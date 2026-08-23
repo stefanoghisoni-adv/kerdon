@@ -609,6 +609,32 @@ export const it = {
     refresh: 'Aggiorna pagina',
   },
 
+  // La tab Clienti: chi ha comprato, e quanto ci si e' guadagnato.
+  customers: {
+    title: 'Clienti',
+    intro:
+      'Quanto rende ogni cliente, al netto del costo dei prodotti che ha comprato.',
+    range: 'Periodo',
+    apply: 'Applica',
+    columns: {
+      customer: 'Cliente',
+      orders: 'Ordini',
+      aop: 'Profitto medio per ordine',
+      ltp: 'Profitto totale',
+      status: 'Sincronizzazione',
+    },
+    synced: 'Sincronizzato',
+    notSynced: 'Non sincronizzato',
+    noName: 'Senza nome',
+    empty: 'Nessun ordine nel periodo scelto.',
+    partial: (covered: number, total: number) =>
+      `${total - covered} ${total - covered === 1 ? 'riga senza costo' : 'righe senza costo'}: il profitto è parziale finché non li compili.`,
+    notConnected: 'Collega un database per vedere i profitti per cliente.',
+    noAccess:
+      'Per calcolare i profitti serve l’accesso agli ordini del negozio. Riapri l’app per concederlo.',
+    resource: { singular: 'cliente', plural: 'clienti' },
+  },
+
   sync: {
     title: 'Sincronizzazione',
     frequency: 'Frequenza',

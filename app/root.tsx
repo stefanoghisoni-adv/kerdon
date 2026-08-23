@@ -245,6 +245,7 @@ export default function App() {
   const menu = {
     home: setupComplete ? strings.common.dashboard : strings.nav.configuration,
     productIssues: strings.common.productIssues,
+    customers: strings.customers.title,
     logs: strings.common.logs,
     plan: strings.common.plan,
     settings: strings.common.settings,
@@ -275,6 +276,9 @@ export default function App() {
             {setupComplete && (
               <>
                 <Link to="/products/issues">{menu.productIssues}</Link>
+                {/* Fra i prodotti e i log: e' l'altra faccia dello stesso dato
+                    — cosa e' stato venduto, e a chi. */}
+                <Link to="/customers">{menu.customers}</Link>
                 <Link to="/logs">{menu.logs}</Link>
                 {/* Nascosta sui piani senza nulla da acquistare (lifetime). */}
                 {canSeePlanTab && <Link to="/plan">{menu.plan}</Link>}

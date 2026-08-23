@@ -572,6 +572,30 @@ export const en: typeof it = {
     refresh: 'Refresh page',
   },
 
+  customers: {
+    title: 'Customers',
+    intro: 'What each customer is worth, after the cost of what they bought.',
+    range: 'Period',
+    apply: 'Apply',
+    columns: {
+      customer: 'Customer',
+      orders: 'Orders',
+      aop: 'Average order profit',
+      ltp: 'Lifetime profit',
+      status: 'Sync',
+    },
+    synced: 'Synced',
+    notSynced: 'Not synced',
+    noName: 'No name',
+    empty: 'No orders in the selected period.',
+    partial: (covered: number, total: number) =>
+      `${total - covered} ${total - covered === 1 ? 'line without a cost' : 'lines without a cost'}: profit stays partial until you fill them in.`,
+    notConnected: 'Connect a database to see profit per customer.',
+    noAccess:
+      'Calculating profit needs access to your store’s orders. Reopen the app to grant it.',
+    resource: { singular: 'customer', plural: 'customers' },
+  },
+
   sync: {
     title: 'Sync',
     frequency: 'Frequency',
