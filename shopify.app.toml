@@ -20,7 +20,7 @@ embedded = true
 # write_products risulta non usato: l'unica scrittura verso Shopify e' su
 # inventory_items (costo per articolo). Resta finche' non si decide di toglierlo,
 # perche' ridurre gli scope fa ripassare i merchant dal consenso.
-scopes = "read_products,write_products,read_inventory,write_inventory,read_customers,read_publications,read_themes"
+scopes = "read_products,write_products,read_inventory,write_inventory,read_customers,read_publications,read_themes,read_orders,read_all_orders"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 

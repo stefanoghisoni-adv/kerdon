@@ -425,6 +425,114 @@ export class ShopifyAPIClient {
     };
   }
 
+  /**
+   * Gli ordini, una pagina alla volta.
+   *
+   * Di un ordine si prende il minimo che serve al profitto: quando, di chi, e
+   * cosa conteneva. Niente indirizzi, telefoni, note — sono dati personali che
+   * non servono a nessun conto e che quindi non entrano.
+   *
+   * Il prezzo di riga e' quello scontato (`discountedUnitPriceSet`): il margine
+   * si fa su cio' che e' entrato in cassa, non sul listino. Se manca si ripiega
+   * sull'originale, che e' comunque meglio di una riga senza prezzo.
+   */
+  async getOrders(options: {
+    limit?: number;
+    pageInfo?: string;
+    updatedAtMin?: string;
+  } = {}) {
+    const data = await this.graphql<{
+      orders: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        nodes: {
+          id: string;
+          name: string | null;
+          createdAt: string | null;
+          updatedAt: string | null;
+          cancelledAt: string | null;
+          displayFinancialStatus: string | null;
+          currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+          customer: { id: string; firstName: string | null; lastName: string | null } | null;
+          lineItems: {
+            nodes: {
+              id: string;
+              title: string | null;
+              quantity: number | null;
+              product: { id: string } | null;
+              variant: { id: string } | null;
+              discountedUnitPriceSet: { shopMoney: { amount: string } } | null;
+              originalUnitPriceSet: { shopMoney: { amount: string } } | null;
+              totalDiscountSet: { shopMoney: { amount: string } } | null;
+            }[];
+          };
+        }[];
+      };
+    }>(
+      `query Orders($first: Int!, $after: String, $query: String) {
+        orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id name createdAt updatedAt cancelledAt displayFinancialStatus
+            currentTotalPriceSet { shopMoney { amount currencyCode } }
+            customer { id firstName lastName }
+            lineItems(first: 100) {
+              nodes {
+                id title quantity
+                product { id }
+                variant { id }
+                discountedUnitPriceSet { shopMoney { amount } }
+                originalUnitPriceSet { shopMoney { amount } }
+                totalDiscountSet { shopMoney { amount } }
+              }
+            }
+          }
+        }
+      }`,
+      {
+        // Meno dei 250 dei clienti: ogni ordine si porta dietro le sue righe, e
+        // una pagina da 250 ordini con cento righe l'uno supererebbe il costo
+        // massimo di una query.
+        first: options.limit || 50,
+        after: options.pageInfo ?? null,
+        query:
+          !options.pageInfo && options.updatedAtMin
+            ? `updated_at:>='${options.updatedAtMin}'`
+            : null,
+      },
+    );
+
+    return {
+      orders: data.orders.nodes.map((o) => ({
+        id: gidToId(o.id),
+        order_number: o.name,
+        placed_at: o.createdAt,
+        updated_at: o.updatedAt,
+        cancelled_at: o.cancelledAt,
+        financial_status: lower(o.displayFinancialStatus),
+        total_price: o.currentTotalPriceSet?.shopMoney.amount ?? null,
+        currency: o.currentTotalPriceSet?.shopMoney.currencyCode ?? null,
+        // null = acquisto senza account: l'ordine esiste, ma non appartiene a
+        // nessun cliente da mettere in elenco.
+        customer_id: o.customer ? gidToId(o.customer.id) : null,
+        customer_first_name: o.customer?.firstName ?? null,
+        customer_last_name: o.customer?.lastName ?? null,
+        lines: o.lineItems.nodes.map((l) => ({
+          id: gidToId(l.id),
+          title: l.title,
+          quantity: l.quantity ?? 0,
+          product_id: l.product ? gidToId(l.product.id) : null,
+          variant_id: l.variant ? gidToId(l.variant.id) : null,
+          unit_price:
+            l.discountedUnitPriceSet?.shopMoney.amount ??
+            l.originalUnitPriceSet?.shopMoney.amount ??
+            null,
+          total_discount: l.totalDiscountSet?.shopMoney.amount ?? null,
+        })),
+      })),
+      nextPageInfo: data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null,
+    };
+  }
+
   async getCustomersCount(): Promise<number> {
     const data = await this.graphql<{ customersCount: { count: number } | null }>(
       '{ customersCount { count } }',
