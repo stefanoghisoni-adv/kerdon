@@ -70,3 +70,24 @@ describe('buildSchemaUpdateSQL', () => {
     expect(sql).toContain('ALTER INDEX IF EXISTS idx_customers_email RENAME TO');
   });
 });
+
+describe('numero di versione e cio che promette', () => {
+  it('non promette tabelle che la DDL non crea', () => {
+    // La 3 e' stata pubblicata quando le tabelle degli ordini esistevano nel
+    // codice ma la DDL non le creava: i progetti aggiornati in quei giorni si
+    // sono presi il numero senza ricevere niente. Finche' gli ordini non sono
+    // davvero in circolo, la versione resta la 2.
+    expect(LATEST_SCHEMA_VERSION).toBe(2);
+  });
+
+  it('quando gli ordini si accendono, l aggiornamento se li porta', () => {
+    const sql = buildSchemaUpdateSQL(1, true, true);
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS orders');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS order_lines');
+  });
+
+  it('senza ordini l aggiornamento non crea tabelle che nessuno riempira', () => {
+    const sql = buildSchemaUpdateSQL(1, true);
+    expect(sql).not.toContain('CREATE TABLE IF NOT EXISTS orders');
+  });
+});
