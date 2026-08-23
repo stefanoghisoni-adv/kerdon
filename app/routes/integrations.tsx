@@ -11,7 +11,6 @@ import {
   InlineStack,
   Page,
   Text,
-  Thumbnail,
 } from '@shopify/polaris';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
@@ -21,6 +20,7 @@ import {
   categoryLabel,
   groupByCategory,
   normalizeStatus,
+  platformDescription,
   platformInitials,
   statusLabel,
 } from '~/lib/integrations/platforms';
@@ -71,7 +71,9 @@ export default function Integrations() {
               {categoryLabel(group.category, t)}
             </Text>
 
-            <InlineGrid columns={{ xs: 1, sm: 2, lg: 4 }} gap="300">
+            {/* Il doppio delle colonne di prima: sono riquadri di
+                riconoscimento — logo, nome, una riga — non schede da leggere. */}
+            <InlineGrid columns={{ xs: 1, sm: 2, md: 4, lg: 8 }} gap="300">
               {group.items.map((platform) => {
                 const installable = canInstall(platform.status);
                 return (
@@ -84,24 +86,45 @@ export default function Integrations() {
                           {/* Il logo arriva dal database. Senza, restano le
                               iniziali: una card senza immagine si riconosce
                               lo stesso, un riquadro vuoto no. */}
-                          {platform.logoUrl ? (
-                            <Thumbnail source={platform.logoUrl} alt={platform.name} size="small" />
-                          ) : (
-                            <Box
-                              background="bg-surface-secondary"
-                              borderRadius="200"
-                              minWidth="40px"
-                              padding="200"
-                            >
-                              <Text as="span" alignment="center" fontWeight="semibold">
+                          {/* Il logo sta dentro un quadrato bianco molto
+                              stondato: i marchi arrivano con fondi diversi —
+                              alcuni trasparenti, alcuni chiari — e senza una
+                              cornice comune la fila di card si vedrebbe
+                              disallineata. */}
+                          <div
+                            style={{
+                              width: 44,
+                              height: 44,
+                              flex: '0 0 auto',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              background: 'var(--p-color-bg-surface)',
+                              border: '1px solid var(--p-color-border)',
+                              borderRadius: 'var(--p-border-radius-300)',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {platform.logoUrl ? (
+                              <img
+                                src={platform.logoUrl}
+                                alt={platform.name}
+                                style={{ width: 26, height: 26, objectFit: 'contain' }}
+                              />
+                            ) : (
+                              <Text as="span" fontWeight="semibold">
                                 {platformInitials(platform.name)}
                               </Text>
-                            </Box>
-                          )}
+                            )}
+                          </div>
                           <Text as="h3" variant="headingSm">
                             {platform.name}
                           </Text>
                         </InlineStack>
+
+                        <Text as="p" tone="subdued" variant="bodySm">
+                          {platformDescription(platform, t)}
+                        </Text>
 
                         <InlineStack>
                           <Badge tone={installable ? 'success' : undefined}>

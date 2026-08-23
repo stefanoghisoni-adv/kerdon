@@ -75,3 +75,20 @@ export function groupByCategory(platforms: Platform[]): { category: string; item
   }
   return [...groups.entries()].map(([category, items]) => ({ category, items }));
 }
+
+/**
+ * La riga che dice cosa fa quella connessione.
+ *
+ * Dal dizionario e non dal database: e' testo da leggere, e va tradotto. Una
+ * piattaforma aggiunta oggi sul database non resta muta — prende la frase
+ * generica con il suo nome dentro.
+ */
+export function platformDescription(
+  platform: { slug: string; name: string },
+  t: Pick<Dictionary, 'integrations'>,
+): string {
+  return (
+    t.integrations.descriptions[platform.slug] ??
+    t.integrations.genericDescription(platform.name)
+  );
+}

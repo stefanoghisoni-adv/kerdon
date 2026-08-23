@@ -645,6 +645,22 @@ export const it = {
       crm: 'CRM',
       email: 'Email marketing',
     },
+    /** Una riga per piattaforma: cosa fa quella connessione, in breve. */
+    descriptions: {
+      'meta-ads': 'Collega Meta Ads con il tracciamento server side avanzato.',
+      'google-ads': 'Collega Google Ads con il tracciamento server side avanzato.',
+      'tiktok-ads': 'Collega TikTok Ads con il tracciamento server side avanzato.',
+      'pinterest-ads': 'Collega Pinterest Ads con il tracciamento server side avanzato.',
+      'snapchat-ads': 'Collega Snapchat Ads con il tracciamento server side avanzato.',
+      'chatgpt-ads': 'Collega ChatGPT Ads con il tracciamento server side avanzato.',
+      hubspot: 'Porta clienti e profittabilità dentro HubSpot.',
+      gohighlevel: 'Porta clienti e profittabilità dentro GoHighLevel.',
+      klaviyo: 'Porta clienti e profittabilità dentro Klaviyo.',
+      mailchimp: 'Porta clienti e profittabilità dentro Mailchimp.',
+    } as Record<string, string | undefined>,
+    /** Per una piattaforma che il dizionario non conosce ancora. */
+    genericDescription: (name: string) =>
+      `Collega ${name} con il tracciamento server side avanzato.`,
     install: 'Installa',
     status: {
       available: 'Disponibile',
