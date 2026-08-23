@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { useFetcher, useLoaderData } from '@remix-run/react';
 import {
   Badge,
   BlockStack,
@@ -23,6 +23,7 @@ import {
   platformDescription,
   platformInitials,
   statusLabel,
+  type PlatformStatus,
 } from '~/lib/integrations/platforms';
 import { useT } from '~/lib/i18n/context';
 
@@ -45,6 +46,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: normalizeStatus(platform.status),
     })),
   });
+}
+
+interface PlatformView {
+  slug: string;
+  name: string;
+  category: string;
+  logoUrl: string | null;
+  status: PlatformStatus;
 }
 
 export default function Integrations() {
@@ -74,87 +83,107 @@ export default function Integrations() {
             {/* Il doppio delle colonne di prima: sono riquadri di
                 riconoscimento — logo, nome, una riga — non schede da leggere. */}
             <InlineGrid columns={{ xs: 1, sm: 2, md: 4, lg: 8 }} gap="300">
-              {group.items.map((platform) => {
-                const installable = canInstall(platform.status);
-                return (
-                  <Card key={platform.slug} padding="400">
-                    {/* Colonna a tutta altezza: il pulsante cade in fondo su
-                        tutte le card, anche dove il nome va a capo. */}
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                      <BlockStack gap="300">
-                        <InlineStack gap="300" blockAlign="center" wrap={false}>
-                          {/* Il logo arriva dal database. Senza, restano le
-                              iniziali: una card senza immagine si riconosce
-                              lo stesso, un riquadro vuoto no. */}
-                          {/* Il logo sta dentro un quadrato bianco molto
-                              stondato: i marchi arrivano con fondi diversi —
-                              alcuni trasparenti, alcuni chiari — e senza una
-                              cornice comune la fila di card si vedrebbe
-                              disallineata. */}
-                          <div
-                            style={{
-                              width: 44,
-                              height: 44,
-                              flex: '0 0 auto',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              background: 'var(--p-color-bg-surface)',
-                              border: '1px solid var(--p-color-border)',
-                              borderRadius: 'var(--p-border-radius-300)',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            {platform.logoUrl ? (
-                              <img
-                                src={platform.logoUrl}
-                                alt={platform.name}
-                                style={{ width: 26, height: 26, objectFit: 'contain' }}
-                              />
-                            ) : (
-                              <Text as="span" fontWeight="semibold">
-                                {platformInitials(platform.name)}
-                              </Text>
-                            )}
-                          </div>
-                          <Text as="h3" variant="headingSm">
-                            {platform.name}
-                          </Text>
-                        </InlineStack>
-
-                        <Text as="p" tone="subdued" variant="bodySm">
-                          {platformDescription(platform, t)}
-                        </Text>
-
-                        <InlineStack>
-                          <Badge tone={installable ? 'success' : undefined}>
-                            {statusLabel(platform.status, t)}
-                          </Badge>
-                        </InlineStack>
-                      </BlockStack>
-
-                      <div
-                        style={{
-                          marginBlockStart: 'auto',
-                          paddingBlockStart: 'var(--p-space-400)',
-                        }}
-                      >
-                        {/* Spento finche' la connessione di quella piattaforma
-                            non esiste davvero: un pulsante che si preme e non
-                            fa niente e' peggio di un pulsante spento. */}
-                        <Button variant="primary" fullWidth disabled={!installable}>
-                          {t.integrations.install}
-                        </Button>
-                      </div>
-                    </div>
-                  </Card>
-                );
-              })}
+              {group.items.map((platform) => (
+                <PlatformCard key={platform.slug} platform={platform} />
+              ))}
             </InlineGrid>
           </BlockStack>
         ))}
       </BlockStack>
       <Box paddingBlockEnd="800" />
     </Page>
+  );
+}
+
+/**
+ * Una piattaforma, in colonna e al centro: logo, nome, stato, cosa fa, e il
+ * comando.
+ *
+ * Ogni card ha il suo fetcher e non uno condiviso: premendo due pulsanti
+ * diversi, un fetcher solo annullerebbe la prima richiesta ancora in volo — e
+ * il primo loader resterebbe acceso su un'azione che nessuno sta piu'
+ * eseguendo.
+ */
+function PlatformCard({ platform }: { platform: PlatformView }) {
+  const t = useT();
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const installable = canInstall(platform.status);
+  const installing = fetcher.state !== 'idle';
+
+  return (
+    <Card padding="400">
+      {/* Colonna a tutta altezza: il pulsante cade in fondo su tutte le card,
+          anche dove il nome o la descrizione vanno a capo. */}
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <BlockStack gap="300" inlineAlign="center">
+          {/* Il logo dentro un quadrato bianco molto stondato: i marchi arrivano
+              con fondi diversi — alcuni trasparenti, alcuni chiari — e senza una
+              cornice comune la fila di card si vedrebbe disallineata. */}
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'var(--p-color-bg-surface)',
+              border: '1px solid var(--p-color-border)',
+              borderRadius: 'var(--p-border-radius-300)',
+              overflow: 'hidden',
+            }}
+          >
+            {platform.logoUrl ? (
+              <img
+                src={platform.logoUrl}
+                alt={platform.name}
+                style={{ width: 28, height: 28, objectFit: 'contain' }}
+              />
+            ) : (
+              <Text as="span" fontWeight="semibold">
+                {platformInitials(platform.name)}
+              </Text>
+            )}
+          </div>
+
+          <Text as="h3" variant="headingSm" alignment="center">
+            {platform.name}
+          </Text>
+
+          <Badge tone={installable ? 'success' : undefined}>
+            {statusLabel(platform.status, t)}
+          </Badge>
+
+          <Text as="p" tone="subdued" variant="bodySm" alignment="center">
+            {platformDescription(platform, t)}
+          </Text>
+
+          {/* L'esito negativo resta nella card che l'ha chiesto: in cima alla
+              pagina non si saprebbe di quale piattaforma parla. */}
+          {fetcher.data?.error && (
+            <Text as="p" tone="critical" variant="bodySm" alignment="center">
+              {fetcher.data.error}
+            </Text>
+          )}
+        </BlockStack>
+
+        <div style={{ marginBlockStart: 'auto', paddingBlockStart: 'var(--p-space-400)' }}>
+          {/* Spento finche' la connessione di quella piattaforma non esiste
+              davvero: un pulsante che si preme e non fa niente e' peggio di un
+              pulsante spento. Mentre l'installazione e' in corso resta fermo,
+              cosi' due clic non aprono due connessioni. */}
+          <Button
+            variant="primary"
+            fullWidth
+            disabled={!installable || installing}
+            loading={installing}
+            onClick={() =>
+              fetcher.submit({ slug: platform.slug }, { method: 'POST', action: '/api/integrations/install' })
+            }
+          >
+            {t.integrations.install}
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }

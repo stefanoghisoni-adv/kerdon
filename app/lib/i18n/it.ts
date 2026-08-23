@@ -661,6 +661,9 @@ export const it = {
     /** Per una piattaforma che il dizionario non conosce ancora. */
     genericDescription: (name: string) =>
       `Collega ${name} con il tracciamento server side avanzato.`,
+    notAvailable: 'Questa integrazione non è disponibile.',
+    notReady: (name: string) =>
+      `La connessione a ${name} non è ancora attiva. Ti avvisiamo appena lo sarà.`,
     install: 'Installa',
     status: {
       available: 'Disponibile',

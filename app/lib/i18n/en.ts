@@ -618,6 +618,9 @@ export const en: typeof it = {
       mailchimp: 'Bring customers and profitability into Mailchimp.',
     } as Record<string, string | undefined>,
     genericDescription: (name: string) => `Connect ${name} with high level server side tracking.`,
+    notAvailable: 'This integration isn’t available.',
+    notReady: (name: string) =>
+      `The ${name} connection isn’t live yet. We’ll let you know as soon as it is.`,
     install: 'Install',
     status: {
       available: 'Available',
