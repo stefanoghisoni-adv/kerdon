@@ -635,6 +635,25 @@ export const it = {
     resource: { singular: 'cliente', plural: 'clienti' },
   },
 
+  // Le piattaforme a cui l'app puo' trasmettere gli eventi.
+  integrations: {
+    title: 'Integrazioni',
+    intro:
+      'Trasmetti alle tue piattaforme gli eventi del negozio con i dati di prodotto e di profittabilità.',
+    categories: {
+      advertising: 'Advertising',
+      crm: 'CRM',
+      email: 'Email marketing',
+    },
+    install: 'Installa',
+    status: {
+      available: 'Disponibile',
+      comingSoon: 'In arrivo',
+      unavailable: 'Non disponibile',
+    },
+    empty: 'Nessuna integrazione disponibile al momento.',
+  },
+
   sync: {
     title: 'Sincronizzazione',
     frequency: 'Frequenza',

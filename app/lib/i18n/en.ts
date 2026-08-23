@@ -596,6 +596,24 @@ export const en: typeof it = {
     resource: { singular: 'customer', plural: 'customers' },
   },
 
+  integrations: {
+    title: 'Integrations',
+    intro:
+      'Send your store’s events to your platforms, with product and profitability data attached.',
+    categories: {
+      advertising: 'Advertising',
+      crm: 'CRM',
+      email: 'Email marketing',
+    },
+    install: 'Install',
+    status: {
+      available: 'Available',
+      comingSoon: 'Coming soon',
+      unavailable: 'Unavailable',
+    },
+    empty: 'No integrations available yet.',
+  },
+
   sync: {
     title: 'Sync',
     frequency: 'Frequency',

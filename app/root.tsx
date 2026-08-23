@@ -246,6 +246,7 @@ export default function App() {
     home: setupComplete ? strings.common.dashboard : strings.nav.configuration,
     productIssues: strings.common.productIssues,
     customers: strings.customers.title,
+    integrations: strings.integrations.title,
     logs: strings.common.logs,
     plan: strings.common.plan,
     settings: strings.common.settings,
@@ -279,6 +280,7 @@ export default function App() {
                 {/* Fra i prodotti e i log: e' l'altra faccia dello stesso dato
                     — cosa e' stato venduto, e a chi. */}
                 <Link to="/customers">{menu.customers}</Link>
+                <Link to="/integrations">{menu.integrations}</Link>
                 <Link to="/logs">{menu.logs}</Link>
                 {/* Nascosta sui piani senza nulla da acquistare (lifetime). */}
                 {canSeePlanTab && <Link to="/plan">{menu.plan}</Link>}
@@ -343,6 +345,7 @@ export function ErrorBoundary() {
             </Link>
             <Link to="/">{strings.common.dashboard}</Link>
             <Link to="/products/issues">{strings.common.productIssues}</Link>
+            <Link to="/integrations">{strings.integrations.title}</Link>
             <Link to="/logs">{strings.common.logs}</Link>
             {canSeePlanTab && <Link to="/plan">{strings.common.plan}</Link>}
             <Link to="/settings/supabase">{strings.common.settings}</Link>

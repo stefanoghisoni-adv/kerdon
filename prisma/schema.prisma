@@ -252,6 +252,36 @@ model PlanPrice {
   @@map("plan_prices")
 }
 
+/// Le piattaforme a cui l'app puo' trasmettere gli eventi, e a che punto sono.
+///
+/// Vive sul database dell'owner e non nel codice perche' lo stato cambia senza
+/// che l'app cambi: una piattaforma passa da "in arrivo" a "disponibile" il
+/// giorno in cui la sua connessione e' pronta, e quel giorno non deve
+/// coincidere con un rilascio.
+model IntegrationPlatform {
+  id       String @id @default(uuid())
+  /// Chiave della categoria: "advertising", "crm", "email". L'app la traduce se
+  /// la conosce, altrimenti la scrive com'e' — cosi' aggiungerne una non
+  /// richiede di toccare il codice.
+  category String
+  /// Nome per esteso, come lo conosce il merchant: "Meta Ads".
+  name     String
+  /// Nome tecnico, quello che identifichera' la connessione: "meta-ads".
+  slug     String @unique
+  /// Logo della piattaforma. null = si mostrano le iniziali.
+  logoUrl  String? @map("logo_url")
+  /// available | coming_soon | unavailable. Testo e non enum: aggiungere uno
+  /// stato non deve richiedere una migrazione.
+  status   String  @default("coming_soon")
+  /// Ordine dentro la categoria: le piu' richieste per prime.
+  position Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([category])
+  @@map("integration_platforms")
+}
+
 /// Con chi e' in rapporto il negozio: un'agenzia con cui collaboriamo, oppure
 /// noi direttamente. Serve a categorizzare e a decidere quale listino applicare.
 model Partner {
