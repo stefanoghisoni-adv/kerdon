@@ -13,6 +13,7 @@ import {
   projectUrl,
 } from '~/lib/supabase-management.server';
 import { buildMerchantSchemaSQL } from '~/lib/supabase-schema';
+import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import { isAuthorized } from '~/utils/authorization.server';
 import { issueReadProxyToken } from '~/lib/read-proxy/token.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
@@ -118,7 +119,8 @@ export async function action({ request }: ActionFunctionArgs) {
     await runQuery(
       token,
       ref,
-      buildMerchantSchemaSQL(includeCustomers) + RELOAD_SCHEMA_SQL,
+      buildMerchantSchemaSQL(includeCustomers, hasOrdersAccess(shop.scopes)) +
+        RELOAD_SCHEMA_SQL,
     );
 
     // Log dell'evento di creazione tabelle. Best effort come l'emissione del

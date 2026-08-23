@@ -4,6 +4,7 @@ import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { runQuery } from '~/lib/supabase-management.server';
 import { validateSupabaseUrl } from '~/utils/supabase-url.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import {
   LATEST_SCHEMA_VERSION,
   buildSchemaUpdateSQL,
@@ -51,10 +52,16 @@ export async function applyMerchantSchemaUpdate(
     return { status: 'up_to_date', version: config.schemaVersion };
   }
 
-  // Le tabelle da allineare dipendono dal piano: i clienti si toccano solo se
-  // il piano li prevede, altrimenti la loro tabella non esiste nemmeno.
+  // Le tabelle da allineare dipendono da due cose diverse: i clienti dal piano
+  // — se non li prevede, la loro tabella non esiste nemmeno — e gli ordini dal
+  // permesso, che il negozio concede all'installazione. Creare tabelle che
+  // nessuno riempira' e' spazio occupato per niente.
   const plan = await findPlanByName(shop.currentPlan);
-  const sql = buildSchemaUpdateSQL(config.schemaVersion, plan?.customersSyncEnabled ?? false);
+  const sql = buildSchemaUpdateSQL(
+    config.schemaVersion,
+    plan?.customersSyncEnabled ?? false,
+    hasOrdersAccess(shop.scopes),
+  );
   if (!sql) return { status: 'up_to_date', version: config.schemaVersion };
 
   const done =

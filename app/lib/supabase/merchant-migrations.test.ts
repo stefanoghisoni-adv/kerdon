@@ -72,12 +72,12 @@ describe('buildSchemaUpdateSQL', () => {
 });
 
 describe('numero di versione e cio che promette', () => {
-  it('non promette tabelle che la DDL non crea', () => {
+  it('salta la 3, che e bruciata', () => {
     // La 3 e' stata pubblicata quando le tabelle degli ordini esistevano nel
     // codice ma la DDL non le creava: i progetti aggiornati in quei giorni si
-    // sono presi il numero senza ricevere niente. Finche' gli ordini non sono
-    // davvero in circolo, la versione resta la 2.
-    expect(LATEST_SCHEMA_VERSION).toBe(2);
+    // sono presi il numero senza ricevere niente. Riusarla li lascerebbe senza
+    // tabelle e senza modo di accorgersene.
+    expect(LATEST_SCHEMA_VERSION).toBe(4);
   });
 
   it('quando gli ordini si accendono, l aggiornamento se li porta', () => {

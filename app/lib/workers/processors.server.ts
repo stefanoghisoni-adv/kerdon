@@ -11,6 +11,9 @@ import { isProductLimitReached } from '../limits/product-limit';
 import { enrichVariantCosts } from '../stats/inventory-cost.server';
 import { filterEligibleProductRows } from '../eligibility/product-eligibility';
 import { sortByCreatedAtAsc } from '../sync/product-order';
+import { hasOrdersAccess } from '../sync/orders-access';
+import { orderToRows } from '../customers/order-rows';
+import { ensureOrdersTables } from '../supabase/ensure-orders-tables.server';
 import {
   createEventBuffer,
   formatProductLabel,
@@ -359,6 +362,115 @@ async function syncCustomersIfEnabled(opts: {
   );
 }
 
+interface OrderSyncResult {
+  total: number;
+  events: ReturnType<typeof createEventBuffer>;
+}
+
+/**
+ * Gli ordini del negozio, una pagina alla volta.
+ *
+ * Due tabelle da riempire insieme: l'ordine e le sue righe. Le righe si
+ * scrivono dopo l'ordine — se l'upsert dell'ordine fallisce, la corsa si ferma
+ * li' e non restano righe orfane che nessuna query saprebbe raggruppare.
+ *
+ * Nessun conto di margine qui dentro: il profitto nasce quando lo si guarda,
+ * incrociando queste righe con il costo che vive nei prodotti.
+ */
+async function syncOrders(
+  shopifyClient: ShopifyAPIClient,
+  supabase: SupabaseClient,
+  updatedAtMin?: string,
+): Promise<OrderSyncResult> {
+  let total = 0;
+  let nextPageInfo: string | null = null;
+  const events = createEventBuffer();
+
+  do {
+    const { orders, nextPageInfo: nextPage } = await shopifyClient.getOrders({
+      pageInfo: nextPageInfo || undefined,
+      updatedAtMin,
+    });
+
+    if (!orders || orders.length === 0) break;
+
+    const converted = orders
+      .map((order) => orderToRows(order))
+      .filter((rows): rows is NonNullable<typeof rows> => rows !== null);
+
+    if (converted.length > 0) {
+      const orderRows = converted.map((c) => c.order);
+      const { error: ordersError } = await supabase
+        .from('orders')
+        .upsert(orderRows, { onConflict: 'shopify_order_id', ignoreDuplicates: false });
+
+      if (ordersError) {
+        throw new Error(`Supabase order upsert failed: ${ordersError.message}`);
+      }
+
+      const lineRows = converted.flatMap((c) => c.lines);
+      // A blocchi come i clienti: un ordine da cento righe moltiplica in fretta,
+      // e PostgREST ha un tetto a quante ne accetta in una volta.
+      const chunkSize = 1000;
+      for (let i = 0; i < lineRows.length; i += chunkSize) {
+        const { error: linesError } = await supabase
+          .from('order_lines')
+          .upsert(lineRows.slice(i, i + chunkSize), {
+            onConflict: 'shopify_line_id',
+            ignoreDuplicates: false,
+          });
+
+        if (linesError) {
+          throw new Error(`Supabase order line upsert failed: ${linesError.message}`);
+        }
+      }
+
+      // Solo il conteggio, come per i clienti: degli ordini non si tiene
+      // nessuna riga di dettaglio sul database dell'applicazione.
+      for (const _ of converted) events.count('order', 'updated');
+      total += converted.length;
+    }
+
+    nextPageInfo = nextPage;
+  } while (nextPageInfo);
+
+  return { total, events };
+}
+
+/**
+ * Gli ordini si sincronizzano solo se il negozio ce l'ha concesso.
+ *
+ * Il permesso si da' all'installazione: chi ha installato l'app prima che gli
+ * ordini esistessero non l'ha dato, e tentare comunque significherebbe far
+ * fallire l'intera corsa — prodotti compresi — per una funzione che quel
+ * negozio non ha nemmeno chiesto.
+ */
+async function syncOrdersIfEnabled(opts: {
+  shopId: string;
+  scopes: string | null | undefined;
+  config: Parameters<typeof ensureOrdersTables>[1];
+  shopifyClient: ShopifyAPIClient;
+  supabase: SupabaseClient;
+  updatedAtMin?: string;
+}): Promise<OrderSyncResult> {
+  if (!hasOrdersAccess(opts.scopes)) return { total: 0, events: createEventBuffer() };
+
+  const tables = await ensureOrdersTables(opts.shopId, opts.config, opts.supabase);
+  if (tables.status === 'unavailable') {
+    console.warn(
+      `Tabelle ordini non disponibili per lo shop ${opts.shopId}: sync ordini saltata`,
+    );
+    return { total: 0, events: createEventBuffer() };
+  }
+
+  // Tabelle appena create: non c'e' storico da aggiornare in delta, e si
+  // recupera tutto. E' il caso di chi concede il permesso oggi su un negozio
+  // che vende da anni — ed e' esattamente il caso in cui il lifetime serve.
+  const updatedAtMin = tables.empty ? undefined : opts.updatedAtMin;
+
+  return syncOrders(opts.shopifyClient, opts.supabase, updatedAtMin);
+}
+
 /**
  * Legge tutti gli shopify_product_id già presenti nella tabella prodotti del
  * merchant, in pagine da 1000 (limite PostgREST). Serve a conoscere quanti
@@ -618,6 +730,19 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
     const totalCustomers = customers.total;
     collector.absorb(customers.events);
 
+    // Gli ordini viaggiano con la stessa corsa: sono la stessa fotografia del
+    // negozio, e due sincronizzazioni sfalsate darebbero un profitto calcolato
+    // su prodotti di ieri e ordini di oggi.
+    const orders = await syncOrdersIfEnabled({
+      shopId: shop.id,
+      scopes: shop.scopes,
+      config: shop.supabaseConfig,
+      shopifyClient,
+      supabase,
+      updatedAtMin: lastSyncTime.toISOString(),
+    });
+    collector.absorb(orders.events);
+
     // Mark completed
     const eventCounters = await collector.flush(syncJob.id);
     await prisma.syncJob.update({
@@ -857,6 +982,15 @@ export async function processInitialBulkSync(
     });
     const totalCustomers = customers.total;
     collector.absorb(customers.events);
+
+    const orders = await syncOrdersIfEnabled({
+      shopId: shop.id,
+      scopes: shop.scopes,
+      config: shop.supabaseConfig,
+      shopifyClient,
+      supabase,
+    });
+    collector.absorb(orders.events);
 
     // Mark sync job as completed
     const eventCounters = await collector.flush(syncJob.id);

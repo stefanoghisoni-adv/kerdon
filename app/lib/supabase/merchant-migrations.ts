@@ -67,17 +67,16 @@ ALTER INDEX IF EXISTS idx_customers_phone RENAME TO idx_customers_phone_number;
  * basta alzare il numero (ci pensa la DDL idempotente); per tutto il resto si
  * aggiunge anche un passo a MERCHANT_MIGRATIONS.
  */
-export const LATEST_SCHEMA_VERSION = 2;
-
 /**
- * La 3 e' bruciata, e va saltata.
+ * La 4, e non la 3.
  *
- * E' stata pubblicata per errore insieme alle tabelle degli ordini, quando la
- * DDL non le creava ancora: i progetti aperti in quei giorni si sono presi il
- * numero senza ricevere niente. Rimettere la 3 quando gli ordini arriveranno
- * lascerebbe quei database senza tabelle e senza modo di accorgersene — per
- * loro l'aggiornamento risulterebbe gia' fatto. Il prossimo numero e' 4.
+ * La 3 e' bruciata: e' stata pubblicata per errore insieme alle tabelle degli
+ * ordini, quando la DDL non le creava ancora, e i progetti aperti in quei
+ * giorni si sono presi il numero senza ricevere niente. Riusarla li avrebbe
+ * lasciati senza tabelle e senza modo di accorgersene — per loro
+ * l'aggiornamento sarebbe risultato gia' fatto.
  */
+export const LATEST_SCHEMA_VERSION = 4;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

@@ -8,9 +8,11 @@
  * riga sincronizzata.
  */
 
-export type SyncEventEntity = 'product' | 'customer';
+export type SyncEventEntity = 'product' | 'customer' | 'order';
 
 // Prodotti: 'added' | 'removed'. Clienti: 'added' | 'updated' | 'suspended'.
+// Ordini: 'added' | 'updated' — non si cancellano e non si sospendono, al
+// massimo cambiano stato.
 export type SyncEventAction = 'added' | 'removed' | 'updated' | 'suspended';
 
 /**
@@ -129,7 +131,7 @@ export function createEventBuffer(
   const counters = emptyCounters();
   // Contate a parte dalle righe in `rows`: drain() svuota l'array, ma il tetto
   // deve continuare a valere sull'intera corsa, non ripartire da zero.
-  const kept: Record<SyncEventEntity, number> = { product: 0, customer: 0 };
+  const kept: Record<SyncEventEntity, number> = { product: 0, customer: 0, order: 0 };
 
   function tally(entity: SyncEventEntity, action: SyncEventAction): void {
     if (entity === 'product') {
