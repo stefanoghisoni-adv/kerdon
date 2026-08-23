@@ -70,7 +70,7 @@ export function TrackingConflicts({
   // Stato per riga, non uno solo per la tabella: le righe sono indipendenti, e
   // dichiarare Meta innocuo mentre si dichiara anche Google deve poter avvenire
   // insieme, con ciascuna riga che mostra la propria attesa.
-  const [busy, setBusy] = useState<Record<string, 'dismiss' | 'leave'>>({});
+  const [busy, setBusy] = useState<Record<string, 'dismiss' | 'leave' | 'restore'>>({});
   // Righe che il merchant ha appena dichiarato innocue. Restano dov'erano, con
   // una riga di testo al posto dei pulsanti: farle sparire sotto il dito
   // toglieva la conferma di quel che era appena successo, e lasciava il dubbio
@@ -102,6 +102,47 @@ export function TrackingConflicts({
       } finally {
         // Sbloccare comunque: se la richiesta e' fallita, e' l'unico modo per
         // riprovare.
+        setBusy((current) => {
+          const next = { ...current };
+          delete next[key];
+          return next;
+        });
+      }
+    },
+    [],
+  );
+
+  /**
+   * Disdice la dichiarazione appena data.
+   *
+   * Un giudizio sul merito si puo' sbagliare — o si guarda meglio e si cambia
+   * idea. Senza questo, l'unico modo per rivedere quell'avviso sarebbe non
+   * vederlo mai piu': la dichiarazione vale da li' in avanti, anche alle
+   * riaperture.
+   */
+  const restore = useCallback(
+    async (finding: TrackingFinding) => {
+      const key = `${finding.kind}-${finding.name}`;
+      setBusy((current) => ({ ...current, [key]: 'restore' }));
+
+      const body = new FormData();
+      body.set('intent', 'restore');
+      body.set('kind', finding.kind);
+      body.set('name', finding.name);
+
+      try {
+        const response = await fetch('/api/tracking/dismiss', { method: 'POST', body });
+        // Come per la dichiarazione: i pulsanti tornano solo se il server ha
+        // davvero disfatto, altrimenti la riga direbbe una cosa e il database
+        // un'altra.
+        if (response.ok) {
+          setDeclared((current) => {
+            const next = { ...current };
+            delete next[key];
+            return next;
+          });
+        }
+      } finally {
         setBusy((current) => {
           const next = { ...current };
           delete next[key];
@@ -189,11 +230,20 @@ export function TrackingConflicts({
                 </Box>
 
                 {declared[key] ? (
-                  <Text as="span" tone="subdued">
-                    {finding.kind === 'channel'
-                      ? t.tracking.conflicts.declaredChannel
-                      : t.tracking.conflicts.declaredCode}
-                  </Text>
+                  <InlineStack gap="200" blockAlign="center" wrap={false}>
+                    <Text as="span" tone="subdued">
+                      {finding.kind === 'channel'
+                        ? t.tracking.conflicts.declaredChannel
+                        : t.tracking.conflicts.declaredCode}
+                    </Text>
+                    <Button
+                      onClick={() => restore(finding)}
+                      loading={busy[key] === 'restore'}
+                      disabled={rowBusy}
+                    >
+                      {t.common.cancel}
+                    </Button>
+                  </InlineStack>
                 ) : (
                 <InlineStack gap="200">
                   <Button

@@ -10,6 +10,10 @@ import { prisma } from '~/db.server';
  * Non e' una chiusura del riquadro ma un giudizio sul merito, quindi va
  * conservato: un canale collegato per il solo catalogo resta collegato, e
  * riproporre l'avviso a ogni apertura lo renderebbe rumore.
+ *
+ * E si puo' disdire. Un giudizio dato per sbaglio, o cambiato dopo aver
+ * guardato meglio, deve poter tornare indietro: senza, l'unico modo per
+ * rivedere quell'avviso sarebbe non vederlo mai piu'.
  */
 export async function action({ request }: ActionFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -25,6 +29,16 @@ export async function action({ request }: ActionFunctionArgs) {
   // che non corrispondono a nessuna fonte e non verrebbero mai riesaminate.
   if ((kind !== 'channel' && kind !== 'theme') || !name) {
     return json({ ok: false }, { status: 400 });
+  }
+
+  // Disdetta: la dichiarazione sparisce e la fonte torna fra quelle da
+  // guardare. deleteMany e non delete: se la riga non c'e' piu' — doppio clic,
+  // due schede aperte — il risultato voluto e' comunque quello.
+  if (String(form.get('intent') ?? '') === 'restore') {
+    await prisma.dismissedTrackingSource.deleteMany({
+      where: { shopId: shop.id, kind, name },
+    });
+    return json({ ok: true });
   }
 
   await prisma.dismissedTrackingSource.upsert({
