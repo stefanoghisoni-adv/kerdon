@@ -25,7 +25,9 @@ import {
   Tooltip,
 } from '@shopify/polaris';
 import { ProductIcon, PersonIcon, SettingsIcon, LockIcon } from '@shopify/polaris-icons';
-import { ProductsCard } from '~/components/Dashboard/ProductsCard';
+import { CoverageCard } from '~/components/Dashboard/CoverageCard';
+import { FreshnessCard } from '~/components/Dashboard/FreshnessCard';
+import { productQuotaLabel } from '~/components/Dashboard/product-quota';
 import { CustomersCard } from '~/components/Dashboard/CustomersCard';
 import { Stepper, type StepperItem } from '~/components/Dashboard/Stepper';
 import { EligibilityChart } from '~/components/Dashboard/EligibilityChart';
@@ -510,6 +512,9 @@ export default function Dashboard() {
   // far partire la navigazione: cambiando sezione dal menu laterale dell'admin
   // si accendeva lo stesso, senza che nessuno l'avesse premuto.
   const settingsNav = useNavLoading('/settings/supabase');
+  // La pagina dei prodotti non idonei interroga Shopify pagina per pagina:
+  // l'attesa si sente, e senza un segnale il merchant clicca due volte.
+  const issuesNav = useNavLoading('/products/issues');
 
   // Stato del collegamento Supabase per il badge del primo step: Non collegato
   // (grigio) → In corso (arancione) → Fallito (rosso) / Collegato (verde).
@@ -1260,25 +1265,57 @@ export default function Dashboard() {
             leggono come se il lavoro fosse gia' finito, mentre non lo e'. */}
         {setupComplete && (
           <>
-        {/* Le quattro card di stato, su tutta la riga. */}
-        <InlineGrid columns={{ xs: 1, sm: 2, xl: 4 }} gap="400">
-          <ProductsCard
-            readyCount={readiness?.readyCount ?? 0}
-            problemCount={readiness?.problemCount ?? 0}
-            planLimit={currentMaxProducts}
+        {/* Le card di stato, su tutta la riga. Non dicono piu' quanti record
+            ci sono ma quanta parte e' utilizzabile: un conteggio dice che la
+            macchina gira, una copertura dice se il dato serve a qualcosa. */}
+        <InlineGrid columns={{ xs: 1, sm: 2, xl: 3 }} gap="400">
+          <CoverageCard
+            title={t.dashboard.coverage.productsTitle}
+            ready={readiness?.readyCount ?? 0}
+            total={(readiness?.readyCount ?? 0) + (readiness?.problemCount ?? 0)}
+            detail={t.dashboard.coverage.ready}
+            issue={
+              (readiness?.problemCount ?? 0) > 0
+                ? t.dashboard.coverage.needAttention(readiness?.problemCount ?? 0)
+                : undefined
+            }
+            action={{
+              label: t.dashboard.coverage.fix,
+              url: '/products/issues',
+              onAction: issuesNav.start,
+              loading: issuesNav.loading,
+            }}
+            // Il consumo del piano scende in fondo e in piccolo: e' un'altra
+            // domanda — quanto spazio resta, non quanta parte funziona — e alla
+            // pari si leggeva come se fosse la stessa.
+            footnote={t.dashboard.coverage.planUsage(
+              productQuotaLabel(readiness?.readyCount ?? 0, currentMaxProducts),
+            )}
             loading={readinessLoading}
           />
-          <CustomersCard
-            enabled={customersEnabled}
-            totalCustomers={customerStats?.totalCustomers ?? 0}
-            optIn={customerStats?.optIn ?? 0}
-            optOut={customerStats?.optOut ?? 0}
-            loading={customerStatsLoading}
-          />
-          <SyncCard
-            frequencyHours={sync.frequencyHours}
+          {customersEnabled ? (
+            <CoverageCard
+              title={t.dashboard.coverage.customersTitle}
+              ready={customerStats?.optIn ?? 0}
+              total={customerStats?.totalCustomers ?? 0}
+              detail={t.dashboard.coverage.optedIn}
+              loading={customerStatsLoading}
+            />
+          ) : (
+            // Piano senza clienti: resta la card di prima, che al posto dei
+            // numeri porta l'invito ad aggiornare.
+            <CustomersCard
+              enabled={false}
+              totalCustomers={0}
+              optIn={0}
+              optOut={0}
+              loading={false}
+            />
+          )}
+          <FreshnessCard
             lastSync={sync.lastSync}
             nextSync={sync.nextSync}
+            frequencyHours={sync.frequencyHours}
             timeZone={shop.ianaTimezone}
           />
         </InlineGrid>

@@ -296,6 +296,27 @@ export const it = {
   },
 
   dashboard: {
+    /** Copertura: quanta parte del catalogo e' utilizzabile davvero. */
+    coverage: {
+      productsTitle: 'Prodotti pronti',
+      customersTitle: 'Clienti con consenso',
+      ready: (ready: number, total: number) => `${ready} di ${total} pronti`,
+      optedIn: (optIn: number, total: number) => `${optIn} di ${total} con consenso`,
+      needAttention: (n: number) =>
+        `${n} ${n === 1 ? 'prodotto da sistemare' : 'prodotti da sistemare'}`,
+      fix: 'Sistema i prodotti',
+      planUsage: (used: string) => `Piano: ${used}`,
+      none: 'Nessun dato',
+    },
+    freshness: {
+      title: 'Aggiornamento dati',
+      fresh: 'Aggiornato',
+      stale: 'Da controllare',
+      never: 'Mai sincronizzato',
+      lastSync: (when: string) => `Ultima sincronizzazione ${when}`,
+      nextSync: (countdown: string) => `La prossima tra ${countdown}`,
+      noSyncYet: 'La prima sincronizzazione non è ancora avvenuta.',
+    },
     title: 'Dashboard',
     products: {
       title: 'Prodotti',
@@ -328,7 +349,7 @@ export const it = {
       },
     },
     chart: {
-      title: 'Prodotti sincronizzabili',
+      title: 'Copertura del catalogo',
       eligible: 'Idonei',
       limit: 'Limite del piano',
     },

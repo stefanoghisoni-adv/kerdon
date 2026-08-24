@@ -2,6 +2,7 @@ import { BlockStack, Card, Text } from '@shopify/polaris';
 import { MetricRow } from './MetricRow';
 import { syncFrequencyLabel } from './account-format';
 import { formatCountdown } from '~/lib/sync/next-sync';
+import { formatSyncDate } from './sync-format';
 import { useT, useLocale } from '~/lib/i18n/context';
 
 export interface SyncCardProps {
@@ -41,7 +42,7 @@ export function SyncCard({ frequencyHours, lastSync, nextSync, timeZone }: SyncC
         <MetricRow
           label={t.sync.last}
           badge={{
-            content: lastSync ? formatDate(lastSync, timeZone, locale) : t.common.never,
+            content: lastSync ? formatSyncDate(lastSync, timeZone, locale) : t.common.never,
           }}
         />
         {/* Il conto alla rovescia e non l'orario: "fra 2 giorni" si capisce a
@@ -54,14 +55,4 @@ export function SyncCard({ frequencyHours, lastSync, nextSync, timeZone }: SyncC
       </BlockStack>
     </Card>
   );
-}
-
-function formatDate(iso: string, timeZone: string | null | undefined, locale: string): string {
-  return new Date(iso).toLocaleString(locale, {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    ...(timeZone ? { timeZone } : {}),
-  });
 }

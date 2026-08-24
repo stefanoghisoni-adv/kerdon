@@ -286,6 +286,26 @@ export const en: typeof it = {
   },
 
   dashboard: {
+    coverage: {
+      productsTitle: 'Products ready',
+      customersTitle: 'Customers with consent',
+      ready: (ready: number, total: number) => `${ready} of ${total} ready`,
+      optedIn: (optIn: number, total: number) => `${optIn} of ${total} opted in`,
+      needAttention: (n: number) =>
+        `${n} ${n === 1 ? 'product needs attention' : 'products need attention'}`,
+      fix: 'Fix products',
+      planUsage: (used: string) => `Plan: ${used}`,
+      none: 'No data',
+    },
+    freshness: {
+      title: 'Data freshness',
+      fresh: 'Up to date',
+      stale: 'Needs a look',
+      never: 'Never synced',
+      lastSync: (when: string) => `Last sync ${when}`,
+      nextSync: (countdown: string) => `Next one in ${countdown}`,
+      noSyncYet: 'The first sync hasn’t happened yet.',
+    },
     title: 'Dashboard',
     products: {
       title: 'Products',
@@ -555,7 +575,7 @@ export const en: typeof it = {
   },
 
   chart: {
-    title: 'Products synced',
+    title: 'Product data coverage',
     currentMonth: 'This month',
     building: 'The history builds up from here, one point a day.',
     unavailable: 'The chart isn’t available right now. Reload the page to try again.',
