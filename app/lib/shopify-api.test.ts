@@ -342,21 +342,38 @@ describe('Shopify API Client (GraphQL)', () => {
     expect(res).toEqual({ id: 111, cost: '9.99' });
   });
 
-  it('getShopInfo restituisce fuso orario e dominio principale', async () => {
+  it('getShopInfo restituisce fuso orario, dominio principale e valuta di vendita', async () => {
     (global.fetch as any).mockResolvedValueOnce(
-      ok({ shop: { ianaTimezone: 'Europe/Rome', primaryDomain: { host: 'negozio.it' } } }),
+      ok({
+        shop: {
+          ianaTimezone: 'Europe/Rome',
+          primaryDomain: { host: 'negozio.it' },
+          currencyCode: 'EUR',
+        },
+      }),
     );
 
     expect(await client().getShopInfo()).toEqual({
       ianaTimezone: 'Europe/Rome',
       primaryDomain: 'negozio.it',
+      currencyCode: 'EUR',
     });
+  });
+
+  it('la sigla della valuta esce come la scrive Shopify, non come capita', async () => {
+    (global.fetch as any).mockResolvedValueOnce(ok({ shop: { currencyCode: ' eur ' } }));
+
+    expect((await client().getShopInfo()).currencyCode).toBe('EUR');
   });
 
   it('getShopInfo senza quei campi restituisce null', async () => {
     (global.fetch as any).mockResolvedValueOnce(ok({ shop: {} }));
 
-    expect(await client().getShopInfo()).toEqual({ ianaTimezone: null, primaryDomain: null });
+    expect(await client().getShopInfo()).toEqual({
+      ianaTimezone: null,
+      primaryDomain: null,
+      currencyCode: null,
+    });
   });
 
   // ─── Errori: il punto dove GraphQL si rompe in silenzio ───

@@ -627,14 +627,27 @@ export class ShopifyAPIClient {
     ianaTimezone: string | null;
     /** Dominio su cui navigano i clienti: proprio se collegato, myshopify altrimenti. */
     primaryDomain: string | null;
+    /**
+     * La valuta con cui il negozio vende, che non e' quella di
+     * `getBillingCurrency`: quella e' come il merchant paga noi, questa e' come
+     * sono scritti i prezzi dei suoi prodotti. Serve al feed, dove ogni prezzo
+     * viaggia con la valuta accanto.
+     */
+    currencyCode: string | null;
   }> {
     const data = await this.graphql<{
-      shop: { ianaTimezone: string | null; primaryDomain: { host: string | null } | null };
-    }>('{ shop { ianaTimezone primaryDomain { host } } }');
+      shop: {
+        ianaTimezone: string | null;
+        primaryDomain: { host: string | null } | null;
+        currencyCode: string | null;
+      };
+    }>('{ shop { ianaTimezone primaryDomain { host } currencyCode } }');
 
+    const currency = data.shop?.currencyCode ?? null;
     return {
       ianaTimezone: data.shop?.ianaTimezone ?? null,
       primaryDomain: data.shop?.primaryDomain?.host ?? null,
+      currencyCode: currency ? currency.trim().toUpperCase() : null,
     };
   }
 

@@ -9,6 +9,7 @@ interface ShopProfile {
   ianaTimezone: string | null;
   primaryDomain: string | null;
   billingCurrency: string | null;
+  shopCurrency: string | null;
 }
 
 /**
@@ -23,7 +24,12 @@ export async function refreshShopProfile(shop: ShopProfile): Promise<void> {
   const client = await ShopifyAPIClient.forShop(shop.shopDomain);
   const info = await client.getShopInfo();
 
-  const data: { ianaTimezone?: string; primaryDomain?: string; billingCurrency?: string } = {};
+  const data: {
+    ianaTimezone?: string;
+    primaryDomain?: string;
+    billingCurrency?: string;
+    shopCurrency?: string;
+  } = {};
 
   if (!shop.ianaTimezone && info.ianaTimezone) {
     data.ianaTimezone = info.ianaTimezone;
@@ -43,6 +49,13 @@ export async function refreshShopProfile(shop: ShopProfile): Promise<void> {
   const billingCurrency = await client.getBillingCurrency().catch(() => null);
   if (billingCurrency && billingCurrency !== shop.billingCurrency) {
     data.billingCurrency = billingCurrency;
+  }
+
+  // La valuta di vendita arriva con il resto del profilo: cambia quando il
+  // merchant cambia paese al negozio, e il feed la scriverebbe sbagliata su
+  // ogni prezzo fino al controllo successivo.
+  if (info.currencyCode && info.currencyCode !== shop.shopCurrency) {
+    data.shopCurrency = info.currencyCode;
   }
 
   if (Object.keys(data).length === 0) return;

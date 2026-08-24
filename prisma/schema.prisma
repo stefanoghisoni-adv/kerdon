@@ -36,47 +36,55 @@ model Session {
 }
 
 model Shop {
-  id                    String             @id @default(uuid())
-  shopDomain            String             @unique @map("shop_domain")
-  accessToken           String             @map("access_token")
-  scopes                String
+  id                String    @id @default(uuid())
+  shopDomain        String    @unique @map("shop_domain")
+  accessToken       String    @map("access_token")
+  scopes            String
   // Nessun default: il piano iniziale si legge dal listino (freePlanName), cosi'
   // rinominare un piano non lascia indietro i negozi nuovi. Sul database c'e'
   // una foreign key verso plans.plan_name che rifiuta i nomi fuori listino.
-  currentPlan           String             @map("current_plan")
-  activeChargeId        String?            @map("active_charge_id")
-  trialEndsAt           DateTime?          @map("trial_ends_at")
-  isInTrial             Boolean            @default(true) @map("is_in_trial")
-  planStartedAt         DateTime?          @map("plan_started_at")
+  currentPlan       String    @map("current_plan")
+  activeChargeId    String?   @map("active_charge_id")
+  trialEndsAt       DateTime? @map("trial_ends_at")
+  isInTrial         Boolean   @default(true) @map("is_in_trial")
+  planStartedAt     DateTime? @map("plan_started_at")
   // Quando il merchant ha confermato il piano dal passo della configurazione.
   // Distinto da planStartedAt, che segna l'attivazione di un abbonamento:
   // confermare il piano che si ha gia' non attiva niente, ma chiude un passo.
   // Confrontato con connectionVerifiedAt dice se la conferma vale per il
   // collegamento di adesso o per uno precedente.
-  planConfirmedAt       DateTime?          @map("plan_confirmed_at")
+  planConfirmedAt   DateTime? @map("plan_confirmed_at")
   // Quando il controllo delle altre fonti di eventi ha dato una risposta.
   // Anche questo confrontato con connectionVerifiedAt: dice se il controllo
   // vale per il collegamento di adesso. Senza, il passo risultava da fare a
   // ogni apertura dell'app — la risposta arriva da una richiesta al browser, e
   // il browser riparte da zero ogni volta.
-  trackingCheckedAt     DateTime?          @map("tracking_checked_at")
+  trackingCheckedAt DateTime? @map("tracking_checked_at")
   // Lingua scelta dal merchant. null = si segue quella del suo admin Shopify,
   // che e' il comportamento normale: la lingua non si chiede, la si eredita.
   // Una scelta esplicita invece vince sempre. Contiene la sola lingua ("it",
   // "en"); i valori "en-US"/"en-GB" salvati quando lingua e valuta erano una
   // scelta sola si leggono ancora, e portano con se' la loro valuta.
-  locale                String?
+  locale            String?
   // Quando la configurazione e' arrivata in fondo la prima volta.
   //
   // Da quel momento non ci si torna piu': cambiare database o piano non
   // rimanda a rifare i passi, che e' quel che succedeva finche' lo stato si
   // ricalcolava ogni volta dai dati. Si azzera solo scollegando l'account, che
   // e' l'unico gesto che riporta il negozio al punto di partenza.
-  setupCompletedAt      DateTime?          @map("setup_completed_at")
+  setupCompletedAt  DateTime? @map("setup_completed_at")
   // Valuta scelta dal merchant, indipendente dalla lingua: un negozio olandese
   // legge in inglese e paga in euro, e prima non poteva dirlo. null = si usa
   // quella che di solito accompagna la sua lingua.
-  preferredCurrency     String?            @map("preferred_currency")
+  preferredCurrency String?   @map("preferred_currency")
+
+  // La valuta con cui il negozio vende ai suoi clienti: e' quella in cui sono
+  // scritti i prezzi in `products`, e non coincide con nessuna delle altre due
+  // — `billingCurrency` e' quella con cui il merchant paga noi,
+  // `preferredCurrency` e' quella che ha scelto di leggere nelle card.
+  // Serve al feed: Meta vuole la valuta accanto a ogni prezzo, e senza rifiuta
+  // il file intero invece della singola riga.
+  shopCurrency          String?            @map("shop_currency")
   // L'ultima lingua che Shopify ci ha dichiarato per questo admin. La manda in
   // coda alla URL a ogni apertura, ma non alle navigazioni interne: senza
   // ricordarla, a meta' sessione l'app cambierebbe lingua da sola.
@@ -140,6 +148,7 @@ model Shop {
   customerDataAccessLogs   CustomerDataAccessLog[]
   dismissedTrackingSources DismissedTrackingSource[]
   trackingSetup            TrackingSetup?
+  productFeeds             ProductFeed[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -481,4 +490,46 @@ model CustomerDataAccessLog {
   @@index([shopId, createdAt(sort: Desc)])
   @@index([createdAt])
   @@map("customer_data_access_logs")
+}
+
+/**
+ * Un feed di catalogo pubblicato verso una piattaforma.
+ * Meta non si collega a niente: va a prendersi un file a un indirizzo, ogni
+ * giorno, senza autenticarsi. Quell'indirizzo e' quindi pubblico per forza, e
+ * l'unica cosa che lo protegge e' il token qui sotto — lungo, casuale, e
+ * sostituibile in un clic quando il merchant sospetta che sia in giro.
+ * Una riga per negozio e per piattaforma: rigenerare il token non crea un
+ * secondo feed, riscrive questo. Il vecchio indirizzo smette di rispondere
+ * nello stesso istante, che e' il motivo per cui esiste il pulsante.
+ */
+model ProductFeed {
+  id       String @id @default(uuid())
+  shopId   String @map("shop_id")
+  /// 'meta' per ora. Il nome della piattaforma, non un id opaco: si legge
+  /// mentre si guarda la tabella.
+  platform String
+
+  /// Il segreto che sta nell'indirizzo. Unico su tutta la tabella: la rotta
+  /// pubblica cerca per questo e basta, senza sapere di quale negozio si tratti
+  /// finche' non l'ha trovato.
+  token String @unique
+
+  /// 'xml' (RSS 2.0) oppure 'csv'. Meta legge entrambi.
+  format  String  @default("xml")
+  enabled Boolean @default(true)
+
+  /// Quando Meta e' passata l'ultima volta, e quante volte in tutto. E' l'unico
+  /// modo che il merchant ha di sapere se dall'altra parte qualcuno sta
+  /// davvero leggendo: Meta non ci avvisa di niente.
+  lastFetchedAt DateTime? @map("last_fetched_at")
+  fetchCount    Int       @default(0) @map("fetch_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, platform])
+  @@index([token])
+  @@map("product_feeds")
 }

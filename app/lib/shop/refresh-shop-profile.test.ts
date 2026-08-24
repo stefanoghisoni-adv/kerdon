@@ -27,6 +27,7 @@ const shop = (over: Record<string, unknown> = {}) => ({
   ianaTimezone: 'Europe/Rome',
   primaryDomain: 'negozio.myshopify.com',
   billingCurrency: 'EUR',
+  shopCurrency: 'EUR',
   ...over,
 });
 
@@ -41,7 +42,7 @@ describe('refreshShopProfile', () => {
   });
 
   it('dominio collegato dopo l’installazione → si aggiorna', () => {
-    getShopInfo.mockResolvedValue({ ianaTimezone: 'Europe/Rome', primaryDomain: 'negozio.it' });
+    getShopInfo.mockResolvedValue({ ianaTimezone: 'Europe/Rome', primaryDomain: 'negozio.it', currencyCode: 'EUR' });
 
     return refreshShopProfile(shop()).then(() => {
       expect(shopUpdate).toHaveBeenCalledWith(
@@ -53,8 +54,7 @@ describe('refreshShopProfile', () => {
   it('niente di cambiato → nessuna scrittura', async () => {
     getShopInfo.mockResolvedValue({
       ianaTimezone: 'Europe/Rome',
-      primaryDomain: 'negozio.myshopify.com',
-    });
+      primaryDomain: 'negozio.myshopify.com', currencyCode: 'EUR' });
 
     await refreshShopProfile(shop());
 
@@ -62,7 +62,7 @@ describe('refreshShopProfile', () => {
   });
 
   it('primo giro: riempie fuso e dominio insieme, con una sola chiamata', async () => {
-    getShopInfo.mockResolvedValue({ ianaTimezone: 'Europe/Rome', primaryDomain: 'negozio.it' });
+    getShopInfo.mockResolvedValue({ ianaTimezone: 'Europe/Rome', primaryDomain: 'negozio.it', currencyCode: 'EUR' });
 
     await refreshShopProfile(shop({ ianaTimezone: null, primaryDomain: null }));
 
@@ -75,7 +75,7 @@ describe('refreshShopProfile', () => {
   });
 
   it('il fuso gia’ noto non viene riscritto anche se Shopify lo ripete', async () => {
-    getShopInfo.mockResolvedValue({ ianaTimezone: 'America/New_York', primaryDomain: 'negozio.it' });
+    getShopInfo.mockResolvedValue({ ianaTimezone: 'America/New_York', primaryDomain: 'negozio.it', currencyCode: 'EUR' });
 
     await refreshShopProfile(shop());
 
@@ -90,7 +90,7 @@ describe('triggerShopProfileRefresh', () => {
     vi.clearAllMocks();
     clearShopProfileChecks();
     shopUpdate.mockResolvedValue({});
-    getShopInfo.mockResolvedValue({ ianaTimezone: 'Europe/Rome', primaryDomain: 'negozio.it' });
+    getShopInfo.mockResolvedValue({ ianaTimezone: 'Europe/Rome', primaryDomain: 'negozio.it', currencyCode: 'EUR' });
   });
 
   it('aprire e riaprire l’app non chiama Shopify ogni volta', async () => {
@@ -118,8 +118,7 @@ describe('valuta di fatturazione', () => {
     shopUpdate.mockResolvedValue({});
     getShopInfo.mockResolvedValue({
       ianaTimezone: 'Europe/Rome',
-      primaryDomain: 'negozio.myshopify.com',
-    });
+      primaryDomain: 'negozio.myshopify.com', currencyCode: 'EUR' });
   });
 
   it('il negozio cambia paese: la valuta nuova si registra', async () => {
@@ -132,9 +131,25 @@ describe('valuta di fatturazione', () => {
     );
   });
 
+  it('il negozio cambia paese: la valuta di vendita lo segue', async () => {
+    getShopInfo.mockResolvedValue({
+      ianaTimezone: 'Europe/Rome',
+      primaryDomain: 'negozio.it',
+      currencyCode: 'GBP',
+    });
+
+    await refreshShopProfile(shop());
+
+    // Non e' la valuta di fatturazione: quella dice come il merchant paga noi,
+    // questa come sono scritti i prezzi che finiscono nel feed.
+    expect(shopUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ shopCurrency: 'GBP' }) }),
+    );
+  });
+
   it("Shopify non risponde: si tiene l'ultima nota, il resto si aggiorna lo stesso", async () => {
     getBillingCurrency.mockRejectedValue(new Error('403'));
-    getShopInfo.mockResolvedValue({ ianaTimezone: 'Europe/Rome', primaryDomain: 'negozio.it' });
+    getShopInfo.mockResolvedValue({ ianaTimezone: 'Europe/Rome', primaryDomain: 'negozio.it', currencyCode: 'EUR' });
 
     await refreshShopProfile(shop());
 

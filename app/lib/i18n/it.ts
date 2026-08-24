@@ -705,6 +705,88 @@ export const it = {
       days: (n: number) => `${n} giorni`,
     },
   },
+  catalogs: {
+    title: 'Cataloghi',
+    intro:
+      'Pubblica il catalogo del negozio verso le piattaforme pubblicitarie. Ogni piattaforma legge un indirizzo che aggiorniamo noi: i prodotti restano allineati senza che tu debba caricare niente a mano.',
+    /** Stato della piattaforma, sulla card. */
+    available: 'Disponibile',
+    active: 'Attivo',
+    paused: 'In pausa',
+    install: 'Attiva',
+    manage: 'Gestisci',
+    meta: {
+      name: 'Meta',
+      description:
+        'Facebook e Instagram. Il catalogo alimenta le inserzioni dinamiche, i post acquistabili e la vetrina del profilo.',
+    },
+    feed: {
+      title: 'Indirizzo del feed',
+      description:
+        'Incolla questo indirizzo dentro Meta: leggera il catalogo da sola, ogni giorno.',
+      format: 'Formato',
+      formatXml: 'XML',
+      formatCsv: 'CSV',
+      formatHelp: 'Meta legge entrambi. Scegli CSV se preferisci aprirlo con un foglio di calcolo.',
+      copy: 'Copia',
+      copied: 'Copiato',
+      open: 'Apri il file',
+      lastFetch: 'Ultima lettura di Meta',
+      never: 'Mai',
+      fetchCount: (n: number) => (n === 1 ? '1 lettura' : `${n} letture`),
+      rotate: "Rigenera l'indirizzo",
+      rotateTitle: "Rigenerare l'indirizzo?",
+      rotateBody:
+        "Il vecchio indirizzo smette di funzionare subito. Dovrai incollare quello nuovo dentro Meta, o il catalogo smettera di aggiornarsi.",
+      rotateConfirm: 'Rigenera',
+      disable: 'Disattiva',
+      disableTitle: 'Disattivare il feed?',
+      disableBody:
+        "L'indirizzo smette di rispondere e Meta non trovera piu il catalogo. Puoi riattivarlo quando vuoi: l'indirizzo resta lo stesso.",
+      disableConfirm: 'Disattiva',
+      enable: 'Riattiva',
+    },
+    steps: {
+      title: 'Come collegarlo a Meta',
+      one: 'Apri Commerce Manager e scegli il catalogo (o creane uno di tipo e-commerce).',
+      two: 'Vai su Sorgenti dati e aggiungi un feed pianificato.',
+      three: "Incolla l'indirizzo qui sopra e imposta l'aggiornamento giornaliero.",
+      four: 'Salva. La prima lettura arriva entro qualche minuto.',
+    },
+    table: {
+      title: 'Prodotti nel catalogo',
+      product: 'Prodotto',
+      price: 'Prezzo',
+      state: 'Stato',
+      included: 'Nel feed',
+      searchPlaceholder: 'Cerca un prodotto…',
+      all: 'Tutti',
+      onlyBlocked: 'Solo esclusi',
+      onlyWarned: 'Solo da sistemare',
+      empty: 'Nessun prodotto sincronizzato.',
+      noMatch: 'Nessun prodotto corrisponde al filtro.',
+      /** Riassunto sopra la tabella. */
+      summary: (included: number, total: number) => `${included} prodotti su ${total} entrano nel feed`,
+      blockedCount: (n: number) => (n === 1 ? '1 escluso' : `${n} esclusi`),
+      warnedCount: (n: number) => (n === 1 ? '1 da sistemare' : `${n} da sistemare`),
+      okBadge: 'Pronto',
+      warnBadge: 'Da sistemare',
+      blockedBadge: 'Escluso',
+    },
+    issues: {
+      no_title: 'Manca il titolo.',
+      no_price: 'Manca il prezzo, o e zero.',
+      no_image: "Manca l'immagine.",
+      no_link: 'Manca il link alla pagina del prodotto.',
+      not_active: 'Il prodotto non e attivo sul negozio.',
+      no_description: 'Manca la descrizione.',
+      no_brand: 'Manca la marca (il fornitore su Shopify).',
+      no_gtin: 'Manca il codice a barre.',
+      title_too_long: 'Il titolo supera i 200 caratteri e verra tagliato.',
+      out_of_stock: 'Il prodotto risulta esaurito.',
+    },
+    notConnected: 'Collega il database per vedere il catalogo.',
+  },
   // Nessun `as const`: con i tipi letterali l'inglese non potrebbe scrivere
   // niente di diverso dall'italiano, che e' esattamente il suo mestiere.
 };

@@ -1,0 +1,134 @@
+import type { LoaderFunctionArgs } from '@remix-run/node';
+import { json } from '@remix-run/node';
+import { useLoaderData, useNavigate } from '@remix-run/react';
+import { Badge, BlockStack, Box, Button, Card, InlineGrid, Page, Text } from '@shopify/polaris';
+import { authenticate } from '~/shopify.server';
+import { prisma } from '~/db.server';
+import { requireSetupComplete } from '~/lib/setup/require-setup.server';
+import { listFeeds } from '~/lib/feeds/feed.server';
+import { MetaLogo } from '~/components/Catalogs/MetaLogo';
+import { useT } from '~/lib/i18n/context';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const { session } = await authenticate.admin(request);
+  await requireSetupComplete(session.shop);
+
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain: session.shop },
+    select: { id: true },
+  });
+  const feeds = shop ? await listFeeds(shop.id) : [];
+
+  return json({
+    meta: feeds.find((feed) => feed.platform === 'meta') ?? null,
+  });
+}
+
+export default function Catalogs() {
+  const { meta } = useLoaderData<typeof loader>();
+  const t = useT();
+  const navigate = useNavigate();
+
+  // Tre stati e non due: un feed spento non e' un feed mai attivato — il
+  // merchant l'ha gia' collegato una volta, e il pulsante deve dirgli che
+  // ritrovera' tutto dov'era.
+  const status = !meta ? 'available' : meta.enabled ? 'active' : 'paused';
+
+  return (
+    <Page title={t.catalogs.title} backAction={{ url: '/' }}>
+      <BlockStack gap="500">
+        <Text as="p" tone="subdued">
+          {t.catalogs.intro}
+        </Text>
+
+        <InlineGrid columns={{ xs: 1, sm: 2, md: 3, lg: 4 }} gap="300">
+          <PlatformCard
+            logo={<MetaLogo />}
+            name={t.catalogs.meta.name}
+            description={t.catalogs.meta.description}
+            badge={
+              status === 'active' ? (
+                <Badge tone="success">{t.catalogs.active}</Badge>
+              ) : status === 'paused' ? (
+                <Badge tone="attention">{t.catalogs.paused}</Badge>
+              ) : (
+                <Badge>{t.catalogs.available}</Badge>
+              )
+            }
+            action={status === 'available' ? t.catalogs.install : t.catalogs.manage}
+            primary={status === 'available'}
+            onAction={() => navigate('/catalogs/meta')}
+          />
+        </InlineGrid>
+      </BlockStack>
+      <Box paddingBlockEnd="800" />
+    </Page>
+  );
+}
+
+/**
+ * Una piattaforma: logo, nome, stato, cosa fa, e il comando.
+ *
+ * In colonna e a tutta altezza, cosi' il pulsante cade in fondo su tutte le
+ * card anche dove la descrizione va a capo una volta in piu'.
+ */
+function PlatformCard({
+  logo,
+  name,
+  description,
+  badge,
+  action,
+  primary,
+  onAction,
+}: {
+  logo: React.ReactNode;
+  name: string;
+  description: string;
+  badge: React.ReactNode;
+  action: string;
+  primary: boolean;
+  onAction: () => void;
+}) {
+  return (
+    <Card padding="400">
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <BlockStack gap="300">
+          {/* Il logo dentro un quadrato con la cornice: i marchi arrivano su
+              fondi diversi, e senza una cornice comune la fila si vede
+              disallineata. */}
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'var(--p-color-bg-surface)',
+              border: '1px solid var(--p-color-border)',
+              borderRadius: 'var(--p-border-radius-300)',
+              overflow: 'hidden',
+            }}
+          >
+            {logo}
+          </div>
+
+          <BlockStack gap="150">
+            <Text as="h3" variant="headingSm">
+              {name}
+            </Text>
+            <div>{badge}</div>
+            <Text as="p" variant="bodySm" tone="subdued">
+              {description}
+            </Text>
+          </BlockStack>
+        </BlockStack>
+
+        <Box paddingBlockStart="400">
+          <Button variant={primary ? 'primary' : undefined} onClick={onAction} fullWidth>
+            {action}
+          </Button>
+        </Box>
+      </div>
+    </Card>
+  );
+}
