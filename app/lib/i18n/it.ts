@@ -635,48 +635,6 @@ export const it = {
     resource: { singular: 'cliente', plural: 'clienti' },
   },
 
-  // Le piattaforme a cui l'app puo' trasmettere gli eventi.
-  integrations: {
-    title: 'Integrazioni',
-    intro:
-      'Trasmetti alle tue piattaforme gli eventi del negozio con i dati di prodotto e di profittabilità.',
-    categories: {
-      advertising: 'Advertising',
-      crm: 'CRM',
-      email: 'Email marketing',
-    },
-    /** Una riga per piattaforma: cosa fa quella connessione, in breve. */
-    descriptions: {
-      'meta-ads': 'Collega Meta Ads con il tracciamento server side avanzato.',
-      'google-ads': 'Collega Google Ads con il tracciamento server side avanzato.',
-      'tiktok-ads': 'Collega TikTok Ads con il tracciamento server side avanzato.',
-      'pinterest-ads': 'Collega Pinterest Ads con il tracciamento server side avanzato.',
-      'snapchat-ads': 'Collega Snapchat Ads con il tracciamento server side avanzato.',
-      'chatgpt-ads': 'Collega ChatGPT Ads con il tracciamento server side avanzato.',
-      hubspot: 'Porta clienti e profittabilità dentro HubSpot.',
-      gohighlevel: 'Porta clienti e profittabilità dentro GoHighLevel.',
-      klaviyo: 'Porta clienti e profittabilità dentro Klaviyo.',
-      mailchimp: 'Porta clienti e profittabilità dentro Mailchimp.',
-    } as Record<string, string | undefined>,
-    /** Per una piattaforma che il dizionario non conosce ancora. */
-    genericDescription: (name: string) =>
-      `Collega ${name} con il tracciamento server side avanzato.`,
-    notConfigured: 'Questa integrazione non è ancora configurata. Riprova più tardi.',
-    connected: (name: string) => `${name} è collegato.`,
-    connectFailed: (name: string) =>
-      `Non è stato possibile collegare ${name}. Riprova.`,
-    notAvailable: 'Questa integrazione non è disponibile.',
-    notReady: (name: string) =>
-      `La connessione a ${name} non è ancora attiva. Ti avvisiamo appena lo sarà.`,
-    install: 'Installa',
-    status: {
-      available: 'Disponibile',
-      comingSoon: 'In arrivo',
-      unavailable: 'Non disponibile',
-    },
-    empty: 'Nessuna integrazione disponibile al momento.',
-  },
-
   sync: {
     title: 'Sincronizzazione',
     frequency: 'Frequenza',

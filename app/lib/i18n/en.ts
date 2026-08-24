@@ -596,43 +596,6 @@ export const en: typeof it = {
     resource: { singular: 'customer', plural: 'customers' },
   },
 
-  integrations: {
-    title: 'Integrations',
-    intro:
-      'Send your store’s events to your platforms, with product and profitability data attached.',
-    categories: {
-      advertising: 'Advertising',
-      crm: 'CRM',
-      email: 'Email marketing',
-    },
-    descriptions: {
-      'meta-ads': 'Connect Meta Ads with high level server side tracking.',
-      'google-ads': 'Connect Google Ads with high level server side tracking.',
-      'tiktok-ads': 'Connect TikTok Ads with high level server side tracking.',
-      'pinterest-ads': 'Connect Pinterest Ads with high level server side tracking.',
-      'snapchat-ads': 'Connect Snapchat Ads with high level server side tracking.',
-      'chatgpt-ads': 'Connect ChatGPT Ads with high level server side tracking.',
-      hubspot: 'Bring customers and profitability into HubSpot.',
-      gohighlevel: 'Bring customers and profitability into GoHighLevel.',
-      klaviyo: 'Bring customers and profitability into Klaviyo.',
-      mailchimp: 'Bring customers and profitability into Mailchimp.',
-    } as Record<string, string | undefined>,
-    genericDescription: (name: string) => `Connect ${name} with high level server side tracking.`,
-    notConfigured: 'This integration isn’t configured yet. Try again later.',
-    connected: (name: string) => `${name} is connected.`,
-    connectFailed: (name: string) => `Couldn’t connect ${name}. Try again.`,
-    notAvailable: 'This integration isn’t available.',
-    notReady: (name: string) =>
-      `The ${name} connection isn’t live yet. We’ll let you know as soon as it is.`,
-    install: 'Install',
-    status: {
-      available: 'Available',
-      comingSoon: 'Coming soon',
-      unavailable: 'Unavailable',
-    },
-    empty: 'No integrations available yet.',
-  },
-
   sync: {
     title: 'Sync',
     frequency: 'Frequency',
