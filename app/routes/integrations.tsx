@@ -1,8 +1,10 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useFetcher, useLoaderData } from '@remix-run/react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Badge,
+  Banner,
   BlockStack,
   Box,
   Button,
@@ -56,14 +58,40 @@ interface PlatformView {
   status: PlatformStatus;
 }
 
+/** Quanto resta a schermo un avviso prima di sparire da solo. */
+const NOTICE_MS = 10_000;
+
 export default function Integrations() {
   const { platforms } = useLoaderData<typeof loader>();
   const t = useT();
   const groups = groupByCategory(platforms);
 
+  // Un avviso alla volta, e se ne va da solo: e' la risposta a un clic, non uno
+  // stato della pagina, e restare li' lo farebbe sembrare un problema aperto.
+  const [notice, setNotice] = useState<{ id: number; message: string } | null>(null);
+  const showNotice = useCallback((message: string) => {
+    setNotice({ id: Date.now(), message });
+  }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    // La chiave e' l'istante: un secondo avviso rimette in moto l'attesa invece
+    // di ereditare quella del primo, che sarebbe quasi scaduta.
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   return (
     <Page fullWidth title={t.integrations.title} backAction={{ url: '/' }}>
       <BlockStack gap="500">
+        {/* Fra il titolo e la descrizione: e' li' che l'occhio torna dopo aver
+            premuto un pulsante piu' in basso. */}
+        {notice && (
+          <Banner tone="info" onDismiss={() => setNotice(null)}>
+            {notice.message}
+          </Banner>
+        )}
+
         <Text as="p" tone="subdued">
           {t.integrations.intro}
         </Text>
@@ -84,7 +112,11 @@ export default function Integrations() {
                 riconoscimento — logo, nome, una riga — non schede da leggere. */}
             <InlineGrid columns={{ xs: 1, sm: 2, md: 4, lg: 8 }} gap="300">
               {group.items.map((platform) => (
-                <PlatformCard key={platform.slug} platform={platform} />
+                <PlatformCard
+                  key={platform.slug}
+                  platform={platform}
+                  onNotice={showNotice}
+                />
               ))}
             </InlineGrid>
           </BlockStack>
@@ -104,11 +136,26 @@ export default function Integrations() {
  * il primo loader resterebbe acceso su un'azione che nessuno sta piu'
  * eseguendo.
  */
-function PlatformCard({ platform }: { platform: PlatformView }) {
+function PlatformCard({
+  platform,
+  onNotice,
+}: {
+  platform: PlatformView;
+  onNotice: (message: string) => void;
+}) {
   const t = useT();
   const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const installable = canInstall(platform.status);
   const installing = fetcher.state !== 'idle';
+
+  // L'esito non resta nella card: dentro un riquadro stretto una frase lunga
+  // spingerebbe il pulsante fuori posto, e le card della stessa fila
+  // perderebbero l'allineamento. Sale in cima, dove c'e' spazio per leggerla.
+  const message = fetcher.data?.error;
+  useEffect(() => {
+    if (message) onNotice(message);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message, fetcher.data]);
 
   return (
     <Card padding="400">
@@ -157,13 +204,6 @@ function PlatformCard({ platform }: { platform: PlatformView }) {
             {platformDescription(platform, t)}
           </Text>
 
-          {/* L'esito negativo resta nella card che l'ha chiesto: in cima alla
-              pagina non si saprebbe di quale piattaforma parla. */}
-          {fetcher.data?.error && (
-            <Text as="p" tone="critical" variant="bodySm" alignment="center">
-              {fetcher.data.error}
-            </Text>
-          )}
         </BlockStack>
 
         <div style={{ marginBlockStart: 'auto', paddingBlockStart: 'var(--p-space-400)' }}>
