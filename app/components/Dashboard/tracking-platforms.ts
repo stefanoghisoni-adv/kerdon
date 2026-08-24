@@ -69,10 +69,14 @@ export function selectedInCategory(
  * diverse e vanno distinte, ma entrambe chiudono il passo — nessuno deve
  * restare bloccato dalla configurazione per non aver voluto essere ricontattato.
  */
-export type ServerSideAnswer = 'needs' | 'has';
+export type ServerSideAnswer = 'needs' | 'has' | 'dismissed';
 
 export function isServerSideAnswer(value: unknown): value is ServerSideAnswer {
-  return value === 'needs' || value === 'has';
+  // 'dismissed' non e' una risposta alla domanda ma alla card: il merchant ha
+  // detto "non adesso", e la card non deve tornare a ogni apertura. Senza un
+  // valore per quel gesto l'unico modo di chiuderla sarebbe stato dichiarare
+  // qualcosa che non ha dichiarato.
+  return value === 'needs' || value === 'has' || value === 'dismissed';
 }
 
 /**

@@ -21,7 +21,7 @@ import {
 export async function loadSetupInput(shopDomain: string): Promise<StepInput | null> {
   const shop = await prisma.shop.findUnique({
     where: { shopDomain },
-    include: { supabaseConfig: true, supabaseOAuthToken: true, trackingSetup: true },
+    include: { supabaseConfig: true, supabaseOAuthToken: true },
   });
   if (!shop) return null;
 
@@ -45,7 +45,6 @@ export async function loadSetupInput(shopDomain: string): Promise<StepInput | nu
     accountConnected: shop.supabaseOAuthToken !== null,
     databaseConnected: connectedAt != null,
     trackingChecked: forThisConnection(shop.trackingCheckedAt),
-    serverSideAnswered: shop.trackingSetup !== null,
     planConfirmed:
       forThisConnection(shop.planConfirmedAt) &&
       resolveSyncState(recentJobs, connectedAt) === 'completed',

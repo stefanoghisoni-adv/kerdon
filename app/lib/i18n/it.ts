@@ -137,15 +137,9 @@ export const it = {
       locked: 'Accedi a Supabase per scegliere il database da collegare.',
     },
     trackingCheck: {
-      title: 'Controllo tracciamenti',
+      title: 'Controllo canali e tema',
       complete: 'Completato',
       locked: 'Collega un database per controllare cosa trasmette già dati.',
-    },
-    serverSide: {
-      title: 'Hai già un tracciamento full server side?',
-      complete: 'Completato',
-      beta: 'Beta',
-      locked: 'Finisci il controllo dei tracciamenti per rispondere a questa domanda.',
     },
     plan: {
       choose: 'Scegli il piano',
@@ -654,6 +648,12 @@ export const it = {
     noAccess:
       'Per calcolare i profitti serve l’accesso agli ordini del negozio. Riapri l’app per concederlo.',
     resource: { singular: 'cliente', plural: 'clienti' },
+  },
+
+  // La proposta di configurazione avanzata, in dashboard.
+  advancedSetup: {
+    title: 'Configurazione avanzata',
+    beta: 'Beta',
   },
 
   sync: {

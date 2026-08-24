@@ -69,10 +69,9 @@ import type { SubscribeResponse } from '~/routes/billing.subscribe';
 import type { BillingInterval } from '~/lib/billing/partner-pricing';
 import { PlanStep } from '~/components/Dashboard/PlanStep';
 import { TrackingCheckStep } from '~/components/Dashboard/TrackingCheckStep';
-import { ServerSideStep } from '~/components/Dashboard/ServerSideStep';
+import { AdvancedSetupCard } from '~/components/Dashboard/AdvancedSetupCard';
 import {
   defaultSelection,
-  isServerSideAnswer,
   type ServerSideAnswer,
 } from '~/components/Dashboard/tracking-platforms';
 import { preselectedPlan, recommendedPlan } from '~/components/Dashboard/plan-step';
@@ -840,7 +839,6 @@ export default function Dashboard() {
     databaseConnected: supabaseConnected,
     trackingChecked,
     planConfirmed,
-    serverSideAnswered: serverSideAnswer !== null,
   });
 
   // Tutti e cinque conclusi: la configurazione non ha piu' niente da chiedere.
@@ -1026,35 +1024,11 @@ export default function Dashboard() {
       ),
     },
     {
-      id: 'server-side',
-      title: t.steps.serverSide.title,
-      state: steps.serverSide,
-      completeLabel: t.steps.serverSide.complete,
-      lockedHint: t.steps.serverSide.locked,
-      // Beta dichiarata: e' l'unico passo che non configura niente dell'app, e
-      // vale la pena dirlo invece di lasciarlo intuire.
-      badge:
-        steps.serverSide === 'complete'
-          ? { tone: 'success' as const, label: t.steps.serverSide.complete }
-          : { tone: 'new' as const, label: t.steps.serverSide.beta },
-      content: (
-        <ServerSideStep
-          selected={selectedPlatforms}
-          onSelectedChange={setSelectedPlatforms}
-          onAnswer={answerServerSide}
-          submitting={answeringServerSide}
-          disabled={blocked || translating}
-          answered={isServerSideAnswer(serverSideAnswer) ? serverSideAnswer : null}
-          error={serverSideError}
-        />
-      ),
-    },
-    {
       id: 'plan',
       // Ultimo passo, ed e' la fine vera: confermando il piano parte la
       // sincronizzazione e da quel momento l'app lavora. Tutto quello che viene
-      // prima serve a sapere cosa si sta comprando — cosa c'e' da sincronizzare,
-      // cosa gia' trasmette dati, che infrastruttura si ha.
+      // prima serve a sapere cosa si sta comprando: cosa c'e' da sincronizzare
+      // e cos'altro sta gia' leggendo il catalogo.
       //
       // La sincronizzazione non ha un pulsante suo: parte con la conferma.
       title: planChosen ? t.steps.plan.confirm : t.steps.plan.choose,
@@ -1335,6 +1309,20 @@ export default function Dashboard() {
           />
           <RecentRunsCard runs={recentRuns} timeZone={shop.ianaTimezone} />
         </InlineGrid>
+
+        {/* In fondo, e chiudibile: e' una proposta, non una cosa da fare.
+            Sparisce per sempre appena il merchant risponde — o dice "non
+            adesso" con la x. */}
+        {serverSideAnswer === null && (
+          <AdvancedSetupCard
+            selected={selectedPlatforms}
+            onSelectedChange={setSelectedPlatforms}
+            onAnswer={answerServerSide}
+            submitting={answeringServerSide}
+            disabled={blocked}
+            error={serverSideError}
+          />
+        )}
           </>
         )}
 

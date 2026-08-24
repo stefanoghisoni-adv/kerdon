@@ -17,7 +17,6 @@ function input(overrides: Partial<StepInput> = {}): StepInput {
     accountConnected: true,
     databaseConnected: true,
     trackingChecked: true,
-    serverSideAnswered: true,
     planConfirmed: true,
     ...overrides,
   };
@@ -35,7 +34,7 @@ describe('menu durante la configurazione', () => {
       { accountConnected: false, databaseConnected: false },
       { databaseConnected: false },
       { trackingChecked: false },
-      { serverSideAnswered: false },
+      { trackingChecked: false },
       { planConfirmed: false },
     ] as Partial<StepInput>[]) {
       expect(allStepsComplete(resolveStepStates(input(missing)))).toBe(false);

@@ -132,15 +132,9 @@ export const en: typeof it = {
       locked: 'Sign in to Supabase to pick the database to connect.',
     },
     trackingCheck: {
-      title: 'Tracking check',
+      title: 'Channels and theme check',
       complete: 'Completed',
       locked: 'Connect a database to check what already sends data.',
-    },
-    serverSide: {
-      title: 'Do you already have full server-side tracking?',
-      complete: 'Completed',
-      beta: 'Beta',
-      locked: 'Finish the tracking check to answer this question.',
     },
     plan: {
       choose: 'Choose your plan',
@@ -614,6 +608,11 @@ export const en: typeof it = {
     noAccess:
       'Calculating profit needs access to your store’s orders. Reopen the app to grant it.',
     resource: { singular: 'customer', plural: 'customers' },
+  },
+
+  advancedSetup: {
+    title: 'Advanced setup',
+    beta: 'Beta',
   },
 
   sync: {

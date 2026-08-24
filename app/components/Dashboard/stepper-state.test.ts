@@ -7,7 +7,6 @@ function input(overrides: Partial<StepInput> = {}): StepInput {
     databaseConnected: false,
     trackingChecked: false,
     planConfirmed: false,
-    serverSideAnswered: false,
     ...overrides,
   };
 }
@@ -18,7 +17,6 @@ describe('resolveStepStates', () => {
       connectAccount: 'active',
       connectDatabase: 'locked',
       trackingCheck: 'locked',
-      serverSide: 'locked',
       plan: 'locked',
     });
   });
@@ -28,7 +26,6 @@ describe('resolveStepStates', () => {
       connectAccount: 'complete',
       connectDatabase: 'active',
       trackingCheck: 'locked',
-      serverSide: 'locked',
       plan: 'locked',
     });
   });
@@ -40,12 +37,11 @@ describe('resolveStepStates', () => {
       connectAccount: 'complete',
       connectDatabase: 'complete',
       trackingCheck: 'active',
-      serverSide: 'locked',
       plan: 'locked',
     });
   });
 
-  it('controllo fatto: tocca alla domanda sull infrastruttura', () => {
+  it('controllo fatto: resta il piano, che e la fine', () => {
     expect(
       resolveStepStates(
         input({ accountConnected: true, databaseConnected: true, trackingChecked: true }),
@@ -54,26 +50,6 @@ describe('resolveStepStates', () => {
       connectAccount: 'complete',
       connectDatabase: 'complete',
       trackingCheck: 'complete',
-      serverSide: 'active',
-      plan: 'locked',
-    });
-  });
-
-  it('risposto sull infrastruttura: resta il piano, che e la fine', () => {
-    expect(
-      resolveStepStates(
-        input({
-          accountConnected: true,
-          databaseConnected: true,
-          trackingChecked: true,
-          serverSideAnswered: true,
-        }),
-      ),
-    ).toEqual({
-      connectAccount: 'complete',
-      connectDatabase: 'complete',
-      trackingCheck: 'complete',
-      serverSide: 'complete',
       plan: 'active',
     });
   });
@@ -95,7 +71,6 @@ describe('resolveStepStates', () => {
     );
     expect(steps.trackingCheck).toBe('active');
     expect(steps.plan).toBe('complete');
-    expect(steps.serverSide).toBe('locked');
   });
 });
 
@@ -107,7 +82,6 @@ describe('allStepsComplete', () => {
         databaseConnected: true,
         trackingChecked: true,
         planConfirmed: true,
-        serverSideAnswered: true,
       }),
     );
     expect(allStepsComplete(done)).toBe(true);
