@@ -26,9 +26,10 @@ import {
 } from '@shopify/polaris';
 import { ProductIcon, PersonIcon, SettingsIcon, LockIcon } from '@shopify/polaris-icons';
 import { ProfitCard } from '~/components/Dashboard/ProfitCard';
-import type { ShopProfit } from '~/lib/customers/profit.server';
+import { MarginCard } from '~/components/Dashboard/MarginCard';
+import { ProfitabilityChart } from '~/components/Dashboard/ProfitabilityChart';
+import type { ShopAverages, ShopProfit } from '~/lib/customers/profit.server';
 import { CoverageCard } from '~/components/Dashboard/CoverageCard';
-import { FreshnessCard } from '~/components/Dashboard/FreshnessCard';
 import { productQuotaLabel } from '~/components/Dashboard/product-quota';
 import { CustomersCard } from '~/components/Dashboard/CustomersCard';
 import { Stepper, type StepperItem } from '~/components/Dashboard/Stepper';
@@ -554,7 +555,7 @@ export default function Dashboard() {
   // Il profitto arriva per conto suo: sono due interrogazioni al database del
   // merchant, e aspettarle prima di mostrare qualsiasi cosa ritarderebbe
   // l'intera dashboard per un numero che puo' comparire un istante dopo.
-  const profitFetcher = useFetcher<ShopProfit>();
+  const profitFetcher = useFetcher<ShopProfit & { averages: ShopAverages }>();
 
   useEffect(() => {
     countsFetcher.load('/api/stats/counts');
@@ -1246,26 +1247,22 @@ export default function Dashboard() {
             leggono come se il lavoro fosse gia' finito, mentre non lo e'. */}
         {setupComplete && (
           <>
-        {/* Il profitto in cima, prima di tutto: e' la domanda per cui il
-            merchant apre l'app. Le card sotto dicono quanto ci si puo' fidare
-            di questo numero. */}
-        <ProfitCard
-          profit={profitFetcher.data?.profit ?? null}
-          orders={profitFetcher.data?.orders ?? 0}
-          change={profitFetcher.data?.change ?? null}
-          coveredLines={profitFetcher.data?.coveredLines ?? 0}
-          totalLines={profitFetcher.data?.totalLines ?? 0}
-          currency={profitFetcher.data?.currency ?? 'EUR'}
-          unavailable={profitFetcher.data?.unavailable ?? null}
-          loading={!profitFetcher.data}
-          onFix={issuesNav.start}
-          fixLoading={issuesNav.loading}
-        />
-
-        {/* Le card di stato, su tutta la riga. Non dicono piu' quanti record
-            ci sono ma quanta parte e' utilizzabile: un conteggio dice che la
-            macchina gira, una copertura dice se il dato serve a qualcosa. */}
-        <InlineGrid columns={{ xs: 1, sm: 2, xl: 3 }} gap="400">
+        {/* Quattro card in fila: prima il profitto, che e' la domanda, poi le
+            tre che dicono quanto ci si possa fidare della risposta. Il profitto
+            su una riga tutta sua sprecava mezza schermata per un numero. */}
+        <InlineGrid columns={{ xs: 1, sm: 2, xl: 4 }} gap="400">
+          <ProfitCard
+            profit={profitFetcher.data?.profit ?? null}
+            orders={profitFetcher.data?.orders ?? 0}
+            change={profitFetcher.data?.change ?? null}
+            coveredLines={profitFetcher.data?.coveredLines ?? 0}
+            totalLines={profitFetcher.data?.totalLines ?? 0}
+            currency={profitFetcher.data?.currency ?? 'EUR'}
+            unavailable={profitFetcher.data?.unavailable ?? null}
+            loading={!profitFetcher.data}
+            onFix={issuesNav.start}
+            fixLoading={issuesNav.loading}
+          />
           <CoverageCard
             title={t.dashboard.coverage.productsTitle}
             ready={readiness?.readyCount ?? 0}
@@ -1309,18 +1306,20 @@ export default function Dashboard() {
               loading={false}
             />
           )}
-          <FreshnessCard
-            lastSync={sync.lastSync}
-            nextSync={sync.nextSync}
-            frequencyHours={sync.frequencyHours}
-            timeZone={shop.ianaTimezone}
+          {/* Al posto delle date — che vivono in Logs, dove le si va a
+              cercare — quanto resta di un ordine medio. */}
+          <MarginCard
+            aov={profitFetcher.data?.averages?.aov ?? null}
+            aop={profitFetcher.data?.averages?.aop ?? null}
+            currency={profitFetcher.data?.averages?.currency ?? 'EUR'}
+            loading={!profitFetcher.data}
           />
         </InlineGrid>
 
         {/* Il grafico prende i due terzi e accanto gli sta il registro in
             breve. */}
         <InlineGrid
-          columns={{ xs: 1, lg: 'minmax(0, 2fr) minmax(0, 1fr)' }}
+          columns={{ xs: 1, lg: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)' }}
           gap="400"
         >
           <EligibilityChart
@@ -1330,6 +1329,17 @@ export default function Dashboard() {
             planLimit={historyFetcher.data?.planLimit ?? null}
             loading={!historyFetcher.data}
           />
+          {/* Fra i due: il valore accanto al profitto. E' la stessa domanda
+              delle card sopra, guardata da lontano. */}
+          <ProfitabilityChart
+            aov={profitFetcher.data?.averages?.aov ?? null}
+            aop={profitFetcher.data?.averages?.aop ?? null}
+            ltv={profitFetcher.data?.averages?.ltv ?? null}
+            ltp={profitFetcher.data?.averages?.ltp ?? null}
+            currency={profitFetcher.data?.averages?.currency ?? 'EUR'}
+            loading={!profitFetcher.data}
+          />
+
           <RecentRunsCard runs={recentRuns} timeZone={shop.ianaTimezone} />
         </InlineGrid>
 

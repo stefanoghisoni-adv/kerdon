@@ -301,6 +301,23 @@ export const it = {
       noOrders: 'Nessun ordine questo mese.',
       unavailable: 'Il profitto sarà disponibile dopo la prima sincronizzazione degli ordini.',
     },
+    /** Quanto resta di un ordine medio. */
+    margin: {
+      title: 'Margine per ordine',
+      aov: (amount: string) => `Ordine medio ${amount}`,
+      aop: (amount: string) => `Profitto medio ${amount}`,
+      noOrders: 'Ancora nessun ordine da cui calcolarlo.',
+    },
+    /** Quanto di cio' che si incassa resta. */
+    profitability: {
+      title: 'Valore e profitto',
+      subtitle: 'Su tutti gli ordini, non solo su questo mese.',
+      perOrder: 'Per ordine',
+      perCustomer: 'Per cliente',
+      value: 'Valore',
+      profit: 'Profitto',
+      empty: 'Servono ordini sincronizzati per calcolarlo.',
+    },
     coverage: {
       productsTitle: 'Prodotti pronti',
       customersTitle: 'Clienti con consenso',

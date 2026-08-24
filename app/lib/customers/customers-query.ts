@@ -174,3 +174,30 @@ export function currentMonthRange(now: Date = new Date()): { from: string; to: s
     to: now.toISOString().slice(0, 10),
   };
 }
+
+/**
+ * Valore e profitto medi, per ordine e per cliente.
+ *
+ * Quattro numeri che rispondono alla stessa domanda da due lati: di quanto
+ * incasso, quanto resta. AOV accanto ad AOP dice quanto margine c'e' in un
+ * ordine medio; LTV accanto a LTP dice lo stesso su tutta la vita di un
+ * cliente. Il valore da solo si puo' gonfiare con uno sconto; il profitto no.
+ *
+ * Su tutti gli ordini e non sul mese: "nel tempo" e' la meta' della domanda, e
+ * un mese solo su un negozio stagionale direbbe quasi il contrario del vero.
+ */
+export function averagesSQL(): string {
+  return `
+SELECT
+  COUNT(DISTINCT o.shopify_order_id) AS orders,
+  COUNT(DISTINCT o.shopify_customer_id) FILTER (WHERE o.shopify_customer_id IS NOT NULL)
+    AS customers,
+  COALESCE(SUM(l.unit_price * l.quantity), 0) AS revenue,
+  COALESCE(SUM((l.unit_price - p.cost_per_item) * l.quantity)
+    FILTER (WHERE p.cost_per_item IS NOT NULL), 0) AS profit,
+  MAX(o.currency) AS currency
+FROM orders o
+JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
+LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
+WHERE o.cancelled_at IS NULL;`.trim();
+}

@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { authenticate } from '~/shopify.server';
-import { loadShopProfit } from '~/lib/customers/profit.server';
+import { loadShopAverages, loadShopProfit } from '~/lib/customers/profit.server';
 
 /**
  * Il profitto del mese, per la dashboard.
@@ -14,7 +14,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
 
   try {
-    return json(await loadShopProfit(session.shop));
+    // Le due domande viaggiano insieme perche' le fa la stessa pagina nello
+    // stesso istante: due rotte avrebbero voluto dire due autenticazioni e due
+    // risvegli del database per riempire la stessa riga di schermo.
+    const [profit, averages] = await Promise.all([
+      loadShopProfit(session.shop),
+      loadShopAverages(session.shop),
+    ]);
+    return json({ ...profit, averages });
   } catch (e) {
     console.error(
       '[api.stats.profit]',
@@ -30,6 +37,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalLines: 0,
       currency: 'EUR',
       unavailable: 'not_connected' as const,
+      averages: {
+        aov: null,
+        aop: null,
+        ltv: null,
+        ltp: null,
+        currency: 'EUR',
+        unavailable: 'not_connected' as const,
+      },
     });
   }
 }

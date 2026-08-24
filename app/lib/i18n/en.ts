@@ -289,6 +289,21 @@ export const en: typeof it = {
       noOrders: 'No orders this month.',
       unavailable: 'Profit becomes available after the first order sync.',
     },
+    margin: {
+      title: 'Margin per order',
+      aov: (amount: string) => `Average order ${amount}`,
+      aop: (amount: string) => `Average profit ${amount}`,
+      noOrders: 'No orders to work from yet.',
+    },
+    profitability: {
+      title: 'Value and profit',
+      subtitle: 'Across all orders, not just this month.',
+      perOrder: 'Per order',
+      perCustomer: 'Per customer',
+      value: 'Value',
+      profit: 'Profit',
+      empty: 'Synced orders are needed to work this out.',
+    },
     coverage: {
       productsTitle: 'Products ready',
       customersTitle: 'Customers with consent',

@@ -2,7 +2,12 @@ import { prisma } from '~/db.server';
 import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { runQueryRows } from '~/lib/supabase-management.server';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
-import { currentMonthRange, previousRange, shopProfitSQL } from './customers-query';
+import {
+  averagesSQL,
+  currentMonthRange,
+  previousRange,
+  shopProfitSQL,
+} from './customers-query';
 
 /**
  * Il profitto del negozio nel mese, con quello del mese prima per il confronto.
@@ -83,6 +88,80 @@ export async function loadShopProfit(shopDomain: string): Promise<ShopProfit> {
     coveredLines: num(current?.covered_lines),
     totalLines: num(current?.total_lines),
     currency: current?.currency ?? 'EUR',
+    unavailable: null,
+  };
+}
+
+/**
+ * Le quattro medie del negozio: ordine e cliente, valore e profitto.
+ *
+ * Sta accanto al profitto del mese e non dentro: quello guarda un periodo,
+ * queste guardano tutta la storia — e infilarle nella stessa risposta avrebbe
+ * fatto credere che parlassero dello stesso arco di tempo.
+ */
+export interface ShopAverages {
+  /** Valore medio di un ordine. null senza ordini. */
+  aov: number | null;
+  /** Profitto medio di un ordine. */
+  aop: number | null;
+  /** Valore portato da un cliente nel tempo. null senza clienti riconosciuti. */
+  ltv: number | null;
+  /** Profitto portato da un cliente nel tempo. */
+  ltp: number | null;
+  currency: string;
+  unavailable: 'no_orders_access' | 'not_connected' | null;
+}
+
+interface AveragesRow {
+  orders: number | string;
+  customers: number | string;
+  revenue: number | string;
+  profit: number | string;
+  currency: string | null;
+}
+
+export async function loadShopAverages(shopDomain: string): Promise<ShopAverages> {
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain },
+    include: { supabaseConfig: true },
+  });
+
+  const empty = (unavailable: ShopAverages['unavailable']): ShopAverages => ({
+    aov: null,
+    aop: null,
+    ltv: null,
+    ltp: null,
+    currency: 'EUR',
+    unavailable,
+  });
+
+  if (!shop?.supabaseConfig?.connectionVerifiedAt || !shop.supabaseConfig.supabaseProjectRef) {
+    return empty('not_connected');
+  }
+  if (!hasOrdersAccess(shop.scopes)) return empty('no_orders_access');
+
+  const token = await getValidAccessToken(shop.id);
+  const [row] = await runQueryRows<AveragesRow>(
+    token,
+    shop.supabaseConfig.supabaseProjectRef,
+    averagesSQL(),
+  );
+
+  const orders = num(row?.orders);
+  const customers = num(row?.customers);
+  const revenue = num(row?.revenue);
+  const profit = num(row?.profit);
+  const per = (total: number, count: number) =>
+    count === 0 ? null : Math.round((total / count) * 100) / 100;
+
+  return {
+    aov: per(revenue, orders),
+    aop: per(profit, orders),
+    // Per cliente e non per ordine: chi compra senza account resta fuori dal
+    // conto, perche' non e' un cliente che si possa seguire nel tempo.
+    ltv: per(revenue, customers),
+    ltp: per(profit, customers),
+    currency: row?.currency ?? 'EUR',
     unavailable: null,
   };
 }
