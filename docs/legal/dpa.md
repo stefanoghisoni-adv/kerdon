@@ -1,50 +1,57 @@
 # Accordo sul trattamento dei dati (DPA) — CoreWard
 
-Ultimo aggiornamento: 6 agosto 2026
+Ultimo aggiornamento: 24 agosto 2026
 
-> **Bozza da far verificare da un legale prima della pubblicazione.**
-> È l'accordo che Shopify chiede quando domanda se esistono accordi sulla privacy
-> con i merchant. Si accetta insieme ai termini di servizio, all'installazione.
+> Questo accordo si accetta insieme ai termini di servizio, all'installazione
+> dell'app.
 
 ## Le parti
 
 **Titolare del trattamento**: il merchant, cioè il soggetto intestatario del
 negozio Shopify su cui CoreWard è installata.
 
-**Responsabile del trattamento**: Stefano Ghisoni, [indirizzo], contatto
-support@coreward.app.
+**Responsabile del trattamento**: Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genova (GE), contatto support@coreward.app.
 
 Il merchant decide finalità e mezzi del trattamento dei dati dei propri clienti.
 CoreWard li tratta solo per erogare il servizio e solo su sua istruzione.
 
 ## 1. Oggetto e durata
 
-CoreWard sincronizza i dati di catalogo e clientela del negozio Shopify del
-merchant verso un progetto database di cui il merchant è intestatario, e ne
-consente la lettura ai suoi strumenti di tracciamento.
+CoreWard sincronizza i dati di catalogo, clientela e ordini del negozio Shopify
+del merchant verso un progetto database di cui il merchant è intestatario, ne
+mantiene aggiornata la copia e ne calcola indicatori di redditività.
 
 L'accordo dura quanto l'installazione dell'app e termina con la disinstallazione.
 
 ## 2. Natura e finalità
 
 Raccolta da Shopify, trasformazione, scrittura nel database del merchant,
-aggiornamento e lettura controllata. Finalità: consentire al merchant di usare i
-propri dati commerciali per il tracciamento delle conversioni e la misurazione
-delle campagne di marketing.
+aggiornamento e lettura controllata. Su richiesta del merchant, scrittura del
+costo di un prodotto verso Shopify.
+
+Finalità: consentire al merchant di usare i propri dati commerciali per misurare
+la redditività degli ordini e della clientela.
 
 ## 3. Categorie di dati e di interessati
 
 **Interessati**: clienti e potenziali clienti del negozio del merchant.
 
-**Dati**: indirizzo email, numero di telefono, nome, cognome, stato e livello del
-consenso al marketing, totale speso, numero di ordini, stato cliente, tag, note.
+**Dati dei clienti**: identificativo Shopify, indirizzo email, numero di
+telefono, nome, cognome, stato e livello del consenso al marketing, totale speso,
+numero di ordini, stato cliente, tag, note.
+
+**Dati degli ordini**: identificativo e numero d'ordine, identificativo del
+cliente, nome e cognome del cliente, valuta, totali, stato del pagamento, date di
+emissione e di eventuale annullamento e, per ogni riga, prodotto, variante,
+quantità, prezzo unitario e sconto.
 
 **Esclusioni esplicite**: nessun indirizzo di spedizione o fatturazione, nessun
-dato di pagamento, nessun contenuto degli ordini, nessuna categoria particolare
-di dati ai sensi dell'art. 9 GDPR.
+dato di pagamento, nessun indirizzo email, numero di telefono o nota prelevati
+dagli ordini, nessun indirizzo IP, nessun dato di navigazione, nessuna categoria
+particolare di dati ai sensi dell'art. 9 GDPR.
 
-**Limite del trattamento**: vengono trattati unicamente i dati dei clienti che
-hanno prestato il consenso al marketing su Shopify.
+**Limite del trattamento**: fra i clienti vengono trattati unicamente i dati di
+chi ha prestato il consenso al marketing su Shopify.
 
 ## 4. Obblighi del responsabile
 
