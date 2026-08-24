@@ -132,3 +132,45 @@ export function previousRange(from: string, to: string): { from: string; to: str
     to: previousEnd.toISOString().slice(0, 10),
   };
 }
+
+/**
+ * Il profitto di tutto il negozio nel periodo, in una riga.
+ *
+ * Stessa giuntura della tabella per cliente — righe d'ordine per costo dei
+ * prodotti — senza il raggruppamento: qui interessa il totale, e farlo sommare
+ * al database costa una query invece di leggere ogni cliente per poi sommarlo
+ * in memoria.
+ *
+ * `covered_lines` su `total_lines` non e' un dettaglio tecnico: e' quanto di
+ * quel totale sia vero. Un profitto calcolato su meta' delle righe e' meta'
+ * profitto, e mostrarlo senza dirlo sarebbe la bugia piu' facile che questa app
+ * possa raccontare.
+ */
+export function shopProfitSQL(input: { from: string; to: string }): string {
+  const from = literalDate(input.from);
+  const to = literalDate(input.to);
+
+  return `
+SELECT
+  COUNT(DISTINCT o.shopify_order_id) AS orders,
+  COALESCE(SUM((l.unit_price - p.cost_per_item) * l.quantity)
+    FILTER (WHERE p.cost_per_item IS NOT NULL), 0) AS profit,
+  COUNT(l.shopify_line_id) FILTER (WHERE p.cost_per_item IS NOT NULL) AS covered_lines,
+  COUNT(l.shopify_line_id) AS total_lines,
+  MAX(o.currency) AS currency
+FROM orders o
+JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
+LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
+WHERE o.cancelled_at IS NULL
+  AND o.placed_at >= ${from}::date
+  AND o.placed_at < (${to}::date + INTERVAL '1 day');`.trim();
+}
+
+/** Il mese in corso: dal primo a oggi. */
+export function currentMonthRange(now: Date = new Date()): { from: string; to: string } {
+  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  return {
+    from: first.toISOString().slice(0, 10),
+    to: now.toISOString().slice(0, 10),
+  };
+}

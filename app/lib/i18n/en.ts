@@ -280,6 +280,15 @@ export const en: typeof it = {
   },
 
   dashboard: {
+    profit: {
+      title: 'Profit this month',
+      orders: (n: number) => `${n} ${n === 1 ? 'order' : 'orders'}`,
+      reliability: (percent: number) => `Based on ${percent}% of order lines`,
+      complete: 'Based on every order line',
+      fix: 'Fill in the costs',
+      noOrders: 'No orders this month.',
+      unavailable: 'Profit becomes available after the first order sync.',
+    },
     coverage: {
       productsTitle: 'Products ready',
       customersTitle: 'Customers with consent',

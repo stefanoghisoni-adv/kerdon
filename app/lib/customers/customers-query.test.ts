@@ -4,6 +4,8 @@ import {
   isCalendarDate,
   lifetimeProfitSQL,
   previousRange,
+  shopProfitSQL,
+  currentMonthRange,
 } from './customers-query';
 
 describe('isCalendarDate', () => {
@@ -98,6 +100,35 @@ describe('previousRange', () => {
     expect(previousRange('2026-08-10', '2026-08-10')).toEqual({
       from: '2026-08-09',
       to: '2026-08-09',
+    });
+  });
+});
+
+describe('shopProfitSQL', () => {
+  it('somma tutto il negozio, senza raggruppare per cliente', () => {
+    const sql = shopProfitSQL({ from: '2026-08-01', to: '2026-08-31' });
+    expect(sql).not.toContain('GROUP BY');
+    expect(sql).toContain('COUNT(DISTINCT o.shopify_order_id)');
+  });
+
+  it('porta con se quanto di quel totale sia vero', () => {
+    // Un profitto calcolato su meta' delle righe e' meta' profitto: mostrarlo
+    // senza dirlo sarebbe la bugia piu' facile che questa app possa raccontare.
+    const sql = shopProfitSQL({ from: '2026-08-01', to: '2026-08-31' });
+    expect(sql).toContain('covered_lines');
+    expect(sql).toContain('total_lines');
+  });
+
+  it('anche qui le date si rifiutano prima, non si ripuliscono dopo', () => {
+    expect(() => shopProfitSQL({ from: 'oggi', to: '2026-08-31' })).toThrow();
+  });
+});
+
+describe('currentMonthRange', () => {
+  it('dal primo del mese a oggi', () => {
+    expect(currentMonthRange(new Date('2026-08-24T10:00:00Z'))).toEqual({
+      from: '2026-08-01',
+      to: '2026-08-24',
     });
   });
 });

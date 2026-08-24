@@ -25,6 +25,8 @@ import {
   Tooltip,
 } from '@shopify/polaris';
 import { ProductIcon, PersonIcon, SettingsIcon, LockIcon } from '@shopify/polaris-icons';
+import { ProfitCard } from '~/components/Dashboard/ProfitCard';
+import type { ShopProfit } from '~/lib/customers/profit.server';
 import { CoverageCard } from '~/components/Dashboard/CoverageCard';
 import { FreshnessCard } from '~/components/Dashboard/FreshnessCard';
 import { productQuotaLabel } from '~/components/Dashboard/product-quota';
@@ -549,12 +551,17 @@ export default function Dashboard() {
   const customerStatsFetcher = useFetcher<CustomerStatsResponse>();
   const customerStatsRefreshFetcher = useFetcher<CustomerStatsResponse>();
   const historyFetcher = useFetcher<ProductHistoryResponse>();
+  // Il profitto arriva per conto suo: sono due interrogazioni al database del
+  // merchant, e aspettarle prima di mostrare qualsiasi cosa ritarderebbe
+  // l'intera dashboard per un numero che puo' comparire un istante dopo.
+  const profitFetcher = useFetcher<ShopProfit>();
 
   useEffect(() => {
     countsFetcher.load('/api/stats/counts');
     readinessFetcher.load('/api/stats/products');
     customerStatsFetcher.load('/api/stats/customers');
     historyFetcher.load('/api/stats/product-history');
+    profitFetcher.load('/api/stats/profit');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1239,6 +1246,22 @@ export default function Dashboard() {
             leggono come se il lavoro fosse gia' finito, mentre non lo e'. */}
         {setupComplete && (
           <>
+        {/* Il profitto in cima, prima di tutto: e' la domanda per cui il
+            merchant apre l'app. Le card sotto dicono quanto ci si puo' fidare
+            di questo numero. */}
+        <ProfitCard
+          profit={profitFetcher.data?.profit ?? null}
+          orders={profitFetcher.data?.orders ?? 0}
+          change={profitFetcher.data?.change ?? null}
+          coveredLines={profitFetcher.data?.coveredLines ?? 0}
+          totalLines={profitFetcher.data?.totalLines ?? 0}
+          currency={profitFetcher.data?.currency ?? 'EUR'}
+          unavailable={profitFetcher.data?.unavailable ?? null}
+          loading={!profitFetcher.data}
+          onFix={issuesNav.start}
+          fixLoading={issuesNav.loading}
+        />
+
         {/* Le card di stato, su tutta la riga. Non dicono piu' quanti record
             ci sono ma quanta parte e' utilizzabile: un conteggio dice che la
             macchina gira, una copertura dice se il dato serve a qualcosa. */}

@@ -291,6 +291,16 @@ export const it = {
 
   dashboard: {
     /** Copertura: quanta parte del catalogo e' utilizzabile davvero. */
+    /** Il numero per cui il merchant apre l'app. */
+    profit: {
+      title: 'Profitto del mese',
+      orders: (n: number) => `${n} ${n === 1 ? 'ordine' : 'ordini'}`,
+      reliability: (percent: number) => `Calcolato sul ${percent}% delle righe d’ordine`,
+      complete: 'Calcolato su tutte le righe d’ordine',
+      fix: 'Completa i costi',
+      noOrders: 'Nessun ordine questo mese.',
+      unavailable: 'Il profitto sarà disponibile dopo la prima sincronizzazione degli ordini.',
+    },
     coverage: {
       productsTitle: 'Prodotti pronti',
       customersTitle: 'Clienti con consenso',
