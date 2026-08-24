@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useFetcher, useLoaderData } from '@remix-run/react';
-import { useCallback, useEffect, useState } from 'react';
+import { useFetcher, useLoaderData, useRevalidator } from '@remix-run/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Badge,
   Banner,
@@ -144,18 +144,63 @@ function PlatformCard({
   onNotice: (message: string) => void;
 }) {
   const t = useT();
-  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const revalidator = useRevalidator();
+  const fetcher = useFetcher<{ ok?: boolean; error?: string; url?: string }>();
   const installable = canInstall(platform.status);
-  const installing = fetcher.state !== 'idle';
+  // La finestra e' aperta: il pulsante resta fermo finche' non torna un esito,
+  // altrimenti un secondo clic aprirebbe una seconda autorizzazione della
+  // stessa cosa.
+  const [authorizing, setAuthorizing] = useState(false);
+  const installing = fetcher.state !== 'idle' || authorizing;
 
   // L'esito non resta nella card: dentro un riquadro stretto una frase lunga
   // spingerebbe il pulsante fuori posto, e le card della stessa fila
   // perderebbero l'allineamento. Sale in cima, dove c'e' spazio per leggerla.
   const message = fetcher.data?.error;
   useEffect(() => {
-    if (message) onNotice(message);
+    if (!message) return;
+    // Nessun indirizzo: la finestra vuota si chiude, altrimenti resta li' a
+    // fissare il merchant senza dire niente.
+    popup.current?.close();
+    setAuthorizing(false);
+    onNotice(message);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [message, fetcher.data]);
+
+  // La rotta non collega niente: risponde con l'indirizzo di autorizzazione, e
+  // la finestra la porta li'. Aperta vuota al clic — un popup aperto dopo una
+  // risposta di rete viene bloccato dal browser.
+  const popup = useRef<Window | null>(null);
+  const authorizeUrl = fetcher.data?.url;
+  useEffect(() => {
+    if (!authorizeUrl) return;
+    if (popup.current && !popup.current.closed) popup.current.location.href = authorizeUrl;
+    else window.open(authorizeUrl, `install-${platform.slug}`, 'width=600,height=760');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authorizeUrl, fetcher.data]);
+
+  // L'esito arriva dalla finestra, non dalla rotta: e' lei che parla con la
+  // piattaforma. Si accetta solo un messaggio della nostra origine — chiunque
+  // puo' scrivere a una finestra che ha aperto.
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { type?: string; ok?: boolean; error?: string };
+      if (!data || data.type !== `${platform.slug.split('-')[0]}-oauth`) return;
+
+      setAuthorizing(false);
+      if (data.ok) {
+        onNotice(t.integrations.connected(platform.name));
+        revalidator.revalidate();
+      } else {
+        onNotice(t.integrations.connectFailed(platform.name));
+      }
+    }
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platform.slug, platform.name]);
 
   return (
     <Card padding="400">
@@ -216,9 +261,16 @@ function PlatformCard({
             fullWidth
             disabled={!installable || installing}
             loading={installing}
-            onClick={() =>
-              fetcher.submit({ slug: platform.slug }, { method: 'POST', action: '/api/integrations/install' })
-            }
+            onClick={() => {
+              // La finestra si apre adesso, vuota, mentre il clic e' ancora
+              // "voluto dall'utente": aperta dopo la risposta verrebbe bloccata.
+              popup.current = window.open('', `install-${platform.slug}`, 'width=600,height=760');
+              setAuthorizing(true);
+              fetcher.submit(
+                { slug: platform.slug },
+                { method: 'POST', action: '/api/integrations/install' },
+              );
+            }}
           >
             {t.integrations.install}
           </Button>

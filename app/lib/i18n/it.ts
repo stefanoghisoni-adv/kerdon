@@ -661,6 +661,10 @@ export const it = {
     /** Per una piattaforma che il dizionario non conosce ancora. */
     genericDescription: (name: string) =>
       `Collega ${name} con il tracciamento server side avanzato.`,
+    notConfigured: 'Questa integrazione non è ancora configurata. Riprova più tardi.',
+    connected: (name: string) => `${name} è collegato.`,
+    connectFailed: (name: string) =>
+      `Non è stato possibile collegare ${name}. Riprova.`,
     notAvailable: 'Questa integrazione non è disponibile.',
     notReady: (name: string) =>
       `La connessione a ${name} non è ancora attiva. Ti avvisiamo appena lo sarà.`,

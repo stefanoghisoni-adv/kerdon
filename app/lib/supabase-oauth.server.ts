@@ -1,47 +1,11 @@
-import { createHmac, timingSafeEqual } from 'crypto';
 import { prisma } from '~/db.server';
 import { encrypt, decrypt } from '~/utils/crypto.server';
 import { refreshAccessToken } from './supabase-management.server';
 
-const STATE_TTL_MS = 10 * 60 * 1000;
-
-function stateSecret(): string {
-  const s = process.env.ENCRYPTION_SECRET;
-  if (!s) throw new Error('ENCRYPTION_SECRET non configurato');
-  return s;
-}
-
-export function signState(shopId: string, now: number = Date.now()): string {
-  const payload = Buffer.from(
-    JSON.stringify({ shopId, exp: now + STATE_TTL_MS }),
-  ).toString('base64url');
-  const sig = createHmac('sha256', stateSecret()).update(payload).digest('base64url');
-  return `${payload}.${sig}`;
-}
-
-export function verifyState(
-  state: string,
-  now: number = Date.now(),
-): { shopId: string } | null {
-  const parts = state.split('.');
-  if (parts.length !== 2) return null;
-  const [payload, sig] = parts;
-  const expected = createHmac('sha256', stateSecret()).update(payload).digest('base64url');
-  const sigBuf = Buffer.from(sig);
-  const expBuf = Buffer.from(expected);
-  if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) return null;
-  try {
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString()) as {
-      shopId?: unknown;
-      exp?: unknown;
-    };
-    if (typeof parsed.shopId !== 'string' || typeof parsed.exp !== 'number') return null;
-    if (now > parsed.exp) return null;
-    return { shopId: parsed.shopId };
-  } catch {
-    return null;
-  }
-}
+// La firma del `state` non ha niente di Supabase: la usa anche Meta, e ogni
+// piattaforma che arrivera'. Vive in un file suo; qui resta il ri-esporto,
+// perche' e' da qui che se lo aspettano le rotte e i test di allora.
+export { signState, verifyState } from './oauth-state.server';
 
 export async function saveTokens(
   shopId: string,

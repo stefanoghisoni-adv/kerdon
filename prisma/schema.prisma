@@ -132,6 +132,7 @@ model Shop {
   partner                  Partner?                     @relation(fields: [partnerName], references: [name], onDelete: SetNull, onUpdate: Cascade)
   supabaseConfig           SupabaseConfig?
   supabaseOAuthToken       SupabaseOAuthToken?
+  metaConnection           MetaConnection?
   billingCharges           BillingCharge[]
   syncJobs                 SyncJob[]
   customFields             CustomField[]
@@ -250,6 +251,33 @@ model PlanPrice {
 
   @@unique([planName, currency])
   @@map("plan_prices")
+}
+
+/// La connessione di un negozio a Meta.
+///
+/// Stessa forma del token di Supabase — credenziali qui, scelta altrove — con
+/// una differenza: Meta non da' un refresh token. Da' un token a lunga durata
+/// (circa sessanta giorni) che si rinnova scambiandolo con se stesso finche' e'
+/// valido; scaduto quello, il merchant deve riautorizzare. Per questo la
+/// scadenza va guardata prima di ogni invio, non solo alla connessione.
+model MetaConnection {
+  id          String   @id @default(uuid())
+  shopId      String   @unique @map("shop_id")
+  accessToken String   @map("access_token")
+  expiresAt   DateTime @map("expires_at")
+  /// L'account pubblicitario scelto ("act_123"), e il pixel a cui mandare gli
+  /// eventi. null finche' il merchant non li ha scelti: la connessione esiste
+  /// ma non trasmette ancora niente.
+  adAccountId String?  @map("ad_account_id")
+  adAccountName String? @map("ad_account_name")
+  pixelId     String?  @map("pixel_id")
+  pixelName   String?  @map("pixel_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("meta_connections")
 }
 
 /// Le piattaforme a cui l'app puo' trasmettere gli eventi, e a che punto sono.

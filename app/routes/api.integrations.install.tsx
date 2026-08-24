@@ -4,6 +4,12 @@ import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { canInstall, normalizeStatus } from '~/lib/integrations/platforms';
 import { dictionaryForShop } from '~/lib/i18n/server';
+import { signState } from '~/lib/oauth-state.server';
+import {
+  buildMetaAuthorizeUrl,
+  metaCredentials,
+  metaRedirectUri,
+} from '~/lib/integrations/meta/oauth.server';
 
 /**
  * L'avvio di una connessione a una piattaforma.
@@ -34,8 +40,29 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ ok: false, error: t.integrations.notAvailable }, { status: 400 });
   }
 
-  // Il connettore vero — autorizzazione della piattaforma, scelta dell'account,
-  // salvataggio della connessione — arriva una piattaforma alla volta. Finche'
-  // manca, si dice quello che c'e' da dire.
+  // Meta e' la prima piattaforma con una connessione vera: si risponde con
+  // l'indirizzo di autorizzazione, e la finestra la apre il browser.
+  if (platform.slug === 'meta-ads') {
+    const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+    if (!shop) return json({ ok: false, error: t.errors.suspended }, { status: 404 });
+
+    const credentials = metaCredentials();
+    if (!credentials || !process.env.SHOPIFY_APP_URL) {
+      console.error('[integrations.install] credenziali Meta non configurate');
+      return json({ ok: false, error: t.integrations.notConfigured }, { status: 500 });
+    }
+
+    return json({
+      ok: true,
+      url: buildMetaAuthorizeUrl({
+        appId: credentials.appId,
+        redirectUri: metaRedirectUri(),
+        state: signState(shop.id),
+      }),
+    });
+  }
+
+  // Le altre arrivano una alla volta: finche' la loro connessione non esiste,
+  // si dice quello che c'e' da dire invece di far girare un loader.
   return json({ ok: false, error: t.integrations.notReady(platform.name) }, { status: 501 });
 }
