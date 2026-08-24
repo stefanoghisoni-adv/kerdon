@@ -30,7 +30,6 @@ import { MarginCard } from '~/components/Dashboard/MarginCard';
 import { ProfitabilityChart } from '~/components/Dashboard/ProfitabilityChart';
 import type { ShopAverages, ShopProfit } from '~/lib/customers/profit.server';
 import { CoverageCard } from '~/components/Dashboard/CoverageCard';
-import { productQuotaLabel } from '~/components/Dashboard/product-quota';
 import { CustomersCard } from '~/components/Dashboard/CustomersCard';
 import { Stepper, type StepperItem } from '~/components/Dashboard/Stepper';
 import { EligibilityChart } from '~/components/Dashboard/EligibilityChart';
@@ -1264,32 +1263,24 @@ export default function Dashboard() {
             fixLoading={issuesNav.loading}
           />
           <CoverageCard
-            title={t.dashboard.coverage.productsTitle}
+            label={t.dashboard.coverage.productsTitle}
+            hint={t.dashboard.coverage.productsHint}
             ready={readiness?.readyCount ?? 0}
             total={(readiness?.readyCount ?? 0) + (readiness?.problemCount ?? 0)}
             detail={t.dashboard.coverage.ready}
-            issue={
-              (readiness?.problemCount ?? 0) > 0
-                ? t.dashboard.coverage.needAttention(readiness?.problemCount ?? 0)
-                : undefined
-            }
+            issue={(readiness?.problemCount ?? 0) > 0}
             action={{
               label: t.dashboard.coverage.fix,
               url: '/products/issues',
               onAction: issuesNav.start,
               loading: issuesNav.loading,
             }}
-            // Il consumo del piano scende in fondo e in piccolo: e' un'altra
-            // domanda — quanto spazio resta, non quanta parte funziona — e alla
-            // pari si leggeva come se fosse la stessa.
-            footnote={t.dashboard.coverage.planUsage(
-              productQuotaLabel(readiness?.readyCount ?? 0, currentMaxProducts),
-            )}
             loading={readinessLoading}
           />
           {customersEnabled ? (
             <CoverageCard
-              title={t.dashboard.coverage.customersTitle}
+              label={t.dashboard.coverage.customersTitle}
+              hint={t.dashboard.coverage.customersHint}
               ready={customerStats?.optIn ?? 0}
               total={customerStats?.totalCustomers ?? 0}
               detail={t.dashboard.coverage.optedIn}

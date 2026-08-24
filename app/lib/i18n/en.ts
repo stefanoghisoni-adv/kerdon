@@ -282,6 +282,7 @@ export const en: typeof it = {
   dashboard: {
     profit: {
       title: 'Profit this month',
+      hint: 'Revenue minus the cost of goods sold, on this month’s orders.',
       orders: (n: number) => `${n} ${n === 1 ? 'order' : 'orders'}`,
       reliability: (percent: number) => `Based on ${percent}% of order lines`,
       complete: 'Based on every order line',
@@ -291,8 +292,8 @@ export const en: typeof it = {
     },
     margin: {
       title: 'Margin per order',
-      aov: (amount: string) => `Average order ${amount}`,
-      aop: (amount: string) => `Average profit ${amount}`,
+      detail: (profit: string, value: string) => `${profit} of ${value} per order`,
+      hint: 'What’s left of an average order after the cost of goods.',
       noOrders: 'No orders to work from yet.',
     },
     profitability: {
@@ -307,12 +308,11 @@ export const en: typeof it = {
     coverage: {
       productsTitle: 'Products ready',
       customersTitle: 'Customers with consent',
+      productsHint: 'Products with a cost filled in — the only ones profit can be worked out on.',
+      customersHint: 'Customers who opted into marketing: the ones the app syncs.',
       ready: (ready: number, total: number) => `${ready} of ${total} ready`,
       optedIn: (optIn: number, total: number) => `${optIn} of ${total} opted in`,
-      needAttention: (n: number) =>
-        `${n} ${n === 1 ? 'product needs attention' : 'products need attention'}`,
       fix: 'Fix products',
-      planUsage: (used: string) => `Plan: ${used}`,
       none: 'No data',
     },
     freshness: {

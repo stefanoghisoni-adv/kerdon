@@ -1,4 +1,5 @@
-import { BlockStack, Button, Card, InlineStack, Text } from '@shopify/polaris';
+import { Button, InlineStack, Text } from '@shopify/polaris';
+import { StatCard } from './StatCard';
 import { formatMoney } from '~/lib/billing/money';
 import { useLocale, useT } from '~/lib/i18n/context';
 
@@ -16,17 +17,13 @@ export interface ProfitCardProps {
 }
 
 /**
- * Il profitto del mese, in cima a tutto.
+ * Il profitto del mese.
  *
  * E' la domanda per cui il merchant apre l'app — quanto ho guadagnato, e sta
- * salendo o scendendo — e finora l'app sapeva rispondere senza scriverlo da
- * nessuna parte: la dashboard apriva con dei conteggi, che dicono se la
- * macchina gira, non come va l'azienda.
- *
- * Sotto il numero c'e' quanto ci si puo' fidare: la percentuale di righe
- * d'ordine che hanno davvero un costo. Non e' una nota tecnica — un profitto
- * calcolato su meta' delle righe e' meta' profitto, e la strada per completarlo
- * parte proprio da li'.
+ * salendo o scendendo. Nella riga sotto c'e' quanto ci si puo' fidare: la
+ * percentuale di righe d'ordine che hanno davvero un costo, e il collegamento
+ * per completarle. Non e' una nota tecnica — un profitto calcolato su meta'
+ * delle righe e' meta' profitto.
  */
 export function ProfitCard({
   profit,
@@ -47,64 +44,50 @@ export function ProfitCard({
     totalLines === 0 ? null : Math.round((coveredLines / totalLines) * 100);
 
   return (
-    <Card>
-      <BlockStack gap="200">
-        <Text as="h2" variant="headingMd">
-          {t.dashboard.profit.title}
-        </Text>
-
-        {unavailable ? (
-          <Text as="p" tone="subdued">
-            {t.dashboard.profit.unavailable}
+    <StatCard
+      label={t.dashboard.profit.title}
+      hint={t.dashboard.profit.hint}
+      value={
+        loading || unavailable || profit == null
+          ? '—'
+          : formatMoney(profit, currency, locale)
+      }
+      // Verde o rosso senza altre parole: accanto a un numero grande la
+      // direzione e' l'unica cosa che si guarda.
+      trailing={
+        !loading && !unavailable && change != null ? (
+          <Text as="span" variant="bodySm" tone={change >= 0 ? 'success' : 'critical'}>
+            {change >= 0 ? '+' : ''}
+            {change}%
           </Text>
-        ) : (
-          <BlockStack gap="200">
-            <InlineStack gap="300" blockAlign="baseline" wrap={false}>
-              <Text as="p" variant="heading3xl">
-                {loading || profit == null ? '—' : formatMoney(profit, currency, locale)}
-              </Text>
-              {/* Verde o rosso, senza altre parole: la direzione e' l'unica cosa
-                  che si guarda accanto a un numero grande. */}
-              {!loading && change != null && (
-                <Text as="span" tone={change >= 0 ? 'success' : 'critical'}>
-                  {change >= 0 ? '+' : ''}
-                  {change}%
-                </Text>
-              )}
-            </InlineStack>
-
-            <Text as="p" tone="subdued">
-              {loading ? '—' : orders === 0 ? t.dashboard.profit.noOrders : t.dashboard.profit.orders(orders)}
-            </Text>
-
-            {/* Quanto di quel numero e' vero, e come renderlo piu' vero. */}
-            {!loading && reliability != null && (
-              <InlineStack gap="200" blockAlign="center" wrap={false}>
-                <Text
-                  as="span"
-                  variant="bodySm"
-                  tone={reliability === 100 ? 'subdued' : 'caution'}
-                >
-                  {reliability === 100
-                    ? t.dashboard.profit.complete
-                    : t.dashboard.profit.reliability(reliability)}
-                </Text>
-                {reliability < 100 && onFix && (
-                  <Button
-                    variant="plain"
-                    url="/products/issues"
-                    onClick={onFix}
-                    loading={fixLoading}
-                    disabled={fixLoading}
-                  >
-                    {t.dashboard.profit.fix}
-                  </Button>
-                )}
-              </InlineStack>
-            )}
-          </BlockStack>
-        )}
-      </BlockStack>
-    </Card>
+        ) : undefined
+      }
+      detail={
+        <InlineStack gap="200" blockAlign="center" wrap={false}>
+          <Text as="span" variant="bodySm" tone={reliability != null && reliability < 100 ? 'caution' : 'subdued'}>
+            {loading
+              ? '—'
+              : unavailable
+                ? t.dashboard.profit.unavailable
+                : orders === 0
+                  ? t.dashboard.profit.noOrders
+                  : reliability != null && reliability < 100
+                    ? t.dashboard.profit.reliability(reliability)
+                    : t.dashboard.profit.orders(orders)}
+          </Text>
+          {!loading && !unavailable && reliability != null && reliability < 100 && onFix && (
+            <Button
+              variant="plain"
+              url="/products/issues"
+              onClick={onFix}
+              loading={fixLoading}
+              disabled={fixLoading}
+            >
+              {t.dashboard.profit.fix}
+            </Button>
+          )}
+        </InlineStack>
+      }
+    />
   );
 }

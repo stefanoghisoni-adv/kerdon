@@ -294,6 +294,7 @@ export const it = {
     /** Il numero per cui il merchant apre l'app. */
     profit: {
       title: 'Profitto del mese',
+      hint: 'Ricavi meno il costo dei prodotti venduti, sugli ordini di questo mese.',
       orders: (n: number) => `${n} ${n === 1 ? 'ordine' : 'ordini'}`,
       reliability: (percent: number) => `Calcolato sul ${percent}% delle righe d’ordine`,
       complete: 'Calcolato su tutte le righe d’ordine',
@@ -304,8 +305,8 @@ export const it = {
     /** Quanto resta di un ordine medio. */
     margin: {
       title: 'Margine per ordine',
-      aov: (amount: string) => `Ordine medio ${amount}`,
-      aop: (amount: string) => `Profitto medio ${amount}`,
+      detail: (profit: string, value: string) => `${profit} su ${value} per ordine`,
+      hint: 'Quanto resta di un ordine medio dopo il costo dei prodotti.',
       noOrders: 'Ancora nessun ordine da cui calcolarlo.',
     },
     /** Quanto di cio' che si incassa resta. */
@@ -321,12 +322,11 @@ export const it = {
     coverage: {
       productsTitle: 'Prodotti pronti',
       customersTitle: 'Clienti con consenso',
+      productsHint: 'I prodotti con un costo compilato, gli unici su cui si può calcolare il profitto.',
+      customersHint: 'I clienti che hanno acconsentito al marketing: sono quelli che l’app sincronizza.',
       ready: (ready: number, total: number) => `${ready} di ${total} pronti`,
       optedIn: (optIn: number, total: number) => `${optIn} di ${total} con consenso`,
-      needAttention: (n: number) =>
-        `${n} ${n === 1 ? 'prodotto da sistemare' : 'prodotti da sistemare'}`,
       fix: 'Sistema i prodotti',
-      planUsage: (used: string) => `Piano: ${used}`,
       none: 'Nessun dato',
     },
     freshness: {
