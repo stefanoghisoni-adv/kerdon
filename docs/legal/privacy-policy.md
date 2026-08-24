@@ -1,128 +1,108 @@
-# Informativa sulla privacy — CoreWard
+# CoreWard — Privacy Policy
 
-Ultimo aggiornamento: 6 agosto 2026
+**Last updated:** {{DATE}}
+**Version:** 1.0
 
-> **Bozza da far verificare da un legale prima della pubblicazione.**
-> I campi fra parentesi quadre vanno completati: senza indirizzo del titolare
-> l'informativa non è a norma.
+> **Placeholders to complete before publishing:** `{{LEGAL_ENTITY}}`, `{{REGISTERED_ADDRESS}}`, `{{VAT_OR_COMPANY_NUMBER}}`, `{{CONTACT_EMAIL}}`, `{{DATE}}`.
+> This draft describes what the application actually does, verified against its source code. It is not legal advice and should be reviewed by a qualified professional before publication.
 
-## 1. Chi tratta i dati
+## 1. Who we are
 
-**Titolare del trattamento**: Stefano Ghisoni
-Indirizzo: [via, CAP, città, paese]
-Partita IVA / Codice fiscale: [da inserire se l'attività è esercitata in forma d'impresa]
-Contatto: support@coreward.app
+CoreWard is an application for Shopify stores, operated by {{LEGAL_ENTITY}}, {{REGISTERED_ADDRESS}}, {{VAT_OR_COMPANY_NUMBER}}. You can reach us at {{CONTACT_EMAIL}}.
 
-CoreWard è un'applicazione per Shopify che sincronizza i dati di catalogo e
-clientela di un negozio nel database che il merchant possiede e controlla.
+## 2. Our role, and yours
 
-## 2. Due ruoli distinti
+CoreWard installs into your Shopify store and copies part of your store's data into **a database that you own** — a Supabase project connected to your own account. That distinction determines who is responsible for what.
 
-Questa distinzione governa tutto il resto del documento.
+**You are the data controller** for your store's data, including your customers' personal data. You decide why it is processed and for how long it is kept.
 
-**Verso il merchant, CoreWard è titolare.** I dati dell'account — dominio del
-negozio, nome, cognome, email e lingua dell'utente Shopify che installa l'app,
-piano sottoscritto e stato di fatturazione — sono trattati da CoreWard per
-erogare il servizio.
+**We are a data processor** acting on your instructions for that data. We process it only to provide the app's functions described below, never for our own purposes, and never to build profiles or datasets across merchants.
 
-**Verso i clienti finali del merchant, CoreWard è responsabile del
-trattamento.** I dati dei clienti del negozio appartengono al merchant, che ne è
-il titolare e decide finalità e mezzi. CoreWard li tratta esclusivamente su
-istruzione del merchant, nei termini del [Data Processing Agreement](./dpa.md).
+**We are the data controller** for the limited information about you as our customer: your store address, your app plan, your billing records and your support correspondence.
 
-## 3. Quali dati
+## 3. What the app processes
 
-### Dati del merchant (CoreWard titolare)
+### 3.1 Store and account information
 
-| Dato | Origine | Perché |
+Your Shopify store domain and primary domain, time zone, billing currency, the app plan you are on, your language preference, and the access tokens that let the app talk to Shopify on your behalf. Access tokens are stored encrypted.
+
+### 3.2 Product catalogue
+
+Product and variant titles, descriptions, vendor, type, handle, status, tags, SKU, barcode, price, compare-at price, **cost per item**, inventory quantity and policy, weight, images and option values.
+
+Cost per item is the reason the app exists: it is what allows profit to be calculated. When you fill in a missing cost, the app can also write it back to Shopify on your instruction.
+
+### 3.3 Customer data — only with marketing consent
+
+The app synchronises **only customers who have given marketing consent** in your store. For those customers it processes: Shopify customer ID, email address, phone number, first and last name, consent state and opt-in level, total spent, number of orders, customer state, tags, note, verified-email and tax-exempt flags, and creation/update timestamps.
+
+Customers who have not given consent are never copied into your database.
+
+**If a customer withdraws consent**, their record is not deleted — deleting it would destroy history you may need — but it is marked as no longer consenting, and any read request for that customer is refused from that moment on.
+
+### 3.4 Orders
+
+Where you have granted the app access to your orders, it processes: order ID and number, the customer's ID and first and last name, currency, total, financial status, cancellation date, order date, and for each line the product and variant, quantity, unit price paid and line discount.
+
+The app deliberately does **not** copy shipping or billing addresses, customer email addresses or phone numbers from orders, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.
+
+### 3.5 Operational records
+
+To run and support the app we keep, in our own database: a record of each synchronisation (type, outcome, timestamps, and how many records were added, updated or removed), product-level entries identifying which products changed, your billing charges, and access records for the read interface (outcome and HTTP status only).
+
+Records about **customers** in our own database are **counts only**. No customer name, email, phone or identifier is written to our systems by the synchronisation.
+
+## 4. Where the data is stored
+
+**Your data lives in your own database.** The Supabase project connected during setup belongs to your Supabase account, in the region you chose. We do not own it, cannot transfer it, and cannot access it after you disconnect the app.
+
+**Our own database** holds the operational records in section 3.5, along with your store configuration and encrypted credentials. It is hosted in the European Union.
+
+## 5. Who else is involved
+
+| Provider | Purpose | Location |
 |---|---|---|
-| Dominio del negozio | Shopify, all'installazione | Identificare l'account |
-| Nome, cognome, email, lingua dell'utente | Sessione Shopify | Autenticazione e assistenza |
-| Piano, stato dell'abbonamento | Shopify Billing | Fatturazione e limiti di servizio |
-| Indirizzo del progetto database collegato | Fornito dal merchant | Far funzionare la sincronizzazione |
+| Shopify | Source of store, product, customer and order data; billing | As per Shopify's own terms |
+| Supabase | Your database, and our own database | European Union |
+| Vercel | Application hosting | European Union |
+| Upstash | Job queue used to run synchronisations | European Union |
 
-### Dati dei clienti del negozio (CoreWard responsabile)
+We do not sell data, do not share it with advertising or analytics platforms, and do not use it to train models.
 
-Solo per i merchant il cui piano include la sincronizzazione clienti, e **solo
-per i clienti che hanno prestato il consenso al marketing su Shopify**:
+## 6. Security
 
-indirizzo email, numero di telefono, nome, cognome, stato del consenso e livello
-di adesione, totale speso, numero di ordini, stato cliente, tag, note.
+Access tokens and database keys are encrypted at rest with AES-256-GCM. The privileged key to your database is never sent to a browser.
 
-Non vengono trattati indirizzi di spedizione o fatturazione, dati di pagamento,
-contenuto degli ordini.
+Tables created by the app in your database have row-level security enabled with no public policies: they cannot be read with a public key.
 
-## 4. Il consenso comanda
+The read interface requires a token issued to your store, is limited to reading, and refuses requests for customers who have withdrawn consent.
 
-Un cliente che non ha acconsentito al marketing su Shopify non viene
-sincronizzato. Se revoca il consenso dopo esserlo stato, il suo record non viene
-cancellato dal database del merchant — viene marcato come non consenziente, e da
-quel momento ogni tentativo di lettura attraverso CoreWard viene rifiutato.
+Requests from Shopify are verified by signature before being acted upon.
 
-La scelta di non cancellare è del merchant: quei dati sono suoi e possono
-servirgli per finalità diverse dal marketing, per le quali risponde lui.
+## 7. How long data is kept
 
-## 5. Dove stanno i dati
+Data in **your** database is kept for as long as you decide. The app does not delete it on a schedule.
 
-| Cosa | Dove | Fornitore |
-|---|---|---|
-| Database dell'applicazione | Parigi, Francia (UE) | Supabase |
-| Esecuzione dell'applicazione | Parigi, Francia (UE) | Vercel |
-| Coda dei lavori di sincronizzazione | Francoforte, Germania (UE) | Upstash |
-| Dati di catalogo e clientela | Progetto del merchant, **nella regione che il merchant sceglie** | Supabase, sotto contratto del merchant |
+**When you uninstall the app**, your data stays where it is — in your database, which remains yours — and our session with your store ends. We keep our operational and billing records for as long as required for accounting and legal purposes.
 
-Nella coda transitano soltanto identificatori interni di negozio: nessun dato
-personale. Ogni componente gestito da CoreWard si trova nell'Unione Europea.
+**When Shopify asks us to erase your store** (the shop redaction request sent 48 hours after uninstall), we delete your store configuration, credentials and operational records from our systems. We do not touch your own database: it is not ours to delete.
 
-I dati di catalogo e clientela non risiedono sull'infrastruttura di CoreWard.
-Vivono nel progetto database del merchant, di cui il merchant è intestatario.
+## 8. Requests from your customers
 
-## 6. Responsabili esterni
+Shopify forwards customer privacy requests to us automatically, and the app answers them:
 
-- **Vercel Inc.** — esecuzione dell'applicazione
-- **Supabase Inc.** — database dell'applicazione
-- **Upstash Inc.** — coda dei lavori
+**Access request** — we collect the customer's synchronised record so you can provide it.
 
-Non ci sono altri fornitori. I dati non vengono venduti, ceduti né comunicati a
-terzi per finalità proprie.
+**Erasure request** — the customer's record is permanently deleted from your database, and the action is recorded in your logs.
 
-## 7. Per quanto tempo
+If a customer contacts you directly, you can also delete their record yourself: it is your database.
 
-| Dato | Conservazione |
-|---|---|
-| Sessione Shopify | Cancellata alla disinstallazione dell'app |
-| Account e piano | Finché l'account esiste |
-| Registro degli accessi ai dati dei clienti | 12 mesi |
-| Dettaglio delle sincronizzazioni | Solo le ultime esecuzioni consultabili |
-| Dati di catalogo e clientela | Restano nel database del merchant, anche dopo la disinstallazione |
+## 9. Your rights
 
-Sull'ultima riga: disinstallare CoreWard **non cancella** ciò che il merchant ha
-raccolto. Quelle tabelle sono nel suo progetto e restano sue. Chi vuole
-eliminarle lo fa dal proprio database.
+Where we act as controller for your account information, you may request access, correction, deletion, restriction, portability, or object to processing, by writing to {{CONTACT_EMAIL}}. You also have the right to lodge a complaint with your data protection authority.
 
-## 8. Diritti
+Where we act as processor, requests concerning your customers should be addressed to you as the controller; we assist you in answering them.
 
-Ogni interessato può chiedere accesso, rettifica, cancellazione, limitazione,
-portabilità e opposizione, e proporre reclamo all'autorità di controllo
-competente.
+## 10. Changes
 
-**Se sei un cliente di un negozio** che usa CoreWard, il tuo interlocutore è il
-negozio: è lui il titolare dei tuoi dati. CoreWard dà seguito alle richieste che
-riceve tramite i canali previsti da Shopify per l'accesso e la cancellazione, e
-assiste il merchant nel rispondere.
-
-**Se sei un merchant**, scrivi a support@coreward.app.
-
-## 9. Sicurezza
-
-I dati in transito viaggiano su HTTPS. I segreti conservati dall'applicazione
-sono cifrati con AES-256-GCM. Il database dell'applicazione non è raggiungibile
-attraverso interfacce pubbliche. Ogni lettura di dati personali dei clienti viene
-registrata. La procedura seguita in caso di incidente è pubblica e consultabile
-nel repository del progetto.
-
-## 10. Modifiche
-
-Le modifiche sostanziali vengono comunicate ai merchant attivi via email con
-almeno 30 giorni di preavviso. La data in cima al documento indica l'ultima
-revisione.
+If we change how the app processes data, we will update this page and the date at the top. Material changes will be announced inside the app before they take effect.
