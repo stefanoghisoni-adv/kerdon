@@ -1,11 +1,11 @@
 # CoreWard — Privacy Policy
 
-**Last updated:** 24-08-2026
+**Last updated:** 25-08-2026
 **Version:** 1.0
 
 ## 1. Who we are
 
-CoreWard is an application for Shopify stores, operated by Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148, Genoa (GE), Italy, VAT IT02705860993. You can reach us at info@stefanoghisoni.it.
+CoreWard is an application for Shopify stores, operated by Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148, Genoa (GE), Italy, VAT IT02705860993. You can reach us at support@coreward.app.
 
 ## 2. Our role, and yours
 
@@ -96,7 +96,7 @@ If a customer contacts you directly, you can also delete their record yourself: 
 
 ## 9. Your rights
 
-Where we act as controller for your account information, you may request access, correction, deletion, restriction, portability, or object to processing, by writing to info@stefanoghisoni.it. You also have the right to lodge a complaint with your data protection authority.
+Where we act as controller for your account information, you may request access, correction, deletion, restriction, portability, or object to processing, by writing to support@coreward.app. You also have the right to lodge a complaint with your data protection authority.
 
 Where we act as processor, requests concerning your customers should be addressed to you as the controller; we assist you in answering them.
 

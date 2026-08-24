@@ -1,0 +1,492 @@
+<title>CoreWard Privacy Policy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+
+<style>
+  :root {
+    --paper:      #FAFBFC;
+    --surface:    #F1F4F3;
+    --ink:        #16202B;
+    --ink-soft:   #4E5F6E;
+    --hairline:   #DFE5E9;
+    --accent:     #0F6E4E;
+    --accent-dim: #6E8C81;
+
+    --serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+    --sans:  "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono:  "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --measure: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #101820;
+      --surface:    #19232C;
+      --ink:        #DFE6EB;
+      --ink-soft:   #97A6B3;
+      --hairline:   #27343F;
+      --accent:     #57C193;
+      --accent-dim: #7E9A8E;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #101820;
+    --surface:    #19232C;
+    --ink:        #DFE6EB;
+    --ink-soft:   #97A6B3;
+    --hairline:   #27343F;
+    --accent:     #57C193;
+    --accent-dim: #7E9A8E;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 clamp(20px, 5vw, 56px);
+  }
+
+  @media (min-width: 1000px) {
+    .shell {
+      grid-template-columns: 216px minmax(0, 1fr);
+      gap: clamp(40px, 6vw, 88px);
+    }
+  }
+
+  /* ── Masthead ───────────────────────────────────────── */
+
+  .masthead {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--hairline);
+    padding: clamp(48px, 9vw, 96px) 0 clamp(28px, 4vw, 44px);
+  }
+
+  .wordmark {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 clamp(20px, 4vw, 34px);
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(2.4rem, 6vw, 3.6rem);
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0 0 0.5em;
+    max-width: 15ch;
+  }
+
+  .standfirst {
+    font-family: var(--serif);
+    font-size: clamp(1.05rem, 2.2vw, 1.3rem);
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 54ch;
+    margin: 0 0 clamp(24px, 4vw, 36px);
+  }
+
+  .stamp {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+  }
+
+  .stamp b {
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  /* ── Contents rail ──────────────────────────────────── */
+
+  .rail { display: none; }
+
+  @media (min-width: 1000px) {
+    .rail {
+      display: block;
+      padding-top: clamp(48px, 6vw, 72px);
+    }
+
+    .rail-inner {
+      position: sticky;
+      top: 40px;
+    }
+
+    .rail h2 {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      margin: 0 0 16px;
+    }
+
+    .rail ol {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      counter-reset: toc;
+    }
+
+    .rail a {
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      gap: 8px;
+      font-size: 0.86rem;
+      line-height: 1.35;
+      color: var(--ink-soft);
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      padding-left: 10px;
+      margin-left: -12px;
+      transition: color 120ms ease, border-color 120ms ease;
+    }
+
+    .rail a::before {
+      counter-increment: toc;
+      content: counter(toc, decimal-leading-zero);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--accent-dim);
+      padding-top: 1px;
+    }
+
+    .rail a:hover,
+    .rail a:focus-visible {
+      color: var(--ink);
+    }
+
+    .rail a[aria-current="true"] {
+      color: var(--ink);
+      border-left-color: var(--accent);
+    }
+
+    .rail a[aria-current="true"]::before { color: var(--accent); }
+  }
+
+  /* ── Body ───────────────────────────────────────────── */
+
+  main {
+    padding: clamp(40px, 6vw, 64px) 0 clamp(64px, 9vw, 112px);
+    max-width: var(--measure);
+  }
+
+  section + section { margin-top: clamp(44px, 6vw, 68px); }
+
+  section > h2 {
+    font-family: var(--serif);
+    font-size: clamp(1.5rem, 3vw, 1.85rem);
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 0.7em;
+    padding-top: 4px;
+    scroll-margin-top: 28px;
+  }
+
+  section > h2 .num {
+    font-family: var(--mono);
+    font-size: 0.72em;
+    font-weight: 400;
+    color: var(--accent);
+    margin-right: 0.7em;
+    letter-spacing: 0.02em;
+  }
+
+  h3 {
+    font-family: var(--sans);
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 2.1em 0 0.7em;
+  }
+
+  p { margin: 0 0 1.1em; }
+  p:last-child { margin-bottom: 0; }
+
+  strong { font-weight: 600; }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  /* A pull-quote for the sentences that carry the whole document. */
+  .keystone {
+    font-family: var(--serif);
+    font-size: 1.18rem;
+    line-height: 1.5;
+    border-left: 2px solid var(--accent);
+    padding: 2px 0 2px 20px;
+    margin: 1.6em 0;
+    color: var(--ink);
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    margin: 1.5em 0;
+    border-top: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 460px;
+    font-size: 0.92rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 11px 20px 11px 0;
+    vertical-align: top;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    border-bottom: 1px solid var(--hairline);
+    padding-top: 14px;
+  }
+
+  tbody tr + tr td { border-top: 1px solid var(--hairline); }
+  tbody td:first-child { font-weight: 500; white-space: nowrap; }
+
+  /* ── Footer ─────────────────────────────────────────── */
+
+  footer {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--hairline);
+    padding: clamp(32px, 5vw, 48px) 0 clamp(48px, 7vw, 80px);
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    max-width: var(--measure);
+  }
+
+  footer p { margin-bottom: 0.8em; }
+  footer .imprint {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    line-height: 1.7;
+    margin-top: 1.6em;
+  }
+
+  @media print {
+    :root { --paper: #fff; --ink: #000; --ink-soft: #333; --hairline: #bbb; --accent: #000; }
+    .rail { display: none; }
+    body { font-size: 11pt; }
+    section { break-inside: avoid-page; }
+    .shell { max-width: none; padding: 0; }
+  }
+</style>
+
+<div class="shell">
+
+  <header class="masthead">
+    <p class="wordmark">CoreWard</p>
+    <h1>Privacy Policy</h1>
+    <p class="standfirst">CoreWard copies part of your Shopify store into a database you own, and works out what your orders and customers actually earn you. This page says exactly what it touches — and what it deliberately leaves alone.</p>
+    <div class="stamp">
+      <span>Last updated <b>25 August 2026</b></span>
+      <span>Version <b>1.0</b></span>
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Contents">
+    <div class="rail-inner">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#who-we-are">Who we are</a></li>
+        <li><a href="#roles">Our role, and yours</a></li>
+        <li><a href="#what-we-process">What the app processes</a></li>
+        <li><a href="#where">Where the data is stored</a></li>
+        <li><a href="#providers">Who else is involved</a></li>
+        <li><a href="#security">Security</a></li>
+        <li><a href="#retention">How long data is kept</a></li>
+        <li><a href="#customer-requests">Requests from your customers</a></li>
+        <li><a href="#rights">Your rights</a></li>
+        <li><a href="#changes">Changes</a></li>
+      </ol>
+    </div>
+  </nav>
+
+  <main>
+
+    <section id="who-we-are">
+      <h2><span class="num">01</span>Who we are</h2>
+      <p>CoreWard is an application for Shopify stores, operated by Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genoa (GE), Italy, VAT IT02705860993. You can reach us at <a href="mailto:support@coreward.app">support@coreward.app</a>.</p>
+    </section>
+
+    <section id="roles">
+      <h2><span class="num">02</span>Our role, and yours</h2>
+      <p>CoreWard installs into your Shopify store and copies part of your store's data into <strong>a database that you own</strong> — a Supabase project connected to your own account. That distinction determines who is responsible for what.</p>
+      <p><strong>You are the data controller</strong> for your store's data, including your customers' personal data. You decide why it is processed and for how long it is kept.</p>
+      <p><strong>We are a data processor</strong> acting on your instructions for that data. We process it only to provide the app's functions described below, never for our own purposes, and never to build profiles or datasets across merchants.</p>
+      <p><strong>We are the data controller</strong> for the limited information about you as our customer: your store address, your app plan, your billing records and your support correspondence.</p>
+    </section>
+
+    <section id="what-we-process">
+      <h2><span class="num">03</span>What the app processes</h2>
+
+      <h3>Store and account information</h3>
+      <p>Your Shopify store domain and primary domain, time zone, billing currency, the app plan you are on, your language preference, and the access tokens that let the app talk to Shopify on your behalf. Access tokens are stored encrypted.</p>
+
+      <h3>Product catalogue</h3>
+      <p>Product and variant titles, descriptions, vendor, type, handle, status, tags, SKU, barcode, price, compare-at price, <strong>cost per item</strong>, inventory quantity and policy, weight, images and option values.</p>
+      <p>Cost per item is the reason the app exists: it is what allows profit to be calculated. When you fill in a missing cost, the app can also write it back to Shopify on your instruction.</p>
+
+      <h3>Customer data — only with marketing consent</h3>
+      <p>The app synchronises <strong>only customers who have given marketing consent</strong> in your store. For those customers it processes: Shopify customer ID, email address, phone number, first and last name, consent state and opt-in level, total spent, number of orders, customer state, tags, note, verified-email and tax-exempt flags, and creation and update timestamps.</p>
+      <p>Customers who have not given consent are never copied into your database.</p>
+      <p><strong>If a customer withdraws consent</strong>, their record is not deleted — deleting it would destroy history you may need — but it is marked as no longer consenting, and any read request for that customer is refused from that moment on.</p>
+
+      <h3>Orders</h3>
+      <p>Where you have granted the app access to your orders, it processes: order ID and number, the customer's ID and first and last name, currency, total, financial status, cancellation date, order date, and for each line the product and variant, quantity, unit price paid and line discount.</p>
+      <p class="keystone">The app deliberately does not copy shipping or billing addresses, customer email addresses or phone numbers from orders, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.</p>
+
+      <h3>Operational records</h3>
+      <p>To run and support the app we keep, in our own database: a record of each synchronisation (type, outcome, timestamps, and how many records were added, updated or removed), product-level entries identifying which products changed, your billing charges, and access records for the read interface — outcome and HTTP status only.</p>
+      <p>Records about <strong>customers</strong> in our own database are <strong>counts only</strong>. No customer name, email, phone or identifier is written to our systems by the synchronisation.</p>
+    </section>
+
+    <section id="where">
+      <h2><span class="num">04</span>Where the data is stored</h2>
+      <p class="keystone">Your data lives in your own database. The Supabase project connected during setup belongs to your Supabase account, in the region you chose. We do not own it, cannot transfer it, and cannot access it after you disconnect the app.</p>
+      <p><strong>Our own database</strong> holds the operational records described above, along with your store configuration and encrypted credentials. It is hosted in the European Union.</p>
+    </section>
+
+    <section id="providers">
+      <h2><span class="num">05</span>Who else is involved</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th scope="col">Provider</th><th scope="col">Purpose</th><th scope="col">Location</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Shopify</td><td>Source of store, product, customer and order data; billing</td><td>As per Shopify's own terms</td></tr>
+            <tr><td>Supabase</td><td>Your database, and our own database</td><td>European Union</td></tr>
+            <tr><td>Vercel</td><td>Application hosting</td><td>European Union</td></tr>
+            <tr><td>Upstash</td><td>Job queue used to run synchronisations</td><td>European Union</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>We do not sell data, do not share it with advertising or analytics platforms, and do not use it to train models.</p>
+    </section>
+
+    <section id="security">
+      <h2><span class="num">06</span>Security</h2>
+      <p>Access tokens and database keys are encrypted at rest with AES-256-GCM. The privileged key to your database is never sent to a browser.</p>
+      <p>Tables created by the app in your database have row-level security enabled with no public policies: they cannot be read with a public key.</p>
+      <p>The read interface requires a token issued to your store, is limited to reading, and refuses requests for customers who have withdrawn consent.</p>
+      <p>Requests from Shopify are verified by signature before being acted upon.</p>
+    </section>
+
+    <section id="retention">
+      <h2><span class="num">07</span>How long data is kept</h2>
+      <p>Data in <strong>your</strong> database is kept for as long as you decide. The app does not delete it on a schedule.</p>
+      <p><strong>When you uninstall the app</strong>, your data stays where it is — in your database, which remains yours — and our session with your store ends. We keep our operational and billing records for as long as required for accounting and legal purposes.</p>
+      <p><strong>When Shopify asks us to erase your store</strong> — the shop redaction request sent 48 hours after uninstall — we delete your store configuration, credentials and operational records from our systems. We do not touch your own database: it is not ours to delete.</p>
+    </section>
+
+    <section id="customer-requests">
+      <h2><span class="num">08</span>Requests from your customers</h2>
+      <p>Shopify forwards customer privacy requests to us automatically, and the app answers them.</p>
+      <p><strong>Access request</strong> — we collect the customer's synchronised record so you can provide it.</p>
+      <p><strong>Erasure request</strong> — the customer's record is permanently deleted from your database, and the action is recorded in your logs.</p>
+      <p>If a customer contacts you directly, you can also delete their record yourself: it is your database.</p>
+    </section>
+
+    <section id="rights">
+      <h2><span class="num">09</span>Your rights</h2>
+      <p>Where we act as controller for your account information, you may request access, correction, deletion, restriction, portability, or object to processing, by writing to <a href="mailto:support@coreward.app">support@coreward.app</a>. You also have the right to lodge a complaint with your data protection authority.</p>
+      <p>Where we act as processor, requests concerning your customers should be addressed to you as the controller; we assist you in answering them.</p>
+    </section>
+
+    <section id="changes">
+      <h2><span class="num">10</span>Changes</h2>
+      <p>If we change how the app processes data, we will update this page and the date at the top. Material changes will be announced inside the app before they take effect.</p>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>The processing described here is governed by our data processing agreement, accepted together with the terms of service when the app is installed.</p>
+    <p class="imprint">
+      Stefano Ghisoni<br>
+      Via Percy Bysshe Shelley 49/10, 16148 Genoa (GE), Italy<br>
+      VAT IT02705860993 · <a href="mailto:support@coreward.app">support@coreward.app</a>
+    </p>
+  </footer>
+
+</div>
+
+<script>
+  // Marca nell'indice la sezione che si sta leggendo: la piu' in alto fra
+  // quelle visibili, cosi' scorrendo all'indietro non resta indietro anche lui.
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('.rail a'));
+    if (!links.length || !('IntersectionObserver' in window)) return;
+
+    var visible = new Set();
+
+    function paint() {
+      var current = links.filter(function (a) {
+        return visible.has(a.getAttribute('href').slice(1));
+      })[0];
+      links.forEach(function (a) {
+        if (a === current) a.setAttribute('aria-current', 'true');
+        else a.removeAttribute('aria-current');
+      });
+    }
+
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) visible.add(entry.target.id);
+        else visible.delete(entry.target.id);
+      });
+      paint();
+    }, { rootMargin: '-10% 0px -70% 0px' });
+
+    document.querySelectorAll('main section').forEach(function (s) { observer.observe(s); });
+  })();
+</script>
