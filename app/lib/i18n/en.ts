@@ -417,7 +417,7 @@ export const en: typeof it = {
     },
     title: "Plan",
     blocked: {
-      title: "You don’t have access to this section",
+      title: "There’s nothing to upgrade",
       body:
         "Your plan has no limits and no renewals: there’s nothing to upgrade. Head back to the " +
         "dashboard to carry on.",

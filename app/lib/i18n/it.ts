@@ -440,7 +440,7 @@ export const it = {
     /** La pagina: titolo, blocco, intestazione, ciclo di fatturazione. */
     title: "Piano",
     blocked: {
-      title: "Non hai accesso a questa sezione",
+      title: "Non c’è niente da aggiornare",
       body:
         "Il tuo piano è senza limiti e non prevede rinnovi: non c’è nessun aggiornamento da " +
         "fare. Torna alla dashboard per continuare.",

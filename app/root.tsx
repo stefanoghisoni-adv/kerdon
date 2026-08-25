@@ -285,8 +285,12 @@ export default function App() {
                     mandano fuori. */}
                 <Link to="/catalogs">{menu.catalogs}</Link>
                 <Link to="/logs">{menu.logs}</Link>
-                {/* Nascosta sui piani senza nulla da acquistare (lifetime). */}
-                {canSeePlanTab && <Link to="/plan">{menu.plan}</Link>}
+                {/* C'e' sempre, anche sui piani senza nulla da acquistare: il
+                    menu dell'admin non sa disabilitare una voce — sono <a>, e
+                    un <a> spento non esiste — quindi o si toglie o si lascia.
+                    Toglierla faceva sembrare persa una sezione che invece esiste
+                    e ha una risposta da dare; ora la risposta e' dentro /plan. */}
+                <Link to="/plan">{menu.plan}</Link>
                 <Link to="/settings/supabase">{menu.settings}</Link>
               </>
             )}

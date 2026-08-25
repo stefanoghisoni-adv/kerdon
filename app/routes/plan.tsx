@@ -57,8 +57,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // corrente non e' tra i 4 (es. 'lifetime'), nessuna card risultera' "attuale".
   const currentPlan = (shop?.currentPlan ?? '').toLowerCase();
 
-  // Il link sparisce dalla NavMenu, ma /plan resta digitabile: il blocco vero sta
-  // qui. 403 anche nello status, non solo a schermo.
+  // Niente da comprare: la pagina esiste e risponde, non e' un errore. Prima
+  // era un 403 perche' la voce di menu non c'era e ci si arrivava solo
+  // digitando l'indirizzo; ora la voce c'e' e ci si arriva cliccandola.
   if (!canAccessPlanTab(currentPlan)) {
     return json(
       {
@@ -69,7 +70,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         partnerLabel: null,
         currency: BASE_CURRENCY,
       },
-      { status: 403 },
     );
   }
 
@@ -227,7 +227,7 @@ export default function Plan() {
         title={t.plan.title}
         backAction={{ url: '/', content: t.common.dashboard }}
       >
-        <Banner tone="critical" title={t.plan.blocked.title}>
+        <Banner tone="info" title={t.plan.blocked.title}>
           <Text as="p">{t.plan.blocked.body}</Text>
         </Banner>
         <Box paddingBlockEnd="800" />
