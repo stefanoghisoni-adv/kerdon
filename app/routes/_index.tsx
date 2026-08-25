@@ -28,6 +28,9 @@ import { ProductIcon, PersonIcon, SettingsIcon, LockIcon } from '@shopify/polari
 import { ProfitCard } from '~/components/Dashboard/ProfitCard';
 import { MarginCard } from '~/components/Dashboard/MarginCard';
 import { ProfitabilityChart } from '~/components/Dashboard/ProfitabilityChart';
+import { TopProductsCard } from '~/components/Dashboard/TopProductsCard';
+import type { Metric } from '~/lib/customers/top-products';
+import type { TopProductsReport } from '~/lib/customers/top-products.server';
 import type { ShopAverages, ShopProfit } from '~/lib/customers/profit.server';
 import { CoverageCard } from '~/components/Dashboard/CoverageCard';
 import { CustomersCard } from '~/components/Dashboard/CustomersCard';
@@ -556,12 +559,26 @@ export default function Dashboard() {
   // l'intera dashboard per un numero che puo' comparire un istante dopo.
   const profitFetcher = useFetcher<ShopProfit & { averages: ShopAverages }>();
 
+  // La metrica vive qui e non nella card: cambiandola si ricarica la rotta, e
+  // la card non deve sapere da dove arrivano le sue righe.
+  const topFetcher = useFetcher<TopProductsReport>();
+  const [topMetric, setTopMetric] = useState<Metric>('cm');
+  const loadTop = useCallback(
+    (metric: Metric) => {
+      setTopMetric(metric);
+      topFetcher.load(`/api/stats/top-products?metric=${metric}`);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   useEffect(() => {
     countsFetcher.load('/api/stats/counts');
     readinessFetcher.load('/api/stats/products');
     customerStatsFetcher.load('/api/stats/customers');
     historyFetcher.load('/api/stats/product-history');
     profitFetcher.load('/api/stats/profit');
+    topFetcher.load('/api/stats/top-products?metric=cm');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1333,6 +1350,17 @@ export default function Dashboard() {
 
           <RecentRunsCard runs={recentRuns} timeZone={shop.ianaTimezone} />
         </InlineGrid>
+
+        {/* Sotto la fila dei grafici: risponde alla domanda che nasce guardando
+            il profitto totale — quale prodotto lo sta facendo. */}
+        <TopProductsCard
+          rows={topFetcher.data?.rows ?? []}
+          currency={topFetcher.data?.currency ?? 'EUR'}
+          metric={topMetric}
+          onMetric={loadTop}
+          loading={topFetcher.state !== 'idle' || !topFetcher.data}
+          adminBase={conflictsFetcher.data?.adminBase}
+        />
 
         {/* In fondo, e chiudibile: e' una proposta, non una cosa da fare.
             Sparisce per sempre appena il merchant risponde — o dice "non

@@ -344,6 +344,20 @@ export const en: typeof it = {
       upgrade: 'Upgrade plan',
     },
     connection: { title: 'Connection' },
+    topProducts: {
+      title: 'The products that earn most',
+      metric: { cm: 'CM', aop: 'AOP', acp: 'ACP', ltp: 'LTP' },
+      help: {
+        cm: 'Contribution margin: total profit brought in over the period. Rewards what sells a lot.',
+        aop: 'Average order profit: what it earns each time it is bought. Rewards the expensive product, even a rare one.',
+        acp: 'Average cart profit: what the whole order it sits in earns. Rewards the product that brings others with it.',
+        ltp: 'Profit per customer: what each customer who bought it brought in. Rewards the product that makes people come back.',
+      },
+      orders: (n: number) => (n === 1 ? '1 order' : `${n} orders`),
+      singleVariant: 'Single variant',
+      empty:
+        'No orders with a filled-in product cost in this period. Without a cost there is no profit to compute.',
+    },
     recentRuns: {
       title: 'Recent syncs',
       seeAll: 'See all',

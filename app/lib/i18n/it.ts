@@ -358,6 +358,20 @@ export const it = {
       upgrade: 'Aggiorna piano',
     },
     connection: { title: 'Connessione' },
+    topProducts: {
+      title: 'I prodotti che rendono di piu\u0027',
+      metric: { cm: 'CM', aop: 'AOP', acp: 'ACP', ltp: 'LTP' },
+      help: {
+        cm: 'Margine di contribuzione: quanto profitto ha portato in tutto nel periodo. Premia chi vende tanto.',
+        aop: 'Profitto medio per ordine: quanto rende ogni volta che viene comprato. Premia il prodotto caro anche se raro.',
+        acp: 'Profitto medio per carrello: quanto rende l\u2019intero ordine in cui si trova. Premia il prodotto che se ne porta dietro altri.',
+        ltp: 'Profitto per cliente: quanto ha portato ogni cliente che l\u2019ha comprato. Premia il prodotto che fa tornare.',
+      },
+      orders: (n: number) => (n === 1 ? '1 ordine' : `${n} ordini`),
+      singleVariant: 'Variante unica',
+      empty:
+        'Nessun ordine con un costo prodotto compilato nel periodo. Senza costo il profitto non si calcola.',
+    },
     recentRuns: {
       title: 'Ultime sincronizzazioni',
       seeAll: 'Vedi tutte',
