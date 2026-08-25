@@ -18,9 +18,13 @@ import { BASE_CURRENCY } from './money';
  * prezzo che ha letto prima di installare.
  */
 
-/** Un piano per come serve qui: il nome e i prezzi del listino base. */
-export interface PricedPlan {
+/** Un piano per come lo conosce il listino: solo il nome. */
+export interface NamedPlan {
   planName: string;
+}
+
+/** Un piano con i prezzi attaccati, nella valuta in cui gli si parlera'. */
+export interface PricedPlan extends NamedPlan {
   priceMonthly: number;
   priceYearly: number;
 }
@@ -33,9 +37,21 @@ export interface PlanPriceRow {
   priceYearly: number;
 }
 
-/** Gratis in una valuta e' gratis in tutte: per questi piani non serve una riga. */
-function isFree(plan: PricedPlan): boolean {
-  return !(plan.priceMonthly > 0) && !(plan.priceYearly > 0);
+function isPaid(row: PlanPriceRow | undefined): boolean {
+  return row !== undefined && (row.priceMonthly > 0 || row.priceYearly > 0);
+}
+
+/**
+ * Il listino nella valuta base, indicizzato per piano.
+ *
+ * La valuta base non e' una valuta come le altre: e' quella in cui ogni piano
+ * ha una riga, ed e' quella che decide chi si paga e chi no. Le altre sono
+ * traduzioni di quel listino, e possono mancare.
+ */
+function baseRows(prices: PlanPriceRow[]): Map<string, PlanPriceRow> {
+  return new Map(
+    prices.filter((row) => row.currency === BASE_CURRENCY).map((row) => [row.planName, row]),
+  );
 }
 
 /**
@@ -44,14 +60,24 @@ function isFree(plan: PricedPlan): boolean {
  * Completo e non parziale: se mancasse anche un solo piano a pagamento, le card
  * mostrerebbero prezzi in due valute diverse una accanto all'altra, e a quel
  * punto nessuno dei due si capisce piu'.
+ *
+ * Quali piani si pagano lo dice la riga in valuta base, non una colonna sul
+ * piano: il listino sta tutto in un posto, e "gratis" e' un prezzo come gli
+ * altri — scritto zero.
  */
-export function completeCurrencies(plans: PricedPlan[], prices: PlanPriceRow[]): string[] {
-  const needed = plans.filter((plan) => !isFree(plan)).map((plan) => plan.planName);
+export function completeCurrencies(plans: NamedPlan[], prices: PlanPriceRow[]): string[] {
+  const base = baseRows(prices);
+  const needed = plans
+    .map((plan) => plan.planName)
+    .filter((name) => isPaid(base.get(name)));
   if (needed.length === 0) return [];
 
   const byCurrency = new Map<string, Set<string>>();
   for (const row of prices) {
-    if (!(row.priceMonthly > 0) && !(row.priceYearly > 0)) continue;
+    // La base non si elenca fra le alternative: e' il punto di partenza, non
+    // una destinazione, e offrirla come scelta non cambierebbe niente.
+    if (row.currency === BASE_CURRENCY) continue;
+    if (!isPaid(row)) continue;
     const set = byCurrency.get(row.currency) ?? new Set<string>();
     set.add(row.planName);
     byCurrency.set(row.currency, set);
@@ -90,37 +116,36 @@ export function resolveShopCurrency({
 }
 
 /**
- * Il listino riscritto nella valuta scelta.
+ * I piani con i prezzi attaccati, nella valuta scelta.
  *
- * I piani gratuiti restano a zero senza bisogno di una riga, e un piano senza
- * riga nella valuta richiesta tiene i prezzi base — non puo' succedere quando
- * la valuta viene da `resolveShopCurrency`, ma se succedesse un prezzo vecchio
- * e' comunque meglio di un prezzo assente.
+ * Il listino sta tutto in `plan_prices`, una riga per piano e valuta. Prima
+ * stava in due posti — le colonne su `plans` e le righe per valuta — e i due
+ * potevano dire cose diverse: chi amministrava scriveva il dollaro nella
+ * tabella per valuta, l'app leggeva la colonna sul piano, e il prezzo mostrato
+ * non era quello scritto. Non c'era modo di accorgersene se non guardandoli
+ * tutti e due.
+ *
+ * L'ordine in cui si cerca: la riga nella valuta chiesta, poi quella in valuta
+ * base, poi zero. Il secondo passo non dovrebbe servire — `resolveShopCurrency`
+ * concede solo valute complete — ma se un giorno servisse, un prezzo in dollari
+ * e' meglio di una card vuota.
  */
-export function planPricesIn<T extends PricedPlan>(
+export function withPrices<T extends NamedPlan>(
   plans: T[],
   prices: PlanPriceRow[],
   currency: string,
-): T[] {
-  // Anche la valuta base passa di qui.
-  //
-  // Prima no, e sembrava sensato: il listino in `plans` E' gia' scritto in
-  // valuta base, quindi le righe per valuta servivano solo alle altre. Ma chi
-  // amministra il listino non lo sa, vede una tabella `plan_prices` con una
-  // colonna currency e ci scrive dentro anche il dollaro — e quel numero non
-  // veniva letto da nessuno. Risultato: si cambia il prezzo in un posto e
-  // l'app continua a mostrarne un altro, senza che niente segnali il conflitto.
-  //
-  // Ora una riga per valuta vince sempre, e `plans` resta il ripiego di quando
-  // non c'e'. Un posto solo dove guardare, e quel posto e' quello dove si e'
-  // scritto per ultimo.
-  const byPlan = new Map(
+): (T & PricedPlan)[] {
+  const wanted = new Map(
     prices.filter((row) => row.currency === currency).map((row) => [row.planName, row]),
   );
+  const base = baseRows(prices);
 
   return plans.map((plan) => {
-    const row = byPlan.get(plan.planName);
-    if (!row || isFree(plan)) return plan;
-    return { ...plan, priceMonthly: row.priceMonthly, priceYearly: row.priceYearly };
+    const row = wanted.get(plan.planName) ?? base.get(plan.planName);
+    return {
+      ...plan,
+      priceMonthly: row?.priceMonthly ?? 0,
+      priceYearly: row?.priceYearly ?? 0,
+    };
   });
 }

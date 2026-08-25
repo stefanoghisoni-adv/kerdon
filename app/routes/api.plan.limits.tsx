@@ -38,8 +38,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const pricing = await resolveShopPricing(
     plans.map((p) => ({
       planName: p.planName,
-      priceMonthly: Number(p.priceMonthly),
-      priceYearly: Number(p.priceYearly),
       maxProducts: p.maxProducts,
       maxCustomers: p.maxCustomers,
       customersSyncEnabled: p.customersSyncEnabled,

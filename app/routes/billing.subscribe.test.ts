@@ -6,6 +6,9 @@ const updateShop = vi.fn();
 const findPlanMock = vi.fn();
 const findManyPlans = vi.fn();
 const findManyPlanPrices = vi.fn();
+
+/** La riga di listino in valuta base: senza, un piano non ha prezzo. */
+const USD_PRO = { planName: 'Pro', currency: 'USD', priceMonthly: 29, priceYearly: 290 };
 const createCharge = vi.fn();
 const updateManyCharges = vi.fn();
 
@@ -78,10 +81,10 @@ describe('/billing/subscribe', () => {
     // Senza listino in altre valute si addebita nella valuta base, che e'
     // quella della scheda dell'App Store: e' il caso normale, e quello che
     // quasi tutti i test qui sotto raccontano.
-    findManyPlans.mockResolvedValue([
-      { planName: 'Pro', priceMonthly: 29, priceYearly: 290 },
-    ]);
-    findManyPlanPrices.mockResolvedValue([]);
+    findManyPlans.mockResolvedValue([{ planName: 'Pro' }]);
+    // Il listino sta tutto qui dentro, dollaro compreso: sul piano i prezzi non
+    // ci sono piu'.
+    findManyPlanPrices.mockResolvedValue([USD_PRO]);
   });
 
   it('il messaggio arriva nella lingua del merchant', async () => {
@@ -138,6 +141,13 @@ describe('/billing/subscribe', () => {
   it('piano gratuito: cancella l abbonamento in corso e applica subito il piano', async () => {
     findUniqueShop.mockResolvedValue({ ...SHOP, currentPlan: 'Pro', activeChargeId: '9876' });
     findPlanMock.mockResolvedValue({ planName: 'Free', priceMonthly: 0, trialDays: null });
+    // Free sta nel listino come tutti gli altri, con la sua riga a zero: e' da
+    // li' che si sa quanto costa, e zero e' un prezzo scritto, non un'assenza.
+    findManyPlans.mockResolvedValue([{ planName: 'Pro' }, { planName: 'Free' }]);
+    findManyPlanPrices.mockResolvedValue([
+      USD_PRO,
+      { planName: 'Free', currency: 'USD', priceMonthly: 0, priceYearly: 0 },
+    ]);
 
     const res = await call('Free');
 
@@ -215,6 +225,7 @@ describe('/billing/subscribe', () => {
     findUniqueShop.mockResolvedValue({ ...SHOP, locale: 'en-GB' });
     findPlanMock.mockResolvedValue({ planName: 'Pro', priceMonthly: 29, trialDays: 7 });
     findManyPlanPrices.mockResolvedValue([
+      USD_PRO,
       { planName: 'Pro', currency: 'GBP', priceMonthly: 32, priceYearly: 320 },
     ]);
     createAppSubscription.mockResolvedValue({
@@ -233,7 +244,7 @@ describe('/billing/subscribe', () => {
   it('senza listino nella sua valuta si addebita nella valuta base, non un prezzo inventato', async () => {
     findUniqueShop.mockResolvedValue({ ...SHOP, locale: 'en-GB' });
     findPlanMock.mockResolvedValue({ planName: 'Pro', priceMonthly: 29, trialDays: 7 });
-    findManyPlanPrices.mockResolvedValue([]);
+    findManyPlanPrices.mockResolvedValue([USD_PRO]);
     createAppSubscription.mockResolvedValue({
       confirmationUrl: 'https://shopify/confirm/1',
       subscriptionGid: 'gid://shopify/AppSubscription/1234',

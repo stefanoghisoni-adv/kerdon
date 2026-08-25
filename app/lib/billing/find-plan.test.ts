@@ -1,42 +1,67 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('~/db.server', () => ({
-  prisma: { plan: { findFirst: vi.fn(), findMany: vi.fn() } },
+  prisma: {
+    plan: { findFirst: vi.fn(), findMany: vi.fn() },
+    planPrice: { findMany: vi.fn() },
+  },
 }));
 
 import { findPlanByName, findFreePlan, freePlanName } from './find-plan.server';
 import { prisma } from '~/db.server';
+
+/** Il listino: i piani da una parte, i prezzi in dollari dall'altra. */
+function listino(
+  plans: { planName: string }[],
+  prices: { planName: string; priceMonthly: number; priceYearly: number }[],
+) {
+  (prisma.plan.findMany as any).mockResolvedValue(plans);
+  (prisma.planPrice.findMany as any).mockResolvedValue(prices);
+}
+
+const free = (planName: string) => ({ planName, priceMonthly: 0, priceYearly: 0 });
+const paid = (planName: string) => ({ planName, priceMonthly: 19, priceYearly: 190 });
 
 describe('findFreePlan', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('cerca il piano a prezzo zero, il piu vecchio se ce n e piu d uno', async () => {
-    (prisma.plan.findMany as any).mockResolvedValue([{ planName: 'Free' }]);
+  it('cerca il piano a prezzo zero nel listino in valuta base', async () => {
+    listino([{ planName: 'Free' }, { planName: 'Pro' }], [free('Free'), paid('Pro')]);
 
     expect(await findFreePlan()).toEqual({ planName: 'Free' });
-    expect(prisma.plan.findMany).toHaveBeenCalledWith({
-      where: { priceMonthly: 0 },
-      orderBy: { createdAt: 'asc' },
-    });
+    expect(prisma.planPrice.findMany).toHaveBeenCalledWith({ where: { currency: 'USD' } });
+  });
+
+  it('il prezzo non sta piu sul piano: un piano a pagamento non e un ripiego', async () => {
+    listino([{ planName: 'Pro' }], [paid('Pro')]);
+    expect(await findFreePlan()).toBeNull();
   });
 
   it('salta i piani interni, che costano zero ma non sono un ripiego', async () => {
     // Lifetime e' a prezzo zero come Free. Se la cancellazione di un
     // abbonamento ci finisse sopra, il merchant si ritroverebbe gratis un piano
     // senza limiti: e' un regalo, non una retrocessione.
-    (prisma.plan.findMany as any).mockResolvedValue([
-      { planName: 'Lifetime' },
-      { planName: 'Free' },
-    ]);
+    listino(
+      [{ planName: 'Lifetime' }, { planName: 'Free' }],
+      [free('Lifetime'), free('Free')],
+    );
 
     expect(await findFreePlan()).toEqual({ planName: 'Free' });
   });
 
   it('nessun piano gratuito acquistabile → null', async () => {
-    (prisma.plan.findMany as any).mockResolvedValue([{ planName: 'Lifetime' }]);
+    listino([{ planName: 'Lifetime' }], [free('Lifetime')]);
     expect(await findFreePlan()).toBeNull();
+  });
+
+  it('un piano senza riga a listino conta come gratuito', async () => {
+    // Non e' indulgenza: darlo per pagante bloccherebbe l'installazione di chi
+    // sta atterrando sul piano d'ingresso, che e' il momento peggiore per
+    // fermarsi. Un prezzo mancante e' un problema di listino, non del merchant.
+    listino([{ planName: 'Free' }], []);
+    expect(await findFreePlan()).toEqual({ planName: 'Free' });
   });
 });
 
@@ -46,14 +71,14 @@ describe('freePlanName', () => {
   });
 
   it('restituisce il nome esatto che sta nel listino', async () => {
-    (prisma.plan.findMany as any).mockResolvedValue([{ planName: 'Gratuito' }]);
+    listino([{ planName: 'Gratuito' }], [free('Gratuito')]);
     expect(await freePlanName()).toBe('Gratuito');
   });
 
   it('listino senza piano gratuito → ripiego, ma con un errore nei log', async () => {
     // Non deve far fallire un'installazione. Se il nome di ripiego e' sbagliato
     // ci pensa la foreign key su shops.current_plan a rifiutarlo.
-    (prisma.plan.findMany as any).mockResolvedValue([]);
+    listino([], []);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     expect(await freePlanName()).toBe('Free');

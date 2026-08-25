@@ -1,42 +1,60 @@
 import { describe, it, expect } from 'vitest';
 import {
   completeCurrencies,
-  planPricesIn,
+  withPrices,
   resolveShopCurrency,
+  type NamedPlan,
   type PlanPriceRow,
-  type PricedPlan,
 } from './currency';
 import { BASE_CURRENCY, formatMoney, formatMoneyExact } from './money';
 
-const PLANS: PricedPlan[] = [
-  { planName: 'free', priceMonthly: 0, priceYearly: 0 },
-  { planName: 'starter', priceMonthly: 19, priceYearly: 190 },
-  { planName: 'pro', priceMonthly: 29, priceYearly: 290 },
+/** Nel listino i piani sono nomi e limiti: i prezzi stanno in `plan_prices`. */
+const PLANS: NamedPlan[] = [
+  { planName: 'free' },
+  { planName: 'starter' },
+  { planName: 'pro' },
 ];
 
-/**
- * Una riga di listino in una valuta che NON e' quella base: la valuta base e'
- * il dollaro (la scheda dell'App Store non ne accetta altre), quindi provare
- * con quella non proverebbe niente.
- */
+/** Una riga in valuta base: e' quella che dice se un piano si paga. */
+function usd(planName: string, priceMonthly: number, priceYearly: number): PlanPriceRow {
+  return { planName, currency: BASE_CURRENCY, priceMonthly, priceYearly };
+}
+
+/** Una riga in una valuta alternativa. */
 function gbp(planName: string, priceMonthly: number, priceYearly: number): PlanPriceRow {
   return { planName, currency: 'GBP', priceMonthly, priceYearly };
 }
 
+/** Il listino base completo: free a zero, gli altri due a pagamento. */
+const BASE: PlanPriceRow[] = [usd('free', 0, 0), usd('starter', 19, 190), usd('pro', 29, 290)];
+
 describe('completeCurrencies', () => {
   it('elenca solo le valute che coprono ogni piano a pagamento', () => {
-    const prices = [gbp('starter', 21, 210), gbp('pro', 32, 320)];
+    const prices = [...BASE, gbp('starter', 21, 210), gbp('pro', 32, 320)];
     expect(completeCurrencies(PLANS, prices)).toEqual(['GBP']);
   });
 
   it("un listino a meta' non conta: due valute nella stessa schermata non si leggono", () => {
-    expect(completeCurrencies(PLANS, [gbp('pro', 32, 320)])).toEqual([]);
+    expect(completeCurrencies(PLANS, [...BASE, gbp('pro', 32, 320)])).toEqual([]);
   });
 
-  it('il piano gratuito non ha bisogno di una riga', () => {
-    const prices = [gbp('starter', 21, 210), gbp('pro', 32, 320)];
+  it('il piano gratuito non ha bisogno di una riga nelle altre valute', () => {
+    // Zero e' zero in ogni valuta: chiedere di tradurlo sarebbe lavoro inutile
+    // per chi amministra, e una valuta in meno fra quelle offerte.
+    const prices = [...BASE, gbp('starter', 21, 210), gbp('pro', 32, 320)];
     expect(completeCurrencies(PLANS, prices)).toContain('GBP');
-    expect(prices.some((row) => row.planName === 'free')).toBe(false);
+    expect(prices.some((row) => row.currency === 'GBP' && row.planName === 'free')).toBe(false);
+  });
+
+  it('la valuta base non si offre come alternativa a se stessa', () => {
+    expect(completeCurrencies(PLANS, BASE)).toEqual([]);
+  });
+
+  it('chi si paga lo dice la riga in valuta base', () => {
+    // Nessun piano a pagamento nel listino: non c'e' niente da coprire, e
+    // offrire una valuta per un listino tutto gratis non vuol dire niente.
+    const free = [usd('free', 0, 0), usd('starter', 0, 0), usd('pro', 0, 0)];
+    expect(completeCurrencies(PLANS, [...free, gbp('pro', 32, 320)])).toEqual([]);
   });
 });
 
@@ -66,26 +84,40 @@ describe('resolveShopCurrency', () => {
   });
 });
 
-describe('planPricesIn', () => {
-  it('riscrive i prezzi nella valuta scelta', () => {
-    const priced = planPricesIn(PLANS, [gbp('starter', 21, 210), gbp('pro', 32, 320)], 'GBP');
+describe('withPrices', () => {
+  it('attacca i prezzi della valuta scelta', () => {
+    const priced = withPrices(PLANS, [...BASE, gbp('starter', 21, 210), gbp('pro', 32, 320)], 'GBP');
     expect(priced.map((p) => p.priceMonthly)).toEqual([0, 21, 32]);
   });
 
-  it('senza righe in quella valuta il listino resta quello di plans', () => {
-    expect(planPricesIn(PLANS, [gbp('pro', 32, 320)], BASE_CURRENCY)).toEqual(PLANS);
+  it('il listino si legge in un posto solo, anche in valuta base', () => {
+    // Era il guaio da togliere: il dollaro scritto in `plan_prices` non veniva
+    // letto da nessuno, perche' l'app prendeva la colonna su `plans`. Si
+    // cambiava il prezzo in un posto e l'app ne mostrava un altro, senza che
+    // niente segnalasse il conflitto.
+    const priced = withPrices(PLANS, [usd('pro', 39, 199)], BASE_CURRENCY);
+    expect(priced.find((p) => p.planName === 'pro')?.priceYearly).toBe(199);
   });
 
-  it('una riga nella valuta base vince su plans: si guarda in un posto solo', () => {
-    // Chi amministra il listino vede una tabella con la colonna currency e ci
-    // scrive dentro anche il dollaro. Se quel numero non venisse letto, si
-    // cambierebbe il prezzo in un posto e l'app ne mostrerebbe un altro.
-    const usd = [
-      { planName: 'starter', currency: BASE_CURRENCY, priceMonthly: 21, priceYearly: 210 },
-      { planName: 'pro', currency: BASE_CURRENCY, priceMonthly: 39, priceYearly: 199 },
-    ];
-    const priced = planPricesIn(PLANS, usd, BASE_CURRENCY);
-    expect(priced.map((p) => p.priceYearly)).toEqual([0, 210, 199]);
+  it('senza riga nella valuta chiesta ripiega sulla base, non sul vuoto', () => {
+    const priced = withPrices(PLANS, [...BASE, gbp('pro', 32, 320)], 'GBP');
+    // starter non ha la riga in sterline: meglio il prezzo in dollari di una
+    // card senza cifra.
+    expect(priced.find((p) => p.planName === 'starter')?.priceMonthly).toBe(19);
+    expect(priced.find((p) => p.planName === 'pro')?.priceMonthly).toBe(32);
+  });
+
+  it('un piano senza nessuna riga vale zero, non "prezzo mancante"', () => {
+    const priced = withPrices([{ planName: 'ignoto' }], BASE, BASE_CURRENCY);
+    expect(priced[0]).toEqual({ planName: 'ignoto', priceMonthly: 0, priceYearly: 0 });
+  });
+
+  it('i campi del piano restano al loro posto', () => {
+    // I limiti viaggiano insieme al prezzo: chi riceve queste righe si aspetta
+    // il piano intero, non un nome con due numeri.
+    const priced = withPrices([{ planName: 'pro', maxProducts: 200 }], BASE, BASE_CURRENCY);
+    expect(priced[0].maxProducts).toBe(200);
+    expect(priced[0].priceMonthly).toBe(29);
   });
 });
 

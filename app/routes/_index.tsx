@@ -184,8 +184,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const pricing = await resolveShopPricing(
       plans.map((p) => ({
         planName: p.planName,
-        priceMonthly: Number(p.priceMonthly),
-        priceYearly: Number(p.priceYearly),
         maxProducts: p.maxProducts,
         maxCustomers: p.maxCustomers,
         maxSyncFrequencyHours: p.maxSyncFrequencyHours,
@@ -292,14 +290,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // del cambio di piano quando li ha appena persi.
       customersUpgradePlan: customersEnabled
         ? null
-        : firstPlanWithCustomersSync(
-            plans.map((p) => ({
-              planName: p.planName,
-              priceMonthly: Number(p.priceMonthly),
-              customersSyncEnabled: p.customersSyncEnabled,
-            })),
-            shop.currentPlan,
-          ),
+        : // Dai piani gia' prezzati: qui il prezzo serve solo a ordinarli, e
+          // riprenderlo da `plans` vorrebbe dire una seconda fonte per il
+          // listino — quella che questa modifica ha appena tolto.
+          firstPlanWithCustomersSync(pricing.plans, shop.currentPlan),
       customersTableCreated: customersTableJob !== null,
       // Il negozio ha gia' scelto un piano almeno una volta? planStartedAt lo
       // scrive l'attivazione, gratuita o a pagamento che sia. Al passo del

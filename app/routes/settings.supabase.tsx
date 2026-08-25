@@ -29,6 +29,7 @@ import { SupabaseAccountConnect } from '~/components/Dashboard/SupabaseAccountCo
 import { SupabaseProjectConnect } from '~/components/Dashboard/SupabaseProjectConnect';
 import { PlanLimitBanner } from '~/components/Dashboard/PlanLimitBanner';
 import { normalizeAuthorization } from '~/utils/authorization.server';
+import { BASE_CURRENCY } from '~/lib/billing/money';
 import { useT } from '~/lib/i18n/context';
 import type { Preferences } from '~/components/Dashboard/PreferencesSelect';
 import { useCallback, useEffect, useState } from 'react';
@@ -47,9 +48,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   // Tutti i piani: da qui esce sia quello in uso (i clienti sono inclusi?) sia
-  // quello da proporre a chi non li ha.
-  const plans = await prisma.plan.findMany();
+  // quello da proporre a chi non li ha. Il prezzo serve solo a ordinarli — si
+  // propone il piu' economico fra quelli che includono i clienti — e viene dal
+  // listino in valuta base, l'unico posto dove i prezzi stanno.
+  const [plans, basePrices] = await Promise.all([
+    prisma.plan.findMany(),
+    prisma.planPrice.findMany({ where: { currency: BASE_CURRENCY } }),
+  ]);
   const plan = plans.find((p) => samePlanName(p.planName, shop?.currentPlan)) ?? null;
+
+  const monthlyOf = new Map(
+    basePrices.map((row) => [row.planName, Number(row.priceMonthly)]),
+  );
 
   const connected = !!shop?.supabaseConfig?.connectionVerifiedAt;
   // La sincronizzazione e' automatica e sempre attiva: non c'e' niente da
@@ -76,7 +86,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : firstPlanWithCustomersSync(
           plans.map((p) => ({
             planName: p.planName,
-            priceMonthly: Number(p.priceMonthly),
+            priceMonthly: monthlyOf.get(p.planName) ?? 0,
             customersSyncEnabled: p.customersSyncEnabled,
           })),
           shop?.currentPlan ?? null,
