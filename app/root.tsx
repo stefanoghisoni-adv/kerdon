@@ -284,7 +284,10 @@ export default function App() {
                     e' l'ultimo anello — prima si sistemano i dati, poi si
                     mandano fuori. */}
                 <Link to="/catalogs">{menu.catalogs}</Link>
-                <Link to="/logs">{menu.logs}</Link>
+                {/* Logs: fuori dal menu. La rotta resta e risponde a chi
+                    ha l'indirizzo — serve a capire cosa e' successo su un
+                    negozio — ma non e' una pagina che il merchant debba
+                    trovarsi fra le sue. */}
                 {/* C'e' sempre, anche sui piani senza nulla da acquistare: il
                     menu dell'admin non sa disabilitare una voce — sono <a>, e
                     un <a> spento non esiste — quindi o si toglie o si lascia.

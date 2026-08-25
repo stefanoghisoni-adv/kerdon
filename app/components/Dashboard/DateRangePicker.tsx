@@ -136,7 +136,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
           </div>
         </Box>
 
-        <Box padding="300">
+        <Box padding="300" width="640px">
           {/* Le due date anche scritte: chi le conosce gia' le batte a
               macchina piu' in fretta di quanto sfogli i mesi. */}
           <Box paddingBlockEnd="300">

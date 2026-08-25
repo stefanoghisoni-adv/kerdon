@@ -1,10 +1,7 @@
 import { Card, BlockStack, InlineStack, Text, Badge, Button, Divider } from '@shopify/polaris';
 import { recentRunRows, type RecentRunInput } from './recent-runs';
 import { formatDateTime } from './sync-log-format';
-import { useNavLoading } from './nav-loading';
 import { useT, useLocale } from '~/lib/i18n/context';
-
-const LOGS_PATH = '/logs';
 
 export interface RecentRunsCardProps {
   runs: RecentRunInput[];
@@ -22,9 +19,6 @@ export function RecentRunsCard({ runs, timeZone }: RecentRunsCardProps) {
   const t = useT();
   const locale = useLocale();
   const rows = recentRunRows(runs, t);
-  // Stesso comportamento degli altri pulsanti-link della dashboard: mentre Remix
-  // carica /logs il pulsante mostra lo spinner e si disabilita.
-  const logs = useNavLoading(LOGS_PATH);
 
   return (
     <Card>
@@ -33,17 +27,9 @@ export function RecentRunsCard({ runs, timeZone }: RecentRunsCardProps) {
           <Text as="h2" variant="headingMd">
             {t.dashboard.recentRuns.title}
           </Text>
-          {rows.length > 0 && (
-            <Button
-              variant="plain"
-              url={LOGS_PATH}
-              onClick={logs.start}
-              disabled={logs.loading}
-              loading={logs.loading}
-            >
-              {t.dashboard.recentRuns.seeAll}
-            </Button>
-          )}
+          {/* Niente "Vedi tutte": la pagina dei log non e' piu' fra quelle
+              che il merchant deve trovare. Qui restano le ultime corse, che
+              rispondono all'unica domanda che si fa — sta girando o no. */}
         </InlineStack>
 
         {rows.length === 0 ? (
