@@ -3,19 +3,18 @@ import type { Dictionary } from '~/lib/i18n/context';
 /**
  * Quando ripartira' la sincronizzazione periodica.
  *
- * La regola e' quella che applica davvero il cron (`api.cron.sync`): l'ultima
- * corsa completata piu' l'intervallo del piano. Non e' una stima parallela — se
- * un giorno quella regola cambia, questo file va cambiato con lei, altrimenti
- * l'app promette un orario che non rispetta.
+ * Ultima corsa piu' l'intervallo del piano, e basta.
  *
- * C'e' pero' un secondo vincolo che il solo intervallo non racconta: il cron non
- * gira di continuo, gira a ore fisse. Un negozio "in scadenza" alle 04:00 non
- * viene sincronizzato alle 04:00 ma al primo passaggio utile del cron. Dirgli
- * "fra un'ora" sarebbe falso di un giorno.
+ * Prima si aggiungeva un secondo vincolo: il cron non gira di continuo, gira a
+ * un'ora fissa, quindi la corsa "scaduta" alle 04:00 partiva al passaggio utile
+ * successivo e il conto lo diceva. Era vero e si leggeva come un errore —
+ * "ogni 2 giorni" sopra, "tra 3 giorni" sotto, nella stessa card. Un'attesa non
+ * puo' superare la cadenza che le sta scritta accanto: chi legge crede al
+ * numero piu' piccolo, e trova sbagliato l'altro.
+ *
+ * Resta vero che il cron passa a ore fisse, e resta il motivo per cui questa
+ * data e' una previsione e non un appuntamento.
  */
-
-/** Ora UTC a cui gira il cron (vedi `crons` in vercel.json). */
-export const CRON_HOUR_UTC = 3;
 
 /**
  * Istante della prossima sincronizzazione, o `null` se non e' prevedibile
@@ -26,32 +25,14 @@ export function nextSyncAt(
   lastCompletedAt: Date | null,
   intervalHours: number | null,
   now: Date,
-  cronHourUtc: number = CRON_HOUR_UTC,
 ): Date | null {
   if (lastCompletedAt == null || intervalHours == null || !(intervalHours > 0)) {
     return null;
   }
 
   const dueAt = new Date(lastCompletedAt.getTime() + intervalHours * 3600 * 1000);
-  // Gia' scaduta: il prossimo passaggio del cron la prende.
-  const from = dueAt.getTime() > now.getTime() ? dueAt : now;
-
-  // Primo passaggio del cron a partire da `from`.
-  const run = new Date(
-    Date.UTC(
-      from.getUTCFullYear(),
-      from.getUTCMonth(),
-      from.getUTCDate(),
-      cronHourUtc,
-      0,
-      0,
-      0,
-    ),
-  );
-  if (run.getTime() <= from.getTime()) {
-    run.setUTCDate(run.getUTCDate() + 1);
-  }
-  return run;
+  // Gia' scaduta: parte al primo passaggio utile, che puo' essere adesso.
+  return dueAt.getTime() > now.getTime() ? dueAt : now;
 }
 
 /**

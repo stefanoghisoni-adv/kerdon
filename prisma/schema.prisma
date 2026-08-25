@@ -225,6 +225,10 @@ model Plan {
   customFieldsLimit     Int?     @map("custom_fields_limit")
   supportLevel          String   @map("support_level")
   customersSyncEnabled  Boolean  @default(false) @map("customers_sync_enabled")
+  // I feed di catalogo verso le piattaforme pubblicitarie. Come la
+  // sincronizzazione clienti: una funzione che il piano concede o no, e che
+  // l'app dichiara in Account accanto alle altre.
+  productFeedsEnabled   Boolean  @default(false) @map("product_feeds_enabled")
   // Giorni di prova prima che l'app passi automaticamente in PENDING (null = nessun limite).
   trialDays             Int?     @map("trial_days")
   createdAt             DateTime @default(now()) @map("created_at")

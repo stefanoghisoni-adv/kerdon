@@ -58,6 +58,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // sospeso).
   const syncRunning = syncIsActive(shop?.supabaseConfig) && shop?.authorization === 'ENABLED';
   const customersIncluded = plan?.customersSyncEnabled ?? false;
+  // I feed non dipendono dalla sincronizzazione in corso ma solo dal piano:
+  // l'indirizzo risponde anche fra una corsa e l'altra, con i dati dell'ultima.
+  const productFeedsIncluded = plan?.productFeedsEnabled ?? false;
 
   // Informazioni di account: sempre presenti, anche senza collegamento — proprio
   // in quel caso "Stato: Non collegato" e' l'informazione piu' utile.
@@ -66,6 +69,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     planName: shop?.currentPlan ?? '',
     productsSyncActive: syncRunning,
     customersSyncActive: syncRunning && customersIncluded,
+    productFeedsActive: productFeedsIncluded,
     // Il piano da proporre si calcola solo quando serve davvero.
     customersUpgradePlan: customersIncluded
       ? null
@@ -239,6 +243,7 @@ export default function SupabaseSettings() {
                   planName={account.planName}
                   productsSyncActive={account.productsSyncActive}
                   customersSyncActive={account.customersSyncActive}
+                  productFeedsActive={account.productFeedsActive}
                   customersUpgradePlan={account.customersUpgradePlan}
                   preferences={{
                     locale: root?.locale ?? 'en',

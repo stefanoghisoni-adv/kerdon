@@ -86,7 +86,7 @@ describe('planComparisonRows', () => {
     expect({ ...rows[2], next: rows[2].next.replace(/\u00a0/g, ' ') }).toEqual({
       label: 'Costo mensile',
       current: 'Gratuito',
-      next: '$ 19 / mese',
+      next: '$ 19/mese',
     });
   });
 

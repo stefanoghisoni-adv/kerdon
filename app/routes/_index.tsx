@@ -35,7 +35,6 @@ import type { ShopAverages, ShopProfit } from '~/lib/customers/profit.server';
 import { CoverageCard } from '~/components/Dashboard/CoverageCard';
 import { CustomersCard } from '~/components/Dashboard/CustomersCard';
 import { Stepper, type StepperItem } from '~/components/Dashboard/Stepper';
-import { EligibilityChart } from '~/components/Dashboard/EligibilityChart';
 import { allStepsComplete, resolveStepStates } from '~/components/Dashboard/stepper-state';
 import { SupabaseAccountConnect } from '~/components/Dashboard/SupabaseAccountConnect';
 import { SupabaseProjectConnect } from '~/components/Dashboard/SupabaseProjectConnect';
@@ -553,7 +552,6 @@ export default function Dashboard() {
   const readinessRefreshFetcher = useFetcher<ReadinessResponse>();
   const customerStatsFetcher = useFetcher<CustomerStatsResponse>();
   const customerStatsRefreshFetcher = useFetcher<CustomerStatsResponse>();
-  const historyFetcher = useFetcher<ProductHistoryResponse>();
   // Il profitto arriva per conto suo: sono due interrogazioni al database del
   // merchant, e aspettarle prima di mostrare qualsiasi cosa ritarderebbe
   // l'intera dashboard per un numero che puo' comparire un istante dopo.
@@ -576,7 +574,6 @@ export default function Dashboard() {
     countsFetcher.load('/api/stats/counts');
     readinessFetcher.load('/api/stats/products');
     customerStatsFetcher.load('/api/stats/customers');
-    historyFetcher.load('/api/stats/product-history');
     profitFetcher.load('/api/stats/profit');
     topFetcher.load('/api/stats/top-products?metric=cm');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1340,12 +1337,16 @@ export default function Dashboard() {
           columns={{ xs: 1, lg: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)' }}
           gap="400"
         >
-          <EligibilityChart
-            points={historyFetcher.data?.points ?? []}
-            monthLabel={historyFetcher.data?.monthLabel}
-            monthStart={historyFetcher.data?.monthStart}
-            planLimit={historyFetcher.data?.planLimit ?? null}
-            loading={!historyFetcher.data}
+          {/* Al posto del grafico dei prodotti sincronizzabili, per ora messo
+              da parte: contava quanti prodotti stanno nel piano, e in una riga
+              che parla di profitto era la domanda meno urgente. */}
+          <TopProductsCard
+            rows={topFetcher.data?.rows ?? []}
+            currency={topFetcher.data?.currency ?? 'EUR'}
+            metric={topMetric}
+            onMetric={loadTop}
+            loading={topFetcher.state !== 'idle' || !topFetcher.data}
+            adminBase={conflictsFetcher.data?.adminBase}
           />
           {/* Fra i due: il valore accanto al profitto. E' la stessa domanda
               delle card sopra, guardata da lontano. */}
@@ -1361,16 +1362,6 @@ export default function Dashboard() {
           <RecentRunsCard runs={recentRuns} timeZone={shop.ianaTimezone} />
         </InlineGrid>
 
-        {/* Sotto la fila dei grafici: risponde alla domanda che nasce guardando
-            il profitto totale — quale prodotto lo sta facendo. */}
-        <TopProductsCard
-          rows={topFetcher.data?.rows ?? []}
-          currency={topFetcher.data?.currency ?? 'EUR'}
-          metric={topMetric}
-          onMetric={loadTop}
-          loading={topFetcher.state !== 'idle' || !topFetcher.data}
-          adminBase={conflictsFetcher.data?.adminBase}
-        />
 
         {/* In fondo, e chiudibile: e' una proposta, non una cosa da fare.
             Sparisce per sempre appena il merchant risponde — o dice "non

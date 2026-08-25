@@ -60,6 +60,7 @@ export const it = {
     plan: "Piano",
     productsSync: "Sincronizzazione prodotti",
     customersSync: "Sincronizzazione clienti",
+    productFeeds: "Feed prodotti",
     upgradeTo: (planName: string) => `Aggiorna a ${planName}`,
   },
 
@@ -379,7 +380,7 @@ export const it = {
     },
     connection: { title: "Connessione" },
     topProducts: {
-      title: "I prodotti che rendono di piu\u0027",
+      title: "I prodotti che rendono di pi\u00F9",
       metric: { cm: "CM", aop: "AOP", acp: "ACP", ltp: "LTP" },
       help: {
         cm: "Margine di contribuzione: quanto profitto ha portato in tutto nel periodo. Premia chi vende tanto.",
@@ -593,7 +594,7 @@ export const it = {
     notIncluded: "Non inclusi",
     unlimited: "Illimitati",
     free: "Gratuito",
-    perMonth: (price: string) => `${price} / mese`,
+    perMonth: (price: string) => `${price}/mese`,
   },
 
   // Prodotti che restano fuori dalla sincronizzazione, e come rimetterli dentro.

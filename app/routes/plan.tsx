@@ -57,21 +57,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // corrente non e' tra i 4 (es. 'lifetime'), nessuna card risultera' "attuale".
   const currentPlan = (shop?.currentPlan ?? '').toLowerCase();
 
-  // Niente da comprare: la pagina esiste e risponde, non e' un errore. Prima
-  // era un 403 perche' la voce di menu non c'era e ci si arrivava solo
-  // digitando l'indirizzo; ora la voce c'e' e ci si arriva cliccandola.
-  if (!canAccessPlanTab(currentPlan)) {
-    return json(
-      {
-        currentPlan,
-        blocked: true as const,
-        cards: [] as PlanCard[],
-        discountIntervals: null,
-        partnerLabel: null,
-        currency: BASE_CURRENCY,
-      },
-    );
-  }
+  // Niente da comprare: le card si vedono lo stesso, spente. Nasconderle
+  // lasciava una pagina vuota che sembrava rotta, e toglieva al merchant
+  // l'unica cosa che poteva ancora volere da qui — sapere cosa contengono gli
+  // altri piani.
+  const blocked = !canAccessPlanTab(currentPlan);
+
 
   // Le card vengono dal listino registrato, non da una copia nel codice: nomi,
   // prezzi e limiti sono quelli che l'app applica davvero.
@@ -120,7 +111,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return json({
     currentPlan,
-    blocked: false as const,
+    blocked,
     cards,
     // Per quanti cicli vale il prezzo riservato: serve a dirlo nella pagina,
     // altrimenti il merchant crede che quella cifra sia per sempre.
@@ -218,23 +209,6 @@ export default function Plan() {
     // stato, e averlo qui rifarebbe partire l'effetto all'infinito.
   }, [fetcher.state, fetcher.data]);
 
-  // Sezione non disponibile: pagina vuota, ritorno alla dashboard e avviso rosso.
-  // Nessuna card e nessun prezzo, cosi' non si suggerisce un upgrade che non serve.
-  if (blocked) {
-    return (
-      <Page
-        fullWidth
-        title={t.plan.title}
-        backAction={{ url: '/', content: t.common.dashboard }}
-      >
-        <Banner tone="info" title={t.plan.blocked.title}>
-          <Text as="p">{t.plan.blocked.body}</Text>
-        </Banner>
-        <Box paddingBlockEnd="800" />
-      </Page>
-    );
-  }
-
   return (
     <Page
       fullWidth
@@ -257,6 +231,15 @@ export default function Plan() {
           diverse. */}
       <div style={SETUP_CONTAINER}>
       <BlockStack gap="500">
+        {/* Piano assegnato da noi: le card restano visibili ma spente, e questo
+            dice perche'. Sopra tutto il resto, o si legge dopo aver gia'
+            provato a cliccare. */}
+        {blocked && (
+          <Banner tone="info" title={t.plan.blocked.title}>
+            <Text as="p">{t.plan.blocked.body}</Text>
+          </Banner>
+        )}
+
         {/* Banner di esito dopo il ritorno dal flusso di addebito. */}
         {outcome === 'success' && (
           <Banner
@@ -383,6 +366,7 @@ export default function Plan() {
           discountIntervals={discountIntervals}
           interval={interval}
           currency={currency}
+          disabled={blocked}
           loading={submittingPlan !== null}
         />
 
@@ -392,6 +376,9 @@ export default function Plan() {
           <Button
             variant="primary"
             {...planButtonState(selectedPlan, selectedIsCurrent, submittingPlan)}
+            // Niente da confermare: il piano lo assegniamo noi, e un pulsante
+            // vivo sotto card spente prometterebbe una scelta che non c'e'.
+            disabled={blocked || planButtonState(selectedPlan, selectedIsCurrent, submittingPlan).disabled}
             onClick={() => {
               setSubmittingPlan(selectedPlan);
               setFetcherError(null);

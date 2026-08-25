@@ -6,21 +6,26 @@ import { it as itDict } from '~/lib/i18n/it';
 const at = (iso: string) => new Date(iso);
 
 describe('nextSyncAt', () => {
-  it('somma l intervallo del piano e aspetta il primo passaggio del cron', () => {
-    // Scadenza alle 04:00: il cron e' gia' passato quel giorno, quindi tocca al
-    // giorno dopo. Dire "fra un'ora" sarebbe stato falso di ventiquattro.
+  it("somma l'intervallo del piano all'ultima corsa, e nient'altro", () => {
     const next = nextSyncAt(at('2026-08-01T04:00:00Z'), 24, at('2026-08-01T12:00:00Z'));
-    expect(next?.toISOString()).toBe('2026-08-03T03:00:00.000Z');
+    expect(next?.toISOString()).toBe('2026-08-02T04:00:00.000Z');
   });
 
-  it('scadenza prima dell ora del cron: passa lo stesso giorno', () => {
-    const next = nextSyncAt(at('2026-08-01T01:00:00Z'), 24, at('2026-08-01T12:00:00Z'));
-    expect(next?.toISOString()).toBe('2026-08-02T03:00:00.000Z');
+  it("l'attesa non supera mai la cadenza scritta accanto", () => {
+    // "Ogni 2 giorni" sopra e "tra 3 giorni" sotto, nella stessa card, si legge
+    // come un errore anche quando e' vero: chi legge crede al numero piu'
+    // piccolo e trova sbagliato l'altro.
+    const interval = 48;
+    const next = nextSyncAt(at('2026-08-01T11:20:00Z'), interval, at('2026-08-01T12:00:00Z'))!;
+    const waitHours = (next.getTime() - at('2026-08-01T12:00:00Z').getTime()) / 3_600_000;
+    expect(waitHours).toBeLessThanOrEqual(interval);
   });
 
-  it('gia scaduta: la prende il prossimo passaggio, non una data nel passato', () => {
-    const next = nextSyncAt(at('2026-07-01T03:00:00Z'), 24, at('2026-08-05T10:00:00Z'));
-    expect(next?.toISOString()).toBe('2026-08-06T03:00:00.000Z');
+  it('gia scaduta: adesso, non una data nel passato', () => {
+    const now = at('2026-08-05T10:00:00Z');
+    expect(nextSyncAt(at('2026-07-01T03:00:00Z'), 24, now)?.toISOString()).toBe(
+      now.toISOString(),
+    );
   });
 
   it('senza una corsa precedente non si promette niente', () => {
@@ -37,7 +42,7 @@ describe('nextSyncAt', () => {
   it('regge l intervallo settimanale del piano Free', () => {
     // 168 ore = 7 giorni.
     const next = nextSyncAt(at('2026-08-01T03:00:00Z'), 168, at('2026-08-02T10:00:00Z'));
-    expect(next?.toISOString()).toBe('2026-08-09T03:00:00.000Z');
+    expect(next?.toISOString()).toBe('2026-08-08T03:00:00.000Z');
   });
 });
 

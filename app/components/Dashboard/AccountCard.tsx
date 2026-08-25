@@ -13,6 +13,8 @@ export interface AccountCardProps {
   planName: string;
   productsSyncActive: boolean;
   customersSyncActive: boolean;
+  /** I feed di catalogo verso le piattaforme: previsti dal piano, o no. */
+  productFeedsActive: boolean;
   /**
    * Piano da proporre quando i clienti non sono inclusi (nome tecnico). Null
    * quando i clienti sono gia' inclusi o non c'e' un piano superiore da
@@ -32,6 +34,7 @@ export function AccountCard({
   planName,
   productsSyncActive,
   customersSyncActive,
+  productFeedsActive,
   customersUpgradePlan,
   preferences,
   locales,
@@ -79,6 +82,12 @@ export function AccountCard({
             ) : undefined
           }
           badge={upgrade ? undefined : syncStatusBadge(customersSyncActive, t)}
+        />
+        {/* Sotto i clienti: e' la terza cosa che il piano concede o no, e si
+            legge con gli stessi due badge delle altre due. */}
+        <MetricRow
+          label={t.account.productFeeds}
+          badge={syncStatusBadge(productFeedsActive, t)}
         />
 
         {/* La lingua sta qui e non in una card sua: e' una preferenza

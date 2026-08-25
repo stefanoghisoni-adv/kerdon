@@ -56,6 +56,7 @@ export const en: typeof it = {
     plan: "Plan",
     productsSync: "Product sync",
     customersSync: "Customer sync",
+    productFeeds: "Product feeds",
     upgradeTo: (planName: string) => `Upgrade to ${planName}`,
   },
 
@@ -561,7 +562,7 @@ export const en: typeof it = {
     notIncluded: "Not included",
     unlimited: "Unlimited",
     free: "Free",
-    perMonth: (price: string) => `${price} / month`,
+    perMonth: (price: string) => `${price}/month`,
   },
 
   issues: {
