@@ -235,7 +235,7 @@ function useReloadOnStaleAssets(): void {
 }
 
 export default function App() {
-  const { apiKey, canSeePlanTab, locale, setupComplete } = useLoaderData<typeof loader>();
+  const { apiKey, locale, setupComplete } = useLoaderData<typeof loader>();
   useReloadOnStaleAssets();
 
   // Le voci del menu vivono fuori dal provider della lingua — la NavMenu e' un
