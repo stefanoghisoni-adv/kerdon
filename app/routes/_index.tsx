@@ -568,7 +568,9 @@ export default function Dashboard() {
   // stessa domanda su archi diversi solo se glielo si chiede, e due periodi
   // nella stessa schermata sono due schermate.
   const [range, setRange] = useState<DateRange>(() => presetRange('monthToDate')!);
-  const [comparison, setComparison] = useState<ComparisonId>('previousPeriod');
+  // Spento di partenza: un confronto acceso senza averlo chiesto fa leggere
+  // ogni numero come una variazione, e la variazione e' una seconda domanda.
+  const [comparison, setComparison] = useState<ComparisonId>('none');
   const loadTop = useCallback(
     (metric: Metric, period: DateRange = range) => {
       setTopMetric(metric);

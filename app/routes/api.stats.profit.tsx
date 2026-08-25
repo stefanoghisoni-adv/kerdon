@@ -33,10 +33,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     to: to && isCalendarDate(to) ? to : month.to,
   };
 
-  const asked = params.get('compare') ?? 'previousPeriod';
+  const asked = params.get('compare') ?? 'none';
   const comparison = (COMPARISONS as string[]).includes(asked)
     ? (asked as ComparisonId)
-    : 'previousPeriod';
+    : 'none';
 
   try {
     // Le due domande viaggiano insieme perche' le fa la stessa pagina nello

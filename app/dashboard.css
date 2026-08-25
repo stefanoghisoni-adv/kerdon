@@ -125,3 +125,36 @@
   flex-direction: column;
   height: 100%;
 }
+
+/* Il calendario del periodo.
+
+   Polaris disegna il DatePicker alla misura di un modulo da compilare: celle
+   larghe, testo da corpo del testo, molta aria. Dentro una tendina che deve
+   contenere due mesi affiancati e una colonna di periodi, quella misura non ci
+   sta — e il riquadro finiva tagliato. Qui si stringe: numeri piu' piccoli e
+   celle piu' basse, come nel picker dell'analytics di Shopify. */
+.range-picker__calendar .Polaris-DatePicker__Day,
+.range-picker__calendar .Polaris-DatePicker__EmptyDay,
+.range-picker__calendar .Polaris-DatePicker__Weekday {
+  font-size: 0.8125rem;
+  min-width: 2rem;
+  padding: 0.25rem;
+}
+
+.range-picker__calendar .Polaris-DatePicker__Title {
+  font-size: 0.875rem;
+}
+
+/* Le due tabelle dei mesi respirano meno fra loro: lo spazio che avanza serve
+   a farcele stare entrambe. */
+.range-picker__calendar .Polaris-DatePicker__MonthContainer {
+  gap: var(--p-space-400);
+}
+
+/* I periodi con un nome: righe piu' compatte, cosi' gli undici stanno tutti
+   senza scorrimento — una colonna che scorre nasconde proprio le voci in
+   cima, che sono le piu' usate. */
+.range-picker__presets .Polaris-ActionList__Item {
+  min-height: auto;
+  padding-block: 0.375rem;
+}

@@ -7,7 +7,6 @@ import {
   Divider,
   InlineStack,
   Popover,
-  Scrollable,
   TextField,
 } from '@shopify/polaris';
 import { CalendarIcon, ArrowRightIcon, ArrowsInHorizontalIcon } from '@shopify/polaris-icons';
@@ -92,6 +91,12 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
       active={open}
       onClose={() => setOpen(false)}
       preferredAlignment="left"
+      preferredPosition="below"
+      // Senza, Polaris tiene la tendina alla larghezza dell'attivatore e
+      // ritaglia il resto: due mesi affiancati e una colonna di periodi non ci
+      // stanno in un pulsante.
+      fluidContent
+      fullHeight
       activator={
         <Button
           icon={CalendarIcon}
@@ -107,8 +112,8 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
         {/* I periodi con un nome. In una colonna che scorre da sola: sono
             undici, e allungare il riquadro fino a contenerli tutti lo
             farebbe uscire dallo schermo dentro l'admin. */}
-        <Box borderInlineEndWidth="025" borderColor="border" minWidth="200px">
-          <Scrollable style={{ maxHeight: 340 }}>
+        <Box borderInlineEndWidth="025" borderColor="border" minWidth="180px">
+          <div className="range-picker__presets">
             <Box padding="200">
               {PRESET_GROUPS.map((group, index) => (
                 <Box key={index} paddingBlockStart={index === 0 ? '0' : '100'}>
@@ -128,10 +133,10 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
                 </Box>
               ))}
             </Box>
-          </Scrollable>
+          </div>
         </Box>
 
-        <Box padding="300" minWidth="620px">
+        <Box padding="300">
           {/* Le due date anche scritte: chi le conosce gia' le batte a
               macchina piu' in fretta di quanto sfogli i mesi. */}
           <Box paddingBlockEnd="300">
@@ -150,6 +155,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
             </InlineStack>
           </Box>
 
+          <div className="range-picker__calendar">
           <DatePicker
             month={month}
             year={year}
@@ -167,6 +173,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
               setDraft(orderRange(iso(toUtc(start)), iso(toUtc(end))))
             }
           />
+          </div>
 
           <Box paddingBlockStart="300">
             <InlineStack align="end" gap="200">
