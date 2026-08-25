@@ -1119,38 +1119,17 @@ export default function Dashboard() {
       // selettore torna dov'e' di casa, nella card Account.
       secondaryActions={
         setupComplete
-          ? (
-              // Periodo, confronto e Impostazioni sulla stessa barra, in
-              // quest'ordine: le prime due dicono cosa si sta guardando, e vanno
-              // lette prima di qualsiasi numero sotto.
-              <InlineStack gap="200" blockAlign="center" wrap={false}>
-                <DateRangePicker
-                  value={range}
-                  onChange={(next) => {
-                    setRange(next);
-                    reloadForPeriod(next, comparison);
-                  }}
-                />
-                <ComparisonSelect
-                  value={comparison}
-                  range={range}
-                  onChange={(next) => {
-                    setComparison(next);
-                    reloadForPeriod(range, next);
-                  }}
-                />
-                <Button
-                  icon={SettingsIcon}
-                  url="/settings/supabase"
-                  accessibilityLabel={t.common.settings}
-                  onClick={settingsNav.start}
-                  disabled={settingsNav.loading}
-                  loading={settingsNav.loading}
-                >
-                  {t.common.settings}
-                </Button>
-              </InlineStack>
-            )
+          ? [
+              {
+                content: t.common.settings,
+                icon: SettingsIcon,
+                url: '/settings/supabase',
+                accessibilityLabel: t.common.settings,
+                onAction: settingsNav.start,
+                disabled: settingsNav.loading,
+                loading: settingsNav.loading,
+              },
+            ]
           : (
               <PreferencesSelect
                 variant="header"
@@ -1167,6 +1146,30 @@ export default function Dashboard() {
       }
     >
       <BlockStack gap="500">
+        {/* Periodo e confronto sotto il titolo, allineati a sinistra: dicono
+            cosa si sta guardando, e vanno letti prima di qualsiasi numero.
+            Nella barra del titolo finivano a destra, dalla parte opposta a
+            quella da cui si comincia a leggere. */}
+        {setupComplete && (
+          <InlineStack gap="200" blockAlign="center" wrap>
+            <DateRangePicker
+              value={range}
+              onChange={(next) => {
+                setRange(next);
+                reloadForPeriod(next, comparison);
+              }}
+            />
+            <ComparisonSelect
+              value={comparison}
+              range={range}
+              onChange={(next) => {
+                setComparison(next);
+                reloadForPeriod(range, next);
+              }}
+            />
+          </InlineStack>
+        )}
+
         {/* Gli avvisi stanno in una pila propria, stretta: sono una lista da
             leggere in fila, non sezioni indipendenti. Tenendoli nel contenitore
             del contenuto avrebbero avuto per forza la stessa distanza delle
