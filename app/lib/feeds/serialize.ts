@@ -6,15 +6,22 @@
  * un foglio di calcolo vuole il CSV. Il contenuto e' lo stesso.
  */
 
-import type { MetaItem } from './meta';
+/**
+ * Una riga del feed: nomi di campo e valori, gia' pronti.
+ *
+ * Non un tipo per piattaforma: Meta e Google chiedono campi diversi, e questo
+ * file non ha motivo di sapere quali — deve solo scriverli nell'ordine giusto.
+ */
+export type FeedItem = Record<string, string | undefined>;
 
 /**
- * L'ordine delle colonne del CSV, che e' anche l'ordine dei tag nell'XML.
+ * L'ordine delle colonne del feed di Meta, che e' anche l'ordine dei tag
+ * nell'XML.
  *
  * Prima i campi obbligatori: aprendo il file con un foglio di calcolo si vede
  * subito se il catalogo ha quello che serve, senza scorrere a destra.
  */
-const FIELDS: (keyof MetaItem)[] = [
+export const META_FIELDS: string[] = [
   'id',
   'item_group_id',
   'title',
@@ -56,9 +63,13 @@ function xmlEscape(value: string): string {
 }
 
 /** RSS 2.0 con lo spazio dei nomi di Google: e' il formato che Meta documenta. */
-export function toXml(items: MetaItem[], opts: { title: string; link: string }): string {
+export function toXml(
+  items: FeedItem[],
+  opts: { title: string; link: string; fields?: string[] },
+): string {
+  const fields = opts.fields ?? META_FIELDS;
   const rows = items.map((item) => {
-    const tags = FIELDS.filter((field) => item[field] !== undefined)
+    const tags = fields.filter((field) => item[field] !== undefined)
       .map((field) => `      <g:${field}>${xmlEscape(String(item[field]))}</g:${field}>`)
       .join('\n');
     return `    <item>\n${tags}\n    </item>`;
@@ -99,10 +110,10 @@ function csvCell(value: string): string {
  */
 const BOM = '\uFEFF';
 
-export function toCsv(items: MetaItem[]): string {
-  const header = FIELDS.join(',');
+export function toCsv(items: FeedItem[], fields: string[] = META_FIELDS): string {
+  const header = fields.join(',');
   const rows = items.map((item) =>
-    FIELDS.map((field) => csvCell(item[field] === undefined ? '' : String(item[field]))).join(','),
+    fields.map((field) => csvCell(item[field] === undefined ? '' : String(item[field]))).join(','),
   );
   return BOM + [header, ...rows].join('\r\n') + '\r\n';
 }

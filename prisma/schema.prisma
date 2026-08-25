@@ -149,6 +149,7 @@ model Shop {
   dismissedTrackingSources DismissedTrackingSource[]
   trackingSetup            TrackingSetup?
   productFeeds             ProductFeed[]
+  feedFieldMappings        FeedFieldMapping[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -536,4 +537,36 @@ model ProductFeed {
   @@unique([shopId, platform])
   @@index([token])
   @@map("product_feeds")
+}
+
+/**
+ * Come le colonne del catalogo del merchant diventano i campi di una
+ * piattaforma.
+ * Serve a Google, che a differenza di Meta non si accontenta di un titolo e un
+ * prezzo: chiede una ventina di campi, alcuni con nomi che non somigliano a
+ * niente su Shopify, e li rifiuta in blocco se uno e' scritto male. Il merchant
+ * deve poter dire "il mio `mpn` e' lo SKU" senza che glielo si imponga.
+ * `recent` tiene le ultime scelte fatte su QUESTO campo: chi mappa venti campi
+ * cambia idea, torna indietro, e ritrovare le tre variabili gia' provate in
+ * cima alla tendina vale piu' di qualunque ordinamento alfabetico.
+ */
+model FeedFieldMapping {
+  id       String @id @default(uuid())
+  shopId   String @map("shop_id")
+  platform String
+  /// Il campo della piattaforma: 'title', 'gtin', 'availability'.
+  field    String
+  /// La colonna del catalogo scelta per riempirlo.
+  variable String
+
+  /// Le ultime scelte su questo campo, dalla piu' recente. Al massimo cinque.
+  recent String[] @default([])
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, platform, field])
+  @@index([shopId, platform])
+  @@map("feed_field_mappings")
 }

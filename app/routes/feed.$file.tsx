@@ -8,7 +8,9 @@ import {
   type FeedFormat,
 } from '~/lib/feeds/feed.server';
 import { toMetaItem, type MetaItem } from '~/lib/feeds/meta';
-import { toCsv, toXml } from '~/lib/feeds/serialize';
+import { GMC_FIELDS, toGmcItem } from '~/lib/feeds/gmc';
+import { loadMapping, variablesOf } from '~/lib/feeds/mapping.server';
+import { toCsv, toXml, type FeedItem } from '~/lib/feeds/serialize';
 
 /**
  * Il catalogo, servito a chi ha l'indirizzo.
@@ -53,18 +55,45 @@ export async function loader({ params }: LoaderFunctionArgs) {
   // parla con lui.
   if (!source) return notFound();
 
-  const items = source.products
-    .map((product) => toMetaItem(product, { domain: source.domain, currency: source.currency }))
-    .filter((item): item is MetaItem => item !== null);
+  const opts = { domain: source.domain, currency: source.currency };
+
+  // Google e Meta chiedono campi diversi con nomi diversi, e Google li lascia
+  // scegliere al merchant: la mappatura si legge una volta, non per prodotto.
+  const google = feed.platform === 'google';
+  const variables = google
+    ? variablesOf(await loadMapping(feed.shopId, 'google'))
+    : null;
+
+  const items = google
+    ? source.products
+        .map((product) => toGmcItem(product, variables!, opts))
+        .filter((item): item is Record<string, string> => item !== null)
+    : (source.products
+        .map((product) => toMetaItem(product, opts))
+        .filter((item): item is MetaItem => item !== null) as FeedItem[]);
 
   void recordFetch(token);
 
-  return respond(extension, items, source.domain);
+  // L'ordine dei campi e' quello della piattaforma: il file di Google ha
+  // colonne che Meta non ha, e scriverle nell'ordine sbagliato le fa leggere a
+  // Google come campi sconosciuti.
+  const fields = google
+    ? [...GMC_FIELDS.map((field) => field.name), 'identifier_exists']
+    : undefined;
+
+  return respond(extension, items, source.domain, fields);
 }
 
-function respond(format: FeedFormat, items: MetaItem[], domain: string): Response {
+function respond(
+  format: FeedFormat,
+  items: FeedItem[],
+  domain: string,
+  fields?: string[],
+): Response {
   const body =
-    format === 'csv' ? toCsv(items) : toXml(items, { title: domain, link: `https://${domain}` });
+    format === 'csv'
+      ? toCsv(items, fields)
+      : toXml(items, { title: domain, link: `https://${domain}`, fields });
 
   return new Response(body, {
     status: 200,

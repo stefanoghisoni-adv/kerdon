@@ -31,6 +31,12 @@ export interface FeedProduct {
   inventory_tracked: boolean | null;
   inventory_policy: string | null;
   image_url: string | null;
+  /** Servono al feed di Google, che ha campi che Meta non ha. */
+  weight?: number | string | null;
+  tags?: string[] | null;
+  option1?: string | null;
+  option2?: string | null;
+  option3?: string | null;
 }
 
 /**
@@ -152,8 +158,15 @@ export function isBlocked(product: FeedProduct): boolean {
   return issuesFor(product).some((code) => severityOf(code) === 'blocking');
 }
 
-/** Un articolo del catalogo Meta, con i nomi dei campi che Meta si aspetta. */
+/**
+ * Un articolo del catalogo Meta, con i nomi dei campi che Meta si aspetta.
+ *
+ * L'indice in coda serve al serializzatore, che scorre i campi per nome senza
+ * sapere di quale piattaforma siano: senza, un tipo con i campi dichiarati non
+ * e' assegnabile a uno che li legge per stringa.
+ */
 export interface MetaItem {
+  [field: string]: string | undefined;
   id: string;
   item_group_id: string;
   title: string;

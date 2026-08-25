@@ -14,8 +14,8 @@ import type { FeedProduct } from './meta';
  * impossibile da indovinare e facile da sostituire.
  */
 
-/** Le piattaforme che sanno leggere un feed. Per ora una. */
-export const PLATFORMS = ['meta'] as const;
+/** Le piattaforme che sanno leggere un feed di catalogo. */
+export const PLATFORMS = ['meta', 'google'] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
 export type FeedFormat = 'xml' | 'csv';
@@ -162,6 +162,13 @@ const FEED_COLUMNS = [
   'inventory_tracked',
   'inventory_policy',
   'image_url',
+  // Solo Google li usa, ma la lettura e' una sola per entrambi i feed: due
+  // query diverse per due piattaforme sarebbero due volte lo stesso lavoro.
+  'weight',
+  'tags',
+  'option1',
+  'option2',
+  'option3',
 ].join(', ');
 
 export function feedProductsSQL(limit: number): string {
