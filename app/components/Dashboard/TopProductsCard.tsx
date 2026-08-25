@@ -26,7 +26,10 @@ export interface TopProductsCardProps {
   adminBase?: string;
 }
 
-const ORDER: Metric[] = ['cm', 'aop', 'acp', 'ltp'];
+// L'ordine in cui si leggono, dal piu' generale al piu' specifico: quanto ha
+// reso in tutto, quanto rende il carrello che se lo porta dietro, quanto rende
+// di suo ogni volta, quanto ha reso per cliente.
+const ORDER: Metric[] = ['cm', 'acp', 'aop', 'ltp'];
 
 /**
  * I cinque prodotti che hanno reso di piu' nel mese.

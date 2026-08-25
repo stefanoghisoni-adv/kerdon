@@ -102,6 +102,21 @@ export async function disableFeed(shopId: string, platform: Platform): Promise<v
 }
 
 /**
+ * Cancella l'integrazione.
+ *
+ * Diverso da spegnerla: la riga sparisce, il token con lei, e riattivando si
+ * riparte da un indirizzo nuovo. E' quello che serve a chi vuole "togliere
+ * tutto" davvero.
+ *
+ * Cosa NON succede, ed e' il motivo per cui il pulsante puo' esistere: qui non
+ * si tocca niente su Meta. Il catalogo, gli shop e le campagne che li usano
+ * restano dove sono — quello che smette e' solo il file che li aggiornava.
+ */
+export async function deleteFeed(shopId: string, platform: Platform): Promise<void> {
+  await prisma.productFeed.deleteMany({ where: { shopId, platform } });
+}
+
+/**
  * Sostituisce il token.
  *
  * L'indirizzo vecchio smette di rispondere nello stesso istante — che e'

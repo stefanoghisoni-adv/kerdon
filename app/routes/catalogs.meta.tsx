@@ -60,6 +60,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     feed,
     url: feed ? feedUrl(feed.token, feed.format) : null,
     catalog,
+    // Per aprire la scheda del prodotto: da qui il merchant sistema quello che
+    // manca, ed e' il gesto successivo a leggere la riga.
+    adminBase: `https://admin.shopify.com/store/${session.shop.replace('.myshopify.com', '')}`,
   });
 }
 
@@ -98,7 +101,7 @@ export async function action({ request }: ActionFunctionArgs) {
 type Filter = 'all' | 'blocked' | 'warned';
 
 export default function CatalogMeta() {
-  const { feed, url, catalog } = useLoaderData<typeof loader>();
+  const { feed, url, catalog, adminBase } = useLoaderData<typeof loader>();
   const t = useT();
   const locale = useLocale();
   const fetcher = useFetcher<{ ok: boolean }>();
@@ -253,24 +256,34 @@ export default function CatalogMeta() {
               </Text>
               <BlockStack gap="200">
                 {[
-                  t.catalogs.steps.one,
-                  t.catalogs.steps.two,
-                  t.catalogs.steps.three,
-                  t.catalogs.steps.four,
+                  // Il collegamento sta dentro il passo che dice di aprirlo, non
+                  // in fondo alla card: li' era una voce in piu' da capire, qui
+                  // e' la parola su cui si clicca mentre si legge cosa fare.
+                  <Text as="span" key="one">
+                    {t.catalogs.steps.oneBefore}{' '}
+                    <Link url="https://business.facebook.com/commerce" target="_blank">
+                      {t.catalogs.steps.oneLink}
+                    </Link>{' '}
+                    {t.catalogs.steps.oneAfter}
+                  </Text>,
+                  <Text as="span" key="two">
+                    {t.catalogs.steps.two}
+                  </Text>,
+                  <Text as="span" key="three">
+                    {t.catalogs.steps.three}
+                  </Text>,
+                  <Text as="span" key="four">
+                    {t.catalogs.steps.four}
+                  </Text>,
                 ].map((step, index) => (
-                  <InlineStack key={step} gap="300" blockAlign="start" wrap={false}>
+                  <InlineStack key={index} gap="300" blockAlign="start" wrap={false}>
                     <Text as="span" tone="subdued" variant="bodySm">
                       {index + 1}.
                     </Text>
-                    <Text as="span">{step}</Text>
+                    {step}
                   </InlineStack>
                 ))}
               </BlockStack>
-              <Text as="p" variant="bodySm" tone="subdued">
-                <Link url="https://business.facebook.com/commerce" target="_blank">
-                  Commerce Manager
-                </Link>
-              </Text>
             </BlockStack>
           </Card>
         )}
@@ -331,7 +344,11 @@ export default function CatalogMeta() {
             headings={[
               { title: t.catalogs.table.product },
               { title: t.catalogs.table.price },
-              { title: t.catalogs.table.included },
+              // Due colonne e non una: l'icona dice quanto e' grave, il badge
+              // dice cosa succede al prodotto quando il feed parte. Sono due
+              // domande, e finivano sotto un'intestazione sola.
+              { title: t.catalogs.table.state },
+              { title: t.catalogs.table.sync },
             ]}
           >
             {rows.map((row, index) => (
@@ -343,13 +360,25 @@ export default function CatalogMeta() {
                       alt=""
                       size="extraSmall"
                     />
-                    <Text as="span" variant="bodyMd" fontWeight="medium">
-                      {row.title}
-                    </Text>
+                    {row.productId ? (
+                      // _top e non una scheda nuova: l'admin di Shopify rifiuta
+                      // di essere incorniciato, e un collegamento normale da qui
+                      // dentro finirebbe in "Connessione negata".
+                      <Link url={`${adminBase}/products/${row.productId}`} target="_top">
+                        {row.title}
+                      </Link>
+                    ) : (
+                      <Text as="span" variant="bodyMd" fontWeight="medium">
+                        {row.title}
+                      </Text>
+                    )}
                   </InlineStack>
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   {row.price === null ? '—' : formatMoney(row.price, catalog.currency, locale)}
+                </IndexTable.Cell>
+                <IndexTable.Cell>
+                  <StateIcon row={row} />
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   <StateBadge row={row} />
@@ -398,34 +427,30 @@ export default function CatalogMeta() {
 }
 
 /**
- * Lo stato di una riga: pronta, da sistemare, esclusa.
+ * I motivi per cui una riga non va bene, uno per frase.
  *
- * Il badge dice il verdetto e l'icona la gravita', ma nessuno dei due dice
- * perche': quello sta nel tooltip, che e' l'unico posto dove ci sta una frase
- * intera senza allargare la colonna.
+ * Su una riga esclusa le avvertenze non contano: il prodotto non c'e', e sapere
+ * che gli manca anche la marca non aiuta finche' non torna dentro.
  */
-function StateBadge({
-  row,
-}: {
-  row: { blocked: boolean; issues: IssueCode[] };
-}) {
+function reasons(row: { blocked: boolean; issues: IssueCode[] }): IssueCode[] {
+  return row.blocked ? row.issues.filter((code) => severityOf(code) === 'blocking') : row.issues;
+}
+
+/**
+ * La gravita', in un'icona.
+ *
+ * L'icona non dice perche': quello sta nel tooltip, che e' l'unico posto dove
+ * ci sta una frase intera senza allargare la colonna.
+ */
+function StateIcon({ row }: { row: { blocked: boolean; issues: IssueCode[] } }) {
   const t = useT();
-
-  if (row.issues.length === 0) {
-    return <Badge tone="success">{t.catalogs.table.okBadge}</Badge>;
-  }
-
-  // Su una riga esclusa le avvertenze non contano: il prodotto non c'e', e
-  // sapere che gli manca anche la marca non aiuta finche' non torna dentro.
-  const shown = row.blocked
-    ? row.issues.filter((code) => severityOf(code) === 'blocking')
-    : row.issues;
+  if (row.issues.length === 0) return null;
 
   return (
     <Tooltip
       content={
         <BlockStack gap="100">
-          {shown.map((code) => (
+          {reasons(row).map((code) => (
             <Text as="span" key={code} variant="bodySm">
               {t.catalogs.issues[code]}
             </Text>
@@ -433,15 +458,25 @@ function StateBadge({
         </BlockStack>
       }
     >
-      <InlineStack gap="100" blockAlign="center" wrap={false}>
-        <Icon
-          source={row.blocked ? DisabledIcon : AlertTriangleIcon}
-          tone={row.blocked ? 'critical' : 'caution'}
-        />
-        <Badge tone={row.blocked ? 'critical' : 'warning'}>
-          {row.blocked ? t.catalogs.table.blockedBadge : t.catalogs.table.warnBadge}
-        </Badge>
-      </InlineStack>
+      <Icon
+        source={row.blocked ? DisabledIcon : AlertTriangleIcon}
+        tone={row.blocked ? 'critical' : 'caution'}
+      />
     </Tooltip>
+  );
+}
+
+/** Cosa succede a questa riga quando il feed parte. */
+function StateBadge({ row }: { row: { blocked: boolean; issues: IssueCode[] } }) {
+  const t = useT();
+
+  if (row.issues.length === 0) {
+    return <Badge tone="success">{t.catalogs.table.okBadge}</Badge>;
+  }
+
+  return (
+    <Badge tone={row.blocked ? 'critical' : 'warning'}>
+      {row.blocked ? t.catalogs.table.blockedBadge : t.catalogs.table.warnBadge}
+    </Badge>
   );
 }

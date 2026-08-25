@@ -1,11 +1,23 @@
-import type { LoaderFunctionArgs } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useLoaderData, useNavigate } from '@remix-run/react';
-import { Badge, BlockStack, Box, Button, Card, InlineGrid, Page, Text } from '@shopify/polaris';
+import { useFetcher, useLoaderData, useNavigate } from '@remix-run/react';
+import { useState } from 'react';
+import {
+  Badge,
+  Banner,
+  BlockStack,
+  Box,
+  Button,
+  Card,
+  InlineGrid,
+  Modal,
+  Page,
+  Text,
+} from '@shopify/polaris';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
-import { listFeeds } from '~/lib/feeds/feed.server';
+import { deleteFeed, listFeeds, PLATFORMS, type Platform } from '~/lib/feeds/feed.server';
 import { MetaLogo } from '~/components/Catalogs/MetaLogo';
 import { useT } from '~/lib/i18n/context';
 
@@ -24,10 +36,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
+export async function action({ request }: ActionFunctionArgs) {
+  const { session } = await authenticate.admin(request);
+  await requireSetupComplete(session.shop);
+
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain: session.shop },
+    select: { id: true },
+  });
+  if (!shop) return json({ ok: false }, { status: 404 });
+
+  const form = await request.formData();
+  const platform = String(form.get('platform') ?? '');
+  // Solo le piattaforme che esistono: il nome arriva dal browser.
+  if (!(PLATFORMS as readonly string[]).includes(platform)) {
+    return json({ ok: false }, { status: 400 });
+  }
+
+  await deleteFeed(shop.id, platform as Platform);
+  return json({ ok: true });
+}
+
 export default function Catalogs() {
   const { meta } = useLoaderData<typeof loader>();
   const t = useT();
   const navigate = useNavigate();
+  const fetcher = useFetcher<{ ok: boolean }>();
+  const deleting = fetcher.state !== 'idle';
+
+  // Il modal vive qui e non dentro la card: nell'admin due dialoghi non si
+  // impilano, e tenerne uno solo a livello di pagina evita che una seconda card
+  // ne apra un altro sotto al primo.
+  const [confirming, setConfirming] = useState<Platform | null>(null);
+
+  const remove = (platform: Platform) => {
+    const data = new FormData();
+    data.set('platform', platform);
+    fetcher.submit(data, { method: 'post' });
+    setConfirming(null);
+  };
 
   // Tre stati e non due: un feed spento non e' un feed mai attivato — il
   // merchant l'ha gia' collegato una volta, e il pulsante deve dirgli che
@@ -58,9 +105,40 @@ export default function Catalogs() {
             action={status === 'available' ? t.catalogs.install : t.catalogs.manage}
             primary={status === 'available'}
             onAction={() => navigate('/catalogs/meta')}
+            deleteLabel={t.catalogs.delete}
+            // Non c'e' niente da eliminare finche' non e' stata attivata: il
+            // pulsante resta, spento, cosi' la card ha la stessa forma prima e
+            // dopo e non si allunga sotto il dito.
+            canDelete={status !== 'available'}
+            deleting={deleting}
+            onDelete={() => setConfirming('meta')}
           />
         </InlineGrid>
       </BlockStack>
+
+      <Modal
+        open={confirming !== null}
+        onClose={() => setConfirming(null)}
+        title={t.catalogs.deleteTitle}
+        primaryAction={{
+          content: t.catalogs.deleteConfirm,
+          destructive: true,
+          onAction: () => confirming && remove(confirming),
+        }}
+        secondaryActions={[{ content: t.common.cancel, onAction: () => setConfirming(null) }]}
+      >
+        <Modal.Section>
+          <BlockStack gap="400">
+            <Text as="p">{t.catalogs.deleteBody}</Text>
+            {/* La domanda che si fa chiunque abbia campagne dinamiche accese:
+                togliendo l'integrazione ufficiale di Meta spariscono cataloghi e
+                shop, e le campagne restano senza riferimenti. Qui non succede, e
+                va detto prima del clic, non dopo. */}
+            <Banner tone="warning">{t.catalogs.deleteSafe}</Banner>
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
+
       <Box paddingBlockEnd="800" />
     </Page>
   );
@@ -80,6 +158,10 @@ function PlatformCard({
   action,
   primary,
   onAction,
+  deleteLabel,
+  canDelete,
+  deleting,
+  onDelete,
 }: {
   logo: React.ReactNode;
   name: string;
@@ -88,6 +170,10 @@ function PlatformCard({
   action: string;
   primary: boolean;
   onAction: () => void;
+  deleteLabel: string;
+  canDelete: boolean;
+  deleting: boolean;
+  onDelete: () => void;
 }) {
   return (
     <Card padding="400">
@@ -124,9 +210,21 @@ function PlatformCard({
         </BlockStack>
 
         <Box paddingBlockStart="400">
-          <Button variant={primary ? 'primary' : undefined} onClick={onAction} fullWidth>
-            {action}
-          </Button>
+          <BlockStack gap="200">
+            <Button variant={primary ? 'primary' : undefined} onClick={onAction} fullWidth>
+              {action}
+            </Button>
+            {/* Rosso ma non primario: e' l'uscita, non la strada. */}
+            <Button
+              tone="critical"
+              disabled={!canDelete || deleting}
+              loading={deleting && canDelete}
+              onClick={onDelete}
+              fullWidth
+            >
+              {deleteLabel}
+            </Button>
+          </BlockStack>
         </Box>
       </div>
     </Card>
