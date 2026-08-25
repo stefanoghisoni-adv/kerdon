@@ -102,8 +102,18 @@ export function planPricesIn<T extends PricedPlan>(
   prices: PlanPriceRow[],
   currency: string,
 ): T[] {
-  if (currency === BASE_CURRENCY) return plans;
-
+  // Anche la valuta base passa di qui.
+  //
+  // Prima no, e sembrava sensato: il listino in `plans` E' gia' scritto in
+  // valuta base, quindi le righe per valuta servivano solo alle altre. Ma chi
+  // amministra il listino non lo sa, vede una tabella `plan_prices` con una
+  // colonna currency e ci scrive dentro anche il dollaro — e quel numero non
+  // veniva letto da nessuno. Risultato: si cambia il prezzo in un posto e
+  // l'app continua a mostrarne un altro, senza che niente segnali il conflitto.
+  //
+  // Ora una riga per valuta vince sempre, e `plans` resta il ripiego di quando
+  // non c'e'. Un posto solo dove guardare, e quel posto e' quello dove si e'
+  // scritto per ultimo.
   const byPlan = new Map(
     prices.filter((row) => row.currency === currency).map((row) => [row.planName, row]),
   );

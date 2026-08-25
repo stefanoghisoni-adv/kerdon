@@ -895,7 +895,6 @@ export default function Dashboard() {
   // quindi cambiando tab il componente si smonta e uno useState si azzererebbe —
   // il banner riapparirebbe pur essendo stato chiuso.
   const DISMISSED_KEY = 'planChangeBannerDismissed';
-  const FLOOR_MS = 120_000;
 
   // Sia il banner conservato sia la chiusura sono legati al piano a cui si
   // riferiscono. Senza, il primo banner della sessione resterebbe l'unico: chi
@@ -912,7 +911,15 @@ export default function Dashboard() {
     { at: number; plan: string; value: NonNullable<typeof planBanner> } | null
   >(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  const [, forceTick] = useState(0);
+
+  // Gli avvisi di sospensione, chiusi per questa visita.
+  //
+  // Chiudibili come gli altri, ma senza memoria: alla ricarica tornano. Non
+  // sono una notifica da leggere una volta, sono lo stato in cui l'app si
+  // trova — toglierli per sempre vorrebbe dire nascondere che e' sospesa. Cosi'
+  // ci si libera la cima della pagina mentre si lavora, e la prossima apertura
+  // lo ridice.
+  const [hiddenAuthBanners, setHiddenAuthBanners] = useState<string[]>([]);
 
   useEffect(() => {
     if (sessionStorage.getItem(DISMISSED_KEY) === bannerPlanId) {
@@ -952,19 +959,15 @@ export default function Dashboard() {
     setBannerDismissed(true);
   };
 
-  // Al superamento dei 2 minuti il banner diventa chiudibile: serve un re-render
-  // al momento giusto, altrimenti la X comparirebbe solo alla prossima
-  // interazione.
-  useEffect(() => {
-    if (banner === null) return;
-    const remaining = FLOOR_MS - (Date.now() - banner.at);
-    if (remaining <= 0) return;
-    const id = setTimeout(() => forceTick((n) => n + 1), remaining);
-    return () => clearTimeout(id);
-  }, [banner]);
-
   const showPlanBanner = banner !== null && !bannerDismissed;
-  const bannerClosable = banner !== null && Date.now() - banner.at >= FLOOR_MS;
+  // Chiudibile da subito.
+  //
+  // Prima la X compariva dopo due minuti, per essere sicuri che il messaggio
+  // venisse letto. Ma un avviso che non si puo' togliere non si fa leggere di
+  // piu': si fa ignorare, e intanto occupa la cima della pagina mentre si sta
+  // lavorando a qualcos'altro. Chi lo chiude subito lo ha gia' letto, e chi non
+  // lo legge non lo leggerebbe comunque al secondo minuto.
+  const bannerClosable = banner !== null;
 
   // Skeleton per i numeri di anteprima finché i conteggi non sono pronti.
   const numberSkeleton = (
@@ -1154,14 +1157,21 @@ export default function Dashboard() {
           </Banner>
         )}
 
-        {/* Banner di sospensione (non chiudibili). Uso dell'app e tracciamento
-            sono due autorizzazioni indipendenti: puo' esserci l'una senza
-            l'altra, e il banner lo dice invece di dare tutto per spento. */}
-        {authorizationBanners(authorization, trackingAuthorization, t).map((b) => (
-          <Banner key={b.id} tone={b.tone} title={b.title}>
-            <Text as="p">{b.message}</Text>
-          </Banner>
-        ))}
+        {/* Banner di sospensione. Uso dell'app e tracciamento sono due
+            autorizzazioni indipendenti: puo' esserci l'una senza l'altra, e il
+            banner lo dice invece di dare tutto per spento. */}
+        {authorizationBanners(authorization, trackingAuthorization, t)
+          .filter((b) => !hiddenAuthBanners.includes(b.id))
+          .map((b) => (
+            <Banner
+              key={b.id}
+              tone={b.tone}
+              title={b.title}
+              onDismiss={() => setHiddenAuthBanners((current) => [...current, b.id])}
+            >
+              <Text as="p">{b.message}</Text>
+            </Banner>
+          ))}
 
         {/* Il cambio di lingua non e' istantaneo: la pagina deve tornare dal
             server con i testi nuovi. Finche' non e' tornata lo si dice, gia'

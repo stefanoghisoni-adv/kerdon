@@ -72,8 +72,20 @@ describe('planPricesIn', () => {
     expect(priced.map((p) => p.priceMonthly)).toEqual([0, 21, 32]);
   });
 
-  it('la valuta base non tocca niente', () => {
+  it('senza righe in quella valuta il listino resta quello di plans', () => {
     expect(planPricesIn(PLANS, [gbp('pro', 32, 320)], BASE_CURRENCY)).toEqual(PLANS);
+  });
+
+  it('una riga nella valuta base vince su plans: si guarda in un posto solo', () => {
+    // Chi amministra il listino vede una tabella con la colonna currency e ci
+    // scrive dentro anche il dollaro. Se quel numero non venisse letto, si
+    // cambierebbe il prezzo in un posto e l'app ne mostrerebbe un altro.
+    const usd = [
+      { planName: 'starter', currency: BASE_CURRENCY, priceMonthly: 21, priceYearly: 210 },
+      { planName: 'pro', currency: BASE_CURRENCY, priceMonthly: 39, priceYearly: 199 },
+    ];
+    const priced = planPricesIn(PLANS, usd, BASE_CURRENCY);
+    expect(priced.map((p) => p.priceYearly)).toEqual([0, 210, 199]);
   });
 });
 
