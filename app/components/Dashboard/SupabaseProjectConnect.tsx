@@ -1,4 +1,5 @@
 import { useT } from '~/lib/i18n/context';
+import { PlanLimitBanner } from './PlanLimitBanner';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFetcher, useRevalidator } from '@remix-run/react';
 import {
@@ -49,6 +50,14 @@ export interface SupabaseProjectConnectProps {
    * Database, dove due pulsanti in fila spezzerebbero l'incolonnamento.
    */
   variant?: 'buttons' | 'menu';
+  /**
+   * Il piano Supabase non consente altri database.
+   *
+   * Chi passa questa funzione si prende in carico l'avviso e lo mette dove
+   * serve: in Impostazioni il menu che lo fa comparire vive dentro una card, e
+   * il banner deve stare sopra tutte le card. Senza, l'avviso resta qui.
+   */
+  onPlanLimit?: (info: { planLabel: string | null; billingUrl: string | null }) => void;
   // Disconnessione riuscita: il parent mostra il banner di conferma in cima alla
   // dashboard. Qui non lo si puo' fare, il componente viene rimontato subito dopo.
 }
@@ -67,6 +76,7 @@ export function SupabaseProjectConnect({
   disabled,
   authorization = 'ENABLED',
   variant = 'buttons',
+  onPlanLimit,
 }: SupabaseProjectConnectProps) {
   const t = useT();
   const revalidator = useRevalidator();
@@ -128,7 +138,19 @@ export function SupabaseProjectConnect({
   // quando si sta cercando come creare un database — e quando Supabase rifiuta
   // davvero una creazione.
   const [limitNoticed, setLimitNoticed] = useState(false);
-  const showLimitBanner = planLimitHit && (limitNoticed || planLimitFromCreate);
+  // Quando il banner lo rende il chiamante, qui dentro non si rende: in
+  // Impostazioni il menu che lo fa comparire vive dentro una card, e l'avviso
+  // deve stare sopra tutte — due copie della stessa frase sono due problemi.
+  const showLimitBanner = !onPlanLimit && planLimitHit && (limitNoticed || planLimitFromCreate);
+
+  // Il chiamante viene avvisato appena sappiamo che il limite c'e', non solo al
+  // clic: cosi' un banner gia' aperto si aggiorna con il nome del piano quando
+  // la risposta di Supabase arriva un istante dopo.
+  useEffect(() => {
+    if (!onPlanLimit || !planLimitFromCreate) return;
+    onPlanLimit({ planLabel: limits?.planLabel ?? null, billingUrl: planLimitBillingUrl });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planLimitFromCreate, planLimitBillingUrl, limits?.planLabel]);
 
   const [regionPopoverActive, setRegionPopoverActive] = useState(false);
   // Se la richiesta delle region non arriva mai in porto (rete giù, 500), dopo
@@ -380,7 +402,13 @@ export function SupabaseProjectConnect({
                   <Button
                     disclosure
                     onClick={() => {
-                      if (planLimitHit) setLimitNoticed(true);
+                      if (planLimitHit) {
+                        setLimitNoticed(true);
+                        onPlanLimit?.({
+                          planLabel: limits?.planLabel ?? null,
+                          billingUrl: planLimitBillingUrl,
+                        });
+                      }
                       setManageOpen((open) => !open);
                     }}
                     loading={limitsChecking}
@@ -597,29 +625,11 @@ export function SupabaseProjectConnect({
   return (
     <BlockStack gap="300">
       {showLimitBanner && (
-        <Banner tone="warning" onDismiss={() => setLimitNoticed(false)}>
-          <Text as="p">
-            {/* Il piano lo conosciamo solo se la OAuth App concede lo scope
-                organizations:read. Quando il limite emerge dal rifiuto di
-                Supabase alla creazione non lo sappiamo: in quel caso diciamo
-                cosa è successo senza inventare un nome di piano. */}
-            {limits?.planLabel
-              ? t.connect.database.limitKnown(limits.planLabel)
-              : t.connect.database.limitUnknown}{' '}
-            {/* Button e non Link: dentro un Banner, Polaris spegne i Link
-                rendendoli monocromatici (leggono BannerContext e non hanno una
-                prop per chiedere il contrario). Il Button variant="plain" resta
-                blu, ed e' lo stesso comando gia' usato altrove nell'app. */}
-            {planLimitBillingUrl ? (
-              <Button variant="plain" url={planLimitBillingUrl} target="_blank">
-                {t.connect.database.limitUpgradeLink}
-              </Button>
-            ) : (
-              t.connect.database.limitUpgradePlain
-            )}
-            {t.connect.database.limitAfter}
-          </Text>
-        </Banner>
+        <PlanLimitBanner
+          planLabel={limits?.planLabel ?? null}
+          billingUrl={planLimitBillingUrl}
+          onDismiss={() => setLimitNoticed(false)}
+        />
       )}
 
       {projectsFetcher.data?.error && (

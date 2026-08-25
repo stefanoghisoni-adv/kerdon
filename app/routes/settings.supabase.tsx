@@ -27,10 +27,11 @@ import { projectDashboardUrl } from '~/lib/supabase-management.server';
 import { SyncCard } from '~/components/Dashboard/SyncCard';
 import { SupabaseAccountConnect } from '~/components/Dashboard/SupabaseAccountConnect';
 import { SupabaseProjectConnect } from '~/components/Dashboard/SupabaseProjectConnect';
+import { PlanLimitBanner } from '~/components/Dashboard/PlanLimitBanner';
 import { normalizeAuthorization } from '~/utils/authorization.server';
 import { useT } from '~/lib/i18n/context';
 import type { Preferences } from '~/components/Dashboard/PreferencesSelect';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -139,6 +140,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function SupabaseSettings() {
   const { account, config, sync, authorization } = useLoaderData<typeof loader>();
   const t = useT();
+  // L'avviso sul limite dei database: lo accende il menu dentro la card, e lo
+  // rende questa pagina, in cima.
+  const [planLimit, setPlanLimit] = useState<{
+    planLabel: string | null;
+    billingUrl: string | null;
+  } | null>(null);
   // Lingua e valuta vivono in root: sono una scelta sola e valgono per tutta
   // l'app, non per questa pagina.
   const root = useRouteLoaderData<typeof rootLoader>('root');
@@ -168,6 +175,16 @@ export default function SupabaseSettings() {
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
+            {/* Il limite di database del piano Supabase. Lo fa comparire il menu
+                "Gestisci", che pero' vive dentro la card Database: l'avviso deve
+                stare qui sopra, dove stanno tutti gli altri. */}
+            {planLimit && (
+              <PlanLimitBanner
+                planLabel={planLimit.planLabel}
+                billingUrl={planLimit.billingUrl}
+                onDismiss={() => setPlanLimit(null)}
+              />
+            )}
             {/* Gli avvisi stanno in cima, prima delle card: dicono se quello
                 che si sta per leggere ha senso — senza un progetto collegato,
                 meta' dei valori sotto sono vuoti per forza. In fondo li si
@@ -261,6 +278,7 @@ export default function SupabaseSettings() {
                         projectName={config?.projectRef ?? undefined}
                         projectUrl={config?.databaseUrl ?? undefined}
                         authorization={authorization}
+                        onPlanLimit={setPlanLimit}
                       />
                       {/* Il ref e' una sigla: il nome e' quello che dice al
                           merchant quale database sia. Compare solo se lo
