@@ -44,7 +44,17 @@ function num(value: number | string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export async function loadShopProfit(shopDomain: string): Promise<ShopProfit> {
+export interface ProfitRangeInput {
+  /** Il periodo scelto in dashboard. */
+  range: { from: string; to: string };
+  /** Con cosa confrontarlo, o null se non si confronta niente. */
+  compare: { from: string; to: string } | null;
+}
+
+export async function loadShopProfit(
+  shopDomain: string,
+  input?: ProfitRangeInput,
+): Promise<ShopProfit> {
   const shop = await prisma.shop.findUnique({
     where: { shopDomain },
     include: { supabaseConfig: true },
@@ -67,12 +77,16 @@ export async function loadShopProfit(shopDomain: string): Promise<ShopProfit> {
 
   const token = await getValidAccessToken(shop.id);
   const ref = shop.supabaseConfig.supabaseProjectRef;
-  const range = currentMonthRange();
-  const before = previousRange(range.from, range.to);
+  const range = input?.range ?? currentMonthRange();
+  // Senza un confronto chiesto si prende il periodo precedente: la variazione
+  // e' meta' di cio' che quella card dice, e toglierla per difetto la
+  // dimezzerebbe.
+  const before =
+    input === undefined ? previousRange(range.from, range.to) : input.compare;
 
   const [[current], [previous]] = await Promise.all([
     runQueryRows<ProfitRow>(token, ref, shopProfitSQL(range)),
-    runQueryRows<ProfitRow>(token, ref, shopProfitSQL(before)),
+    before ? runQueryRows<ProfitRow>(token, ref, shopProfitSQL(before)) : Promise.resolve([]),
   ]);
 
   const profit = Math.round(num(current?.profit) * 100) / 100;
@@ -84,7 +98,10 @@ export async function loadShopProfit(shopDomain: string): Promise<ShopProfit> {
     // Da zero non si calcola una percentuale: qualunque aumento sarebbe
     // "infinito per cento", e il mese scorso a zero e' il caso normale di un
     // negozio appena collegato.
-    change: was === 0 ? null : Math.round(((profit - was) / Math.abs(was)) * 1000) / 10,
+    change:
+      !previous || was === 0
+        ? null
+        : Math.round(((profit - was) / Math.abs(was)) * 1000) / 10,
     coveredLines: num(current?.covered_lines),
     totalLines: num(current?.total_lines),
     currency: current?.currency ?? 'EUR',

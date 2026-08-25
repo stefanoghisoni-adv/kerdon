@@ -763,6 +763,29 @@ export const it = {
       days: (n: number) => `${n} giorni`,
     },
   },
+  dates: {
+    apply: "Applica",
+    presets: {
+      today: "Oggi",
+      yesterday: "Ieri",
+      last7: "Ultimi 7 giorni",
+      last30: "Ultimi 30 giorni",
+      last90: "Ultimi 90 giorni",
+      monthToDate: "Da inizio mese",
+      quarterToDate: "Da inizio trimestre",
+      yearToDate: "Da inizio anno",
+      lastMonth: "Mese scorso",
+      lastQuarter: "Trimestre scorso",
+      lastYear: "Anno scorso",
+      custom: "Intervallo personalizzato",
+    },
+    comparisons: {
+      none: "Nessun confronto",
+      previousPeriod: "Periodo precedente",
+      previousYear: "Anno precedente",
+      previousYearWeekday: "Anno precedente (giorno della settimana)",
+    },
+  },
   catalogs: {
     title: "Cataloghi",
     intro:

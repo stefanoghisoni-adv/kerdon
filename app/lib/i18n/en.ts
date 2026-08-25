@@ -716,6 +716,29 @@ export const en: typeof it = {
       days: (n: number) => `${n} days`,
     },
   },
+  dates: {
+    apply: "Apply",
+    presets: {
+      today: "Today",
+      yesterday: "Yesterday",
+      last7: "Last 7 days",
+      last30: "Last 30 days",
+      last90: "Last 90 days",
+      monthToDate: "Month to date",
+      quarterToDate: "Quarter to date",
+      yearToDate: "Year to date",
+      lastMonth: "Last month",
+      lastQuarter: "Last quarter",
+      lastYear: "Last year",
+      custom: "Custom range",
+    },
+    comparisons: {
+      none: "No comparison",
+      previousPeriod: "Previous period",
+      previousYear: "Previous year",
+      previousYearWeekday: "Previous year (matching weekday)",
+    },
+  },
   catalogs: {
     title: "Catalogues",
     intro:

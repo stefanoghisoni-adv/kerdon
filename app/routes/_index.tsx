@@ -29,6 +29,8 @@ import { ProfitCard } from '~/components/Dashboard/ProfitCard';
 import { MarginCard } from '~/components/Dashboard/MarginCard';
 import { ProfitabilityChart } from '~/components/Dashboard/ProfitabilityChart';
 import { TopProductsCard } from '~/components/Dashboard/TopProductsCard';
+import { ComparisonSelect, DateRangePicker } from '~/components/Dashboard/DateRangePicker';
+import { presetRange, type ComparisonId, type DateRange } from '~/lib/dates/ranges';
 import type { Metric } from '~/lib/customers/top-products';
 import type { TopProductsReport } from '~/lib/customers/top-products.server';
 import type { ShopAverages, ShopProfit } from '~/lib/customers/profit.server';
@@ -561,21 +563,44 @@ export default function Dashboard() {
   // la card non deve sapere da dove arrivano le sue righe.
   const topFetcher = useFetcher<TopProductsReport>();
   const [topMetric, setTopMetric] = useState<Metric>('cm');
+
+  // Il periodo vale per tutta la pagina: profitto e prodotti rispondono alla
+  // stessa domanda su archi diversi solo se glielo si chiede, e due periodi
+  // nella stessa schermata sono due schermate.
+  const [range, setRange] = useState<DateRange>(() => presetRange('monthToDate')!);
+  const [comparison, setComparison] = useState<ComparisonId>('previousPeriod');
   const loadTop = useCallback(
-    (metric: Metric) => {
+    (metric: Metric, period: DateRange = range) => {
       setTopMetric(metric);
-      topFetcher.load(`/api/stats/top-products?metric=${metric}`);
+      topFetcher.load(
+        `/api/stats/top-products?metric=${metric}&from=${period.from}&to=${period.to}`,
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [range],
+  );
+
+  // Cambiando periodo o confronto si ricaricano le due letture che ne
+  // dipendono. Non la pagina intera: il resto — copertura, clienti, corse — non
+  // guarda un periodo.
+  const reloadForPeriod = useCallback(
+    (period: DateRange, compare: ComparisonId) => {
+      profitFetcher.load(
+        `/api/stats/profit?from=${period.from}&to=${period.to}&compare=${compare}`,
+      );
+      topFetcher.load(
+        `/api/stats/top-products?metric=${topMetric}&from=${period.from}&to=${period.to}`,
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [topMetric],
   );
 
   useEffect(() => {
     countsFetcher.load('/api/stats/counts');
     readinessFetcher.load('/api/stats/products');
     customerStatsFetcher.load('/api/stats/customers');
-    profitFetcher.load('/api/stats/profit');
-    topFetcher.load('/api/stats/top-products?metric=cm');
+    reloadForPeriod(range, comparison);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1094,17 +1119,38 @@ export default function Dashboard() {
       // selettore torna dov'e' di casa, nella card Account.
       secondaryActions={
         setupComplete
-          ? [
-              {
-                content: t.common.settings,
-                icon: SettingsIcon,
-                url: '/settings/supabase',
-                accessibilityLabel: t.common.settings,
-                onAction: settingsNav.start,
-                disabled: settingsNav.loading,
-                loading: settingsNav.loading,
-              },
-            ]
+          ? (
+              // Periodo, confronto e Impostazioni sulla stessa barra, in
+              // quest'ordine: le prime due dicono cosa si sta guardando, e vanno
+              // lette prima di qualsiasi numero sotto.
+              <InlineStack gap="200" blockAlign="center" wrap={false}>
+                <DateRangePicker
+                  value={range}
+                  onChange={(next) => {
+                    setRange(next);
+                    reloadForPeriod(next, comparison);
+                  }}
+                />
+                <ComparisonSelect
+                  value={comparison}
+                  range={range}
+                  onChange={(next) => {
+                    setComparison(next);
+                    reloadForPeriod(range, next);
+                  }}
+                />
+                <Button
+                  icon={SettingsIcon}
+                  url="/settings/supabase"
+                  accessibilityLabel={t.common.settings}
+                  onClick={settingsNav.start}
+                  disabled={settingsNav.loading}
+                  loading={settingsNav.loading}
+                >
+                  {t.common.settings}
+                </Button>
+              </InlineStack>
+            )
           : (
               <PreferencesSelect
                 variant="header"
