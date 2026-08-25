@@ -152,7 +152,7 @@ export default function CatalogMeta() {
         <Card>
           <BlockStack gap="400">
             <InlineStack gap="300" blockAlign="center" wrap={false}>
-              <MetaLogo size={24} />
+              <MetaLogo size={28} />
               <Text as="h2" variant="headingMd">
                 {t.catalogs.feed.title}
               </Text>
