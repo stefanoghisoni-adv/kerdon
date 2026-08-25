@@ -1,6 +1,7 @@
 import type { Plan } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { isSelectablePlan } from '~/components/Billing/plan-access';
+import { BASE_CURRENCY } from './money';
 
 // Il nome del piano viaggia in due posti che non si aggiornano insieme: la
 // colonna `plans.plan_name` (il listino) e `shops.current_plan` (quello scritto
@@ -46,9 +47,19 @@ const FALLBACK_FREE_PLAN_NAME = 'Free';
  * puo' cambiare, e un nome inventato qui darebbe un negozio senza piano valido.
  */
 export async function findFreePlan(): Promise<Plan | null> {
-  const freeOfCharge = await prisma.plan.findMany({
-    where: { priceMonthly: 0 },
-    orderBy: { createdAt: 'asc' },
+  // Il prezzo non sta piu' sul piano: gratuito e' chi ha zero nel listino in
+  // valuta base. Un piano senza riga conta come gratuito — non e' una svista
+  // benevola, e' l'unico esito prudente: dare per pagante un piano di cui non
+  // si conosce il prezzo bloccherebbe l'installazione invece di completarla.
+  const [plans, base] = await Promise.all([
+    prisma.plan.findMany({ orderBy: { createdAt: 'asc' } }),
+    prisma.planPrice.findMany({ where: { currency: BASE_CURRENCY } }),
+  ]);
+
+  const priced = new Map(base.map((row) => [row.planName, row]));
+  const freeOfCharge = plans.filter((plan) => {
+    const row = priced.get(plan.planName);
+    return !row || (Number(row.priceMonthly) === 0 && Number(row.priceYearly) === 0);
   });
 
   // I piani interni assegnati dall'owner (lifetime) costano zero ma non sono un

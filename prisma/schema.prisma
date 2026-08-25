@@ -215,11 +215,17 @@ model SupabaseConfig {
   @@map("supabase_configs")
 }
 
+/// Un piano: cosa concede, non quanto costa.
+///
+/// I prezzi stavano anche qui, in due colonne, e la stessa cifra stava in
+/// `plan_prices` con la sua valuta. Due posti per lo stesso dato che nessun
+/// vincolo teneva d'accordo: chi amministrava scriveva il dollaro nella tabella
+/// per valuta, l'app leggeva la colonna qui, e il prezzo mostrato non era
+/// quello scritto. Ora il listino sta tutto in `plan_prices` — una riga per
+/// piano e valuta, dollaro compreso — e qui restano solo i limiti.
 model Plan {
   id                    String   @id @default(uuid())
   planName              String   @unique @map("plan_name")
-  priceMonthly          Decimal  @map("price_monthly") @db.Decimal(10, 2)
-  priceYearly           Decimal  @map("price_yearly") @db.Decimal(10, 2)
   maxProducts           Int?     @map("max_products")
   maxCustomers          Int?     @map("max_customers")
   maxSyncFrequencyHours Float    @map("max_sync_frequency_hours")

@@ -14,12 +14,22 @@ async function testDatabase() {
     // Test 2: List all plans with details
     console.log('\n📋 Plan Details:\n');
     const plans = await prisma.plan.findMany({
-      orderBy: { priceMonthly: 'asc' }
+      orderBy: { createdAt: 'asc' }
     });
 
+    // I prezzi non stanno piu' sul piano: stanno in plan_prices, una riga per
+    // piano e valuta. Qui si mostra quella in dollari, che e' il listino.
+    const basePrices = await prisma.planPrice.findMany({ where: { currency: 'USD' } });
+    const usd = new Map(basePrices.map(row => [row.planName, row]));
+
     plans.forEach(plan => {
+      const price = usd.get(plan.planName);
       console.log(`  ${plan.planName.toUpperCase()}`);
-      console.log(`    💰 Monthly: $${plan.priceMonthly} | Yearly: $${plan.priceYearly}`);
+      console.log(
+        price
+          ? `    💰 Monthly: $${price.priceMonthly} | Yearly: $${price.priceYearly}`
+          : `    ⚠️  Nessun prezzo in USD a listino`,
+      );
       console.log(`    📦 Products: ${plan.maxProducts ?? '∞'} | Customers: ${plan.maxCustomers ?? '∞'}`);
       console.log(`    ⏱️  Sync Frequency: ${plan.maxSyncFrequencyHours}h`);
       console.log(`    🎨 Custom Fields: ${plan.customFieldsLimit ?? '∞'}`);

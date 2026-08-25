@@ -1,8 +1,9 @@
 import { prisma } from '~/db.server';
 import {
   completeCurrencies,
-  planPricesIn,
+  withPrices,
   resolveShopCurrency,
+  type NamedPlan,
   type PricedPlan,
 } from './currency';
 
@@ -13,9 +14,9 @@ import {
  * un numero senza la sua valuta viene mostrato con quella sbagliata, e finisce
  * che l'app promette un prezzo che Shopify non addebita.
  */
-export interface ShopPricing<T extends PricedPlan> {
+export interface ShopPricing<T extends NamedPlan> {
   currency: string;
-  plans: T[];
+  plans: (T & PricedPlan)[];
 }
 
 /**
@@ -25,7 +26,7 @@ export interface ShopPricing<T extends PricedPlan> {
  * per valuta risparmierebbe niente e impedirebbe di sapere quali valute sono
  * complete, che e' la domanda vera.
  */
-export async function resolveShopPricing<T extends PricedPlan>(
+export async function resolveShopPricing<T extends NamedPlan>(
   plans: T[],
   opts: {
     /**
@@ -51,7 +52,7 @@ export async function resolveShopPricing<T extends PricedPlan>(
     hasReservedPrice: opts.hasReservedPrice,
   });
 
-  return { currency, plans: planPricesIn(plans, prices, currency) };
+  return { currency, plans: withPrices(plans, prices, currency) };
 }
 
 /**
@@ -69,18 +70,15 @@ export async function completeCurrenciesCached(): Promise<string[]> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.currencies;
 
   const [plans, rows] = await Promise.all([
-    prisma.plan.findMany({
-      select: { planName: true, priceMonthly: true, priceYearly: true },
-    }),
+    // Solo i nomi: quali piani esistono lo dice `plans`, quanto costano lo dice
+    // `plan_prices`, e qui servono tutti e due per sapere quali valute coprono
+    // il listino per intero.
+    prisma.plan.findMany({ select: { planName: true } }),
     prisma.planPrice.findMany(),
   ]);
 
   const currencies = completeCurrencies(
-    plans.map((p) => ({
-      planName: p.planName,
-      priceMonthly: Number(p.priceMonthly),
-      priceYearly: Number(p.priceYearly),
-    })),
+    plans,
     rows.map((row) => ({
       planName: row.planName,
       currency: row.currency,

@@ -123,20 +123,22 @@ export async function action({ request }: ActionFunctionArgs) {
   // addebitato in un'altra non e' un dettaglio, e' una cifra che il merchant
   // non ha mai accettato.
 
-  const allPlans = await prisma.plan.findMany();
-  const pricing = await resolveShopPricing(
-    allPlans.map((p) => ({
-      planName: p.planName,
-      priceMonthly: Number(p.priceMonthly),
-      priceYearly: Number(p.priceYearly),
-    })),
-    { preferredCurrency: wantedCurrency(shop), hasReservedPrice: partnerPrice != null },
-  );
-  const pricedPlan =
-    pricing.plans.find((p) => samePlanName(p.planName, plan.planName)) ?? {
-      priceMonthly: Number(plan.priceMonthly),
-      priceYearly: Number(plan.priceYearly),
-    };
+  const allPlans = await prisma.plan.findMany({ select: { planName: true } });
+  const pricing = await resolveShopPricing(allPlans, {
+    preferredCurrency: wantedCurrency(shop),
+    hasReservedPrice: partnerPrice != null,
+  });
+
+  const pricedPlan = pricing.plans.find((p) => samePlanName(p.planName, plan.planName));
+
+  // Nessun prezzo per questo piano: non si addebita. Prima qui c'era un
+  // ripiego sulle colonne del piano, che ora non esistono piu' — e comunque un
+  // ripiego non e' quello che serve quando si sta per far pagare qualcuno.
+  // Meglio un errore che una cifra scelta dal codice.
+  if (!pricedPlan) {
+    console.error(`[billing] nessun prezzo a listino per "${plan.planName}"`);
+    return json({ error: 'plan_not_priced' }, { status: 409 });
+  }
 
   const listPrice = priceForInterval(
     { priceMonthly: pricedPlan.priceMonthly, priceYearly: pricedPlan.priceYearly },

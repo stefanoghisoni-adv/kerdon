@@ -132,17 +132,34 @@ CREATE TABLE "partner_plan_prices" (
 );
 
 -- CreateTable
+-- Il listino: una riga per piano e valuta, dollaro compreso.
+--
+-- E' l'unico posto dove sta un prezzo. Prima i prezzi stavano anche su `plans`,
+-- in due colonne, e niente teneva d'accordo i due: si scriveva il dollaro qui e
+-- l'app mostrava il numero dell'altra tabella.
+CREATE TABLE "plan_prices" (
+    "id" TEXT NOT NULL,
+    "plan_name" TEXT NOT NULL,
+    "currency" TEXT NOT NULL,
+    "price_monthly" DECIMAL(10,2) NOT NULL,
+    "price_yearly" DECIMAL(10,2) NOT NULL,
+
+    CONSTRAINT "plan_prices_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+-- I piani: cosa concedono, non quanto costano. Il listino sta in
+-- `plan_prices`, una riga per piano e valuta, dollaro compreso.
 CREATE TABLE "plans" (
     "id" TEXT NOT NULL,
     "plan_name" TEXT NOT NULL,
-    "price_monthly" DECIMAL(10,2) NOT NULL,
-    "price_yearly" DECIMAL(10,2) NOT NULL,
     "max_products" INTEGER,
     "max_customers" INTEGER,
     "max_sync_frequency_hours" DOUBLE PRECISION NOT NULL,
     "custom_fields_limit" INTEGER,
     "support_level" TEXT NOT NULL,
     "customers_sync_enabled" BOOLEAN NOT NULL DEFAULT false,
+    "product_feeds_enabled" BOOLEAN NOT NULL DEFAULT false,
     "trial_days" INTEGER,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -277,6 +294,10 @@ CREATE UNIQUE INDEX "supabase_configs_shop_id_key" ON "supabase_configs"("shop_i
 -- CreateIndex
 CREATE UNIQUE INDEX "plans_plan_name_key" ON "plans"("plan_name");
 
+-- Un prezzo solo per piano e valuta: due righe per la stessa coppia sarebbero
+-- di nuovo due prezzi in disaccordo, che e' il guaio da cui si viene.
+CREATE UNIQUE INDEX "plan_prices_plan_name_currency_key" ON "plan_prices"("plan_name", "currency");
+
 -- CreateIndex
 CREATE UNIQUE INDEX "billing_charges_shopify_charge_id_key" ON "billing_charges"("shopify_charge_id");
 
@@ -313,6 +334,10 @@ ALTER TABLE "dismissed_tracking_sources" ADD CONSTRAINT "dismissed_tracking_sour
 -- AddForeignKey
 ALTER TABLE "partner_plan_prices" ADD CONSTRAINT "partner_plan_prices_partner_name_fkey" FOREIGN KEY ("partner_name") REFERENCES "partners"("name") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- Rinominare un piano porta con se' i suoi prezzi; cancellarlo li porta via.
+-- Un prezzo orfano sarebbe un listino per un piano che non esiste.
+ALTER TABLE "plan_prices" ADD CONSTRAINT "plan_prices_plan_name_fkey" FOREIGN KEY ("plan_name") REFERENCES "plans"("plan_name") ON DELETE CASCADE ON UPDATE CASCADE;
+
 -- AddForeignKey
 -- SET NULL e non CASCADE: cancellare un partner non deve portarsi via i negozi.
 ALTER TABLE "shops" ADD CONSTRAINT "shops_partner_name_fkey" FOREIGN KEY ("partner_name") REFERENCES "partners"("name") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -344,12 +369,29 @@ ALTER TABLE "sync_job_events" ADD CONSTRAINT "sync_job_events_sync_job_id_fkey" 
 -- I piani: cinque righe copiate dal database owner in uso, non dal seed.
 -- prisma/seed.ts e' rimasto indietro (nomi minuscoli, prezzi 29/99/299) e
 -- rigenerarli da li' darebbe piani sbagliati.
-INSERT INTO "plans" ("id", "plan_name", "price_monthly", "price_yearly", "max_products", "max_customers", "max_sync_frequency_hours", "custom_fields_limit", "support_level", "customers_sync_enabled", "created_at", "trial_days") VALUES
-  ('60b36215-e0d0-48e4-8f59-1550028a1078', 'Free',       0.00,  0.00,   50,  200, 168.00,    3, 'community', false, '2026-07-14 15:48:23.356115', 14),
-  ('316217c4-3a7b-40f8-9f7c-8d5ddc1d5daa', 'Pro',       19.00, 290.00,  200,  500,  96.00,   10, 'email',     true,  '2026-07-14 15:48:23.356115', NULL),
-  ('eb31cfe0-d134-4421-a4d6-0f6e2a89f88d', 'Business',  49.00, 990.00, 1000, 2000,  48.00,   50, 'priority',  true,  '2026-07-14 15:48:23.356115', NULL),
-  ('fdf4476c-ab51-44f7-ba28-a785cddb3ec9', 'Enterprise',79.00, 2990.00, NULL, NULL,  24.00, NULL, 'dedicated', true,  '2026-07-14 15:48:23.356115', NULL),
-  ('0b896582-5f98-41b3-9073-65c9874b8360', 'Lifetime',   0.00,  0.00,   NULL, NULL,   0.50, NULL, 'dedicated', true,  '2026-07-17 02:30:10.250832', NULL);
+INSERT INTO "plans" ("id", "plan_name", "max_products", "max_customers", "max_sync_frequency_hours", "custom_fields_limit", "support_level", "customers_sync_enabled", "product_feeds_enabled", "created_at", "trial_days") VALUES
+  ('60b36215-e0d0-48e4-8f59-1550028a1078', 'Free',        50,  200, 168.00,    3, 'community', false, false, '2026-07-14 15:48:23.356115', 14),
+  ('316217c4-3a7b-40f8-9f7c-8d5ddc1d5daa', 'Pro',        200,  500,  96.00,   10, 'email',     true,  true,  '2026-07-14 15:48:23.356115', NULL),
+  ('eb31cfe0-d134-4421-a4d6-0f6e2a89f88d', 'Business',  1000, 2000,  48.00,   50, 'priority',  true,  true,  '2026-07-14 15:48:23.356115', NULL),
+  ('fdf4476c-ab51-44f7-ba28-a785cddb3ec9', 'Enterprise',NULL, NULL,  24.00, NULL, 'dedicated', true,  true,  '2026-07-14 15:48:23.356115', NULL),
+  ('0b896582-5f98-41b3-9073-65c9874b8360', 'Lifetime',  NULL, NULL,   0.50, NULL, 'dedicated', true,  true,  '2026-07-17 02:30:10.250832', NULL);
+
+-- Il listino, in dollari: la valuta base, quella della scheda dell'App Store.
+--
+-- Ogni piano ha la sua riga, anche quelli che non si pagano: zero e' un prezzo
+-- scritto, non un'assenza. E' da queste righe che l'app sa quali piani sono a
+-- pagamento — senza, li darebbe tutti per gratuiti.
+--
+-- Le altre valute si aggiungono qui accanto, una riga per piano. Una valuta si
+-- usa solo se copre TUTTI i piani a pagamento: a meta' listino le card
+-- mostrerebbero due valute affiancate, e a quel punto non si capisce piu' né
+-- l'una né l'altra.
+INSERT INTO "plan_prices" ("id", "plan_name", "currency", "price_monthly", "price_yearly") VALUES
+  (gen_random_uuid(), 'Free',       'USD',  0.00,    0.00),
+  (gen_random_uuid(), 'Pro',        'USD', 19.00,  290.00),
+  (gen_random_uuid(), 'Business',   'USD', 49.00,  990.00),
+  (gen_random_uuid(), 'Enterprise', 'USD', 79.00, 2990.00),
+  (gen_random_uuid(), 'Lifetime',   'USD',  0.00,    0.00);
 
 -- Le due chiavi esterne sul nome del piano. Non le genera `migrate diff`:
 -- schema.prisma non modella la relazione fra shops e plans, ma il database in
