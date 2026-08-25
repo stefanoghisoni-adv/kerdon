@@ -18,6 +18,7 @@ import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { deleteFeed, listFeeds, PLATFORMS, type Platform } from '~/lib/feeds/feed.server';
+import { useNavLoading } from '~/components/Dashboard/nav-loading';
 import { MetaLogo } from '~/components/Catalogs/MetaLogo';
 import { useT } from '~/lib/i18n/context';
 
@@ -104,6 +105,7 @@ export default function Catalogs() {
             }
             action={status === 'available' ? t.catalogs.install : t.catalogs.manage}
             primary={status === 'available'}
+            path="/catalogs/meta"
             onAction={() => navigate('/catalogs/meta')}
             deleteLabel={t.catalogs.delete}
             // Non c'e' niente da eliminare finche' non e' stata attivata: il
@@ -157,6 +159,7 @@ function PlatformCard({
   badge,
   action,
   primary,
+  path,
   onAction,
   deleteLabel,
   canDelete,
@@ -169,12 +172,22 @@ function PlatformCard({
   badge: React.ReactNode;
   action: string;
   primary: boolean;
+  /** Dove porta il pulsante principale: serve a sapere quando ha finito. */
+  path: string;
   onAction: () => void;
   deleteLabel: string;
   canDelete: boolean;
   deleting: boolean;
   onDelete: () => void;
 }) {
+  // L'attesa del pulsante principale e' una navigazione, non una richiesta: si
+  // accende solo se e' stato questo pulsante a farla partire, altrimenti anche
+  // il menu laterale dell'admin lo accenderebbe.
+  const nav = useNavLoading(path);
+  // Mentre uno dei due lavora l'altro si spegne: sono due strade opposte sulla
+  // stessa integrazione, e premerle insieme non porta da nessuna parte.
+  const working = nav.loading || deleting;
+
   return (
     <Card padding="400">
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -211,13 +224,22 @@ function PlatformCard({
 
         <Box paddingBlockStart="400">
           <BlockStack gap="200">
-            <Button variant={primary ? 'primary' : undefined} onClick={onAction} fullWidth>
+            <Button
+              variant={primary ? 'primary' : undefined}
+              onClick={() => {
+                nav.start();
+                onAction();
+              }}
+              loading={nav.loading}
+              disabled={working}
+              fullWidth
+            >
               {action}
             </Button>
             {/* Rosso ma non primario: e' l'uscita, non la strada. */}
             <Button
               tone="critical"
-              disabled={!canDelete || deleting}
+              disabled={!canDelete || working}
               loading={deleting && canDelete}
               onClick={onDelete}
               fullWidth
