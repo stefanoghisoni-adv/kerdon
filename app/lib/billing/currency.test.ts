@@ -78,17 +78,32 @@ describe('planPricesIn', () => {
 });
 
 describe('formatMoney', () => {
-  it('scrive la valuta accanto alla cifra, nella forma della lingua', () => {
-    // Spazi unificatori: Intl usa NBSP fra cifra e simbolo.
-    expect(formatMoney(29, 'EUR', 'it').replace(/ /g, ' ')).toBe('29 €');
+  /** Intl separa simbolo e cifra con uno spazio unificatore, non con lo spazio. */
+  const plain = (value: string) => value.replace(/\u00A0/g, ' ');
+
+  it('il simbolo sta davanti alla cifra in tutte le lingue', () => {
+    // In italiano la convenzione tipografica vorrebbe "29 EUR" con il simbolo in
+    // coda: in una card di numeri incolonnati la valuta letta per ultima arriva
+    // troppo tardi, quando la cifra e' gia' stata letta nella valuta sbagliata.
+    expect(plain(formatMoney(29, 'EUR', 'it'))).toBe('\u20AC 29');
     expect(formatMoney(29, 'USD', 'en')).toBe('$29');
   });
 
+  it('i separatori restano quelli della lingua: cambia solo dove sta il simbolo', () => {
+    expect(plain(formatMoney(12345.5, 'EUR', 'it'))).toBe('\u20AC 12.345,50');
+    expect(formatMoney(12345.5, 'USD', 'en')).toBe('$12,345.50');
+  });
+
   it('i centesimi solo quando ci sono', () => {
-    expect(formatMoney(9.9, 'EUR', 'it').replace(/ /g, ' ')).toBe('9,90 €');
+    expect(plain(formatMoney(9.9, 'EUR', 'it'))).toBe('\u20AC 9,90');
+  });
+
+  it('il meno resta attaccato alla cifra, non al simbolo', () => {
+    expect(plain(formatMoney(-5, 'EUR', 'it'))).toBe('\u20AC -5');
+    expect(formatMoney(-5, 'USD', 'en')).toBe('$-5');
   });
 
   it('gli importi esatti li scrivono sempre', () => {
-    expect(formatMoneyExact(5, 'EUR', 'it').replace(/ /g, ' ')).toBe('5,00 €');
+    expect(plain(formatMoneyExact(5, 'EUR', 'it'))).toBe('\u20AC 5,00');
   });
 });

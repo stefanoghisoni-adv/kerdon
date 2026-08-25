@@ -42,12 +42,50 @@ function formatter(currency: string, locale: Locale, fractionDigits: number): In
     currency,
     // Il simbolo, non la sigla: in italiano Intl scriverebbe "29 USD" per le
     // valute straniere, e un prezzo si legge meglio con "$" o "€" davanti alla
-    // cifra che con tre lettere. Con il mercato scelto dal merchant la valuta
-    // straniera e' ormai un caso di ripiego, ma resta un prezzo da leggere.
+    // cifra che con tre lettere.
     currencyDisplay: 'narrowSymbol',
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
   });
+}
+
+/**
+ * Il simbolo davanti, sempre.
+ *
+ * In italiano Intl scrive "30,95 $", che e' la convenzione tipografica giusta e
+ * la cosa sbagliata da mettere in una card: l'occhio scorre una colonna di
+ * numeri e arriva alla valuta per ultima, dopo aver gia' letto la cifra come se
+ * fosse nella propria. Con il simbolo davanti si sa cosa si sta leggendo prima
+ * di leggerlo.
+ *
+ * Si ricompone dai pezzi invece di concatenare a mano: separatori delle
+ * migliaia, decimali e segno meno restano quelli della lingua, e cambia solo
+ * dove sta il simbolo.
+ */
+function symbolFirst(parts: Intl.NumberFormatPart[]): string {
+  const symbol = parts.find((part) => part.type === 'currency');
+  if (!symbol) return parts.map((part) => part.value).join('');
+
+  const index = parts.indexOf(symbol);
+  // Lo spazio che divideva simbolo e cifra se ne va con il simbolo: senza,
+  // spostando solo quello resterebbe uno spazio in fondo.
+  const rest = parts.filter((part, i) => {
+    if (i === index) return false;
+    const adjacent = i === index - 1 || i === index + 1;
+    return !(adjacent && part.type === 'literal' && part.value.trim() === '');
+  });
+
+  const spaced = parts.some(
+    (part, i) =>
+      (i === index - 1 || i === index + 1) &&
+      part.type === 'literal' &&
+      part.value.trim() === '',
+  );
+
+  // Il segno meno resta attaccato alla cifra e non al simbolo: "-$5" e' un
+  // prezzo negativo, "$-5" e' un errore di stampa.
+  const body = rest.map((part) => part.value).join('');
+  return spaced ? `${symbol.value}\u00A0${body}` : `${symbol.value}${body}`;
 }
 
 /**
@@ -58,7 +96,9 @@ function formatter(currency: string, locale: Locale, fractionDigits: number): In
  * una card che deve farsi leggere in un colpo d'occhio.
  */
 export function formatMoney(amount: number, currency: string, locale: Locale): string {
-  return formatter(currency, locale, Number.isInteger(amount) ? 0 : 2).format(amount);
+  return symbolFirst(
+    formatter(currency, locale, Number.isInteger(amount) ? 0 : 2).formatToParts(amount),
+  );
 }
 
 /**
@@ -68,5 +108,5 @@ export function formatMoney(amount: number, currency: string, locale: Locale): s
  * di una cifra precisa, e qui si sta parlando di quanto si risparmia.
  */
 export function formatMoneyExact(amount: number, currency: string, locale: Locale): string {
-  return formatter(currency, locale, 2).format(amount);
+  return symbolFirst(formatter(currency, locale, 2).formatToParts(amount));
 }

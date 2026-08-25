@@ -78,6 +78,17 @@ export function TrackingConflicts({
   // quella dichiarazione e' registrata sul server e vale da li' in poi.
   const [declared, setDeclared] = useState<Record<string, true>>({});
 
+  /**
+   * Le righe dichiarate in questa sessione, tenute in vita.
+   *
+   * Il server toglie dall'elenco cio' che risulta dichiarato: al primo
+   * ricalcolo dei conflitti la riga appena dichiarata sparisce, e con lei il
+   * pulsante per disdire — che a quel punto non esiste piu' da nessuna parte.
+   * Qui la riga resta finche' il merchant non lascia la pagina, che e' l'unico
+   * momento in cui puo' davvero avere finito di guardarla.
+   */
+  const [sticky, setSticky] = useState<TrackingFinding[]>([]);
+
   const rowKey = (finding: TrackingFinding) => `${finding.kind}-${finding.name}`;
 
   // fetch e non useFetcher: un fetcher solo per tutta la tabella verrebbe
@@ -98,7 +109,12 @@ export function TrackingConflicts({
         // Solo se il server l'ha registrata: una riga che si dichiara a posto
         // mentre la richiesta e' fallita tornerebbe alla riapertura, e nel
         // frattempo avrebbe detto il contrario di cio' che risulta.
-        if (response.ok) setDeclared((current) => ({ ...current, [key]: true }));
+        if (response.ok) {
+          setDeclared((current) => ({ ...current, [key]: true }));
+          setSticky((current) =>
+            current.some((f) => `${f.kind}-${f.name}` === key) ? current : [...current, finding],
+          );
+        }
       } finally {
         // Sbloccare comunque: se la richiesta e' fallita, e' l'unico modo per
         // riprovare.
@@ -141,6 +157,9 @@ export function TrackingConflicts({
             delete next[key];
             return next;
           });
+          // Disdetta la dichiarazione, la riga torna a farsi calcolare dal
+          // server come tutte le altre: tenerla in vita qui la duplicherebbe.
+          setSticky((current) => current.filter((f) => `${f.kind}-${f.name}` !== key));
         }
       } finally {
         setBusy((current) => {
@@ -173,14 +192,24 @@ export function TrackingConflicts({
   // hook in piu' del primo, e React interrompeva la pagina intera con l'errore
   // #310 — "Rendered more hooks than during the previous render". E' quello che
   // faceva comparire "Si e' verificato un errore" al posto della dashboard.
-  if (findings.length === 0) return null;
+  // L'elenco del server piu' le righe dichiarate qui, che il server non manda
+  // piu'. L'ordine e' quello del server: le aggiunte vanno in coda, dove il
+  // merchant le ha lasciate.
+  const shown = [
+    ...findings,
+    ...sticky.filter(
+      (f) => !findings.some((g) => g.kind === f.kind && g.name === f.name),
+    ),
+  ];
+
+  if (shown.length === 0) return null;
 
   const content = (
       <BlockStack gap="300">
         <Text as="p">{t.tracking.conflicts.intro}</Text>
 
         <BlockStack gap="200">
-          {findings.map((finding) => {
+          {shown.map((finding) => {
             const url = actionUrl(finding);
             const key = rowKey(finding);
             // Entrambi i pulsanti della riga si spengono, ovunque si sia

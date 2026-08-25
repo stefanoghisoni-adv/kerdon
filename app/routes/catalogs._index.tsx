@@ -92,7 +92,7 @@ function PlatformCard({
   return (
     <Card padding="400">
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <BlockStack gap="300">
+        <BlockStack gap="300" inlineAlign="center">
           {/* Il logo dentro un quadrato con la cornice: i marchi arrivano su
               fondi diversi, e senza una cornice comune la fila si vede
               disallineata. */}
@@ -112,12 +112,12 @@ function PlatformCard({
             {logo}
           </div>
 
-          <BlockStack gap="150">
-            <Text as="h3" variant="headingSm">
+          <BlockStack gap="150" inlineAlign="center">
+            <Text as="h3" variant="headingSm" alignment="center">
               {name}
             </Text>
             <div>{badge}</div>
-            <Text as="p" variant="bodySm" tone="subdued">
+            <Text as="p" variant="bodySm" tone="subdued" alignment="center">
               {description}
             </Text>
           </BlockStack>
