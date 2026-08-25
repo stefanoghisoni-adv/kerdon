@@ -347,7 +347,10 @@ export default function CatalogMeta() {
               // Due colonne e non una: l'icona dice quanto e' grave, il badge
               // dice cosa succede al prodotto quando il feed parte. Sono due
               // domande, e finivano sotto un'intestazione sola.
-              { title: t.catalogs.table.state },
+              // Al centro: e' una colonna di soli simboli, e allineati a un
+              // bordo sembrano appoggiati alla colonna accanto invece che alla
+              // propria.
+              { title: t.catalogs.table.state, alignment: 'center' as const },
               { title: t.catalogs.table.sync },
             ]}
           >
@@ -378,7 +381,9 @@ export default function CatalogMeta() {
                   {row.price === null ? '—' : formatMoney(row.price, catalog.currency, locale)}
                 </IndexTable.Cell>
                 <IndexTable.Cell>
-                  <StateIcon row={row} />
+                  <InlineStack align="center">
+                    <StateIcon row={row} />
+                  </InlineStack>
                 </IndexTable.Cell>
                 <IndexTable.Cell>
                   <StateBadge row={row} />
