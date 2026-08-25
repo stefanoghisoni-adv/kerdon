@@ -121,6 +121,15 @@ export function SupabaseProjectConnect({
   const planLimitHit = Boolean(limits?.limitReached || planLimitFromCreate);
   const planLimitBillingUrl = createFetcher.data?.billingUrl ?? limits?.billingUrl ?? null;
 
+  // Il limite si annuncia quando lo si incontra, non prima.
+  //
+  // Un banner sempre acceso in cima alla pagina diventa arredamento: si smette
+  // di leggerlo dopo due aperture. Compare invece aprendo il menu — cioe'
+  // quando si sta cercando come creare un database — e quando Supabase rifiuta
+  // davvero una creazione.
+  const [limitNoticed, setLimitNoticed] = useState(false);
+  const showLimitBanner = planLimitHit && (limitNoticed || planLimitFromCreate);
+
   const [regionPopoverActive, setRegionPopoverActive] = useState(false);
   // Se la richiesta delle region non arriva mai in porto (rete giù, 500), dopo
   // qualche secondo smettiamo di mostrare il loader e ripieghiamo sulla lista
@@ -370,7 +379,10 @@ export function SupabaseProjectConnect({
                 activator={
                   <Button
                     disclosure
-                    onClick={() => setManageOpen((open) => !open)}
+                    onClick={() => {
+                      if (planLimitHit) setLimitNoticed(true);
+                      setManageOpen((open) => !open);
+                    }}
                     loading={limitsChecking}
                     disabled={disabled}
                   >
@@ -387,11 +399,11 @@ export function SupabaseProjectConnect({
                           content: t.connect.database.create,
                           prefix: <Icon source={PlusIcon} />,
                       // Spento quando il piano Supabase non consente altri
-                      // progetti. Un elenco Polaris non porta tooltip: il
-                      // motivo va sotto la voce, e compare solo quando c'e'
-                      // davvero qualcosa da spiegare.
+                      // progetti. Il motivo non sta qui sotto: una voce di menu
+                      // con due righe di spiegazione fa diventare il menu il
+                      // posto dove si legge, invece di quello dove si sceglie.
+                      // Lo dice il banner in cima, all'apertura del menu.
                       disabled: limitsChecking || planLimitHit,
-                      helpText: planLimitHit ? t.connect.database.limitReached : undefined,
                       onAction: () => {
                         setManageOpen(false);
                         setChanging(true);
@@ -584,21 +596,16 @@ export function SupabaseProjectConnect({
 
   return (
     <BlockStack gap="300">
-      {planLimitHit && (
-        <Banner tone="warning" title="Hai raggiunto il limite massimo di progetti su Supabase">
+      {showLimitBanner && (
+        <Banner tone="warning" onDismiss={() => setLimitNoticed(false)}>
           <Text as="p">
             {/* Il piano lo conosciamo solo se la OAuth App concede lo scope
                 organizations:read. Quando il limite emerge dal rifiuto di
                 Supabase alla creazione non lo sappiamo: in quel caso diciamo
                 cosa è successo senza inventare un nome di piano. */}
-            {limits?.planLabel && limits.maxProjects !== null
-              ? t.connect.database.limitKnown(
-                  limits.planLabel,
-                  limits.maxProjects,
-                  limits.activeProjects,
-                )
+            {limits?.planLabel
+              ? t.connect.database.limitKnown(limits.planLabel)
               : t.connect.database.limitUnknown}{' '}
-            {t.connect.database.limitBefore}{' '}
             {/* Button e non Link: dentro un Banner, Polaris spegne i Link
                 rendendoli monocromatici (leggono BannerContext e non hanno una
                 prop per chiedere il contrario). Il Button variant="plain" resta

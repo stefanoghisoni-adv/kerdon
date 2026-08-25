@@ -205,15 +205,13 @@ export const it = {
       projectName: "Nome del progetto",
       syncDisabled: "Sincronizzazione disabilitata.",
       syncSuspended: "Sincronizzazione sospesa.",
-      limitKnown: (plan: string, max: number, active: number) =>
-        `Il tuo piano ${plan} consente al massimo ${max} progetti attivi e ne hai già ${active}.`,
-      limitUnknown:
-        "Il tuo piano Supabase non consente di creare altri progetti.",
-      limitBefore: "Per crearne un altro",
-      limitUpgradeLink: "aggiorna ora il piano Supabase",
-      limitUpgradePlain: "aggiorna il piano Supabase",
-      limitAfter:
-        ", oppure metti in pausa un progetto esistente dalla dashboard Supabase: i progetti in pausa non occupano nessuno slot.",
+      limitKnown: (plan: string) =>
+        `Hai raggiunto il limite massimo di database previsti dal tuo piano ${plan}.`,
+      limitUnknown: "Hai raggiunto il limite massimo di database previsti dal tuo piano Supabase.",
+      limitBefore: "",
+      limitUpgradeLink: "Aggiorna ora il piano",
+      limitUpgradePlain: "Aggiorna il piano",
+      limitAfter: " su Supabase per creare più database.",
       connectedTo: "Database collegato:",
       limitReached:
         "Hai raggiunto il limite massimo di database per il tuo piano Supabase.",
