@@ -284,7 +284,8 @@
    di testo che ha accanto. Si alza con una traslazione e non con un margine:
    il margine sposterebbe anche cio' che gli sta intorno, la traslazione muove
    solo il disegno. */
-.variable-picker .Polaris-ActionList__Item {
+.variable-picker .Polaris-ActionList__Item,
+.variable-picker .Polaris-ActionList__Item * {
   font-weight: var(--p-font-weight-regular);
 }
 
@@ -335,4 +336,15 @@
 .Polaris-Banner .Polaris-Button__Text,
 .Polaris-Banner .Polaris-Link {
   white-space: nowrap;
+}
+
+/* Il valore scelto sul pulsante che apre la tendina.
+
+   Polaris scrive in grassetto il testo dei pulsanti. Qui pero' il pulsante non
+   e' un comando: e' il valore corrente di un campo, uno per riga su venti
+   righe. In grassetto quella colonna pesava piu' dei nomi dei campi accanto, e
+   si leggeva come se fosse lei il dato principale. */
+.gmc-mapping .Polaris-Button__Text,
+.gmc-mapping .Polaris-Button {
+  font-weight: var(--p-font-weight-regular);
 }

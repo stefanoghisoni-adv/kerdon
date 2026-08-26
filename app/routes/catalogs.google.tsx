@@ -282,7 +282,7 @@ export default function CatalogGoogle() {
                 borderRadius="200"
                 overflowX="scroll"
               >
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table className="gmc-mapping" style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
                       <Th>{t.catalogs.mapping.field}</Th>
