@@ -101,7 +101,11 @@ const CUSTOMERS_COLUMNS: Column[] = [
   // costruisce un pubblico o una integrazione trova il posto gia' pronto e non
   // deve rifare una migrazione per un campo solo.
   { name: 'external_id', type: 'TEXT' },
-  { name: 'date_of_birth', type: 'DATE' },
+  // TEXT e non DATE: il formato voluto e' `YYYYMMDD` senza separatori, che e'
+  // quello che le piattaforme pubblicitarie confrontano. Un DATE lo
+  // restituirebbe sempre come 1985-04-23, e chi legge dovrebbe rifare la
+  // conversione ogni volta.
+  { name: 'date_of_birth', type: 'TEXT' },
   { name: 'total_spent', type: 'NUMERIC(10, 2)' },
   { name: 'orders_count', type: 'INTEGER' },
   { name: 'customer_state', type: 'TEXT' },

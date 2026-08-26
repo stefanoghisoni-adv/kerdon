@@ -101,3 +101,24 @@ describe('numero di versione e cio che promette', () => {
     expect(sql).not.toContain('CREATE TABLE IF NOT EXISTS orders');
   });
 });
+
+describe('formato dei campi che le piattaforme confrontano', () => {
+  it('l aggiornamento porta la conversione della data di nascita', () => {
+    // Un DATE non puo' contenere "19850423": il tipo va cambiato prima che
+    // qualcuno cominci a scriverci.
+    const sql = buildSchemaUpdateSQL(5, true, true);
+    expect(sql).toContain('date_of_birth TYPE TEXT');
+  });
+
+  it('l aggiornamento ripulisce i telefoni gia sincronizzati', () => {
+    // Senza, i clienti piu' vecchi resterebbero nella forma leggibile di
+    // Shopify e fuori dai pubblici — e sono quelli che contano di piu'.
+    const sql = buildSchemaUpdateSQL(5, true, true);
+    expect(sql).toContain('regexp_replace');
+    expect(sql).toContain('phone_number');
+  });
+
+  it('chi e gia alla versione corrente non riceve altri passi', () => {
+    expect(pendingMigrations(LATEST_SCHEMA_VERSION)).toEqual([]);
+  });
+});

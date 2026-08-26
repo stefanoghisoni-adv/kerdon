@@ -1,4 +1,5 @@
 import type { ShopifyCustomer, SupabaseCustomerRow } from '~/types/shopify';
+import { normalizeBirthdate, normalizePhone } from './customer-format';
 
 /**
  * Transforms a Shopify customer payload into a single Supabase row matching the
@@ -29,7 +30,10 @@ export function transformCustomer(customer: ShopifyCustomer): SupabaseCustomerRo
   return {
     shopify_customer_id: customer.id,
     email_address: customer.email || null,
-    phone_number: customer.phone || null,
+    // In sole cifre, prefisso compreso: e' la forma che Meta e Google
+    // confrontano. Quella leggibile di Shopify e' giusta da mostrare e
+    // sbagliata da confrontare — l'hash di "+39 333" non e' quello di "39333".
+    phone_number: normalizePhone(customer.phone),
     first_name: customer.first_name || null,
     last_name: customer.last_name || null,
     accepts_marketing: acceptsMarketing,
@@ -55,7 +59,10 @@ export function transformCustomer(customer: ShopifyCustomer): SupabaseCustomerRo
     // `external_id`, per dire — sarebbe peggio di lasciarla vuota: chi la legge
     // crederebbe che sia il suo identificativo.
     external_id: null,
-    date_of_birth: null,
+    // Nessun campo da cui leggerla, per ora: passa comunque di qui, cosi' il
+    // giorno in cui arrivera' da un metafield sara' gia' scritta come YYYYMMDD
+    // senza doversene ricordare.
+    date_of_birth: normalizeBirthdate(null),
     synced_at: new Date().toISOString(),
   };
 }

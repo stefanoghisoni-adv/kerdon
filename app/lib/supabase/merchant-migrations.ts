@@ -56,6 +56,50 @@ ALTER INDEX IF EXISTS idx_customers_email RENAME TO idx_customers_email_address;
 ALTER INDEX IF EXISTS idx_customers_phone RENAME TO idx_customers_phone_number;
 `,
   },
+  {
+    version: 6,
+    description: 'Telefono in sole cifre e data di nascita come YYYYMMDD',
+    // Due cose che la DDL additiva non sa fare: cambiare il tipo di una colonna
+    // e riscrivere i dati gia' dentro.
+    //
+    // `date_of_birth` era nata DATE, e un DATE non puo' contenere "19850423".
+    // La conversione e' innocua perche' la colonna e' vuota — nessuno la scrive
+    // ancora — ma va fatta prima che qualcuno cominci.
+    //
+    // I telefoni gia' sincronizzati restano nella forma leggibile di Shopify
+    // ("+39 333 123 4567"), che per un confronto non vale: senza questa riga
+    // proprio i clienti piu' vecchi resterebbero fuori dai pubblici, e sono
+    // quelli che contano di piu'. `regexp_replace` e' idempotente: rieseguirla
+    // su un numero gia' pulito non lo tocca.
+    sql: `
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'customers'
+      AND column_name = 'date_of_birth'
+      AND data_type = 'date'
+  ) THEN
+    ALTER TABLE public.customers
+      ALTER COLUMN date_of_birth TYPE TEXT
+      USING to_char(date_of_birth, 'YYYYMMDD');
+  END IF;
+END $$;
+
+UPDATE public.customers
+SET phone_number = regexp_replace(phone_number, '[^0-9]', '', 'g')
+WHERE phone_number IS NOT NULL
+  AND phone_number <> regexp_replace(phone_number, '[^0-9]', '', 'g');
+
+-- Un numero fatto di soli separatori diventa una stringa vuota: e' un'assenza,
+-- e va scritta come tale o finisce nei pubblici come cliente senza telefono ma
+-- con il campo pieno.
+UPDATE public.customers
+SET phone_number = NULL
+WHERE phone_number = '';
+`,
+  },
 ];
 
 /**
@@ -77,11 +121,15 @@ ALTER INDEX IF EXISTS idx_customers_phone RENAME TO idx_customers_phone_number;
  * l'aggiornamento sarebbe risultato gia' fatto.
  */
 /**
- * La 5 porta l'indirizzo del cliente — paese, via, CAP, regione — piu' due
+ * La 5 ha portato l'indirizzo del cliente — paese, via, CAP, regione — piu' due
  * colonne che Shopify non riempie da sola (`external_id`, `date_of_birth`).
- * Sono tutte aggiunte: basta il numero, ci pensa la DDL idempotente.
+ *
+ * La 6 sistema il formato dei due campi che le piattaforme pubblicitarie
+ * confrontano: telefono in sole cifre, data di nascita come YYYYMMDD. Ha un
+ * passo esplicito perche' cambia un tipo e riscrive dati gia' presenti, cose
+ * che la DDL additiva non sa fare.
  */
-export const LATEST_SCHEMA_VERSION = 5;
+export const LATEST_SCHEMA_VERSION = 6;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {
