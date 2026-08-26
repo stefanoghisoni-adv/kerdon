@@ -26,6 +26,7 @@ import { AlertTriangleIcon, DisabledIcon, ImageIcon, SearchIcon } from '@shopify
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
+import { shopCanUseFeeds } from '~/lib/feeds/feed-access.server';
 import {
   disableFeed,
   enableFeed,
@@ -77,6 +78,15 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = String(form.get('intent') ?? '');
   const rawFormat = String(form.get('format') ?? 'xml');
   const format: FeedFormat = isFeedFormat(rawFormat) ? rawFormat : 'xml';
+
+  // Accendere un feed e' l'unica azione che il piano puo' vietare: le altre
+  // agiscono su qualcosa che esiste gia', e chi l'ha ottenuto quando il piano
+  // lo prevedeva deve poterlo spegnere anche dopo.
+  if (intent === 'enable' || intent === 'format') {
+    if (!(await shopCanUseFeeds(session.shop))) {
+      return json({ ok: false, error: 'plan_required' }, { status: 403 });
+    }
+  }
 
   switch (intent) {
     case 'enable':

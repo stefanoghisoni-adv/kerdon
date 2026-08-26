@@ -128,12 +128,13 @@ describe('buildPlanFeatures', () => {
     const has = (level: string, key: string) =>
       buildPlanFeatures(row({ supportLevel: level })).find((f) => f.key === key)!.included;
 
-    // Il livello di assistenza decide una riga sola: il push manuale. Email e
-    // chat non sono piu' in elenco — erano su tutte le card o su nessuna, e una
-    // riga uguale ovunque non aiuta a scegliere.
+    // Il livello di assistenza decide una riga sola: il push manuale, e solo
+    // per l'assistenza dedicata. Email e chat non sono piu' in elenco — erano
+    // su tutte le card o su nessuna, e una riga uguale ovunque non aiuta a
+    // scegliere.
     expect(has('community', 'push')).toBe(false);
     expect(has('email', 'push')).toBe(false);
-    expect(has('priority', 'push')).toBe(true);
+    expect(has('priority', 'push')).toBe(false);
     expect(has('dedicated', 'push')).toBe(true);
   });
 
@@ -172,18 +173,21 @@ describe('buildPlanFeatures', () => {
 });
 
 describe('manualSyncAllowed', () => {
-  it('lo concedono i piani con assistenza prioritaria o dedicata', () => {
-    expect(manualSyncAllowed('priority')).toBe(true);
+  it('lo concede la sola assistenza dedicata, cioe Enterprise', () => {
+    // Una sincronizzazione chiesta a mano costa una lettura completa di Shopify
+    // ogni volta che si preme: concederla a meta' listino significa pagarla noi
+    // per tutti.
     expect(manualSyncAllowed('dedicated')).toBe(true);
   });
 
-  it('gli altri no', () => {
+  it('gli altri no, "priority" compreso', () => {
     expect(manualSyncAllowed('community')).toBe(false);
     expect(manualSyncAllowed('email')).toBe(false);
+    expect(manualSyncAllowed('priority')).toBe(false);
   });
 
   it('regge maiuscole e spazi: il livello lo scrive l owner a mano', () => {
-    expect(manualSyncAllowed('  Priority ')).toBe(true);
+    expect(manualSyncAllowed('  Dedicated ')).toBe(true);
   });
 
   it('senza livello non si concede niente', () => {

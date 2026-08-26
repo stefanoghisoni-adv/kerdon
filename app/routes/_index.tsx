@@ -69,6 +69,7 @@ import { SyncCard } from '~/components/Dashboard/SyncCard';
 import { RecentRunsCard } from '~/components/Dashboard/RecentRunsCard';
 import { loadSyncRuns, syncTimingFrom } from '~/lib/sync/sync-timing.server';
 import { buildPlanCards, manualSyncAllowed } from '~/components/Billing/plan-catalog';
+import { countSoldWithoutCost } from '~/lib/stats/sold-variants.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { canAccessPlanTab } from '~/components/Billing/plan-access';
 import type { SubscribeResponse } from '~/routes/billing.subscribe';
@@ -285,6 +286,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       authorization,
       trackingAuthorization,
       planChanged,
+      // Quanti prodotti venduti non hanno un costo: e' il numero che spiega
+      // perche' il profitto mostrato e' piu' alto del vero. Una riga di
+      // conteggio sul database del merchant, non una passata sul catalogo.
+      soldWithoutCost: await countSoldWithoutCost(session.shop),
       // Il push manuale e' una funzione del piano: senza, il pulsante non
       // compare affatto. Mostrarlo spento sarebbe peggio — inviterebbe a
       // premere una cosa che non si puo' avere, e la card del piano dice gia'
@@ -506,8 +511,21 @@ interface ProductHistoryResponse {
   planLimit: number | null;
 }
 
+/** Ogni quanto si ricontrolla se la corsa manuale e' finita. */
+const MANUAL_SYNC_POLL_MS = 4_000;
+
+/**
+ * Dopo quanto si smette di aspettare.
+ *
+ * Non e' il tempo che una sincronizzazione impiega — e' il tempo oltre il quale
+ * conviene ridare il pulsante al merchant invece di lasciarglielo spento. Se la
+ * corsa e' ancora viva finira' comunque, e i suoi numeri li vedra' alla
+ * prossima apertura.
+ */
+const MANUAL_SYNC_TIMEOUT_MS = 3 * 60_000;
+
 export default function Dashboard() {
-  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
+  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, syncState, planChanged, soldWithoutCost, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
     useLoaderData<typeof loader>();
   const blocked = authorization !== 'ENABLED';
   const t = useT();
@@ -590,8 +608,23 @@ export default function Dashboard() {
   // La sincronizzazione chiesta a mano. Il fetcher e' suo e non condiviso con
   // gli altri della pagina: un pulsante che si spegne perche' sta caricando il
   // grafico accanto non si capisce.
+  // L'avviso dei costi mancanti si chiude per questa visita e basta: alla
+  // prossima apertura torna, perche' finche' quei costi mancano il profitto
+  // mostrato resta piu' alto del vero. Un "non mostrare piu'" nasconderebbe una
+  // cosa che continua a essere vera.
+  const [costWarningHidden, setCostWarningHidden] = useState(false);
+
   const manualSyncFetcher = useFetcher<{ queued?: boolean; error?: string }>();
-  const manualSyncing = manualSyncFetcher.state !== 'idle';
+
+  // Quando e' partita la corsa chiesta a mano, non "se la richiesta e' in
+  // volo".
+  //
+  // La differenza conta: la richiesta risponde subito, perche' mette il lavoro
+  // in coda e torna. La sincronizzazione vera comincia dopo e dura qualche
+  // secondo. Legando il pulsante alla sola richiesta, si riaccendeva mentre la
+  // corsa stava ancora girando e i numeri sotto erano ancora quelli vecchi.
+  const [manualStartedAt, setManualStartedAt] = useState<number | null>(null);
+  const manualSyncing = manualSyncFetcher.state !== 'idle' || manualStartedAt !== null;
 
   const startManualSync = useCallback(() => {
     const data = new FormData();
@@ -599,6 +632,12 @@ export default function Dashboard() {
     manualSyncFetcher.submit(data, { method: 'post' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (manualSyncFetcher.state === 'idle' && manualSyncFetcher.data?.queued) {
+      setManualStartedAt(Date.now());
+    }
+  }, [manualSyncFetcher.state, manualSyncFetcher.data]);
 
   // Il periodo vale per tutta la pagina: profitto e prodotti rispondono alla
   // stessa domanda su archi diversi solo se glielo si chiede, e due periodi
@@ -669,6 +708,34 @@ export default function Dashboard() {
   // mentre la sync è in corso — anche se prosegue in background a pagina chiusa —
   // e resta disabilitato dopo il completamento (le successive sono automatiche).
   const revalidator = useRevalidator();
+
+  // Mentre la corsa manuale gira si ricontrolla ogni pochi secondi, e a ogni
+  // giro si rileggono anche i numeri che dipendono dai dati appena scritti —
+  // profitto e prodotti che rendono. Senza, il merchant vedeva finire la
+  // sincronizzazione e la tabella dei prodotti restava quella di prima: la
+  // corsa aveva funzionato, ma non c'era modo di accorgersene senza ricaricare.
+  //
+  // Con una scadenza: se qualcosa si inceppa a monte il pulsante deve tornare
+  // premibile, non restare spento per sempre.
+  useEffect(() => {
+    if (manualStartedAt === null) return;
+
+    const done = recentRuns.some(
+      (run) => run.status !== 'running' && new Date(run.startedAt).getTime() >= manualStartedAt,
+    );
+    if (done || Date.now() - manualStartedAt > MANUAL_SYNC_TIMEOUT_MS) {
+      setManualStartedAt(null);
+      reloadForPeriod(range, comparison);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      revalidator.revalidate();
+      reloadForPeriod(range, comparison);
+    }, MANUAL_SYNC_POLL_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualStartedAt, recentRuns]);
 
   // La lingua durante la configurazione. Il selettore vive nella barra del
   // titolo perche' Impostazioni li' non e' raggiungibile — e la lingua e' la
@@ -1188,29 +1255,51 @@ export default function Dashboard() {
             cosa si sta guardando, e vanno letti prima di qualsiasi numero.
             Nella barra del titolo finivano a destra, dalla parte opposta a
             quella da cui si comincia a leggere. */}
-        {setupComplete && (
-          <InlineStack gap="200" blockAlign="center" wrap>
-            <DateRangePicker
-              value={range}
-              onChange={(next) => {
-                setRange(next);
-                reloadForPeriod(next, comparison);
-              }}
-            />
-            <ComparisonSelect
-              value={comparison}
-              range={range}
-              onChange={(next) => {
-                setComparison(next);
-                reloadForPeriod(range, next);
-              }}
-            />
+        {/* Sopra i filtri: dice che i numeri sotto sono incompleti, e va letto
+            prima di leggerli. Si chiude, e non ricompare finche' la pagina
+            resta aperta — ma torna alla prossima apertura, perche' finche' quei
+            costi mancano la notizia resta vera. */}
+        {setupComplete && soldWithoutCost > 0 && !costWarningHidden && (
+          <Banner
+            tone="warning"
+            onDismiss={() => setCostWarningHidden(true)}
+            action={{
+              content: t.dashboard.soldWithoutCost.fix,
+              url: '/products/issues?sold=1',
+            }}
+          >
+            {t.dashboard.soldWithoutCost.body(soldWithoutCost)}
+          </Banner>
+        )}
 
-            {/* A destra dei filtri, staccato: non sceglie cosa guardare come
-                loro, fa succedere qualcosa. Se il piano non lo prevede non
-                compare affatto — mostrarlo spento inviterebbe a premere una
-                cosa che non si puo' avere, e la card del piano dice gia' chi
-                ce l'ha. */}
+        {setupComplete && (
+          // Filtri a sinistra, comando a destra: i primi dicono cosa si sta
+          // guardando, il secondo fa succedere qualcosa. Messi vicini si
+          // premevano per sbaglio l'uno per l'altro; alle due estremita' della
+          // riga il pulsante cade sotto Impostazioni, dove stanno le cose che
+          // agiscono.
+          <InlineStack gap="200" blockAlign="center" align="space-between" wrap>
+            <InlineStack gap="200" blockAlign="center" wrap>
+              <DateRangePicker
+                value={range}
+                onChange={(next) => {
+                  setRange(next);
+                  reloadForPeriod(next, comparison);
+                }}
+              />
+              <ComparisonSelect
+                value={comparison}
+                range={range}
+                onChange={(next) => {
+                  setComparison(next);
+                  reloadForPeriod(range, next);
+                }}
+              />
+            </InlineStack>
+
+            {/* Se il piano non lo prevede non compare affatto: mostrarlo spento
+                inviterebbe a premere una cosa che non si puo' avere, e la card
+                del piano dice gia' chi ce l'ha. */}
             {manualSyncEnabled && (
               <Button
                 variant="primary"

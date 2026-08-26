@@ -83,7 +83,11 @@ function customersFeature(plan: PlanRow): PlanFeature {
 // Il livello di assistenza (`support_level`) decide una sola riga: se il push
 // manuale e' concesso. Le altre due che ne uscivano — email e chat — erano su
 // tutte le card o su nessuna, e una riga uguale ovunque non aiuta a scegliere.
-const PUSH_LEVELS = new Set(['priority', 'dedicated']);
+// Solo l'assistenza dedicata, cioe' Enterprise (e Lifetime, che assegniamo
+// noi). Prima bastava anche "priority": una sincronizzazione chiesta a mano
+// costa una lettura completa di Shopify ogni volta che si preme, e concederla a
+// meta' listino significa pagarla noi per tutti.
+const PUSH_LEVELS = new Set(['dedicated']);
 
 /**
  * Se questo piano concede il push manuale.

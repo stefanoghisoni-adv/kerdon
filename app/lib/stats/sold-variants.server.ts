@@ -104,3 +104,59 @@ export async function loadSoldVariantIds(
     return { ids: null, customerName: null };
   }
 }
+
+/**
+ * Quanti prodotti venduti non hanno un costo.
+ *
+ * Sono quelli che stanno falsando il profitto adesso: compaiono in ordini non
+ * annullati, e di loro non si sa quanto siano costati. Il profitto di quegli
+ * ordini e' calcolato sulle sole righe che un costo ce l'hanno, quindi risulta
+ * piu' alto del vero — e non c'e' niente a schermo che lo dica, se non lo si
+ * dice qui.
+ *
+ * La domanda si fa al database del merchant e non a Shopify: una passata sul
+ * catalogo intero, a ogni apertura della dashboard, costerebbe secondi. Questa
+ * e' una riga di conteggio.
+ *
+ * `products` contiene solo i prodotti idonei, cioe' quelli con un costo: una
+ * variante senza costo non ha nemmeno la riga. Per questo la join e' esterna e
+ * il conto prende sia le righe assenti sia quelle con il costo vuoto.
+ */
+export async function countSoldWithoutCost(shopDomain: string): Promise<number> {
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain },
+    select: {
+      id: true,
+      supabaseConfig: { select: { supabaseProjectRef: true, connectionVerifiedAt: true } },
+    },
+  });
+
+  const ref = shop?.supabaseConfig?.supabaseProjectRef;
+  if (!shop || !ref || !shop.supabaseConfig?.connectionVerifiedAt) return 0;
+
+  try {
+    const token = await getValidAccessToken(shop.id);
+    const rows = await runQueryRows<{ total: string | number | null }>(
+      token,
+      ref,
+      `SELECT COUNT(DISTINCT l.shopify_variant_id) AS total
+       FROM order_lines l
+       JOIN orders o ON o.shopify_order_id = l.shopify_order_id
+       LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
+       WHERE l.shopify_variant_id IS NOT NULL
+         AND o.cancelled_at IS NULL
+         AND p.cost_per_item IS NULL`,
+    );
+
+    const total = Number(rows[0]?.total ?? 0);
+    return Number.isFinite(total) && total > 0 ? total : 0;
+  } catch (error) {
+    // Zero e non un errore: l'avviso e' un di piu', e una dashboard che non si
+    // apre perche' non si e' potuto contare un avviso e' molto peggio.
+    console.warn(
+      '[dashboard] non ho potuto contare i prodotti venduti senza costo:',
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+    return 0;
+  }
+}

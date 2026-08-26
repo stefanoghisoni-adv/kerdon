@@ -420,6 +420,18 @@ export const it = {
         running: "Sincronizzazione",
       },
     },
+    soldWithoutCost: {
+      /**
+       * Non "mancano dei costi" ma "il profitto che stai leggendo e' piu' alto
+       * del vero": la prima e' un'informazione, la seconda dice perche'
+       * dovrebbe importare.
+       */
+      body: (count: number) =>
+        count === 1
+          ? "C\u2019\u00e8 1 prodotto incluso in ordini evasi e/o pagati (non annullati) che non ha un costo prodotto definito, e questo impedisce la definizione del profitto reale."
+          : `Ci sono ${count} prodotti che risultano essere inclusi in ordini evasi e/o pagati (non annullati) che non hanno un costo prodotto definito e questo impedisce la definizione del profitto reale.`,
+      fix: "Risolvi problemi",
+    },
     manualSync: {
       button: "Sincronizzazione manuale",
       running:
@@ -864,6 +876,8 @@ export const it = {
     deleteSafe:
       "Gli attuali cataloghi e shop non subiranno modifiche con l\u2019eliminazione.",
     deleteConfirm: "Elimina integrazione",
+    planRequired:
+      "I feed di catalogo non sono compresi nel tuo piano. Le integrazioni restano qui, pronte: per attivarle serve un piano che li preveda.",
     manage: "Gestisci",
     google: {
       name: "Google Merchant Center",

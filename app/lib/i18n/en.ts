@@ -382,6 +382,13 @@ export const en: typeof it = {
         running: "Sync",
       },
     },
+    soldWithoutCost: {
+      body: (count: number) =>
+        count === 1
+          ? "There is 1 product included in fulfilled and/or paid orders (not cancelled) with no product cost set, which makes real profit impossible to work out."
+          : `There are ${count} products included in fulfilled and/or paid orders (not cancelled) with no product cost set, which makes real profit impossible to work out.`,
+      fix: "Fix issues",
+    },
     manualSync: {
       button: "Manual sync",
       running:
@@ -766,6 +773,8 @@ export const en: typeof it = {
     deleteSafe:
       "Your existing catalogues and shops are not changed by this deletion.",
     deleteConfirm: "Delete integration",
+    planRequired:
+      "Catalogue feeds are not part of your plan. The integrations stay here, ready: activating them needs a plan that includes them.",
     manage: "Manage",
     google: {
       name: "Google Merchant Center",

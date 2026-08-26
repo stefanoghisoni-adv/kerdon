@@ -17,6 +17,7 @@ import {
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
+import { shopCanUseFeeds } from '~/lib/feeds/feed-access.server';
 import { deleteFeed, listFeeds, PLATFORMS, type Platform } from '~/lib/feeds/feed.server';
 import { useNavLoading } from '~/components/Dashboard/nav-loading';
 import { MetaLogo } from '~/components/Catalogs/MetaLogo';
@@ -36,6 +37,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json({
     meta: feeds.find((feed) => feed.platform === 'meta') ?? null,
     google: feeds.find((feed) => feed.platform === 'google') ?? null,
+    // I feed sono una funzione del piano. Le card restano visibili anche a chi
+    // non li ha — servono a sapere cosa si otterrebbe — ma i comandi che
+    // attivano no.
+    canUseFeeds: await shopCanUseFeeds(session.shop),
   });
 }
 
@@ -61,7 +66,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Catalogs() {
-  const { meta, google } = useLoaderData<typeof loader>();
+  const { meta, google, canUseFeeds } = useLoaderData<typeof loader>();
   const t = useT();
   const navigate = useNavigate();
   const fetcher = useFetcher<{ ok: boolean }>();
@@ -119,6 +124,10 @@ export default function Catalogs() {
           {t.catalogs.intro}
         </Text>
 
+        {/* Dice perche' i pulsanti sono spenti. Senza, un pulsante che non
+            risponde si legge come un guasto: il merchant riprova, poi scrive. */}
+        {!canUseFeeds && <Banner tone="info">{t.catalogs.planRequired}</Banner>}
+
         <InlineGrid columns={{ xs: 1, sm: 2, md: 3, lg: 4 }} gap="300">
           <PlatformCard
             logo={<MetaLogo />}
@@ -127,6 +136,9 @@ export default function Catalogs() {
             badge={badgeFor(status)}
             action={status === 'available' ? t.catalogs.install : t.catalogs.manage}
             primary={status === 'available'}
+            // Solo l'attivazione e' vietata: chi ha gia' un feed acceso deve
+            // poterlo gestire e spegnere anche dopo un cambio di piano.
+            canAct={canUseFeeds || status !== 'available'}
             path="/catalogs/meta"
             onAction={() => navigate('/catalogs/meta')}
             deleteLabel={t.catalogs.delete}
@@ -145,6 +157,7 @@ export default function Catalogs() {
             badge={badgeFor(googleStatus)}
             action={googleStatus === 'available' ? t.catalogs.install : t.catalogs.manage}
             primary={googleStatus === 'available'}
+            canAct={canUseFeeds || googleStatus !== 'available'}
             path="/catalogs/google"
             onAction={() => navigate('/catalogs/google')}
             deleteLabel={t.catalogs.delete}
@@ -199,6 +212,7 @@ function PlatformCard({
   path,
   onAction,
   deleteLabel,
+  canAct,
   canDelete,
   deleting,
   onDelete,
@@ -213,6 +227,8 @@ function PlatformCard({
   path: string;
   onAction: () => void;
   deleteLabel: string;
+  /** Il piano concede i feed: senza, il pulsante che attiva resta spento. */
+  canAct: boolean;
   canDelete: boolean;
   deleting: boolean;
   onDelete: () => void;
@@ -276,7 +292,7 @@ function PlatformCard({
                 onAction();
               }}
               loading={nav.loading}
-              disabled={working}
+              disabled={working || !canAct}
               fullWidth
             >
               {action}

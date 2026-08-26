@@ -10,7 +10,7 @@ import type { Dictionary } from '~/lib/i18n/context';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useLoaderData, useFetcher, useNavigate } from '@remix-run/react';
+import { useLoaderData, useFetcher, useNavigate, useNavigation } from '@remix-run/react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Page,
@@ -380,6 +380,17 @@ export default function ProblemProducts() {
   } = loaderData;
   const navigate = useNavigate();
 
+  // Il filtro premuto mostra il suo caricamento, e nel frattempo nessuno dei
+  // due si puo' premere. La lettura non e' istantanea — l'elenco si ricostruisce
+  // dai prodotti di Shopify — e senza un segno il primo clic sembra non aver
+  // fatto niente, cosi' si preme di nuovo.
+  const navigation = useNavigation();
+  const goingTo =
+    navigation.state === 'loading' ? navigation.location?.search ?? '' : null;
+  const switching = goingTo !== null;
+  const loadingAll = goingTo === '';
+  const loadingSold = goingTo != null && goingTo.includes('sold=1');
+
   // I filtri stanno nell'indirizzo e non in uno stato: cosi' l'elenco che si
   // sta guardando ha un link, e tornare indietro col browser riporta al filtro
   // di prima invece che alla pagina intera.
@@ -570,11 +581,22 @@ export default function ProblemProducts() {
         {!error && (
           <InlineStack gap="200" blockAlign="center" wrap>
             <ButtonGroup variant="segmented">
-              <Button pressed={!soldOnly} onClick={() => goTo({ sold: false })}>
+              <Button
+                pressed={!soldOnly}
+                loading={loadingAll}
+                disabled={switching}
+                onClick={() => goTo({ sold: false })}
+              >
                 {t.issues.filterAll}
               </Button>
+              {/* Premuto anche con l'etichetta del cliente: quella restringe
+                  questo filtro, non ne apre un terzo. Vederlo spento mentre si
+                  guarda un elenco di soli prodotti venduti faceva credere di
+                  stare su "Tutti". */}
               <Button
-                pressed={soldOnly && !customerId}
+                pressed={soldOnly}
+                loading={loadingSold}
+                disabled={switching}
                 onClick={() => goTo({ sold: true })}
               >
                 {t.issues.filterSold}
