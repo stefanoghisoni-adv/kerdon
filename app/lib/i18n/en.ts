@@ -749,8 +749,8 @@ export const en: typeof it = {
     install: "Activate",
     delete: "Delete integration",
     deleteTitle: "Delete the integration?",
-    deleteBody:
-      "The feed address is deleted and stops responding. Meta will no longer find the file and your products will stop updating. You can set the integration up again whenever you like: the address will be a new one and will need pasting in again.",
+    deleteBody: (platform: string) =>
+      `The feed address is deleted and stops responding. ${platform} will no longer find the file and your products will stop updating. You can set the integration up again whenever you like: the address will be a new one and will need pasting in again.`,
     deleteSafe:
       "Your existing catalogues and shops are not changed by this deletion.",
     deleteConfirm: "Delete integration",

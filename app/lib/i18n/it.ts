@@ -797,8 +797,13 @@ export const it = {
     install: "Attiva",
     delete: "Elimina integrazione",
     deleteTitle: "Eliminare l\u2019integrazione?",
-    deleteBody:
-      "L\u2019indirizzo del feed viene eliminato e smette di rispondere. Meta non trover\u00e0 pi\u00f9 il file e i prodotti non si aggiorneranno pi\u00f9. Puoi rifare l\u2019integrazione quando vuoi: l\u2019indirizzo sar\u00e0 nuovo e andr\u00e0 reincollato.",
+    /**
+     * Il nome della piattaforma dentro il testo, non "la piattaforma": ogni
+     * integrazione si stacca per conto suo, e chi sta eliminando quella di Meta
+     * deve leggere Meta \u2014 altrimenti si chiede se sta togliendo anche le altre.
+     */
+    deleteBody: (platform: string) =>
+      `L\u2019indirizzo del feed viene eliminato e smette di rispondere. ${platform} non trover\u00e0 pi\u00f9 il file e i prodotti non si aggiorneranno pi\u00f9. Puoi rifare l\u2019integrazione quando vuoi: l\u2019indirizzo sar\u00e0 nuovo e andr\u00e0 reincollato.`,
     deleteSafe:
       "Gli attuali cataloghi e shop non subiranno modifiche con l\u2019eliminazione.",
     deleteConfirm: "Elimina integrazione",

@@ -20,6 +20,7 @@ import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { deleteFeed, listFeeds, PLATFORMS, type Platform } from '~/lib/feeds/feed.server';
 import { useNavLoading } from '~/components/Dashboard/nav-loading';
 import { MetaLogo } from '~/components/Catalogs/MetaLogo';
+import { GoogleLogo } from '~/components/Catalogs/GoogleLogo';
 import { useT } from '~/lib/i18n/context';
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -34,6 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return json({
     meta: feeds.find((feed) => feed.platform === 'meta') ?? null,
+    google: feeds.find((feed) => feed.platform === 'google') ?? null,
   });
 }
 
@@ -59,7 +61,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Catalogs() {
-  const { meta } = useLoaderData<typeof loader>();
+  const { meta, google } = useLoaderData<typeof loader>();
   const t = useT();
   const navigate = useNavigate();
   const fetcher = useFetcher<{ ok: boolean }>();
@@ -80,7 +82,26 @@ export default function Catalogs() {
   // Tre stati e non due: un feed spento non e' un feed mai attivato — il
   // merchant l'ha gia' collegato una volta, e il pulsante deve dirgli che
   // ritrovera' tutto dov'era.
-  const status = !meta ? 'available' : meta.enabled ? 'active' : 'paused';
+  const statusOf = (feed: { enabled: boolean } | null) =>
+    !feed ? 'available' : feed.enabled ? 'active' : 'paused';
+  const status = statusOf(meta);
+  const googleStatus = statusOf(google);
+
+  // Il nome per esteso della piattaforma, per i testi che la nominano. Il modal
+  // di eliminazione ne parla al singolare: si stacca una integrazione per
+  // volta, e leggere il nome giusto e' quello che dice al merchant che le altre
+  // restano dove sono.
+  const platformName = (platform: Platform | null) =>
+    platform === 'google' ? t.catalogs.google.name : t.catalogs.meta.name;
+
+  const badgeFor = (state: string) =>
+    state === 'active' ? (
+      <Badge tone="success">{t.catalogs.active}</Badge>
+    ) : state === 'paused' ? (
+      <Badge tone="attention">{t.catalogs.paused}</Badge>
+    ) : (
+      <Badge>{t.catalogs.available}</Badge>
+    );
 
   return (
     <Page title={t.catalogs.title} backAction={{ url: '/' }}>
@@ -94,15 +115,7 @@ export default function Catalogs() {
             logo={<MetaLogo />}
             name={t.catalogs.meta.name}
             description={t.catalogs.meta.description}
-            badge={
-              status === 'active' ? (
-                <Badge tone="success">{t.catalogs.active}</Badge>
-              ) : status === 'paused' ? (
-                <Badge tone="attention">{t.catalogs.paused}</Badge>
-              ) : (
-                <Badge>{t.catalogs.available}</Badge>
-              )
-            }
+            badge={badgeFor(status)}
             action={status === 'available' ? t.catalogs.install : t.catalogs.manage}
             primary={status === 'available'}
             path="/catalogs/meta"
@@ -114,6 +127,21 @@ export default function Catalogs() {
             canDelete={status !== 'available'}
             deleting={deleting}
             onDelete={() => setConfirming('meta')}
+          />
+
+          <PlatformCard
+            logo={<GoogleLogo />}
+            name={t.catalogs.google.name}
+            description={t.catalogs.google.description}
+            badge={badgeFor(googleStatus)}
+            action={googleStatus === 'available' ? t.catalogs.install : t.catalogs.manage}
+            primary={googleStatus === 'available'}
+            path="/catalogs/google"
+            onAction={() => navigate('/catalogs/google')}
+            deleteLabel={t.catalogs.delete}
+            canDelete={googleStatus !== 'available'}
+            deleting={deleting}
+            onDelete={() => setConfirming('google')}
           />
         </InlineGrid>
       </BlockStack>
@@ -131,7 +159,7 @@ export default function Catalogs() {
       >
         <Modal.Section>
           <BlockStack gap="400">
-            <Text as="p">{t.catalogs.deleteBody}</Text>
+            <Text as="p">{t.catalogs.deleteBody(platformName(confirming))}</Text>
             {/* La domanda che si fa chiunque abbia campagne dinamiche accese:
                 togliendo l'integrazione ufficiale di Meta spariscono cataloghi e
                 shop, e le campagne restano senza riferimenti. Qui non succede, e
