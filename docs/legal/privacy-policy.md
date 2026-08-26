@@ -70,7 +70,11 @@ Records about **customers** in our own database are **counts only**. No customer
 | Vercel | Application hosting | European Union |
 | Upstash | Job queue used to run synchronisations | European Union |
 
-We do not sell data, do not share it with advertising or analytics platforms, and do not use it to train models.
+**We do not sell data.** Not yours, not your customers', to anyone, in any form. And we do not use it to train models.
+
+Beyond the providers listed above — who act on our instructions and not on their own behalf — we do not pass data to anyone else. In particular, **we** are not the ones sending it to advertising or analytics platforms.
+
+What the app does is put the data **in your own database** and make it available to you. From there it is your call: if you use it to build an audience on an advertising platform, you are the one sending it, you are the controller, and the legal basis is the consent your customer gave in your store. That is precisely why the app synchronises only those who gave that consent, and stops answering for those who withdraw it.
 
 ## 6. Security
 

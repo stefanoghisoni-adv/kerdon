@@ -32,8 +32,15 @@ prelevati dagli ordini, indirizzo IP, dati di navigazione.
 **Perché ti servono questi dati.** L'app copia il catalogo e i clienti del
 negozio nel database del merchant — un database suo, che lui controlla — perché
 possa calcolare il profitto per prodotto e per cliente e alimentare i propri
-strumenti di marketing. I dati non transitano verso di noi: restano fra Shopify
-e l'infrastruttura del merchant.
+strumenti di marketing.
+
+Non conserviamo dati dei clienti sui nostri sistemi: la sincronizzazione va da
+Shopify al database del merchant, e da noi resta soltanto il conteggio delle
+corse. I dati passano dalla nostra infrastruttura mentre vengono scritti, e
+possono passarci di nuovo quando il merchant li rilegge attraverso l'interfaccia
+di lettura — su sua istruzione, per finalità che decide lui. Non li vendiamo, e
+non siamo noi a inviarli a piattaforme pubblicitarie: quello lo fa il merchant,
+che di quel trattamento è titolare.
 
 **Rispetti le decisioni dei clienti di rifiutare la vendita dei propri dati?**
 → **Sì.** L'app sincronizza unicamente i clienti che hanno prestato il consenso

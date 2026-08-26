@@ -73,7 +73,11 @@ Quanto ai **clienti**, nel nostro database ci sono **soltanto conteggi**. Nessun
 | Vercel | Hosting dell'applicazione | Unione Europea |
 | Upstash | Coda dei lavori di sincronizzazione | Unione Europea |
 
-Non vendiamo dati, non li condividiamo con piattaforme pubblicitarie o di analisi e non li usiamo per addestrare modelli.
+**Non vendiamo dati.** Né i tuoi, né quelli dei tuoi clienti, a nessuno e in nessuna forma. E non li usiamo per addestrare modelli.
+
+Oltre ai fornitori elencati qui sopra — che agiscono su nostra istruzione e non per conto proprio — non trasmettiamo dati a nessun altro. In particolare **non siamo noi** a inviarli a piattaforme pubblicitarie o di analisi.
+
+Quello che l'app fa è portare i dati **nel tuo database** e metterli a tua disposizione. Da lì in poi decidi tu: se li usi per costruire un pubblico su una piattaforma pubblicitaria, quell'invio lo fai tu, il titolare del trattamento sei tu, e la base giuridica è il consenso che il cliente ha prestato nel tuo negozio. È esattamente la ragione per cui l'app sincronizza soltanto chi quel consenso l'ha dato, e smette di rispondere per chi lo revoca.
 
 ## 6. Sicurezza
 
