@@ -15,7 +15,7 @@ export const en: typeof it = {
     settings: "Settings",
     plan: "Plan",
     logs: "Logs",
-    productIssues: "Products not eligible",
+    productIssues: "Products",
     never: "Never",
     notSet: "—",
     active: "Active",
@@ -580,13 +580,13 @@ export const en: typeof it = {
   },
 
   issues: {
-    title: "Products not eligible",
+    title: "Products",
     filterAll: "All",
     filterSold: "Only products in orders",
     hiddenCount: (hidden: number) =>
       hidden === 1 ? "1 product hidden by the filter" : `${hidden} products hidden by the filter`,
     recheck: "Recheck and update",
-    listTitle: "Products not eligible",
+    listTitle: "Products",
     suspended:
       "The app is suspended for this store: you can read the list but not change costs until " +
       "it’s reactivated.",
