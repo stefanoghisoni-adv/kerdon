@@ -556,22 +556,12 @@ export default function ProblemProducts() {
       fullWidth
       title={t.issues.title}
       backAction={{ url: '/' }}
-      primaryAction={{
-        content: t.issues.recheck,
-        onAction: runRecheck,
-        loading: updating,
-        disabled: !hasChanges || blocked,
-      }}
     >
       <BlockStack gap="400">
         <ProductOverflowBanner disabled={blocked} />
 
         {error && <Banner tone="critical">{error}</Banner>}
 
-        {/* Si arriva qui da un cliente col profitto parziale, e l'elenco e' gia'
-            ristretto ai prodotti che lo riguardano. Va detto: un elenco piu'
-            corto del previsto, senza spiegazione, si legge come un elenco
-            incompleto. Il link toglie il filtro senza far cercare come. */}
         {/* I filtri, sopra la tabella e allineati a sinistra: si leggono prima
             dell'elenco che governano, non dopo.
 
@@ -579,8 +569,9 @@ export default function ProblemProducts() {
             perche' e' un'altra cosa: quelli scelgono FRA due elenchi, questa
             ne restringe uno. Togliendola resta il filtro che c'era sotto. */}
         {!error && (
-          <InlineStack gap="200" blockAlign="center" wrap>
-            <ButtonGroup variant="segmented">
+          <InlineStack gap="200" blockAlign="center" align="space-between" wrap>
+            <InlineStack gap="200" blockAlign="center" wrap>
+              <ButtonGroup variant="segmented">
               <Button
                 pressed={!soldOnly}
                 loading={loadingAll}
@@ -607,11 +598,26 @@ export default function ProblemProducts() {
               <Tag onRemove={() => goTo({ sold: true })}>{customerName}</Tag>
             )}
 
-            {soldOnly && hiddenByFilter > 0 && (
-              <Text as="span" tone="subdued" variant="bodySm">
-                {t.issues.hiddenCount(hiddenByFilter)}
-              </Text>
-            )}
+              {soldOnly && hiddenByFilter > 0 && (
+                <Text as="span" tone="subdued" variant="bodySm">
+                  {t.issues.hiddenCount(hiddenByFilter)}
+                </Text>
+              )}
+            </InlineStack>
+
+            {/* Il comando scende dalla barra del titolo alla riga dei filtri,
+                all'estremita' opposta: e' la stessa riga in cui si decide cosa
+                guardare, ed e' li' che si finisce di lavorare — dopo aver
+                compilato i costi, non prima di scegliere il filtro. In alto
+                restava lontano dal punto in cui il lavoro si conclude. */}
+            <Button
+              variant="primary"
+              onClick={runRecheck}
+              loading={updating}
+              disabled={!hasChanges || blocked}
+            >
+              {t.issues.recheck}
+            </Button>
           </InlineStack>
         )}
 

@@ -1,25 +1,21 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useLoaderData, useSearchParams } from '@remix-run/react';
-import { useCallback, useMemo, useState } from 'react';
+import { useLoaderData } from '@remix-run/react';
 import {
   Badge,
   Banner,
   BlockStack,
   Box,
-  Button,
   Card,
-  DatePicker,
   Icon,
   IndexTable,
   InlineStack,
   Link,
   Page,
-  Popover,
   Text,
   Tooltip,
 } from '@shopify/polaris';
-import { AlertCircleIcon, CalendarIcon, CheckCircleIcon } from '@shopify/polaris-icons';
+import { AlertCircleIcon, CheckCircleIcon } from '@shopify/polaris-icons';
 import { authenticate } from '~/shopify.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { loadCustomersReport } from '~/lib/customers/customers.server';
@@ -62,73 +58,16 @@ export default function Customers() {
   const { rows, currency, unavailable, range, adminBase } = useLoaderData<typeof loader>();
   const t = useT();
   const locale = useLocale();
-  const [, setSearchParams] = useSearchParams();
-
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [selected, setSelected] = useState({
-    start: new Date(`${range.from}T00:00:00Z`),
-    end: new Date(`${range.to}T00:00:00Z`),
-  });
-  const [{ month, year }, setMonth] = useState({
-    month: new Date(`${range.to}T00:00:00Z`).getUTCMonth(),
-    year: new Date(`${range.to}T00:00:00Z`).getUTCFullYear(),
-  });
-
-  const apply = useCallback(() => {
-    setPickerOpen(false);
-    setSearchParams({
-      from: selected.start.toISOString().slice(0, 10),
-      to: selected.end.toISOString().slice(0, 10),
-    });
-  }, [selected, setSearchParams]);
-
-  const rangeLabel = useMemo(() => {
-    const fmt = new Intl.DateTimeFormat(locale === 'it' ? 'it-IT' : 'en-US', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      timeZone: 'UTC',
-    });
-    return `${fmt.format(new Date(`${range.from}T00:00:00Z`))} – ${fmt.format(
-      new Date(`${range.to}T00:00:00Z`),
-    )}`;
-  }, [range, locale]);
-
   return (
     <Page
       fullWidth
       title={t.customers.title}
       backAction={{ url: '/' }}
-      secondaryActions={
-        <Popover
-          active={pickerOpen}
-          preferredAlignment="right"
-          onClose={() => setPickerOpen(false)}
-          activator={
-            <Button icon={CalendarIcon} disclosure onClick={() => setPickerOpen((o) => !o)}>
-              {rangeLabel}
-            </Button>
-          }
-        >
-          <Box padding="300" minWidth="320px">
-            <BlockStack gap="300">
-              <DatePicker
-                month={month}
-                year={year}
-                selected={selected}
-                onMonthChange={(m, y) => setMonth({ month: m, year: y })}
-                onChange={(next) => setSelected({ start: next.start, end: next.end })}
-                allowRange
-              />
-              <InlineStack align="end">
-                <Button variant="primary" onClick={apply}>
-                  {t.customers.apply}
-                </Button>
-              </InlineStack>
-            </BlockStack>
-          </Box>
-        </Popover>
-      }
+      // Niente selettore di date qui: il periodo si sceglie in dashboard, ed
+      // e' li' che si guarda l'andamento. Questa tabella risponde a un'altra
+      // domanda — chi sono i clienti e quanto rendono — e due selettori in due
+      // pagine, ognuno col suo periodo, facevano leggere numeri diversi
+      // credendoli lo stesso numero.
     >
       <BlockStack gap="400">
         <ProductOverflowBanner />

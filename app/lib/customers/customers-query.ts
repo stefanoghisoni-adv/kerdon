@@ -186,7 +186,13 @@ export function currentMonthRange(now: Date = new Date()): { from: string; to: s
  * Su tutti gli ordini e non sul mese: "nel tempo" e' la meta' della domanda, e
  * un mese solo su un negozio stagionale direbbe quasi il contrario del vero.
  */
-export function averagesSQL(): string {
+export function averagesSQL(range?: { from: string; to: string }): string {
+  // Il periodo restringe gli ordini, non i prodotti: quello che si guarda e'
+  // "quanto ho reso in questi giorni", e un ordine fuori dal periodo non deve
+  // entrare nel conto nemmeno con le sue righe.
+  const window = range
+    ? `AND o.created_at >= '${range.from}' AND o.created_at < ('${range.to}'::date + 1)`
+    : '';
   return `
 SELECT
   COUNT(DISTINCT o.shopify_order_id) AS orders,

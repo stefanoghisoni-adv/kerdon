@@ -308,7 +308,7 @@ export const en: typeof it = {
     },
     profitability: {
       title: "Value and profit",
-      subtitle: "Across all orders, not just this month.",
+      subtitle: "Across the orders in the selected period.",
       perOrder: "Per order",
       perCustomer: "Per customer",
       value: "Value",

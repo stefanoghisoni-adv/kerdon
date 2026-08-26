@@ -112,9 +112,10 @@ export async function loadShopProfit(
 /**
  * Le quattro medie del negozio: ordine e cliente, valore e profitto.
  *
- * Sta accanto al profitto del mese e non dentro: quello guarda un periodo,
- * queste guardano tutta la storia — e infilarle nella stessa risposta avrebbe
- * fatto credere che parlassero dello stesso arco di tempo.
+ * Guardano lo stesso periodo del profitto accanto. Prima guardavano tutta la
+ * storia, e in una schermata con un selettore di date in cima due archi di
+ * tempo diversi non si distinguono: si cambiava il periodo, meta' dei numeri si
+ * muoveva e l'altra meta' no.
  */
 export interface ShopAverages {
   /** Valore medio di un ordine. null senza ordini. */
@@ -148,7 +149,10 @@ interface AveragesRow {
   currency: string | null;
 }
 
-export async function loadShopAverages(shopDomain: string): Promise<ShopAverages> {
+export async function loadShopAverages(
+  shopDomain: string,
+  range?: { from: string; to: string },
+): Promise<ShopAverages> {
   const shop = await prisma.shop.findUnique({
     where: { shopDomain },
     include: { supabaseConfig: true },
@@ -174,7 +178,7 @@ export async function loadShopAverages(shopDomain: string): Promise<ShopAverages
   const [row] = await runQueryRows<AveragesRow>(
     token,
     shop.supabaseConfig.supabaseProjectRef,
-    averagesSQL(),
+    averagesSQL(range),
   );
 
   const orders = num(row?.orders);

@@ -47,7 +47,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         range,
         compare: comparisonRange(range, comparison),
       }),
-      loadShopAverages(session.shop),
+      loadShopAverages(session.shop, range),
     ]);
     return json({ ...profit, averages });
   } catch (e) {

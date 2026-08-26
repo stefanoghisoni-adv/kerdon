@@ -330,7 +330,7 @@ export const it = {
     /** Quanto di cio' che si incassa resta. */
     profitability: {
       title: "Valore e profitto",
-      subtitle: "Su tutti gli ordini, non solo su questo mese.",
+      subtitle: "Sugli ordini del periodo scelto.",
       perOrder: "Per ordine",
       perCustomer: "Per cliente",
       value: "Valore",
