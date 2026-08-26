@@ -69,6 +69,10 @@ export function ProductOverflowBanner({
   reason = 'products',
 }: ProductOverflowBannerProps) {
   const [confirming, setConfirming] = useState(false);
+  // Chiuso per questa visita, non per sempre: il tetto resta superato finche'
+  // non si cambia piano, quindi alla prossima apertura la notizia e' ancora
+  // vera. Ma va potuta togliere di mezzo per guardare il resto della pagina.
+  const [dismissed, setDismissed] = useState(false);
   const locale = useLocale();
   const t = useT();
   const fetcher = useFetcher<SubscribeResponse>();
@@ -130,6 +134,7 @@ export function ProductOverflowBanner({
   // Senza database collegato l'avviso non ha oggetto: nessun prodotto sta
   // restando fuori, perche' non ne sta entrando nessuno. Vale su tutte e tre le
   // pagine che lo mostrano.
+  if (dismissed) return null;
   if (reason === 'products' && limits.data?.connected === false) return null;
   if (!suggestedPlan || !currentPlan) return null;
   if (reason === 'products' && totalProducts == null) return null;
@@ -156,6 +161,7 @@ export function ProductOverflowBanner({
       <Banner
         tone={reason === 'feeds' ? 'info' : 'warning'}
         title={reason === 'feeds' ? undefined : t.overflow.title}
+        onDismiss={() => setDismissed(true)}
       >
         <BlockStack gap="300">
           <Text as="p">

@@ -175,6 +175,7 @@ export const en: typeof it = {
       create: "Create new database",
       newName: "Name of the new database",
       region: "Region",
+      regionSuggested: "Recommended",
       regionPlaceholder: "Select a region…",
       regionsLoading: "Loading regions…",
       creating: "Creating the database… (this can take 1-2 minutes)",

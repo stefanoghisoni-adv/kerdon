@@ -93,7 +93,11 @@ export function SupabaseProjectConnect({
   const [query, setQuery] = useState('');
 
   // Creazione di un nuovo progetto.
-  const regionsFetcher = useFetcher<{ regions: { id: string; name: string }[] }>();
+  const regionsFetcher = useFetcher<{
+    regions: { id: string; name: string }[];
+    /** La region consigliata per questo negozio, se il server ha saputo dirla. */
+    suggested?: string | null;
+  }>();
   const createFetcher = useFetcher<{
     ok?: boolean;
     ref?: string;
@@ -109,6 +113,11 @@ export function SupabaseProjectConnect({
   const [changing, setChanging] = useState(false);
   const [newName, setNewName] = useState('');
   const [region, setRegion] = useState('eu-central-1');
+  // La scelta e' stata fatta a mano: da quel momento il suggerimento non tocca
+  // piu' la tendina. Arriva dal server qualche istante dopo l'apertura del
+  // form, e senza questa memoria cambierebbe sotto le dita a chi nel frattempo
+  // ha gia' scelto la sua.
+  const [regionChosen, setRegionChosen] = useState(false);
   // Limiti di progetto del piano Supabase: alimenta il loader sul pulsante di
   // creazione e, a limite raggiunto, il banner + il pulsante verso il billing.
   const limitsFetcher = useFetcher<{
@@ -206,6 +215,19 @@ export function SupabaseProjectConnect({
     [regionsFetcher.data],
   );
 
+  // La region piu' vicina al negozio. La sceglie il server, che e' l'unico ad
+  // avere il fuso orario dichiarato da Shopify — l'unica idea di "dove" che
+  // l'app ha. Finche' l'elenco non arriva non c'e' suggerimento, e la tendina
+  // resta quella di prima.
+  const suggestedRegion = regionsFetcher.data?.suggested ?? null;
+
+  // Il suggerimento diventa la scelta di partenza: chi non ha preferenze si
+  // ritrova gia' sulla region giusta, e chi ne ha una la cambia come prima.
+  useEffect(() => {
+    if (!suggestedRegion || regionChosen) return;
+    setRegion(suggestedRegion);
+  }, [suggestedRegion, regionChosen]);
+
   // Rientro delle opzioni rispetto al titolo di sezione: le voci risultano
   // annidate sotto il continente invece che allineate a filo con esso.
   // Memoizzato perché OptionList confronta le sezioni in profondità.
@@ -215,10 +237,22 @@ export function SupabaseProjectConnect({
         title: group.title,
         options: group.options.map((option) => ({
           value: option.value,
-          label: <Box paddingInlineStart="300">{option.label}</Box>,
+          label: (
+            <Box paddingInlineStart="300">
+              <InlineStack gap="200" blockAlign="center" wrap={false}>
+                {option.label}
+                {/* Il badge dice perche' quella voce merita di essere guardata
+                    per prima. Resta un suggerimento: l'elenco le mostra tutte,
+                    e chi ha un obbligo di residenza dei dati sceglie la sua. */}
+                {option.value === suggestedRegion && (
+                  <Badge tone="info">{t.connect.database.regionSuggested}</Badge>
+                )}
+              </InlineStack>
+            </Box>
+          ),
         })),
       })),
-    [regionGroups],
+    [regionGroups, suggestedRegion, t],
   );
 
   const confirmSelection = useCallback(() => {
@@ -882,7 +916,10 @@ export function SupabaseProjectConnect({
                       sections={indentedRegionGroups}
                       selected={[region]}
                       onChange={(selected) => {
-                        if (selected[0]) setRegion(selected[0]);
+                        if (selected[0]) {
+                          setRegion(selected[0]);
+                          setRegionChosen(true);
+                        }
                         setRegionPopoverActive(false);
                       }}
                     />

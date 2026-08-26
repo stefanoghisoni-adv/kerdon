@@ -77,6 +77,9 @@ export function TrackingConflicts({
   // di aver premuto l'altro pulsante. Alla riapertura non ci saranno piu' —
   // quella dichiarazione e' registrata sul server e vale da li' in poi.
   const [declared, setDeclared] = useState<Record<string, true>>({});
+  // Chiuso per questa visita. Solo per la forma a banner: nel passo della
+  // configurazione non c'e' niente da chiudere, e' il passo stesso.
+  const [dismissed, setDismissed] = useState(false);
 
   /**
    * Le righe dichiarate in questa sessione, tenute in vita.
@@ -314,9 +317,18 @@ export function TrackingConflicts({
   );
 
   if (variant === 'plain') return content;
+  if (dismissed) return null;
 
   return (
-    <Banner tone="warning" title={t.tracking.conflicts.title}>
+    <Banner
+      tone="warning"
+      title={t.tracking.conflicts.title}
+      // Si chiude per questa visita e torna alla prossima: finche' quelle fonti
+      // sono attive la notizia resta vera, e un "non mostrare piu'" nasconderebbe
+      // una cosa che continua a esserlo. Ma leggerla una volta basta, e tenerla
+      // ferma in cima a ogni pagina la trasforma in arredamento.
+      onDismiss={() => setDismissed(true)}
+    >
       {content}
     </Banner>
   );

@@ -188,6 +188,7 @@ export const it = {
       create: "Crea nuovo database",
       newName: "Nome del nuovo database",
       region: "Region",
+      regionSuggested: "Consigliato",
       regionPlaceholder: "Seleziona una region…",
       regionsLoading: "Caricamento delle region…",
       creating: "Creazione del database in corso… (può richiedere 1-2 minuti)",
