@@ -60,7 +60,7 @@ export const it = {
     plan: "Piano",
     productsSync: "Sincronizzazione prodotti",
     customersSync: "Sincronizzazione clienti",
-    productFeeds: "Feed prodotti",
+    productFeeds: "Multi-feed prodotto",
     upgradeTo: (planName: string) => `Aggiorna a ${planName}`,
   },
 

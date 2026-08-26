@@ -19,7 +19,7 @@ import { prisma } from '~/db.server';
 import { getReadProxyTokenForDisplay } from '~/lib/read-proxy/token.server';
 import { AccountCard } from '~/components/Dashboard/AccountCard';
 import { DatabaseCard } from '~/components/Dashboard/DatabaseCard';
-import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-format';
+import { firstPlanWithCustomersSync, firstPlanWithFeeds } from '~/components/Dashboard/account-format';
 import { samePlanName } from '~/lib/billing/plan-name';
 import { syncIsActive } from '~/lib/sync/sync-active';
 import { loadSyncTiming } from '~/lib/sync/sync-timing.server';
@@ -61,6 +61,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     basePrices.map((row) => [row.planName, Number(row.priceMonthly)]),
   );
 
+  // Il listino come serve ai due suggerimenti di upgrade: nome, prezzo e cosa
+  // include. Costruito una volta e usato due, perche' e' la stessa domanda
+  // fatta su due funzioni diverse.
+  const planOptions = plans.map((p) => ({
+    planName: p.planName,
+    priceMonthly: monthlyOf.get(p.planName) ?? 0,
+    customersSyncEnabled: p.customersSyncEnabled,
+    productFeedsEnabled: p.productFeedsEnabled,
+  }));
+
   const connected = !!shop?.supabaseConfig?.connectionVerifiedAt;
   // La sincronizzazione e' automatica e sempre attiva: non c'e' niente da
   // accendere. Restano le due condizioni che non dipendono dal merchant — il
@@ -84,13 +94,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     customersUpgradePlan: customersIncluded
       ? null
       : firstPlanWithCustomersSync(
-          plans.map((p) => ({
-            planName: p.planName,
-            priceMonthly: monthlyOf.get(p.planName) ?? 0,
-            customersSyncEnabled: p.customersSyncEnabled,
-          })),
+          planOptions,
           shop?.currentPlan ?? null,
         ),
+    // Stessa domanda per i feed: qual e' il piano piu' economico che li ha.
+    feedsUpgradePlan: productFeedsIncluded
+      ? null
+      : firstPlanWithFeeds(planOptions, shop?.currentPlan ?? null),
   };
 
   // Cadenza del piano e ultima corsa completata: la sincronizzazione e' una
@@ -254,6 +264,7 @@ export default function SupabaseSettings() {
                   productsSyncActive={account.productsSyncActive}
                   customersSyncActive={account.customersSyncActive}
                   productFeedsActive={account.productFeedsActive}
+                  feedsUpgradePlan={account.feedsUpgradePlan}
                   customersUpgradePlan={account.customersUpgradePlan}
                   preferences={{
                     locale: root?.locale ?? 'en',

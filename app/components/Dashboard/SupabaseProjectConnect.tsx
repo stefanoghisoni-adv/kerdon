@@ -671,7 +671,12 @@ export function SupabaseProjectConnect({
         <Banner tone="critical">{projectsFetcher.data.error}</Banner>
       )}
 
-      {!projectsLoaded && (
+      {/* Non mentre si sta creando: li' l'elenco viene ricaricato in sottofondo
+          per accogliere il database nuovo, e "Caricamento database" comparso
+          sopra il modulo di creazione sembra parlare di quello che si sta
+          creando — come se stesse per finire, mentre invece deve ancora
+          cominciare. */}
+      {!projectsLoaded && !showCreate && (
         <InlineStack gap="200" blockAlign="center">
           <Spinner accessibilityLabel={t.connect.database.loading} size="small" />
           <Text as="span" tone="subdued">

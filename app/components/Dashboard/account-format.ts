@@ -38,6 +38,7 @@ export interface PlanOption {
   planName: string;
   priceMonthly: number;
   customersSyncEnabled: boolean;
+  productFeedsEnabled?: boolean;
 }
 
 /**
@@ -65,6 +66,31 @@ export function firstPlanWithCustomersSync(
     .sort((a, b) => a.priceMonthly - b.priceMonthly || a.planName.localeCompare(b.planName));
 
   return candidates[0]?.planName ?? null;
+}
+
+/**
+ * Piano piu' economico fra quelli che includono i feed di catalogo.
+ *
+ * Stessa regola dei clienti, e per la stessa ragione: una riga che dice "non
+ * ce l'hai" senza dire come averlo lascia il merchant a cercare da solo in che
+ * piano stia quella funzione.
+ */
+export function firstPlanWithFeeds(
+  plans: PlanOption[],
+  currentPlan: string | null | undefined,
+): string | null {
+  const current = (currentPlan ?? '').trim().toLowerCase();
+  return (
+    plans
+      .filter(
+        (p) =>
+          p.productFeedsEnabled &&
+          isSelectablePlan(p.planName) &&
+          p.planName.trim().toLowerCase() !== current,
+      )
+      .sort((a, b) => a.priceMonthly - b.priceMonthly || a.planName.localeCompare(b.planName))[0]
+      ?.planName ?? null
+  );
 }
 
 // Plan.maxSyncFrequencyHours e' un Float: sotto l'ora si legge meglio in minuti,

@@ -56,7 +56,7 @@ export const en: typeof it = {
     plan: "Plan",
     productsSync: "Product sync",
     customersSync: "Customer sync",
-    productFeeds: "Product feeds",
+    productFeeds: "Multi product feed",
     upgradeTo: (planName: string) => `Upgrade to ${planName}`,
   },
 

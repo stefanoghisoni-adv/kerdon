@@ -21,6 +21,8 @@ export interface AccountCardProps {
    * proporre: in quel caso la riga torna al badge.
    */
   customersUpgradePlan?: string | null;
+  /** Piano piu' economico che include i feed, per chi non li ha. */
+  feedsUpgradePlan?: string | null;
   /** La lingua in uso e come cambiarla: vive qui perche' e' un dato di account. */
   /** Lingua e valuta in uso, e quelle fra cui scegliere. */
   preferences: Preferences;
@@ -36,6 +38,7 @@ export function AccountCard({
   customersSyncActive,
   productFeedsActive,
   customersUpgradePlan,
+  feedsUpgradePlan,
   preferences,
   locales,
   currencies,
@@ -50,6 +53,9 @@ export function AccountCard({
   const plan = useNavLoading('/plan');
 
   const upgrade = !customersSyncActive && Boolean(customersUpgradePlan);
+  // Stessa regola dei clienti: dire "non ce l'hai" senza dire come averlo
+  // lascia il merchant a cercare da solo in che piano stia quella funzione.
+  const feedsUpgrade = !productFeedsActive && Boolean(feedsUpgradePlan);
 
   return (
     <Card>
@@ -87,7 +93,20 @@ export function AccountCard({
             legge con gli stessi due badge delle altre due. */}
         <MetricRow
           label={t.account.productFeeds}
-          badge={syncStatusBadge(productFeedsActive, t)}
+          action={
+            feedsUpgrade ? (
+              <Button
+                variant="plain"
+                url="/plan"
+                onClick={plan.start}
+                disabled={plan.loading}
+                loading={plan.loading}
+              >
+                {t.account.upgradeTo(planLabel(feedsUpgradePlan))}
+              </Button>
+            ) : undefined
+          }
+          badge={feedsUpgrade ? undefined : syncStatusBadge(productFeedsActive, t)}
         />
 
         {/* La lingua sta qui e non in una card sua: e' una preferenza
