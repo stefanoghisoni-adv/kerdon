@@ -190,8 +190,16 @@ export function averagesSQL(range?: { from: string; to: string }): string {
   // Il periodo restringe gli ordini, non i prodotti: quello che si guarda e'
   // "quanto ho reso in questi giorni", e un ordine fuori dal periodo non deve
   // entrare nel conto nemmeno con le sue righe.
+  //
+  // Le due date passano da `literalDate` come in ogni altra query di questo
+  // file: l'API che esegue queste istruzioni non accetta parametri, quindi la
+  // query si compone come testo e ogni valore che arriva da fuori va verificato
+  // PRIMA di entrarci. Interpolarle direttamente — come facevano queste due —
+  // significa che basta una stringa costruita ad arte al posto di una data per
+  // scrivere SQL dentro la nostra.
   const window = range
-    ? `AND o.created_at >= '${range.from}' AND o.created_at < ('${range.to}'::date + 1)`
+    ? `AND o.created_at >= ${literalDate(range.from)}` +
+      ` AND o.created_at < (${literalDate(range.to)}::date + 1)`
     : '';
   return `
 SELECT
@@ -215,5 +223,5 @@ SELECT
 FROM orders o
 JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
 LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
-WHERE o.cancelled_at IS NULL;`.trim();
+WHERE o.cancelled_at IS NULL ${window};`.trim();
 }

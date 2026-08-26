@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  averagesSQL,
   customersInRangeSQL,
   isCalendarDate,
   lifetimeProfitSQL,
@@ -130,5 +131,34 @@ describe('currentMonthRange', () => {
       from: '2026-08-01',
       to: '2026-08-24',
     });
+  });
+});
+
+describe('il periodo delle medie non entra nella query senza controllo', () => {
+  it('una data valida diventa un letterale fra apici', () => {
+    const sql = averagesSQL({ from: '2026-08-01', to: '2026-08-26' });
+    expect(sql).toContain("'2026-08-01'");
+    expect(sql).toContain("'2026-08-26'");
+  });
+
+  it('senza periodo la query non porta nessuna condizione sulle date', () => {
+    expect(averagesSQL()).not.toContain('created_at >=');
+  });
+
+  it('quello che non e una data non entra affatto', () => {
+    // L'API che esegue queste istruzioni non accetta parametri: la query si
+    // compone come testo, quindi un valore costruito ad arte scriverebbe SQL
+    // dentro la nostra. Si verifica prima, e chi non passa fa fallire la
+    // chiamata invece di finire dentro la stringa.
+    for (const bad of [
+      "2026-08-01' OR '1'='1",
+      "2026-08-01'; DROP TABLE orders; --",
+      '2026-13-01',
+      'ieri',
+      '',
+    ]) {
+      expect(() => averagesSQL({ from: bad, to: '2026-08-26' })).toThrow();
+      expect(() => averagesSQL({ from: '2026-08-01', to: bad })).toThrow();
+    }
   });
 });
