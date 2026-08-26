@@ -4,20 +4,34 @@ import { recentRunLabel, recentRunRows } from './recent-runs';
 import { it as itDict } from '~/lib/i18n/it';
 
 describe('recentRunLabel', () => {
-  it('dà un nome parlante a ogni tipo di corsa', () => {
-    expect(recentRunLabel('initial_bulk', itDict)).toBe('Sincronizzazione completa');
-    expect(recentRunLabel('periodic_check', itDict)).toBe('Aggiornamento periodico');
-    expect(recentRunLabel('webhook', itDict)).toBe('Aggiornamento da Shopify');
+  it('una corsa conclusa si chiama nello stesso modo, da qualunque parte sia partita', () => {
+    // Periodica o da webhook e' una distinzione nostra: per il merchant e'
+    // sempre la stessa cosa, i suoi dati che si allineano.
+    for (const type of ['initial_bulk', 'periodic_check', 'webhook', 'qualcosa_di_nuovo']) {
+      expect(recentRunLabel(type, 'completed', itDict)).toBe('Sincronizzazione completata');
+    }
+  });
+
+  it('"completata" solo quando lo e davvero', () => {
+    // Accanto c'e' il badge con lo stato: un titolo che promette successo sopra
+    // un badge rosso si legge come un errore dell'app.
+    expect(recentRunLabel('periodic_check', 'failed', itDict)).toBe('Sincronizzazione');
+    expect(recentRunLabel('periodic_check', 'running', itDict)).toBe('Sincronizzazione');
   });
 
   it('per le creazioni di tabella riusa la frase del registro', () => {
-    expect(recentRunLabel('table_create_customers', itDict)).toBe(
-      'Creazione tabella clienti riuscita',
-    );
+    for (const type of ['table_create_products', 'table_create_customers', 'table_create_both']) {
+      expect(recentRunLabel(type, 'completed', itDict)).toBe('Creazione tabelle nel database');
+    }
   });
 
-  it('un tipo mai visto non lascia la riga senza nome', () => {
-    expect(recentRunLabel('qualcosa_di_nuovo', itDict)).toBe('Sincronizzazione');
+  it('nessun titolo ripete l esito, che sta gia nel badge', () => {
+    const titoli = [
+      recentRunLabel('periodic_check', 'completed', itDict),
+      recentRunLabel('periodic_check', 'failed', itDict),
+      recentRunLabel('table_create_both', 'completed', itDict),
+    ];
+    for (const titolo of titoli) expect(titolo).not.toMatch(/riuscit/i);
   });
 });
 

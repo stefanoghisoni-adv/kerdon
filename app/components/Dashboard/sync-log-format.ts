@@ -1,15 +1,20 @@
 import type { Dictionary } from '~/lib/i18n/context';
 
-const TABLE_CREATION_KEYS: Record<string, keyof Dictionary['logs']['tableCreated']> = {
-  table_create_products: 'products',
-  table_create_customers: 'customers',
-  table_create_both: 'both',
-};
+const TABLE_CREATION_TYPES = new Set([
+  'table_create_products',
+  'table_create_customers',
+  'table_create_both',
+]);
 
-// null se il job non e' un evento di creazione tabelle.
+/**
+ * null se il job non e' un evento di creazione tabelle.
+ *
+ * Una frase sola per tutti e tre i tipi: quali tabelle siano nate lo dice il
+ * dettaglio, e tre varianti di titolo per la stessa notizia facevano sembrare
+ * diverse tre corse che diverse non sono.
+ */
 export function tableCreationMessage(jobType: string, t: Dictionary): string | null {
-  const key = TABLE_CREATION_KEYS[jobType];
-  return key ? t.logs.tableCreated[key] : null;
+  return TABLE_CREATION_TYPES.has(jobType) ? t.logs.tableCreated : null;
 }
 
 // Il modo in cui il database dice che una tabella non c'e': o non esiste

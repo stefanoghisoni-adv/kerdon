@@ -32,10 +32,12 @@ describe('hasSyncDetail', () => {
 });
 
 describe('tableCreationMessage', () => {
-  it('mappa i tre eventi di creazione', () => {
-    expect(tableCreationMessage('table_create_products', itDict)).toBe('Creazione tabella prodotti riuscita');
-    expect(tableCreationMessage('table_create_customers', itDict)).toBe('Creazione tabella clienti riuscita');
-    expect(tableCreationMessage('table_create_both', itDict)).toBe('Creazione tabelle prodotti e clienti riuscita');
+  it('una frase sola per tutti e tre gli eventi di creazione', () => {
+    // Quali tabelle siano nate lo dice il dettaglio: tre titoli diversi per la
+    // stessa notizia facevano sembrare diverse tre corse che diverse non sono.
+    for (const type of ['table_create_products', 'table_create_customers', 'table_create_both']) {
+      expect(tableCreationMessage(type, itDict)).toBe('Creazione tabelle nel database');
+    }
   });
   it('un job di sync non e un evento di creazione', () => {
     expect(tableCreationMessage('initial_bulk', itDict)).toBeNull();

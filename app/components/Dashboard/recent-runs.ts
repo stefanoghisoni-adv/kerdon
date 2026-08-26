@@ -26,31 +26,39 @@ export interface RecentRunRow {
 }
 
 /**
- * Come si chiama, per il merchant, ciascun tipo di corsa.
- *
  * Le richieste GDPR non compaiono: arrivano da Shopify, non sono
  * sincronizzazioni, e in un riquadro che si intitola "Ultime sincronizzazioni"
  * sarebbero fuori posto. Nel registro completo restano.
  */
-const RUN_LABELS: Record<string, keyof Dictionary['dashboard']['recentRuns']['run']> = {
-  initial_bulk: 'initial',
-  periodic_check: 'periodic',
-  webhook: 'webhook',
-};
-
 const HIDDEN_JOB_TYPES = new Set([
   'gdpr_data_request',
   'gdpr_redact',
   'gdpr_shop_redact',
 ]);
 
-export function recentRunLabel(jobType: string, t: Dictionary): string {
+/**
+ * Come si chiama, per il merchant, una corsa.
+ *
+ * Due titoli in tutto, piu' quello della creazione tabelle. Prima erano quattro
+ * — "Sincronizzazione completa", "Aggiornamento periodico", "Aggiornamento da
+ * Shopify", "Sincronizzazione" — e distinguevano cose che al merchant non
+ * servono: da Shopify arriva tutto, e che la corsa sia partita da un orario o
+ * da un webhook e' una faccenda nostra. Per lui e' sempre la stessa cosa, i
+ * suoi dati che si allineano.
+ *
+ * Il titolo dice "completata" solo quando lo e' davvero: accanto c'e' il badge
+ * con lo stato, e un titolo che promette successo sopra un badge rosso si legge
+ * come un errore dell'app.
+ */
+export function recentRunLabel(jobType: string, status: string, t: Dictionary): string {
   // Le creazioni di tabella hanno gia' una frase loro, la stessa del registro:
   // due modi di dire la stessa cosa nelle due pagine sarebbero uno di troppo.
   const creation = tableCreationMessage(jobType, t);
   if (creation) return creation;
-  const key = RUN_LABELS[jobType];
-  return key ? t.dashboard.recentRuns.run[key] : t.dashboard.recentRuns.run.generic;
+
+  return status === 'completed'
+    ? t.dashboard.recentRuns.run.done
+    : t.dashboard.recentRuns.run.running;
 }
 
 /**
@@ -70,7 +78,7 @@ export function recentRunRows(
     .map((run) => ({
       id: run.id,
       badge: syncStatusBadge(run.status, t),
-      label: recentRunLabel(run.jobType, t),
+      label: recentRunLabel(run.jobType, run.status, t),
       startedAt: run.startedAt,
     }));
 }

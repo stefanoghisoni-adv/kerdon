@@ -77,11 +77,7 @@ export const en: typeof it = {
     title: "Logs",
     nextSync: (countdown: string) => `Next sync in ${countdown}`,
     status: { completed: "Completed", failed: "Failed", running: "Running" },
-    tableCreated: {
-      products: "Products table created",
-      customers: "Customers table created",
-      both: "Products and customers tables created",
-    },
+    tableCreated: "Database tables created",
     unknownError: "Unknown error",
     missingCustomersTable: "No customers table was found",
     missingProductsTable: "No products table was found",
@@ -380,10 +376,8 @@ export const en: typeof it = {
       seeAll: "See all",
       empty: "No sync yet.",
       run: {
-        initial: "Full sync",
-        periodic: "Scheduled refresh",
-        webhook: "Update from Shopify",
-        generic: "Sync",
+        done: "Sync completed",
+        running: "Sync",
       },
     },
     chart: {

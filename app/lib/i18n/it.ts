@@ -82,11 +82,13 @@ export const it = {
     nextSync: (countdown: string) =>
       `Prossima sincronizzazione tra ${countdown}`,
     status: { completed: "Completata", failed: "Fallita", running: "In corso" },
-    tableCreated: {
-      products: "Creazione tabella prodotti riuscita",
-      customers: "Creazione tabella clienti riuscita",
-      both: "Creazione tabelle prodotti e clienti riuscita",
-    },
+    /**
+     * Una frase sola per tutte e tre le creazioni di tabella, e senza
+     * "riuscita": l'esito lo dice gia' il badge accanto, e ripeterlo a parole
+     * costringe a leggere due volte la stessa notizia. Quali tabelle siano
+     * state create si vede nel dettaglio, non nel titolo.
+     */
+    tableCreated: "Creazione tabelle nel database",
     unknownError: "Errore sconosciuto",
     missingCustomersTable: "Non è stata trovata nessuna tabella per i clienti",
     missingProductsTable: "Non è stata trovata nessuna tabella per i prodotti",
@@ -398,10 +400,15 @@ export const it = {
       seeAll: "Vedi tutte",
       empty: "Nessuna sincronizzazione ancora.",
       run: {
-        initial: "Sincronizzazione completa",
-        periodic: "Aggiornamento periodico",
-        webhook: "Aggiornamento da Shopify",
-        generic: "Sincronizzazione",
+        /** Corsa conclusa: e' l'unica dicitura di successo per una sync. */
+        done: "Sincronizzazione completata",
+        /**
+         * Corsa in corso o fallita. "Aggiornamento da Shopify" non diceva
+         * niente a nessuno — da Shopify arriva tutto — e distinguere periodica
+         * da webhook e' una distinzione nostra, non del merchant: per lui e'
+         * sempre la stessa cosa, i suoi dati che si allineano.
+         */
+        running: "Sincronizzazione",
       },
     },
     chart: {
