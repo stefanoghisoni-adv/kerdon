@@ -7,6 +7,7 @@ import {
   buildPlanCards,
   buildPlanFeatures,
   FEATURE_ORDER,
+  manualSyncAllowed,
   type PlanRow,
 } from './plan-catalog';
 
@@ -166,6 +167,41 @@ describe('buildPlanFeatures', () => {
           expect(label.length).toBeLessThanOrEqual(26);
         }
       }
+    }
+  });
+});
+
+describe('manualSyncAllowed', () => {
+  it('lo concedono i piani con assistenza prioritaria o dedicata', () => {
+    expect(manualSyncAllowed('priority')).toBe(true);
+    expect(manualSyncAllowed('dedicated')).toBe(true);
+  });
+
+  it('gli altri no', () => {
+    expect(manualSyncAllowed('community')).toBe(false);
+    expect(manualSyncAllowed('email')).toBe(false);
+  });
+
+  it('regge maiuscole e spazi: il livello lo scrive l owner a mano', () => {
+    expect(manualSyncAllowed('  Priority ')).toBe(true);
+  });
+
+  it('senza livello non si concede niente', () => {
+    // Un piano di cui non si conosce il livello non deve sbloccare una funzione:
+    // meglio un pulsante che non compare di uno che compare a chi non l'ha pagato.
+    expect(manualSyncAllowed(null)).toBe(false);
+    expect(manualSyncAllowed(undefined)).toBe(false);
+    expect(manualSyncAllowed('')).toBe(false);
+  });
+
+  it('dice la stessa cosa della riga nella card', () => {
+    // Due letture dello stesso insieme sono due posti dove sbagliare: qui si
+    // verifica che il pulsante e la riga del piano restino d'accordo.
+    for (const level of ['community', 'email', 'priority', 'dedicated']) {
+      const inCard = buildPlanFeatures(row({ supportLevel: level })).find(
+        (f) => f.key === 'push',
+      )!.included;
+      expect(manualSyncAllowed(level)).toBe(inCard);
     }
   });
 });

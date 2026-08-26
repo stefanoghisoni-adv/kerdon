@@ -85,6 +85,17 @@ function customersFeature(plan: PlanRow): PlanFeature {
 // tutte le card o su nessuna, e una riga uguale ovunque non aiuta a scegliere.
 const PUSH_LEVELS = new Set(['priority', 'dedicated']);
 
+/**
+ * Se questo piano concede il push manuale.
+ *
+ * Una funzione e non il solo insieme perche' la stessa domanda si fa in due
+ * posti — la riga della card e il pulsante in dashboard — e due letture dello
+ * stesso insieme sono due posti dove sbagliare il confronto.
+ */
+export function manualSyncAllowed(supportLevel: string | null | undefined): boolean {
+  return PUSH_LEVELS.has((supportLevel ?? '').trim().toLowerCase());
+}
+
 export function buildPlanFeatures(plan: PlanRow): PlanFeature[] {
   const level = (plan.supportLevel ?? '').trim().toLowerCase();
   // L'ordine va dal vincolo che si sente ogni giorno a quello che si nota una

@@ -420,6 +420,11 @@ export const it = {
         running: "Sincronizzazione",
       },
     },
+    manualSync: {
+      button: "Sincronizzazione manuale",
+      running:
+        "Stiamo eseguendo la sincronizzazione manuale dei dati di ordini, prodotti e clienti. Ci vorrà solo qualche istante…",
+    },
     chart: {
       title: "Copertura del catalogo",
       eligible: "Idonei",

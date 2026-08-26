@@ -382,6 +382,11 @@ export const en: typeof it = {
         running: "Sync",
       },
     },
+    manualSync: {
+      button: "Manual sync",
+      running:
+        "We are running a manual sync of your order, product and customer data. It will only take a moment…",
+    },
     chart: {
       title: "Syncable products",
       eligible: "Eligible",

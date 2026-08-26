@@ -68,7 +68,8 @@ import { useNavLoading } from '~/components/Dashboard/nav-loading';
 import { SyncCard } from '~/components/Dashboard/SyncCard';
 import { RecentRunsCard } from '~/components/Dashboard/RecentRunsCard';
 import { loadSyncRuns, syncTimingFrom } from '~/lib/sync/sync-timing.server';
-import { buildPlanCards } from '~/components/Billing/plan-catalog';
+import { buildPlanCards, manualSyncAllowed } from '~/components/Billing/plan-catalog';
+import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { canAccessPlanTab } from '~/components/Billing/plan-access';
 import type { SubscribeResponse } from '~/routes/billing.subscribe';
 import type { BillingInterval } from '~/lib/billing/partner-pricing';
@@ -284,6 +285,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       authorization,
       trackingAuthorization,
       planChanged,
+      // Il push manuale e' una funzione del piano: senza, il pulsante non
+      // compare affatto. Mostrarlo spento sarebbe peggio — inviterebbe a
+      // premere una cosa che non si puo' avere, e la card del piano dice gia'
+      // chi ce l'ha.
+      manualSyncEnabled: manualSyncAllowed(plan?.supportLevel),
       currentMaxProducts: plan?.maxProducts ?? null,
       previousMaxProducts: previousPlan?.maxProducts ?? null,
       // Serve a distinguere "clienti sbloccati adesso" da "clienti che c'erano
@@ -408,6 +414,23 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
+    // Due vie arrivano qui, e una sola delle due conferma il piano.
+    //
+    // Il pulsante "Sincronizzazione manuale" della dashboard chiede solo di
+    // sincronizzare. Se segnasse anche la conferma del piano, premerlo durante
+    // la configurazione chiuderebbe un passo che il merchant non ha fatto.
+    const form = await request.formData().catch(() => null);
+    const manualOnly = String(form?.get('intent') ?? '') === 'sync';
+
+    // Il push manuale e' una funzione del piano: chi non ce l'ha non deve
+    // poterlo far partire nemmeno riabilitando il pulsante nell'HTML.
+    if (manualOnly) {
+      const plan = await findPlanByName(shop.currentPlan);
+      if (!manualSyncAllowed(plan?.supportLevel)) {
+        return json({ error: 'plan_required' }, { status: 403 });
+      }
+    }
+
     // Sync in background durabile: mettiamo il job in coda (sopravvive a browser
     // chiuso / timeout) e inneschiamo SUBITO il drain in un'invocazione separata,
     // così la prima sync parte immediatamente senza attendere il cron. Se il
@@ -415,6 +438,8 @@ export async function action({ request }: ActionFunctionArgs) {
     // periodiche restano gestite dal cron secondo l'intervallo in Impostazioni.
     await enqueueManualSync(shop.id);
     triggerSyncDrain();
+
+    if (manualOnly) return json({ queued: true });
 
     // La sincronizzazione parte da qui solo per una via: il pulsante "Conferma
     // e sincronizza" del passo del piano. Quindi qui la conferma c'e' stata, e
@@ -482,7 +507,7 @@ interface ProductHistoryResponse {
 }
 
 export default function Dashboard() {
-  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, syncState, planChanged, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
+  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
     useLoaderData<typeof loader>();
   const blocked = authorization !== 'ENABLED';
   const t = useT();
@@ -561,6 +586,19 @@ export default function Dashboard() {
   // la card non deve sapere da dove arrivano le sue righe.
   const topFetcher = useFetcher<TopProductsReport>();
   const [topMetric, setTopMetric] = useState<Metric>('cm');
+
+  // La sincronizzazione chiesta a mano. Il fetcher e' suo e non condiviso con
+  // gli altri della pagina: un pulsante che si spegne perche' sta caricando il
+  // grafico accanto non si capisce.
+  const manualSyncFetcher = useFetcher<{ queued?: boolean; error?: string }>();
+  const manualSyncing = manualSyncFetcher.state !== 'idle';
+
+  const startManualSync = useCallback(() => {
+    const data = new FormData();
+    data.set('intent', 'sync');
+    manualSyncFetcher.submit(data, { method: 'post' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Il periodo vale per tutta la pagina: profitto e prodotti rispondono alla
   // stessa domanda su archi diversi solo se glielo si chiede, e due periodi
@@ -1167,8 +1205,29 @@ export default function Dashboard() {
                 reloadForPeriod(range, next);
               }}
             />
+
+            {/* A destra dei filtri, staccato: non sceglie cosa guardare come
+                loro, fa succedere qualcosa. Se il piano non lo prevede non
+                compare affatto — mostrarlo spento inviterebbe a premere una
+                cosa che non si puo' avere, e la card del piano dice gia' chi
+                ce l'ha. */}
+            {manualSyncEnabled && (
+              <Button
+                variant="primary"
+                loading={manualSyncing}
+                disabled={manualSyncing}
+                onClick={startManualSync}
+              >
+                {t.dashboard.manualSync.button}
+              </Button>
+            )}
           </InlineStack>
         )}
+
+        {/* Fra i filtri e le card, dove cade lo sguardo appena premuto il
+            pulsante. Non e' un avviso da chiudere: sparisce da solo quando la
+            corsa e' partita. */}
+        {manualSyncing && <Banner tone="info">{t.dashboard.manualSync.running}</Banner>}
 
         {/* Gli avvisi stanno in una pila propria, stretta: sono una lista da
             leggere in fila, non sezioni indipendenti. Tenendoli nel contenitore
