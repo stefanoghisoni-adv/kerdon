@@ -112,15 +112,18 @@
   min-height: 220px;
 }
 
-/* Card dei piani. Stesso problema della card del grafico: la Card di Polaris e'
-   fatta di due elementi annidati e nessuno dei due propaga l'altezza al
-   contenuto, quindi la colonna interna non arriva in fondo e il pulsante, che
-   si tiene giu' con margin-block-start:auto, si solleva. Rendendo flessibili
-   tutti e tre i livelli la CTA resta incollata al fondo su ogni card, anche
-   quando una ha una riga in piu' delle altre. */
+/* Card dei piani e delle piattaforme. Stesso problema della card del grafico:
+   la Card di Polaris e' fatta di due elementi annidati e nessuno dei due
+   propaga l'altezza al contenuto, quindi la colonna interna non arriva in fondo
+   e il pulsante, che si tiene giu' con margin-block-start:auto, si solleva.
+   Rendendo flessibili tutti e tre i livelli la CTA resta incollata al fondo su
+   ogni card, anche quando una ha una riga di descrizione in piu' delle altre. */
 .plan-card,
 .plan-card > *,
-.plan-card > * > * {
+.plan-card > * > *,
+.platform-card,
+.platform-card > *,
+.platform-card > * > * {
   display: flex;
   flex-direction: column;
   height: 100%;

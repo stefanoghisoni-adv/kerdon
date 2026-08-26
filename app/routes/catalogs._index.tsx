@@ -217,6 +217,10 @@ function PlatformCard({
   const working = nav.loading || deleting;
 
   return (
+    // La classe rende flessibili i livelli annidati della Card: senza, il
+    // "height: 100%" qui sotto si misura su un contenitore che non e' stato
+    // steso, e i pulsanti risalgono sotto le descrizioni corte.
+    <div className="platform-card">
     <Card padding="400">
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <BlockStack gap="300" inlineAlign="center">
@@ -250,7 +254,11 @@ function PlatformCard({
           </BlockStack>
         </BlockStack>
 
-        <Box paddingBlockStart="400">
+        {/* I due pulsanti in fondo, sempre: `auto` mangia lo spazio che avanza
+            sopra di loro, cosi' una card con la descrizione corta li tiene alla
+            stessa altezza di una con la descrizione lunga. Allineati fra le
+            card, si premono senza rimirare dove sono finiti. */}
+        <div style={{ marginBlockStart: 'auto', paddingBlockStart: 'var(--p-space-400)' }}>
           <BlockStack gap="200">
             <Button
               variant={primary ? 'primary' : undefined}
@@ -275,8 +283,9 @@ function PlatformCard({
               {deleteLabel}
             </Button>
           </BlockStack>
-        </Box>
+        </div>
       </div>
     </Card>
+    </div>
   );
 }
