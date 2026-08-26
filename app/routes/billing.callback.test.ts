@@ -12,9 +12,11 @@ const cancelAppSubscription = vi.fn();
 
 const admin = { graphql: vi.fn() };
 
+// La sessione offline, come la usa la rotta: nessun token embedded, perche' al
+// ritorno dal pagamento il browser e' di primo livello e non ne ha uno.
 vi.mock('~/shopify.server', () => ({
-  authenticate: {
-    admin: async () => ({ session: { shop: 'test-shop.myshopify.com' }, admin }),
+  unauthenticated: {
+    admin: async (shop: string) => ({ session: { shop }, admin }),
   },
 }));
 vi.mock('~/db.server', () => ({
@@ -253,5 +255,30 @@ describe('/billing/callback', () => {
     expect(updateShop).not.toHaveBeenCalled();
     expect(location(res).searchParams.get('billing')).toBe('ko');
     errorSpy.mockRestore();
+  });
+});
+
+describe('il ritorno dal pagamento non passa da una sessione embedded', () => {
+  it('senza un negozio valido nella querystring non si costruisce nessun client', async () => {
+    // Il negozio arriva dalla URL, quindi da fuori: quello che non e' un
+    // dominio myshopify non deve nemmeno arrivare a Shopify.
+    for (const shop of ['', 'non-un-dominio', 'evil.example.com', '../x.myshopify.com']) {
+      const res = await call(`?charge_id=1234&shop=${encodeURIComponent(shop)}`);
+      expect(location(res).searchParams.get('billing')).toBe('ko');
+    }
+  });
+
+  it('il negozio su cui si lavora e quello scritto nella querystring', async () => {
+    // Prima veniva dalla sessione embedded. Ora arriva dalla URL, ed e' il
+    // valore su cui si apre la sessione offline: se i due divergessero, si
+    // attiverebbe un piano sul negozio sbagliato.
+    getSubscription.mockResolvedValue(subscription());
+    updateShop.mockClear();
+
+    await call('?charge_id=1234&shop=test-shop.myshopify.com');
+
+    expect(findUniqueShop).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { shopDomain: 'test-shop.myshopify.com' } }),
+    );
   });
 });

@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { redirect } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
+import { unauthenticated } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import {
   cancelAppSubscription,
@@ -106,9 +106,40 @@ async function cancelPreviousSubscriptions(
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session, admin } = await authenticate.admin(request);
   const requestUrl = new URL(request.url);
-  const shopDomain = session.shop;
+
+  // Qui NON si chiede una sessione embedded, e non e' una dimenticanza.
+  //
+  // Shopify riporta il browser su questo indirizzo al PRIMO LIVELLO, fuori
+  // dall'iframe e senza alcun token di sessione addosso. Chiedendone uno, la
+  // libreria non trova niente e fa il suo rimbalzo: manda dentro l'admin su
+  // /auth/session-token con questo indirizzo in coda, aspettandosi che una
+  // pagina intermedia recuperi il token e ricarichi. Quel giro si inceppa e
+  // lascia il riquadro vuoto — senza contenuto e senza menu — dopo che il
+  // merchant ha appena pagato.
+  //
+  // Al posto suo si usa la sessione offline gia' salvata per quel negozio: e'
+  // la stessa che usano i webhook, e non ha bisogno di nessuno davanti allo
+  // schermo. Il negozio arriva dalla querystring, ma non e' una parola sulla
+  // fiducia: se non ha una sessione salvata non c'e' nessun client da
+  // costruire, e il solo effetto possibile e' rileggere da Shopify un
+  // abbonamento che deve risultare ATTIVO e portare il nome di un piano del
+  // listino. Un charge_id indovinato non attiva niente.
+  const shopDomain = (requestUrl.searchParams.get('shop') ?? '').trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/.test(shopDomain)) {
+    return backToPlan(requestUrl, shopDomain, 'ko');
+  }
+
+  let admin: BillingAdmin;
+  try {
+    ({ admin } = await unauthenticated.admin(shopDomain));
+  } catch (error) {
+    console.error(
+      `[billing.callback] nessuna sessione per ${shopDomain}:`,
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+    return backToPlan(requestUrl, shopDomain, 'ko');
+  }
 
   const chargeIdRaw = (requestUrl.searchParams.get('charge_id') ?? '').trim();
   if (!/^\d+$/.test(chargeIdRaw)) {

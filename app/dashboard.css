@@ -278,3 +278,16 @@
 .Polaris-Checkbox__Input:disabled ~ .Polaris-Checkbox__Backdrop {
   cursor: default;
 }
+
+/* La pila degli avvisi, quando avvisi non ce ne sono.
+
+   E' un contenitore che esiste sempre e si riempie solo all'occorrenza: senza
+   niente dentro resta alto zero, ma continua a contare come figlio della
+   colonna e si prende il suo spazio. Fra i filtri e le prime card si vedeva
+   uno stacco doppio senza che ci fosse niente in mezzo.
+
+   `:has()` guarda dentro: si nasconde il contenitore, non il figlio vuoto —
+   nascondere il figlio lascerebbe il contenitore a occupare lo stesso spazio. */
+.alerts-stack:has(> .Polaris-BlockStack:empty) {
+  display: none;
+}

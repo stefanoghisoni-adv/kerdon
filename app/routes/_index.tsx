@@ -1329,7 +1329,10 @@ export default function Dashboard() {
             stretta, sembrerebbe riguardare un'altra pagina. A configurazione
             conclusa la larghezza torna quella delle card, che sono cio' che
             gli avvisi accompagnano. */}
-        <div style={setupComplete ? undefined : SETUP_CONTAINER}>
+        {/* La classe serve a farla sparire quando dentro non c'e' niente: senza
+            avvisi restava un contenitore vuoto, e la distanza fra i filtri e le
+            card era quella di due spazi invece di uno. */}
+        <div className="alerts-stack" style={setupComplete ? undefined : SETUP_CONTAINER}>
         <BlockStack gap="200">
         {/* Esito della disconnessione: in cima perche' e' la risposta all'ultima
             azione del merchant, e il modal che l'ha avviata e' gia' sparito. */}
