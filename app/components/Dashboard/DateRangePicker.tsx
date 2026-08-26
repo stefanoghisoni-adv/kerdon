@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActionList,
-  Box,
   Button,
   DatePicker,
   Divider,
-  InlineStack,
+  Icon,
   Popover,
   TextField,
 } from '@shopify/polaris';
@@ -108,83 +107,80 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
         </Button>
       }
     >
-      <InlineStack wrap={false} blockAlign="stretch">
-        {/* I periodi con un nome. In una colonna che scorre da sola: sono
-            undici, e allungare il riquadro fino a contenerli tutti lo
-            farebbe uscire dallo schermo dentro l'admin. */}
-        <Box borderInlineEndWidth="025" borderColor="border" minWidth="180px">
-          <div className="range-picker__presets">
-            <Box padding="200">
-              {PRESET_GROUPS.map((group, index) => (
-                <Box key={index} paddingBlockStart={index === 0 ? '0' : '100'}>
-                  {index > 0 && (
-                    <Box paddingBlockEnd="100">
-                      <Divider />
-                    </Box>
-                  )}
-                  <ActionList
-                    actionRole="menuitem"
-                    items={group.map((preset) => ({
-                      content: t.dates.presets[preset],
-                      active: selectedPreset === preset,
-                      onAction: () => choosePreset(preset),
-                    }))}
-                  />
-                </Box>
-              ))}
-            </Box>
-          </div>
-        </Box>
+      {/* Tre zone, come nel selettore dell'analytics di Shopify: i periodi a
+          sinistra, i campi e il calendario al centro, i comandi in un piede
+          separato da una riga. Il piede staccato e' la differenza che si nota
+          di piu': prima Annulla e Applica galleggiavano sotto il calendario e
+          si confondevano con i giorni. */}
+      <div className="range-picker">
+        <div className="range-picker__sidebar">
+          {PRESET_GROUPS.map((group, index) => (
+            <div key={index}>
+              {index > 0 && <Divider />}
+              <ActionList
+                actionRole="menuitem"
+                items={group.map((preset) => ({
+                  content: t.dates.presets[preset],
+                  active: selectedPreset === preset,
+                  onAction: () => choosePreset(preset),
+                }))}
+              />
+            </div>
+          ))}
+        </div>
 
-        <Box padding="300" width="640px">
-          {/* Le due date anche scritte: chi le conosce gia' le batte a
-              macchina piu' in fretta di quanto sfogli i mesi. */}
-          <Box paddingBlockEnd="300">
-            <InlineStack gap="200" blockAlign="center" wrap={false}>
+        <div className="range-picker__main">
+          <div className="range-picker__body">
+            {/* Le due date anche scritte: chi le conosce gia' le batte a
+                macchina piu' in fretta di quanto sfogli i mesi. */}
+            <div className="range-picker__fields">
               <DateField
                 value={draft.from}
                 onCommit={(next) => setDraft(orderRange(next, draft.to))}
               />
-              <Box paddingInline="100">
-                <Button icon={ArrowRightIcon} variant="tertiary" disabled accessibilityLabel="" />
-              </Box>
+              {/* Una freccia, non un pulsante spento: indica il verso e basta,
+                  e un pulsante disabilitato invita a premerlo. */}
+              <span className="range-picker__arrow">
+                <Icon source={ArrowRightIcon} tone="subdued" />
+              </span>
               <DateField
                 value={draft.to}
                 onCommit={(next) => setDraft(orderRange(draft.from, next))}
               />
-            </InlineStack>
-          </Box>
+            </div>
 
-          <div className="range-picker__calendar">
-          <DatePicker
-            month={month}
-            year={year}
-            multiMonth
-            allowRange
-            // Lunedi': e' il primo giorno della settimana ovunque l'app parli,
-            // e una settimana che parte di domenica sposta di un giorno la
-            // lettura di "questa settimana".
-            weekStartsOn={1}
-            selected={{ start: fromIso(draft.from), end: fromIso(draft.to) }}
-            onMonthChange={(nextMonth, nextYear) =>
-              setVisible({ month: nextMonth, year: nextYear })
-            }
-            onChange={({ start, end }) =>
-              setDraft(orderRange(iso(toUtc(start)), iso(toUtc(end))))
-            }
-          />
+            <div className="range-picker__calendar">
+              <DatePicker
+                month={month}
+                year={year}
+                multiMonth
+                allowRange
+                // Lunedi': e' il primo giorno della settimana ovunque l'app
+                // parli, e una settimana che parte di domenica sposta di un
+                // giorno la lettura di "questa settimana".
+                weekStartsOn={1}
+                selected={{ start: fromIso(draft.from), end: fromIso(draft.to) }}
+                onMonthChange={(nextMonth, nextYear) =>
+                  setVisible({ month: nextMonth, year: nextYear })
+                }
+                onChange={({ start, end }) =>
+                  setDraft(orderRange(iso(toUtc(start)), iso(toUtc(end))))
+                }
+              />
+            </div>
           </div>
 
-          <Box paddingBlockStart="300">
-            <InlineStack align="end" gap="200">
+          <div className="range-picker__footer">
+            <Divider />
+            <div className="range-picker__actions">
               <Button onClick={() => setOpen(false)}>{t.common.cancel}</Button>
               <Button variant="primary" onClick={apply}>
                 {t.dates.apply}
               </Button>
-            </InlineStack>
-          </Box>
-        </Box>
-      </InlineStack>
+            </div>
+          </div>
+        </div>
+      </div>
     </Popover>
   );
 }
@@ -207,6 +203,7 @@ function toUtc(date: Date): Date {
  * farebbe saltare il calendario a mesi che nessuno ha chiesto.
  */
 function DateField({ value, onCommit }: { value: string; onCommit: (value: string) => void }) {
+  const t = useT();
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
 
@@ -234,6 +231,9 @@ function DateField({ value, onCommit }: { value: string; onCommit: (value: strin
         value={text}
         onChange={setText}
         onBlur={commit}
+        // Il formato atteso scritto nel campo: senza, chi lo trova vuoto non sa
+        // se si scrive 03/04 o 04/03, e lo scopre solo sbagliando.
+        placeholder={t.dates.placeholder}
         autoComplete="off"
         inputMode="numeric"
       />

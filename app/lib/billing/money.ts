@@ -75,17 +75,20 @@ function symbolFirst(parts: Intl.NumberFormatPart[]): string {
     return !(adjacent && part.type === 'literal' && part.value.trim() === '');
   });
 
-  const spaced = parts.some(
-    (part, i) =>
-      (i === index - 1 || i === index + 1) &&
-      part.type === 'literal' &&
-      part.value.trim() === '',
-  );
-
+  // Lo spazio c'e' sempre, qualunque cosa faccia la lingua di suo.
+  //
+  // Intl lo mette in italiano ("12,00 \u20AC") e non in inglese ("\u20AC12.00"). Tenendo
+  // quella differenza, cambiare lingua faceva avvicinare simbolo e cifra dentro
+  // le stesse card: lo stesso prezzo si vedeva muovere senza che nessun prezzo
+  // fosse cambiato, e in un listino quello e' un movimento che allarma.
+  //
+  // Uno spazio unificatore e non uno normale: fra simbolo e cifra non deve mai
+  // andare a capo.
+  //
   // Il segno meno resta attaccato alla cifra e non al simbolo: "-$5" e' un
   // prezzo negativo, "$-5" e' un errore di stampa.
   const body = rest.map((part) => part.value).join('');
-  return spaced ? `${symbol.value}\u00A0${body}` : `${symbol.value}${body}`;
+  return `${symbol.value}\u00A0${body}`;
 }
 
 /**

@@ -725,6 +725,7 @@ export const en: typeof it = {
   },
   dates: {
     apply: "Apply",
+    placeholder: "YYYY-MM-DD",
     presets: {
       today: "Today",
       yesterday: "Yesterday",

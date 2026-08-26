@@ -125,17 +125,37 @@ describe('formatMoney', () => {
   /** Intl separa simbolo e cifra con uno spazio unificatore, non con lo spazio. */
   const plain = (value: string) => value.replace(/\u00A0/g, ' ');
 
+  it('fra simbolo e cifra lo spazio c e sempre, in ogni lingua', () => {
+    // Intl lo mette in italiano e non in inglese. Tenendo quella differenza,
+    // cambiare lingua faceva avvicinare simbolo e cifra dentro le stesse card:
+    // lo stesso prezzo si vedeva muovere senza essere cambiato.
+    for (const [amount, currency, locale] of [
+      [29, 'EUR', 'it'],
+      [29, 'USD', 'en'],
+      [29, 'EUR', 'en'],
+      [29, 'USD', 'it'],
+    ] as const) {
+      expect(formatMoney(amount, currency, locale)).toMatch(/\u00A0/);
+    }
+  });
+
+  it('lo spazio non manda a capo la cifra', () => {
+    // Unificatore e non normale: "€" in fondo a una riga e "29" all'inizio
+    // della successiva sono due cose, non un prezzo.
+    expect(formatMoney(29, 'EUR', 'it')).not.toMatch(/ /);
+  });
+
   it('il simbolo sta davanti alla cifra in tutte le lingue', () => {
     // In italiano la convenzione tipografica vorrebbe "29 EUR" con il simbolo in
     // coda: in una card di numeri incolonnati la valuta letta per ultima arriva
     // troppo tardi, quando la cifra e' gia' stata letta nella valuta sbagliata.
     expect(plain(formatMoney(29, 'EUR', 'it'))).toBe('\u20AC 29');
-    expect(formatMoney(29, 'USD', 'en')).toBe('$29');
+    expect(plain(formatMoney(29, 'USD', 'en'))).toBe('$ 29');
   });
 
   it('i separatori restano quelli della lingua: cambia solo dove sta il simbolo', () => {
     expect(plain(formatMoney(12345.5, 'EUR', 'it'))).toBe('\u20AC 12.345,50');
-    expect(formatMoney(12345.5, 'USD', 'en')).toBe('$12,345.50');
+    expect(plain(formatMoney(12345.5, 'USD', 'en'))).toBe('$ 12,345.50');
   });
 
   it('i centesimi solo quando ci sono', () => {
@@ -144,7 +164,7 @@ describe('formatMoney', () => {
 
   it('il meno resta attaccato alla cifra, non al simbolo', () => {
     expect(plain(formatMoney(-5, 'EUR', 'it'))).toBe('\u20AC -5');
-    expect(formatMoney(-5, 'USD', 'en')).toBe('$-5');
+    expect(plain(formatMoney(-5, 'USD', 'en'))).toBe('$ -5');
   });
 
   it('gli importi esatti li scrivono sempre', () => {

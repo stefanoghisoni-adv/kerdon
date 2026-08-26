@@ -129,6 +129,83 @@
   height: 100%;
 }
 
+/* Il selettore del periodo.
+
+   Tre zone: i periodi a sinistra, i campi e il calendario al centro, i comandi
+   in un piede separato da una riga. Larghezza fissa perche' il contenuto e'
+   fisso — due mesi affiancati e una colonna di undici voci — e lasciarla
+   decidere al contenuto faceva variare il riquadro da una apertura all'altra.
+
+   Il piede staccato e' la differenza che si nota di piu': prima Annulla e
+   Applica galleggiavano sotto il calendario e si confondevano con i giorni. */
+.range-picker {
+  display: flex;
+  align-items: stretch;
+  width: 700px;
+  max-width: 90vw;
+}
+
+.range-picker__sidebar {
+  flex: 0 0 auto;
+  width: 180px;
+  padding: var(--p-space-200);
+  border-inline-end: var(--p-border-width-025) solid var(--p-color-border);
+  /* Gli undici periodi ci stanno tutti: una colonna che scorre nasconde
+     proprio le voci in cima, che sono le piu' usate. */
+  overflow: visible;
+}
+
+/* Righe piu' compatte della misura nativa di Polaris, che e' pensata per un
+   menu con poche voci. */
+.range-picker__sidebar .Polaris-ActionList__Item {
+  min-height: auto;
+  padding-block: 0.375rem;
+}
+
+.range-picker__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.range-picker__body {
+  padding: var(--p-space-300);
+}
+
+/* I due campi e la freccia su una riga sola: la freccia non si stringe, i
+   campi si dividono quello che resta in parti uguali. */
+.range-picker__fields {
+  display: flex;
+  align-items: center;
+  gap: var(--p-space-200);
+  padding-block-end: var(--p-space-300);
+}
+
+.range-picker__fields > *:not(.range-picker__arrow) {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.range-picker__arrow {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+/* Il piede resta in fondo anche quando il calendario e' piu' corto del solito
+   — un mese con cinque righe invece di sei. */
+.range-picker__footer {
+  margin-block-start: auto;
+}
+
+.range-picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--p-space-200);
+  padding: var(--p-space-300);
+}
+
 /* Il calendario del periodo.
 
    Due misure da imporre a Polaris, che da solo non le ha.
@@ -157,14 +234,6 @@
 
 .range-picker__calendar .Polaris-DatePicker__Title {
   font-size: 0.875rem;
-}
-
-/* I periodi con un nome: righe piu' compatte, cosi' gli undici stanno tutti
-   senza scorrimento — una colonna che scorre nasconde proprio le voci in
-   cima, che sono le piu' usate. */
-.range-picker__presets .Polaris-ActionList__Item {
-  min-height: auto;
-  padding-block: 0.375rem;
 }
 
 /* La tendina che sceglie il dato di un campo di Google.

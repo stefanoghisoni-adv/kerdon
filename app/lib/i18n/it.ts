@@ -812,6 +812,7 @@ export const it = {
   },
   dates: {
     apply: "Applica",
+    placeholder: "AAAA-MM-GG",
     presets: {
       today: "Oggi",
       yesterday: "Ieri",
