@@ -1,4 +1,9 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
+import {
+  externalIdCookie,
+  newExternalId,
+  readExternalId,
+} from '~/lib/tracking/external-id';
 import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
 import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
 import {
@@ -131,6 +136,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       outcome: result.outcome,
       status: result.response.status,
     });
+  }
+
+  // L'identificativo del browser, emesso qui perche' questo e' l'unico punto
+  // dell'app che la vetrina chiama a ogni pagina. Si crea solo se non c'e'
+  // gia': un identificativo che cambia a ogni visita non lega niente a niente,
+  // ed e' esattamente il contrario di cio' che serve.
+  //
+  // Non dipende dall'esito della lettura: anche una richiesta rifiutata viene
+  // da un browser che vale la pena riconoscere alla prossima.
+  if (!readExternalId(request.headers.get('Cookie'))) {
+    result.response.headers.append('Set-Cookie', externalIdCookie(newExternalId()));
   }
 
   return result.response;

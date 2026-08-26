@@ -14,6 +14,7 @@ import {
   Page,
   Text,
 } from '@shopify/polaris';
+import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
@@ -120,6 +121,12 @@ export default function Catalogs() {
   return (
     <Page title={t.catalogs.title} backAction={{ url: '/' }}>
       <BlockStack gap="500">
+        {/* Il cambio di piano si legge da ogni tab, non solo da dove e' stato
+            fatto: chi lo cambia e va dritto qui deve sapere lo stesso cosa e'
+            cambiato. Il contenuto lo calcola la dashboard e lo lascia nel
+            sessionStorage; se non c'e' niente da dire, questo non rende nulla. */}
+        <PlanChangeBanner />
+
         <Text as="p" tone="subdued">
           {t.catalogs.intro}
         </Text>

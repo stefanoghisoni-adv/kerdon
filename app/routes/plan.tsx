@@ -19,6 +19,7 @@ import {
   Banner,
 } from '@shopify/polaris';
 import { SettingsIcon } from '@shopify/polaris-icons';
+import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { buildPlanCards, type PlanCard } from '~/components/Billing/plan-catalog';
@@ -230,6 +231,12 @@ export default function Plan() {
           diverse. */}
       <div style={SETUP_CONTAINER}>
       <BlockStack gap="500">
+        {/* Il cambio di piano si legge da ogni tab, non solo da dove e' stato
+            fatto: chi lo cambia e va dritto qui deve sapere lo stesso cosa e'
+            cambiato. Il contenuto lo calcola la dashboard e lo lascia nel
+            sessionStorage; se non c'e' niente da dire, questo non rende nulla. */}
+        <PlanChangeBanner />
+
         {/* Piano assegnato da noi: le card restano visibili ma spente, e questo
             dice perche'. Sopra tutto il resto, o si legge dopo aver gia'
             provato a cliccare. */}

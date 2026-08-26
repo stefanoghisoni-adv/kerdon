@@ -162,3 +162,15 @@ describe('il periodo delle medie non entra nella query senza controllo', () => {
     }
   });
 });
+
+describe('la colonna della data e sempre la stessa in tutte le query', () => {
+  it('gli ordini si filtrano su placed_at, non su created_at', () => {
+    // `orders` non ha una colonna `created_at`: usarla non da' zero risultati,
+    // fa fallire la query — e la card mostra "—" come se non ci fossero ordini.
+    const range = { from: '2026-08-01', to: '2026-08-26' };
+    for (const sql of [averagesSQL(range), shopProfitSQL(range)]) {
+      expect(sql).toContain('o.placed_at');
+      expect(sql).not.toContain('o.created_at');
+    }
+  });
+});

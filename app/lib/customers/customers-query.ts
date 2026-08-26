@@ -198,8 +198,8 @@ export function averagesSQL(range?: { from: string; to: string }): string {
   // significa che basta una stringa costruita ad arte al posto di una data per
   // scrivere SQL dentro la nostra.
   const window = range
-    ? `AND o.created_at >= ${literalDate(range.from)}` +
-      ` AND o.created_at < (${literalDate(range.to)}::date + 1)`
+    ? `AND o.placed_at >= ${literalDate(range.from)}::date` +
+      ` AND o.placed_at < (${literalDate(range.to)}::date + INTERVAL '1 day')`
     : '';
   return `
 SELECT

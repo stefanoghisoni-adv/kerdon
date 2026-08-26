@@ -300,7 +300,7 @@ export const en: typeof it = {
       unavailable: "Profit becomes available after the first order sync.",
     },
     margin: {
-      title: "Margin per order",
+      title: "Average margin per order",
       detail: (profit: string, value: string) =>
         `${profit} of ${value} per order`,
       hint: "What’s left of an average order after the cost of goods.",
@@ -701,6 +701,14 @@ export const en: typeof it = {
       }: the figure is synced but stays partial until you fill it in.`,
     allGood: "This customer's profit is worked out from complete costs.",
     fixIssues: "Fix issues",
+    planRequired:
+      " and turn on customer sync: without it there is nothing to show here",
+    loadFailed:
+      "Your customers could not be read from your database. Try again shortly.",
+    filterAll: "All",
+    filterIssues: "Need attention",
+    hiddenCount: (n: number) =>
+      n === 1 ? "1 customer with no issues hidden" : `${n} customers with no issues hidden`,
     notConnected: "Connect a database to see profit per customer.",
     noAccess:
       "Calculating profit needs access to your store’s orders. Reopen the app to grant it.",

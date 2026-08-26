@@ -1,4 +1,4 @@
-import { Card, BlockStack, Text, Button, Box, Link, Tooltip } from '@shopify/polaris';
+import { Card, BlockStack, Text, Box, Link, Tooltip } from '@shopify/polaris';
 import { MetricRow } from './MetricRow';
 import { useNavLoading } from './nav-loading';
 import { useT } from '~/lib/i18n/context';
@@ -83,18 +83,6 @@ export function CustomersCard({
                 </Link>
                 {t.dashboard.customers.upsell}
               </Text>
-            </Box>
-            {/* Un filo piu' in basso: stacca il pulsante dal testo sopra. */}
-            <Box paddingBlockStart="200">
-              <Button
-                variant="primary"
-                url="/plan"
-                onClick={plan.start}
-                disabled={plan.loading}
-                loading={plan.loading}
-              >
-                {t.dashboard.customers.upgrade}
-              </Button>
             </Box>
           </BlockStack>
         )}

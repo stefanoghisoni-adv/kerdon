@@ -321,7 +321,7 @@ export const it = {
     },
     /** Quanto resta di un ordine medio. */
     margin: {
-      title: "Margine per ordine",
+      title: "Margine medio per ordine",
       detail: (profit: string, value: string) =>
         `${profit} su ${value} per ordine`,
       hint: "Quanto resta di un ordine medio dopo il costo dei prodotti.",
@@ -792,6 +792,14 @@ export const it = {
       } il costo: il valore è sincronizzato ma resta parziale finché non lo compili.`,
     allGood: "Il profitto di questo cliente è calcolato su costi completi.",
     fixIssues: "Risolvi problemi",
+    planRequired:
+      " e attiva la sincronizzazione dei clienti: senza, qui non c\u2019\u00e8 niente da mostrare",
+    loadFailed:
+      "Non \u00e8 stato possibile leggere i clienti dal tuo database. Riprova fra poco.",
+    filterAll: "Tutti",
+    filterIssues: "Richiedono un intervento",
+    hiddenCount: (n: number) =>
+      n === 1 ? "1 cliente senza problemi nascosto" : `${n} clienti senza problemi nascosti`,
     notConnected: "Collega un database per vedere i profitti per cliente.",
     noAccess:
       "Per calcolare i profitti serve l’accesso agli ordini del negozio. Riapri l’app per concederlo.",

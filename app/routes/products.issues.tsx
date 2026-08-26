@@ -29,6 +29,7 @@ import {
   BlockStack,
   Pagination,
 } from '@shopify/polaris';
+import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { isAuthorized } from '~/utils/authorization.server';
@@ -558,6 +559,12 @@ export default function ProblemProducts() {
       backAction={{ url: '/' }}
     >
       <BlockStack gap="400">
+        {/* Il cambio di piano si legge da ogni tab, non solo da dove e' stato
+            fatto: chi lo cambia e va dritto qui deve sapere lo stesso cosa e'
+            cambiato. Il contenuto lo calcola la dashboard e lo lascia nel
+            sessionStorage; se non c'e' niente da dire, questo non rende nulla. */}
+        <PlanChangeBanner />
+
         <ProductOverflowBanner disabled={blocked} />
 
         {error && <Banner tone="critical">{error}</Banner>}

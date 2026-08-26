@@ -1255,23 +1255,6 @@ export default function Dashboard() {
             cosa si sta guardando, e vanno letti prima di qualsiasi numero.
             Nella barra del titolo finivano a destra, dalla parte opposta a
             quella da cui si comincia a leggere. */}
-        {/* Sopra i filtri: dice che i numeri sotto sono incompleti, e va letto
-            prima di leggerli. Si chiude, e non ricompare finche' la pagina
-            resta aperta — ma torna alla prossima apertura, perche' finche' quei
-            costi mancano la notizia resta vera. */}
-        {setupComplete && soldWithoutCost > 0 && !costWarningHidden && (
-          <Banner
-            tone="warning"
-            onDismiss={() => setCostWarningHidden(true)}
-            action={{
-              content: t.dashboard.soldWithoutCost.fix,
-              url: '/products/issues?sold=1',
-            }}
-          >
-            {t.dashboard.soldWithoutCost.body(soldWithoutCost)}
-          </Banner>
-        )}
-
         {setupComplete && (
           // Filtri a sinistra, comando a destra: i primi dicono cosa si sta
           // guardando, il secondo fa succedere qualcosa. Messi vicini si
@@ -1379,21 +1362,27 @@ export default function Dashboard() {
           </Banner>
         )}
 
-        {/* Chi altro sta gia' inviando eventi. Non compare se non c'e' niente
-            da segnalare — e durante la configurazione non compare affatto:
-            li' e' il terzo passo, non un avviso in cima. La stessa cosa detta
-            in due punti della stessa pagina si legge come due problemi. */}
-        {setupComplete && (
-          <TrackingConflicts
-            findings={conflictsFetcher.data?.findings ?? []}
-            adminBase={conflictsFetcher.data?.adminBase}
-            themeId={conflictsFetcher.data?.themeId}
-          />
-        )}
-
         {/* Tabelle da allineare: non si chiude finche' l'aggiornamento non e'
             andato a buon fine. Di norma succede da solo e il banner nemmeno si
             vede. */}
+
+        {/* I quattro avvisi, dal piu' vincolante al piu' informativo.
+
+            Il tetto prodotti viene per primo perche' e' l'unico che sta gia'
+            lasciando fuori dei dati adesso. Poi il cambio di piano, che spiega
+            perche' quel tetto e' quello. Poi le altre fonti di eventi, che
+            riguardano il negozio e non l'app. Ultimo il conto dei costi
+            mancanti: dice che un numero e' impreciso, non che qualcosa non
+            funziona. */}
+        {/* Catalogo piu' grande del tetto: dice quanti restano fuori e propone
+            il piano che li contiene tutti. Non prima che un piano sia stato
+            scelto e confermato: fino a quel momento il tetto e' quello del
+            piano gratuito assegnato all'installazione, che nessuno ha voluto —
+            avvisare che non basta sarebbe rimproverare una scelta mai fatta, e
+            per giunta accanto al passo che quella scelta la sta chiedendo, dove
+            il badge "Consigliato" dice gia' la stessa cosa meglio. */}
+        {planConfirmed && <ProductOverflowBanner disabled={blocked} />}
+
 
         {/* L'avviso sul cambio di piano parla di una configurazione che gira
             gia': confronta il piano di adesso con quello dell'ultima
@@ -1436,14 +1425,36 @@ export default function Dashboard() {
           </Banner>
         )}
 
-        {/* Catalogo piu' grande del tetto: dice quanti restano fuori e propone
-            il piano che li contiene tutti. Non prima che un piano sia stato
-            scelto e confermato: fino a quel momento il tetto e' quello del
-            piano gratuito assegnato all'installazione, che nessuno ha voluto —
-            avvisare che non basta sarebbe rimproverare una scelta mai fatta, e
-            per giunta accanto al passo che quella scelta la sta chiedendo, dove
-            il badge "Consigliato" dice gia' la stessa cosa meglio. */}
-        {planConfirmed && <ProductOverflowBanner disabled={blocked} />}
+        {/* Chi altro sta gia' inviando eventi. Non compare se non c'e' niente
+            da segnalare — e durante la configurazione non compare affatto:
+            li' e' il terzo passo, non un avviso in cima. La stessa cosa detta
+            in due punti della stessa pagina si legge come due problemi. */}
+        {setupComplete && (
+          <TrackingConflicts
+            findings={conflictsFetcher.data?.findings ?? []}
+            adminBase={conflictsFetcher.data?.adminBase}
+            themeId={conflictsFetcher.data?.themeId}
+          />
+        )}
+
+
+        {/* Sopra i filtri: dice che i numeri sotto sono incompleti, e va letto
+            prima di leggerli. Si chiude, e non ricompare finche' la pagina
+            resta aperta — ma torna alla prossima apertura, perche' finche' quei
+            costi mancano la notizia resta vera. */}
+        {setupComplete && soldWithoutCost > 0 && !costWarningHidden && (
+          <Banner
+            tone="warning"
+            onDismiss={() => setCostWarningHidden(true)}
+            action={{
+              content: t.dashboard.soldWithoutCost.fix,
+              url: '/products/issues?sold=1',
+            }}
+          >
+            {t.dashboard.soldWithoutCost.body(soldWithoutCost)}
+          </Banner>
+        )}
+
 
         </BlockStack>
         </div>

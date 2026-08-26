@@ -42,7 +42,7 @@ export interface CustomersReport {
   /** La valuta con cui il negozio vende. */
   currency: string;
   /** Perche' non c'e' niente da mostrare, quando non c'e'. */
-  unavailable: 'no_orders_access' | 'not_connected' | null;
+  unavailable: 'no_orders_access' | 'not_connected' | 'plan_required' | 'failed' | null;
 }
 
 interface RangeRow {

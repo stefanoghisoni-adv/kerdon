@@ -1,11 +1,14 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import { useState } from 'react';
 import {
   Badge,
   Banner,
   BlockStack,
   Box,
+  Button,
+  ButtonGroup,
   Card,
   Icon,
   IndexTable,
@@ -16,7 +19,12 @@ import {
   Tooltip,
 } from '@shopify/polaris';
 import { AlertCircleIcon, CheckCircleIcon } from '@shopify/polaris-icons';
+import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
 import { authenticate } from '~/shopify.server';
+import { prisma } from '~/db.server';
+import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { firstPlanWithCustomersSync, planLabel } from '~/components/Dashboard/account-format';
+import { BASE_CURRENCY } from '~/lib/billing/money';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { loadCustomersReport } from '~/lib/customers/customers.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
@@ -43,10 +51,51 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? wanted
       : currentMonth();
 
-  const report = await loadCustomersReport({ shopDomain: session.shop, ...range });
+  // Il piano decide se questa tabella ha qualcosa da mostrare. Senza la
+  // sincronizzazione clienti la tabella nel database del merchant non esiste
+  // nemmeno, e la query falliva con un 400 che arrivava fino a schermo come
+  // "Unexpected Server Error" — con la pagina d'errore che, per giunta, torna
+  // scura. Meglio entrare e trovare scritto perche' non c'e' niente.
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain: session.shop },
+    select: { currentPlan: true },
+  });
+  const plan = await findPlanByName(shop?.currentPlan);
+  const customersIncluded = plan?.customersSyncEnabled ?? false;
+
+  let upgradePlan: string | null = null;
+  if (!customersIncluded) {
+    const [plans, basePrices] = await Promise.all([
+      prisma.plan.findMany(),
+      prisma.planPrice.findMany({ where: { currency: BASE_CURRENCY } }),
+    ]);
+    const monthlyOf = new Map(basePrices.map((row) => [row.planName, Number(row.priceMonthly)]));
+    upgradePlan = firstPlanWithCustomersSync(
+      plans.map((p) => ({
+        planName: p.planName,
+        priceMonthly: monthlyOf.get(p.planName) ?? 0,
+        customersSyncEnabled: p.customersSyncEnabled,
+      })),
+      shop?.currentPlan ?? null,
+    );
+  }
+
+  // Anche col piano giusto una lettura puo' fallire — tabella non ancora
+  // creata, progetto irraggiungibile. Un guasto sul database del merchant non
+  // deve diventare una pagina d'errore dell'app.
+  const report = customersIncluded
+    ? await loadCustomersReport({ shopDomain: session.shop, ...range }).catch((error) => {
+        console.warn(
+          '[customers] lettura non riuscita:',
+          error instanceof Error ? error.message : 'errore sconosciuto',
+        );
+        return { rows: [], currency: 'EUR', unavailable: 'failed' as const };
+      })
+    : { rows: [], currency: 'EUR', unavailable: 'plan_required' as const };
 
   return json({
     ...report,
+    upgradePlan,
     range,
     // Per aprire la scheda del cliente: da qui il merchant vede l'anagrafica
     // vera, ed e' il gesto che segue la lettura di una riga.
@@ -55,9 +104,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export default function Customers() {
-  const { rows, currency, unavailable, range, adminBase } = useLoaderData<typeof loader>();
+  const { rows, currency, unavailable, upgradePlan, adminBase } = useLoaderData<typeof loader>();
   const t = useT();
   const locale = useLocale();
+
+  // Il filtro sta in uno stato e non nell'indirizzo: non ricarica niente —
+  // le righe sono gia' tutte qui — e passare dal server per nascondere delle
+  // righe che si hanno gia' sarebbe un viaggio per nulla.
+  const [onlyIssues, setOnlyIssues] = useState(false);
+
+  const needsWork = (row: { coveredLines: number; totalLines: number }) =>
+    row.coveredLines < row.totalLines;
+  const visibleRows = onlyIssues ? rows.filter(needsWork) : rows;
+  const hiddenByFilter = rows.length - visibleRows.length;
+
   return (
     <Page
       fullWidth
@@ -70,6 +130,12 @@ export default function Customers() {
       // credendoli lo stesso numero.
     >
       <BlockStack gap="400">
+        {/* Il cambio di piano si legge da ogni tab, non solo da dove e' stato
+            fatto: chi lo cambia e va dritto qui deve sapere lo stesso cosa e'
+            cambiato. Il contenuto lo calcola la dashboard e lo lascia nel
+            sessionStorage; se non c'e' niente da dire, questo non rende nulla. */}
+        <PlanChangeBanner />
+
         <ProductOverflowBanner />
 
         {unavailable === 'not_connected' && (
@@ -81,6 +147,50 @@ export default function Customers() {
           <Banner tone="warning">{t.customers.noAccess}</Banner>
         )}
 
+        {/* Il piano non prevede i clienti: si entra lo stesso e si legge
+            perche' non c'e' niente. Prima la pagina falliva con un errore del
+            server, che oltre a non spiegare niente riportava il tema scuro. */}
+        {unavailable === 'plan_required' && (
+          <Banner tone="info">
+            <Text as="p">
+              <Link url="/plan" removeUnderline>
+                {t.account.upgradeTo(planLabel(upgradePlan))}
+              </Link>
+              {t.customers.planRequired}
+            </Text>
+          </Banner>
+        )}
+
+        {/* Lettura non riuscita: si dice, invece di mostrare una tabella vuota
+            che sembrerebbe un negozio senza clienti. */}
+        {unavailable === 'failed' && (
+          <Banner tone="warning">{t.customers.loadFailed}</Banner>
+        )}
+
+        {/* Due filtri, come nei prodotti non idonei: a sinistra, sopra la
+            tabella. "Richiedono un intervento" tiene solo le righe con la spia
+            gialla — quelle il cui profitto e' calcolato su prodotti senza
+            costo. Sono le uniche su cui c'e' qualcosa da fare, e in un elenco
+            lungo si perdono fra quelle a posto. */}
+        {unavailable === null && rows.length > 0 && (
+          <InlineStack gap="200" blockAlign="center" wrap>
+            <ButtonGroup variant="segmented">
+              <Button pressed={!onlyIssues} onClick={() => setOnlyIssues(false)}>
+                {t.customers.filterAll}
+              </Button>
+              <Button pressed={onlyIssues} onClick={() => setOnlyIssues(true)}>
+                {t.customers.filterIssues}
+              </Button>
+            </ButtonGroup>
+
+            {onlyIssues && hiddenByFilter > 0 && (
+              <Text as="span" tone="subdued" variant="bodySm">
+                {t.customers.hiddenCount(hiddenByFilter)}
+              </Text>
+            )}
+          </InlineStack>
+        )}
+
         {unavailable === null && (
           <Card padding="0">
             <Box padding="400">
@@ -90,7 +200,7 @@ export default function Customers() {
             </Box>
             <IndexTable
               resourceName={t.customers.resource}
-              itemCount={rows.length}
+              itemCount={visibleRows.length}
               selectable={false}
               headings={[
                 { title: t.customers.columns.customer },
@@ -112,7 +222,7 @@ export default function Customers() {
                 </Box>
               }
             >
-              {rows.map((row, index) => (
+              {visibleRows.map((row, index) => (
                 <IndexTable.Row id={String(row.customerId)} key={row.customerId} position={index}>
                   <IndexTable.Cell>
                     {/* Il nome porta alla scheda del cliente. _top e non
