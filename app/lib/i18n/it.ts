@@ -385,8 +385,10 @@ export const it = {
         "Qui vengono identificati i clienti che hanno acconsentito al marketing",
       optOutInfo:
         "Qui vengono identificati i clienti che non hanno acconsentito al marketing",
+      hint: "Percentuale di utenti che hanno acconsentito al marketing su Shopify",
+      /** Segue il link col nome del piano: comincia in minuscolo e finisce senza punto. */
       upsell:
-        "Potenzia la trasmissione dei dati utente monitorando anche il Lifetime Value (LTV) e Lifetime Profit (LTP).",
+        " e potenzia il tuo tracciamento server con dati utente persistenti su qualsiasi evento",
       upgrade: "Aggiorna piano",
     },
     connection: { title: "Connessione" },

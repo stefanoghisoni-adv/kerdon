@@ -1517,6 +1517,7 @@ export default function Dashboard() {
               totalCustomers={0}
               optIn={0}
               optOut={0}
+              upgradePlan={customersUpgradePlan}
               loading={false}
             />
           )}

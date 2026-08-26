@@ -354,8 +354,9 @@ export const en: typeof it = {
       optOut: "Opted-out customers",
       optInInfo: "These are the customers who consented to marketing",
       optOutInfo: "These are the customers who did not consent to marketing",
+      hint: "Share of customers who gave marketing consent on Shopify",
       upsell:
-        "Get more out of your user data by tracking Lifetime Value (LTV) and Lifetime Profit (LTP) too.",
+        " and power your server-side tracking with persistent user data on every event",
       upgrade: "Upgrade plan",
     },
     connection: { title: "Connection" },
