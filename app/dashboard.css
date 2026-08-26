@@ -256,3 +256,25 @@
 .variable-picker .Polaris-ActionList__Item .Polaris-Badge {
   transform: translateY(-1px);
 }
+
+/* Le caselle nell'elenco dei database da eliminare.
+
+   Polaris lascia il cursore predefinito sulla casella e sulla sua etichetta: si
+   possono premere entrambe, ma solo il puntatore a freccia lo dice — cioe' non
+   lo dice. La mano si mette su tutta la riga selezionabile, non sul solo
+   quadratino, perche' l'area cliccabile e' quella. */
+.Polaris-Choice,
+.Polaris-Choice__Control,
+.Polaris-Checkbox,
+.Polaris-Checkbox__Input,
+.Polaris-Checkbox__Backdrop {
+  cursor: pointer;
+}
+
+/* Una casella spenta non si preme: li' la mano prometterebbe qualcosa che non
+   succede. */
+.Polaris-Choice--disabled,
+.Polaris-Checkbox__Input:disabled,
+.Polaris-Checkbox__Input:disabled ~ .Polaris-Checkbox__Backdrop {
+  cursor: default;
+}

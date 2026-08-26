@@ -239,13 +239,25 @@ export function SupabaseProjectConnect({
   // Tutti i database dell'account, quello collegato compreso: sta in elenco ma
   // spento, cosi' si vede che c'e' e che non si tocca — sparendo sembrerebbe
   // che l'app non lo veda.
-  const allProjects = projectsFetcher.data?.projects ?? [];
+  // I database appena eliminati, tenuti da parte.
+  //
+  // L'elenco di Supabase impiega qualche istante ad accorgersi di una
+  // cancellazione: chiedendolo subito dopo, quello appena eliminato torna
+  // ancora indietro. Sceglierlo darebbe un errore incomprensibile, e vederlo
+  // fa dubitare che la cancellazione sia andata a buon fine. Qui si toglie
+  // subito, senza aspettare che l'elenco si aggiorni da solo.
+  const [removedRefs, setRemovedRefs] = useState<string[]>([]);
+
+  const allProjects = (projectsFetcher.data?.projects ?? []).filter(
+    (project) => !removedRefs.includes(project.id),
+  );
 
   // Eliminato: l'elenco e i limiti del piano non sono piu' quelli di prima.
   useEffect(() => {
     if (!deleteFetcher.data?.ok) return;
     setDeleting(false);
     setConfirmingDelete(false);
+    setRemovedRefs((current) => [...current, ...deleteRefs]);
     setDeleteRefs([]);
     projectsFetcher.load('/api/supabase/projects');
     limitsFetcher.load('/api/supabase/project-limits');
@@ -279,7 +291,9 @@ export function SupabaseProjectConnect({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectFetcher.data]);
 
-  const projects = projectsFetcher.data?.projects;
+  const projects = projectsFetcher.data?.projects?.filter(
+    (project) => !removedRefs.includes(project.id),
+  );
   const projectsLoaded = projectsFetcher.state === 'idle' && projects !== undefined;
 
   const filtered = useMemo(() => {
@@ -343,14 +357,29 @@ export function SupabaseProjectConnect({
         if (data.ready && !cancelled) {
           clearInterval(timer);
           setProvisioning(false);
-          selectFetcher.submit(
-            { ref: creatingRef },
-            {
-              method: 'post',
-              action: '/api/supabase/select-project',
-              encType: 'application/json',
-            },
-          );
+
+          // Creare un database non vuol dire cominciare a usarlo.
+          //
+          // Alla prima configurazione si', perche' e' l'unico che c'e' e non
+          // c'e' altro da scegliere. Ma da Impostazioni, con uno gia'
+          // collegato, crearne un secondo e ritrovarsi la sincronizzazione
+          // spostata sopra e' una cosa che nessuno ha chiesto: per spostarla
+          // c'e' "Cambia database".
+          if (connected) {
+            setShowCreate(false);
+            setNewName('');
+            projectsFetcher.load('/api/supabase/projects');
+            limitsFetcher.load('/api/supabase/project-limits');
+          } else {
+            selectFetcher.submit(
+              { ref: creatingRef },
+              {
+                method: 'post',
+                action: '/api/supabase/select-project',
+                encType: 'application/json',
+              },
+            );
+          }
         }
       } catch {
         // rete transitoria: riprova al tick successivo
@@ -361,7 +390,13 @@ export function SupabaseProjectConnect({
       clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provisioning, creatingRef, selectFetcher]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provisioning, creatingRef, selectFetcher, connected]);
+
+  // La creazione, dal clic al database pronto. Sono due fasi — la richiesta e
+  // il provisioning — ma per chi guarda sono una cosa sola, e i campi devono
+  // restare spenti per tutte e due.
+  const creatingNow = createFetcher.state !== 'idle' || provisioning;
 
   const submitCreate = useCallback(() => {
     setCreateError(null);
@@ -761,10 +796,16 @@ export function SupabaseProjectConnect({
         // sembrava scollegato. Con una larghezza contenuta i due combaciano.
         <Box maxWidth="420px">
           <BlockStack gap="300">
+            {/* Nome e region si spengono appena parte la creazione: quello che
+                si scrive li' dopo non arriva da nessuna parte — la richiesta e'
+                gia' partita con i valori di prima — e un campo che accetta
+                testo mentre l'operazione e' in corso promette una modifica che
+                non avverra'. */}
             <TextField
               label={t.connect.database.newName}
               value={newName}
               onChange={setNewName}
+              disabled={disabled || creatingNow}
               autoComplete="off"
             />
             {/* Popover + OptionList, non <Select>: quest'ultimo rende un <select>
@@ -791,7 +832,7 @@ export function SupabaseProjectConnect({
                     disclosure
                     fullWidth
                     textAlign="left"
-                    disabled={disabled}
+                    disabled={disabled || creatingNow}
                   >
                     {selectedRegionName || t.connect.database.regionPlaceholder}
                   </Button>
@@ -821,9 +862,13 @@ export function SupabaseProjectConnect({
               </Popover>
             </Labelled>
             {createError && <Banner tone="critical">{createError}</Banner>}
-            {provisioning ? (
+            {/* Il messaggio compare dal primo istante e non dal provisioning:
+                fra il clic e la risposta della creazione passa qualche secondo,
+                e in quel buco non c'era niente a dire che stesse succedendo
+                qualcosa. */}
+            {creatingNow ? (
               <InlineStack gap="200" blockAlign="center">
-                <Spinner accessibilityLabel="Creazione in corso" size="small" />
+                <Spinner accessibilityLabel={t.connect.database.creating} size="small" />
                 <Text as="span">
                   {t.connect.database.creating}
                 </Text>
