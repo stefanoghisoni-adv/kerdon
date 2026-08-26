@@ -76,7 +76,12 @@ ALTER INDEX IF EXISTS idx_customers_phone RENAME TO idx_customers_phone_number;
  * lasciati senza tabelle e senza modo di accorgersene — per loro
  * l'aggiornamento sarebbe risultato gia' fatto.
  */
-export const LATEST_SCHEMA_VERSION = 4;
+/**
+ * La 5 porta l'indirizzo del cliente — paese, via, CAP, regione — piu' due
+ * colonne che Shopify non riempie da sola (`external_id`, `date_of_birth`).
+ * Sono tutte aggiunte: basta il numero, ci pensa la DDL idempotente.
+ */
+export const LATEST_SCHEMA_VERSION = 5;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

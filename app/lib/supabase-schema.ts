@@ -83,6 +83,25 @@ const CUSTOMERS_COLUMNS: Column[] = [
   { name: 'last_name', type: 'TEXT' },
   { name: 'accepts_marketing', type: 'BOOLEAN' },
   { name: 'marketing_opt_in_level', type: 'TEXT' },
+  // L'indirizzo predefinito del cliente, sparso in colonne invece che in un
+  // testo solo: gli strumenti di tracciamento chiedono paese e CAP separati, e
+  // ricavarli da una stringa unica vorrebbe dire indovinare dove finisce l'uno
+  // e comincia l'altro.
+  //
+  // `region` e non `state`: `customer_state` esiste gia' su questa tabella e
+  // vuol dire un'altra cosa — se il cliente e' attivo, invitato o disabilitato.
+  // Due colonne con lo stesso nome e significati diversi sono un errore che si
+  // scopre tardi.
+  { name: 'country', type: 'TEXT' },
+  { name: 'address', type: 'TEXT' },
+  { name: 'zipcode', type: 'TEXT' },
+  { name: 'region', type: 'TEXT' },
+  // Le due che Shopify non ha come campi propri: restano vuote finche' non si
+  // decide da quale metafield leggerle. La colonna c'e' lo stesso, cosi' chi
+  // costruisce un pubblico o una integrazione trova il posto gia' pronto e non
+  // deve rifare una migrazione per un campo solo.
+  { name: 'external_id', type: 'TEXT' },
+  { name: 'date_of_birth', type: 'DATE' },
   { name: 'total_spent', type: 'NUMERIC(10, 2)' },
   { name: 'orders_count', type: 'INTEGER' },
   { name: 'customer_state', type: 'TEXT' },

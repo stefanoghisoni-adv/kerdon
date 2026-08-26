@@ -371,9 +371,9 @@ ALTER TABLE "sync_job_events" ADD CONSTRAINT "sync_job_events_sync_job_id_fkey" 
 -- rigenerarli da li' darebbe piani sbagliati.
 INSERT INTO "plans" ("id", "plan_name", "max_products", "max_customers", "max_sync_frequency_hours", "custom_fields_limit", "support_level", "customers_sync_enabled", "product_feeds_enabled", "created_at", "trial_days") VALUES
   ('60b36215-e0d0-48e4-8f59-1550028a1078', 'Free',        50,  200, 168.00,    3, 'community', false, false, '2026-07-14 15:48:23.356115', 14),
-  ('316217c4-3a7b-40f8-9f7c-8d5ddc1d5daa', 'Pro',        200,  500,  96.00,   10, 'email',     true,  true,  '2026-07-14 15:48:23.356115', NULL),
-  ('eb31cfe0-d134-4421-a4d6-0f6e2a89f88d', 'Business',  1000, 2000,  48.00,   50, 'priority',  true,  true,  '2026-07-14 15:48:23.356115', NULL),
-  ('fdf4476c-ab51-44f7-ba28-a785cddb3ec9', 'Enterprise',NULL, NULL,  24.00, NULL, 'dedicated', true,  true,  '2026-07-14 15:48:23.356115', NULL),
+  ('316217c4-3a7b-40f8-9f7c-8d5ddc1d5daa', 'Pro',        200,  500,  96.00,   10, 'email',     true,  true,  '2026-07-14 15:48:23.356115', 14),
+  ('eb31cfe0-d134-4421-a4d6-0f6e2a89f88d', 'Business',  1000, 2000,  48.00,   50, 'priority',  true,  true,  '2026-07-14 15:48:23.356115', 14),
+  ('fdf4476c-ab51-44f7-ba28-a785cddb3ec9', 'Enterprise',NULL, NULL,  24.00, NULL, 'dedicated', true,  true,  '2026-07-14 15:48:23.356115', 14),
   ('0b896582-5f98-41b3-9073-65c9874b8360', 'Lifetime',  NULL, NULL,   0.50, NULL, 'dedicated', true,  true,  '2026-07-17 02:30:10.250832', NULL);
 
 -- Il listino, in dollari: la valuta base, quella della scheda dell'App Store.

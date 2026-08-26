@@ -20,6 +20,8 @@ export function transformCustomer(customer: ShopifyCustomer): SupabaseCustomerRo
   const marketingOptInLevel =
     consent?.opt_in_level ?? customer.marketing_opt_in_level ?? null;
 
+  const address = customer.default_address;
+
   const tags = customer.tags
     ? customer.tags.split(',').map((tag) => tag.trim()).filter(Boolean)
     : [];
@@ -41,6 +43,19 @@ export function transformCustomer(customer: ShopifyCustomer): SupabaseCustomerRo
     tax_exempt: customer.tax_exempt ?? null,
     created_at: customer.created_at ?? null,
     updated_at: customer.updated_at ?? null,
+    country: address?.country || null,
+    // Via e civico in una colonna sola, con la seconda riga in coda quando c'e'
+    // (interno, scala, presso). Sono due campi su Shopify ma un indirizzo solo:
+    // separati costringerebbero chiunque li legga a ricomporli.
+    address: [address?.address1, address?.address2].filter(Boolean).join(', ') || null,
+    zipcode: address?.zip || null,
+    region: address?.province || null,
+    // Shopify non ha questi due come campi del cliente: la colonna esiste, il
+    // dato no. Scriverci dentro qualcosa di inventato — l'id Shopify come
+    // `external_id`, per dire — sarebbe peggio di lasciarla vuota: chi la legge
+    // crederebbe che sia il suo identificativo.
+    external_id: null,
+    date_of_birth: null,
     synced_at: new Date().toISOString(),
   };
 }

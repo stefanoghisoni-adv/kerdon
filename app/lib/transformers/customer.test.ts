@@ -71,3 +71,57 @@ describe('transformCustomer', () => {
     expect(row.accepts_marketing).toBeNull();
   });
 });
+
+describe("l'indirizzo del cliente", () => {
+  const withAddress = (address: Record<string, string | null> | null) =>
+    transformCustomer({
+      id: 1,
+      email: 'a@b.it',
+      phone: null,
+      first_name: 'Ada',
+      last_name: 'Rossi',
+      default_address: address,
+    } as never);
+
+  it('si legge dall indirizzo predefinito, non dall elenco completo', () => {
+    // Per un pubblico pubblicitario conta dove il cliente vive, non un
+    // indirizzo di spedizione occasionale.
+    const row = withAddress({
+      address1: 'Via Roma 1',
+      address2: null,
+      city: 'Milano',
+      province: 'Lombardia',
+      country: 'Italy',
+      zip: '20100',
+    });
+
+    expect(row.country).toBe('Italy');
+    expect(row.address).toBe('Via Roma 1');
+    expect(row.zipcode).toBe('20100');
+    expect(row.region).toBe('Lombardia');
+  });
+
+  it('la seconda riga entra nello stesso indirizzo', () => {
+    // Sono due campi su Shopify ma un indirizzo solo: separarli costringerebbe
+    // chiunque li legga a ricomporli.
+    const row = withAddress({ address1: 'Via Roma 1', address2: 'Scala B', country: 'Italy' });
+    expect(row.address).toBe('Via Roma 1, Scala B');
+  });
+
+  it('senza indirizzo le colonne restano vuote, non stringhe vuote', () => {
+    const row = withAddress(null);
+    expect(row.country).toBeNull();
+    expect(row.address).toBeNull();
+    expect(row.zipcode).toBeNull();
+    expect(row.region).toBeNull();
+  });
+
+  it('external_id e date_of_birth restano vuoti finche non c e da dove leggerli', () => {
+    // Shopify non li ha come campi del cliente. Metterci dentro l'id Shopify
+    // sarebbe peggio del vuoto: chi legge crederebbe che sia il suo
+    // identificativo esterno.
+    const row = withAddress({ country: 'Italy' });
+    expect(row.external_id).toBeNull();
+    expect(row.date_of_birth).toBeNull();
+  });
+});

@@ -77,7 +77,17 @@ describe('numero di versione e cio che promette', () => {
     // codice ma la DDL non le creava: i progetti aggiornati in quei giorni si
     // sono presi il numero senza ricevere niente. Riusarla li lascerebbe senza
     // tabelle e senza modo di accorgersene.
-    expect(LATEST_SCHEMA_VERSION).toBe(4);
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(4);
+    expect(LATEST_SCHEMA_VERSION).not.toBe(3);
+  });
+
+  it('l aggiornamento porta le colonne dell indirizzo del cliente', () => {
+    // Sono aggiunte, quindi non hanno un passo esplicito: le porta la DDL
+    // idempotente, che pero' viaggia solo se il numero di versione e' salito.
+    const sql = buildSchemaUpdateSQL(4, true, true);
+    for (const column of ['country', 'address', 'zipcode', 'region', 'external_id', 'date_of_birth']) {
+      expect(sql).toContain(column);
+    }
   });
 
   it('quando gli ordini si accendono, l aggiornamento se li porta', () => {

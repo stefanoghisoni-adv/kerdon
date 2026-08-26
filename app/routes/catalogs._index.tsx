@@ -65,7 +65,16 @@ export default function Catalogs() {
   const t = useT();
   const navigate = useNavigate();
   const fetcher = useFetcher<{ ok: boolean }>();
-  const deleting = fetcher.state !== 'idle';
+  // QUALE integrazione si sta eliminando, non "se ne sta eliminando una". Il
+  // fetcher e' uno solo per la pagina, e un booleano condiviso spegneva i
+  // pulsanti di tutte le card: eliminando Meta si bloccava anche Google, che
+  // con quell'operazione non c'entra niente.
+  //
+  // Il nome arriva dal form appena inviato, senza tenerne una copia in uno
+  // stato a parte: una seconda fonte per la stessa cosa e' una seconda cosa da
+  // tenere allineata.
+  const deletingPlatform =
+    fetcher.state === 'idle' ? null : (fetcher.formData?.get('platform') as string | null);
 
   // Il modal vive qui e non dentro la card: nell'admin due dialoghi non si
   // impilano, e tenerne uno solo a livello di pagina evita che una seconda card
@@ -125,7 +134,7 @@ export default function Catalogs() {
             // pulsante resta, spento, cosi' la card ha la stessa forma prima e
             // dopo e non si allunga sotto il dito.
             canDelete={status !== 'available'}
-            deleting={deleting}
+            deleting={deletingPlatform === 'meta'}
             onDelete={() => setConfirming('meta')}
           />
 
@@ -140,7 +149,7 @@ export default function Catalogs() {
             onAction={() => navigate('/catalogs/google')}
             deleteLabel={t.catalogs.delete}
             canDelete={googleStatus !== 'available'}
-            deleting={deleting}
+            deleting={deletingPlatform === 'google'}
             onDelete={() => setConfirming('google')}
           />
         </InlineGrid>

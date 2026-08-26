@@ -69,6 +69,19 @@ export interface ShopifyCustomer {
   tax_exempt?: boolean | null;
   created_at?: string | null;
   updated_at?: string | null;
+  /**
+   * L'indirizzo predefinito. Shopify ne restituisce anche l'elenco completo
+   * (`addresses`), ma per un pubblico pubblicitario conta quello in uso: gli
+   * altri sono indirizzi di spedizione occasionali, non dove il cliente vive.
+   */
+  default_address?: {
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    province?: string | null;
+    country?: string | null;
+    zip?: string | null;
+  } | null;
 }
 
 export interface SupabaseCustomerRow {
@@ -90,6 +103,18 @@ export interface SupabaseCustomerRow {
   tax_exempt: boolean | null;
   created_at: string | null;
   updated_at: string | null;
+  /** Dall'indirizzo predefinito: paese, via, CAP, regione. */
+  country: string | null;
+  address: string | null;
+  zipcode: string | null;
+  region: string | null;
+  /**
+   * Le due che Shopify non ha come campi propri. Restano null finche' non si
+   * decide da quale metafield leggerle: la colonna esiste perche' chi costruisce
+   * un pubblico trovi il posto gia' pronto, non perche' sia gia' riempita.
+   */
+  external_id: string | null;
+  date_of_birth: string | null;
   synced_at: string;
 }
 
