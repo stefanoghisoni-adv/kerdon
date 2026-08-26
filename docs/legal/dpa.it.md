@@ -41,17 +41,24 @@ la redditività degli ordini e della clientela.
 
 **Dati dei clienti**: identificativo Shopify, indirizzo email, numero di
 telefono, nome, cognome, stato e livello del consenso al marketing, totale speso,
-numero di ordini, stato cliente, tag, note.
+numero di ordini, stato cliente, tag, note, indirizzo predefinito (via, CAP,
+regione, paese) e, se il merchant sceglie di popolarli, un identificativo esterno
+e la data di nascita.
 
 **Dati degli ordini**: identificativo e numero d'ordine, identificativo del
 cliente, nome e cognome del cliente, valuta, totali, stato del pagamento, date di
 emissione e di eventuale annullamento e, per ogni riga, prodotto, variante,
 quantità, prezzo unitario e sconto.
 
-**Esclusioni esplicite**: nessun indirizzo di spedizione o fatturazione, nessun
-dato di pagamento, nessun indirizzo email, numero di telefono o nota prelevati
-dagli ordini, nessun indirizzo IP, nessun dato di navigazione, nessuna categoria
-particolare di dati ai sensi dell'art. 9 GDPR.
+**Esclusioni esplicite**: nessun dato di pagamento; dagli ordini non viene
+prelevato alcun indirizzo, indirizzo email, numero di telefono o nota; nessun
+indirizzo IP; nessun dato di navigazione; nessuna categoria particolare di dati
+ai sensi dell'art. 9 GDPR.
+
+L'indirizzo trattato e' quello predefinito dell'anagrafica cliente, non un
+indirizzo di spedizione o fatturazione ricavato da un ordine. La data di nascita,
+quando il merchant sceglie di popolarla, non costituisce categoria particolare ai
+sensi dell'art. 9.
 
 **Limite del trattamento**: fra i clienti vengono trattati unicamente i dati di
 chi ha prestato il consenso al marketing su Shopify.

@@ -36,6 +36,10 @@ Il costo per articolo è la ragione per cui l'app esiste: è ciò che consente d
 
 L'app sincronizza **unicamente i clienti che hanno prestato il consenso al marketing** nel tuo negozio. Di quei clienti tratta: identificativo Shopify, indirizzo email, numero di telefono, nome e cognome, stato e livello del consenso, totale speso, numero di ordini, stato cliente, tag, note, indicatori di email verificata ed esenzione fiscale, date di creazione e aggiornamento.
 
+Tratta inoltre l'**indirizzo predefinito** del cliente — via, CAP, regione e paese — e due campi che restano a tua disposizione: un identificativo esterno e la data di nascita. Questi due l'app non li compila: Shopify non li espone come campi del cliente, e restano vuoti finché non sei tu a decidere da quale metafield leggerli.
+
+Perché l'indirizzo: paese e CAP sono ciò che le piattaforme pubblicitarie usano per riconoscere i tuoi clienti fra i propri utenti, e senza di essi il pubblico che costruisci risulta più piccolo del vero. Per la stessa ragione il numero di telefono viene scritto in sole cifre, prefisso internazionale compreso, e la data di nascita nel formato `AAAAMMGG`: è la forma che quelle piattaforme confrontano.
+
 I clienti che non hanno prestato il consenso non vengono mai copiati nel tuo database.
 
 **Se un cliente revoca il consenso**, il suo record non viene cancellato — cancellarlo distruggerebbe uno storico che potrebbe servirti — ma viene marcato come non più consenziente, e da quel momento ogni richiesta di lettura che lo riguarda viene rifiutata.
@@ -44,7 +48,9 @@ I clienti che non hanno prestato il consenso non vengono mai copiati nel tuo dat
 
 Dove hai concesso all'app l'accesso agli ordini, vengono trattati: identificativo e numero d'ordine, identificativo del cliente e suo nome e cognome, valuta, totale, stato del pagamento, data di annullamento, data dell'ordine e, per ogni riga, prodotto e variante, quantità, prezzo unitario pagato e sconto di riga.
 
-L'app deliberatamente **non** copia indirizzi di spedizione o fatturazione, indirizzi email o numeri di telefono prelevati dagli ordini, note dell'ordine o dati di pagamento. Al calcolo del profitto non servono, quindi non vengono presi.
+Dagli **ordini** l'app deliberatamente **non** preleva indirizzi, indirizzi email, numeri di telefono, note dell'ordine o dati di pagamento. Al calcolo del profitto non servono, quindi non vengono presi.
+
+L'indirizzo del cliente descritto al punto 3.3 è cosa diversa: è l'indirizzo predefinito dell'anagrafica, di chi ha prestato il consenso al marketing, e non viene ricavato dagli ordini.
 
 ### 3.5 Registri operativi
 

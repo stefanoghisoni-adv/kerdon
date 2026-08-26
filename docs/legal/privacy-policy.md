@@ -33,6 +33,10 @@ Cost per item is the reason the app exists: it is what allows profit to be calcu
 
 The app synchronises **only customers who have given marketing consent** in your store. For those customers it processes: Shopify customer ID, email address, phone number, first and last name, consent state and opt-in level, total spent, number of orders, customer state, tags, note, verified-email and tax-exempt flags, and creation/update timestamps.
 
+It also processes the customer's **default address** — street, postcode, region and country — plus two fields left at your disposal: an external identifier and a date of birth. The app does not fill those two in: Shopify does not expose them as customer fields, and they stay empty until you decide which metafield to read them from.
+
+Why the address: country and postcode are what advertising platforms use to recognise your customers among their own users, and without them the audience you build comes out smaller than it really is. For the same reason the phone number is written as digits only, international prefix included, and the date of birth as `YYYYMMDD`: that is the form those platforms compare.
+
 Customers who have not given consent are never copied into your database.
 
 **If a customer withdraws consent**, their record is not deleted — deleting it would destroy history you may need — but it is marked as no longer consenting, and any read request for that customer is refused from that moment on.
@@ -41,7 +45,9 @@ Customers who have not given consent are never copied into your database.
 
 Where you have granted the app access to your orders, it processes: order ID and number, the customer's ID and first and last name, currency, total, financial status, cancellation date, order date, and for each line the product and variant, quantity, unit price paid and line discount.
 
-The app deliberately does **not** copy shipping or billing addresses, customer email addresses or phone numbers from orders, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.
+From **orders** the app deliberately does **not** take addresses, email addresses, phone numbers, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.
+
+The customer address described in 3.3 is a different thing: it is the default address on the customer record, for customers who have given marketing consent, and it is not derived from orders.
 
 ### 3.5 Operational records
 

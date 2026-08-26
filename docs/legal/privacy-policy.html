@@ -377,12 +377,15 @@
 
       <h3>Customer data — only with marketing consent</h3>
       <p>The app synchronises <strong>only customers who have given marketing consent</strong> in your store. For those customers it processes: Shopify customer ID, email address, phone number, first and last name, consent state and opt-in level, total spent, number of orders, customer state, tags, note, verified-email and tax-exempt flags, and creation and update timestamps.</p>
+      <p>It also processes the customer's <strong>default address</strong> — street, postcode, region and country — plus two fields left at your disposal: an external identifier and a date of birth. The app does not fill those two in: Shopify does not expose them as customer fields, and they stay empty until you decide which metafield to read them from.</p>
+      <p>Why the address: country and postcode are what advertising platforms use to recognise your customers among their own users, and without them the audience you build comes out smaller than it really is. For the same reason the phone number is written as digits only, international prefix included, and the date of birth as <code>YYYYMMDD</code>: that is the form those platforms compare.</p>
       <p>Customers who have not given consent are never copied into your database.</p>
       <p><strong>If a customer withdraws consent</strong>, their record is not deleted — deleting it would destroy history you may need — but it is marked as no longer consenting, and any read request for that customer is refused from that moment on.</p>
 
       <h3>Orders</h3>
       <p>Where you have granted the app access to your orders, it processes: order ID and number, the customer's ID and first and last name, currency, total, financial status, cancellation date, order date, and for each line the product and variant, quantity, unit price paid and line discount.</p>
-      <p class="keystone">The app deliberately does not copy shipping or billing addresses, customer email addresses or phone numbers from orders, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.</p>
+      <p class="keystone">From orders the app deliberately does not take addresses, email addresses, phone numbers, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.</p>
+      <p>The customer address described above is a different thing: it is the default address on the customer record, for customers who have given marketing consent, and it is not derived from orders.</p>
 
       <h3>Operational records</h3>
       <p>To run and support the app we keep, in our own database: a record of each synchronisation (type, outcome, timestamps, and how many records were added, updated or removed), product-level entries identifying which products changed, your billing charges, and access records for the read interface — outcome and HTTP status only.</p>

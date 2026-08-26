@@ -43,16 +43,23 @@ profitability of its orders and its customers.
 
 **Customer data**: Shopify identifier, email address, telephone number, first
 name, last name, marketing consent state and opt-in level, total spent, number of
-orders, customer state, tags, note.
+orders, customer state, tags, note, default address (street, postcode, region,
+country) and, where the merchant chooses to populate them, an external identifier
+and a date of birth.
 
 **Order data**: order identifier and number, customer identifier, customer first
 and last name, currency, totals, financial status, order date and any
 cancellation date and, for each line, product, variant, quantity, unit price and
 discount.
 
-**Explicit exclusions**: no shipping or billing address, no payment data, no
-email address, telephone number or note taken from orders, no IP address, no
-browsing data, no special category of data within the meaning of Article 9 GDPR.
+**Explicit exclusions**: no payment data; no address, email address, telephone
+number or note is taken from orders; no IP address; no browsing data; no special
+category of data within the meaning of Article 9 GDPR.
+
+The address processed is the default address on the customer record, not a
+shipping or billing address derived from an order. A date of birth, where the
+merchant chooses to populate it, is not a special category within the meaning of
+Article 9.
 
 **Limit of the processing**: among customers, only the data of those who have
 given marketing consent on Shopify is processed.
