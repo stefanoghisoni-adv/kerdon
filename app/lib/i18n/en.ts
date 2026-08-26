@@ -567,6 +567,11 @@ export const en: typeof it = {
 
   issues: {
     title: "Products not eligible",
+    soldOnly: (hidden: number) =>
+      hidden === 0
+        ? "Showing only products that have sold: these are the ones making customer profit partial."
+        : `Showing only products that have sold — the ones making customer profit partial. Another ${hidden} products without a cost have not been ordered yet.`,
+    showAll: "Show all products",
     recheck: "Recheck and update",
     listTitle: "Products not eligible",
     suspended:
@@ -674,15 +679,18 @@ export const en: typeof it = {
       aop: "Average order profit",
       ltp: "Lifetime profit",
       status: "Sync",
+      actions: "Actions",
     },
     synced: "Synced",
     notSynced: "Not synced",
     noName: "No name",
     empty: "No orders in the selected period.",
-    partial: (covered: number, total: number) =>
-      `${total - covered} ${
-        total - covered === 1 ? "line without a cost" : "lines without a cost"
-      }: profit stays partial until you fill them in.`,
+    warning: (missing: number) =>
+      `This customer's profit is worked out from ${missing} ${
+        missing === 1 ? "product with no cost" : "products with no cost"
+      }: the figure is synced but stays partial until you fill it in.`,
+    allGood: "This customer's profit is worked out from complete costs.",
+    fixIssues: "Fix issues",
     notConnected: "Connect a database to see profit per customer.",
     noAccess:
       "Calculating profit needs access to your store’s orders. Reopen the app to grant it.",

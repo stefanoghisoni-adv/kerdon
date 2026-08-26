@@ -600,6 +600,16 @@ export const it = {
   // Prodotti che restano fuori dalla sincronizzazione, e come rimetterli dentro.
   issues: {
     title: "Prodotti non idonei",
+    /**
+     * Il filtro che arriva dalla tab Clienti. Dice quanti prodotti sono
+     * nascosti, non quanti se ne vedono: il numero visibile e' gia' sotto gli
+     * occhi, quello che manca no.
+     */
+    soldOnly: (hidden: number) =>
+      hidden === 0
+        ? "Stai vedendo solo i prodotti già venduti: sono questi a rendere parziale il profitto dei clienti."
+        : `Stai vedendo solo i prodotti già venduti — quelli che rendono parziale il profitto dei clienti. Altri ${hidden} prodotti senza costo non sono ancora stati ordinati.`,
+    showAll: "Mostra tutti i prodotti",
     recheck: "Ricontrolla e aggiorna",
     listTitle: "Elenco prodotti non idonei",
     suspended:
@@ -720,15 +730,22 @@ export const it = {
       aop: "Profitto medio per ordine",
       ltp: "Profitto totale",
       status: "Sincronizzazione",
+      actions: "Azioni",
     },
     synced: "Sincronizzato",
     notSynced: "Non sincronizzato",
     noName: "Senza nome",
     empty: "Nessun ordine nel periodo scelto.",
-    partial: (covered: number, total: number) =>
-      `${total - covered} ${
-        total - covered === 1 ? "riga senza costo" : "righe senza costo"
-      }: il profitto è parziale finché non li compili.`,
+    /**
+     * Il tooltip della spia, al posto della nota sotto il nome: la stessa cosa
+     * detta a chi la cerca, invece che a tutti in ogni riga.
+     */
+    warning: (missing: number) =>
+      `Il profitto di questo cliente è calcolato su ${missing} ${
+        missing === 1 ? "prodotto di cui non si conosce" : "prodotti di cui non si conosce"
+      } il costo: il valore è sincronizzato ma resta parziale finché non lo compili.`,
+    allGood: "Il profitto di questo cliente è calcolato su costi completi.",
+    fixIssues: "Risolvi problemi",
     notConnected: "Collega un database per vedere i profitti per cliente.",
     noAccess:
       "Per calcolare i profitti serve l’accesso agli ordini del negozio. Riapri l’app per concederlo.",

@@ -46,6 +46,7 @@ import {
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { filterProblemVariants, pageCount, pageSlice } from '~/lib/stats/problem-filter';
+import { loadSoldVariantIds } from '~/lib/stats/sold-variants.server';
 import {
   costFieldDisabled,
   collectPendingCosts,
@@ -94,7 +95,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     error = (await dictionaryForShop(session.shop)).errors.productsFetchFailed;
   }
 
-  const rows = error ? [] : collectProblemVariants(allProducts);
+  const allRows = error ? [] : collectProblemVariants(allProducts);
+
+  // "Solo quelli gia' venduti": ci si arriva dalla tab Clienti, da un cliente
+  // il cui profitto e' parziale. Li' la domanda non e' "cosa manca nel
+  // catalogo" ma "cosa sta falsando i miei numeri adesso", e sono due elenchi
+  // diversi — un prodotto mai ordinato non sporca nessun profitto.
+  const soldOnly = new URL(request.url).searchParams.get('sold') === '1';
+  const sold = soldOnly ? await loadSoldVariantIds(session.shop) : null;
+  const rows = sold ? allRows.filter((row) => sold.has(row.variantId)) : allRows;
 
   // Quota del piano: serve all'avviso di limite in esaurimento, lo stesso della
   // dashboard. I prodotti sono gia' in memoria, quindi il conteggio non costa
@@ -108,6 +117,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     blocked: !isAuthorized(shop.authorization),
     readyCount: error ? 0 : computeProductReadiness(allProducts).readyCount,
     planLimit: plan?.maxProducts ?? null,
+    // Il filtro e' attivo solo se e' stato chiesto E se si e' potuto applicare:
+    // senza database collegato la pagina mostra tutto, e dire il contrario
+    // farebbe credere che siano quelli i prodotti venduti.
+    soldOnly: soldOnly && sold !== null,
+    hiddenByFilter: sold ? allRows.length - rows.length : 0,
   });
 }
 
@@ -331,7 +345,8 @@ function CostRow({
 export default function ProblemProducts() {
   const t = useT();
   const loaderData = useLoaderData<typeof loader>();
-  const { error, shopDomain, blocked, readyCount, planLimit } = loaderData;
+  const { error, shopDomain, blocked, readyCount, planLimit, soldOnly, hiddenByFilter } =
+    loaderData;
 
   const [rows, setRows] = useState<ProblemVariant[]>(loaderData.rows);
   const [values, setValues] = useState<Record<number, string>>({});
@@ -487,6 +502,21 @@ export default function ProblemProducts() {
         <ProductOverflowBanner disabled={blocked} />
 
         {error && <Banner tone="critical">{error}</Banner>}
+
+        {/* Si arriva qui da un cliente col profitto parziale, e l'elenco e' gia'
+            ristretto ai prodotti che lo riguardano. Va detto: un elenco piu'
+            corto del previsto, senza spiegazione, si legge come un elenco
+            incompleto. Il link toglie il filtro senza far cercare come. */}
+        {soldOnly && (
+          <Banner tone="info">
+            <InlineStack gap="200" blockAlign="center" wrap>
+              <Text as="span">{t.issues.soldOnly(hiddenByFilter)}</Text>
+              <Link url="/products/issues" removeUnderline>
+                {t.issues.showAll}
+              </Link>
+            </InlineStack>
+          </Banner>
+        )}
 
         {blocked && !error && (
           <Banner tone="warning">{t.issues.suspended}</Banner>

@@ -10,13 +10,16 @@ import {
   Button,
   Card,
   DatePicker,
+  Icon,
   IndexTable,
   InlineStack,
+  Link,
   Page,
   Popover,
   Text,
+  Tooltip,
 } from '@shopify/polaris';
-import { CalendarIcon } from '@shopify/polaris-icons';
+import { AlertCircleIcon, CalendarIcon, CheckCircleIcon } from '@shopify/polaris-icons';
 import { authenticate } from '~/shopify.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { loadCustomersReport } from '~/lib/customers/customers.server';
@@ -46,11 +49,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const report = await loadCustomersReport({ shopDomain: session.shop, ...range });
 
-  return json({ ...report, range });
+  return json({
+    ...report,
+    range,
+    // Per aprire la scheda del cliente: da qui il merchant vede l'anagrafica
+    // vera, ed e' il gesto che segue la lettura di una riga.
+    adminBase: `https://admin.shopify.com/store/${session.shop.replace('.myshopify.com', '')}`,
+  });
 }
 
 export default function Customers() {
-  const { rows, currency, unavailable, range } = useLoaderData<typeof loader>();
+  const { rows, currency, unavailable, range, adminBase } = useLoaderData<typeof loader>();
   const t = useT();
   const locale = useLocale();
   const [, setSearchParams] = useSearchParams();
@@ -146,10 +155,15 @@ export default function Customers() {
               selectable={false}
               headings={[
                 { title: t.customers.columns.customer },
+                // Senza intestazione: e' una spia, non un dato. Un titolo sopra
+                // due icone chiederebbe di leggere una parola per capire un
+                // segno che si capisce gia' da solo.
+                { title: '', alignment: 'center' as const },
                 { title: t.customers.columns.orders },
                 { title: t.customers.columns.aop },
                 { title: t.customers.columns.ltp },
                 { title: t.customers.columns.status },
+                { title: t.customers.columns.actions },
               ]}
               emptyState={
                 <Box padding="600">
@@ -162,20 +176,42 @@ export default function Customers() {
               {rows.map((row, index) => (
                 <IndexTable.Row id={String(row.customerId)} key={row.customerId} position={index}>
                   <IndexTable.Cell>
-                    <BlockStack gap="050">
+                    {/* Il nome porta alla scheda del cliente. _top e non
+                        _blank: dentro l'admin il target nuovo aprirebbe una
+                        finestra spoglia, senza il menu di Shopify intorno. */}
+                    <Link
+                      url={`${adminBase}/customers/${row.customerId}`}
+                      target="_top"
+                      removeUnderline
+                    >
                       <Text as="span" fontWeight="semibold">
                         {[row.firstName, row.lastName].filter(Boolean).join(' ') ||
                           t.customers.noName}
                       </Text>
-                      {/* Quante righe non hanno ancora un costo: senza questa
-                          nota il profitto sembrerebbe completo mentre e'
-                          parziale. */}
-                      {row.coveredLines < row.totalLines && (
-                        <Text as="span" tone="subdued" variant="bodySm">
-                          {t.customers.partial(row.coveredLines, row.totalLines)}
-                        </Text>
-                      )}
-                    </BlockStack>
+                    </Link>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    {/* Il profitto di questa riga e' completo, oppure e'
+                        calcolato su prodotti di cui non si conosce il costo.
+                        L'icona lo dice senza occupare una riga di testo sotto
+                        ogni nome: la spiegazione sta nel tooltip, per chi la
+                        cerca. */}
+                    <InlineStack align="center">
+                      <Tooltip
+                        content={
+                          row.coveredLines < row.totalLines
+                            ? t.customers.warning(row.totalLines - row.coveredLines)
+                            : t.customers.allGood
+                        }
+                      >
+                        <Icon
+                          source={
+                            row.coveredLines < row.totalLines ? AlertCircleIcon : CheckCircleIcon
+                          }
+                          tone={row.coveredLines < row.totalLines ? 'warning' : 'success'}
+                        />
+                      </Tooltip>
+                    </InlineStack>
                   </IndexTable.Cell>
                   <IndexTable.Cell>{row.orders}</IndexTable.Cell>
                   <IndexTable.Cell>
@@ -205,6 +241,16 @@ export default function Customers() {
                     <Badge tone={row.synced ? 'success' : 'warning'}>
                       {row.synced ? t.customers.synced : t.customers.notSynced}
                     </Badge>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    {/* Solo dove c'e' qualcosa da risolvere. Un comando su ogni
+                        riga, anche su quelle a posto, si smette di leggere: e'
+                        la riga senza comando che deve saltare all'occhio. */}
+                    {row.coveredLines < row.totalLines && (
+                      <Link url="/products/issues?sold=1" removeUnderline>
+                        {t.customers.fixIssues}
+                      </Link>
+                    )}
                   </IndexTable.Cell>
                 </IndexTable.Row>
               ))}
