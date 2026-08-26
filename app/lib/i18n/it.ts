@@ -17,7 +17,7 @@ export const it = {
     settings: "Impostazioni",
     plan: "Piano",
     logs: "Logs",
-    productIssues: "Prodotti non idonei",
+    productIssues: "Prodotti",
     never: "Mai",
     notSet: "—",
     active: "Attiva",
@@ -644,7 +644,7 @@ export const it = {
 
   // Prodotti che restano fuori dalla sincronizzazione, e come rimetterli dentro.
   issues: {
-    title: "Prodotti non idonei",
+    title: "Prodotti",
     /**
      * Il filtro che arriva dalla tab Clienti. Dice quanti prodotti sono
      * nascosti, non quanti se ne vedono: il numero visibile e' gia' sotto gli
