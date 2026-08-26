@@ -7,6 +7,7 @@ import {
   Box,
   Button,
   InlineStack,
+  Link,
   Modal,
   Text,
 } from '@shopify/polaris';
@@ -29,6 +30,15 @@ type SubscribeResponse =
 
 export interface ProductOverflowBannerProps {
   disabled?: boolean;
+  /**
+   * Cosa manca, e quindi cosa si sta proponendo.
+   *
+   * `products` e' il caso originale: il catalogo non ci sta nel piano.
+   * `feeds` lo riusa per i cataloghi pubblicitari — cambia il testo del banner,
+   * non il modal: la domanda che si fa il merchant e' la stessa ("cosa ottengo
+   * passando di piano?") e merita la stessa risposta, non due tabelle diverse.
+   */
+  reason?: 'products' | 'feeds';
 }
 
 interface LimitsResponse {
@@ -54,7 +64,10 @@ interface ReadinessResponse {
  * porta con se' la soluzione, invece di rimandare a un'altra pagina: il nome
  * del piano che basta e' gia' calcolato, e l'aggiornamento si conferma qui.
  */
-export function ProductOverflowBanner({ disabled }: ProductOverflowBannerProps) {
+export function ProductOverflowBanner({
+  disabled,
+  reason = 'products',
+}: ProductOverflowBannerProps) {
   const [confirming, setConfirming] = useState(false);
   const locale = useLocale();
   const t = useT();
@@ -70,19 +83,33 @@ export function ProductOverflowBanner({ disabled }: ProductOverflowBannerProps) 
   // dashboard non costa una lettura del catalogo.
   const limits = useFetcher<LimitsResponse>();
   const readiness = useFetcher<ReadinessResponse>();
+  // Quanti clienti hanno dato il consenso: serve solo dentro il modal, accanto
+  // al tetto del piano. Si chiede insieme agli altri due perche' il modal si
+  // apre da un clic e a quel punto e' tardi per andarlo a prendere.
+  const customerStats = useFetcher<{ optIn?: number }>();
   useEffect(() => {
     if (limits.state === 'idle' && !limits.data) limits.load('/api/plan/limits');
     if (readiness.state === 'idle' && !readiness.data) readiness.load('/api/stats/products');
+    if (customerStats.state === 'idle' && !customerStats.data) {
+      customerStats.load('/api/stats/customers');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const currentPlan = limits.data?.currentPlan ?? null;
   const totalProducts =
     readiness.data != null ? readiness.data.readyCount + readiness.data.problemCount : null;
+  const plans = limits.data?.plans ?? [];
   const suggestedPlan =
-    currentPlan && totalProducts != null
-      ? suggestPlanForProducts(limits.data?.plans ?? [], currentPlan.planName, totalProducts)
-      : null;
+    reason === 'feeds'
+      ? // Il piu' economico fra quelli che hanno i feed: qui non c'e' un tetto
+        // da superare, c'e' una funzione da ottenere.
+        plans
+          .filter((p) => p.productFeedsEnabled)
+          .sort((a, b) => a.priceMonthly - b.priceMonthly)[0] ?? null
+      : currentPlan && totalProducts != null
+        ? suggestPlanForProducts(plans, currentPlan.planName, totalProducts)
+        : null;
 
   const confirm = useCallback(() => {
     if (!suggestedPlan) return;
@@ -103,35 +130,60 @@ export function ProductOverflowBanner({ disabled }: ProductOverflowBannerProps) 
   // Senza database collegato l'avviso non ha oggetto: nessun prodotto sta
   // restando fuori, perche' non ne sta entrando nessuno. Vale su tutte e tre le
   // pagine che lo mostrano.
-  if (limits.data?.connected === false) return null;
-  if (!suggestedPlan || !currentPlan || totalProducts == null) return null;
+  if (reason === 'products' && limits.data?.connected === false) return null;
+  if (!suggestedPlan || !currentPlan) return null;
+  if (reason === 'products' && totalProducts == null) return null;
+  // Il piano li ha gia': non c'e' niente da proporre.
+  if (reason === 'feeds' && currentPlan.productFeedsEnabled) return null;
 
   const nextLabel = planLabel(suggestedPlan.planName);
-  const excluded = currentPlan.maxProducts == null ? 0 : totalProducts - currentPlan.maxProducts;
+  const excluded =
+    currentPlan.maxProducts == null || totalProducts == null
+      ? 0
+      : totalProducts - currentPlan.maxProducts;
   const rows = planComparisonRows(
     currentPlan,
     suggestedPlan,
     limits.data?.currency ?? BASE_CURRENCY,
     locale,
     t,
+    { products: totalProducts, customers: customerStats.data?.optIn ?? null },
   );
   const error = fetcher.data && 'error' in fetcher.data ? fetcher.data.error : null;
 
   return (
     <>
-      <Banner tone="warning" title={t.overflow.title}>
+      <Banner
+        tone={reason === 'feeds' ? 'info' : 'warning'}
+        title={reason === 'feeds' ? undefined : t.overflow.title}
+      >
         <BlockStack gap="300">
-          <Text as="p">{t.overflow.body(excluded, nextLabel)}</Text>
+          <Text as="p">
+            {reason === 'feeds' ? (
+              <>
+                <Link onClick={() => setConfirming(true)} removeUnderline>
+                  {t.account.upgradeTo(nextLabel)}
+                </Link>
+                {t.catalogs.planRequired}
+              </>
+            ) : (
+              t.overflow.body(excluded, nextLabel)
+            )}
+          </Text>
           {error && <Text as="p" tone="critical">{error}</Text>}
-          <InlineStack>
-            <Button
-              variant="primary"
-              onClick={() => setConfirming(true)}
-              disabled={disabled || submitting}
-            >
-              {t.overflow.upgradeNow(nextLabel)}
-            </Button>
-          </InlineStack>
+          {/* Nel modo "feed" il comando e' gia' il link dentro la frase: un
+              pulsante sotto direbbe la stessa cosa una seconda volta. */}
+          {reason === 'products' && (
+            <InlineStack>
+              <Button
+                variant="primary"
+                onClick={() => setConfirming(true)}
+                disabled={disabled || submitting}
+              >
+                {t.overflow.upgradeNow(nextLabel)}
+              </Button>
+            </InlineStack>
+          )}
         </BlockStack>
       </Banner>
 
@@ -179,7 +231,20 @@ export function ProductOverflowBanner({ disabled }: ProductOverflowBannerProps) 
 
             {rows.map((row) => (
               <InlineStack key={row.label} gap="400" align="space-between" blockAlign="center">
-                <Text as="span">{row.label}</Text>
+                <Text as="span">
+                  {row.label}
+                  {/* Il numero di adesso, nello stesso grigio della riga in
+                      fondo al modal: e' un termine di paragone, non un altro
+                      dato da leggere. */}
+                  {row.note && (
+                    <>
+                      {' '}
+                      <Text as="span" tone="subdued">
+                        {row.note}
+                      </Text>
+                    </>
+                  )}
+                </Text>
                 <InlineStack gap="300" blockAlign="center">
                   {/* Il valore che si lascia resta in grigio: e' il termine di
                       paragone, non una cosa da leggere per prima. */}

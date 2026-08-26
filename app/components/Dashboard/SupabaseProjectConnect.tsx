@@ -531,7 +531,25 @@ export function SupabaseProjectConnect({
                     <Banner tone="critical">{deleteFetcher.data.error}</Banner>
                   )}
 
-                  {allProjects.length === 0 ? (
+                  {/* Finche' l'elenco non e' arrivato non si dice niente.
+                      Aprendo la finestra pochi secondi dopo aver collegato
+                      l'account, la richiesta e' ancora in volo e `allProjects`
+                      e' vuoto: "non hai database da eliminare" era una risposta
+                      data prima di aver guardato — e infatti bastava chiudere e
+                      riaprire per vederli comparire. */}
+                  {!projectsLoaded ? (
+                    <Box padding="600">
+                      <BlockStack gap="300" inlineAlign="center">
+                        <Spinner
+                          accessibilityLabel={t.connect.database.loading}
+                          size="small"
+                        />
+                        <Text as="span" tone="subdued">
+                          {t.connect.database.loading}
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                  ) : allProjects.length === 0 ? (
                     <Text as="p" tone="subdued">
                       {t.connect.database.deleteNone}
                     </Text>

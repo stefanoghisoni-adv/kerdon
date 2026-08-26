@@ -41,6 +41,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       maxProducts: p.maxProducts,
       maxCustomers: p.maxCustomers,
       customersSyncEnabled: p.customersSyncEnabled,
+      // Serve al confronto dentro il modal: e' una delle cose che cambiano
+      // passando di piano, e chi sceglie deve vederle tutte.
+      productFeedsEnabled: p.productFeedsEnabled,
     })),
     { preferredCurrency: wantedCurrency(shop), hasReservedPrice: reserved > 0 },
   );

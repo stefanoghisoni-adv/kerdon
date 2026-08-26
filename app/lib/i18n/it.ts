@@ -633,6 +633,8 @@ export const it = {
     products: "Prodotti sincronizzabili",
     customers: "Clienti sincronizzabili",
     monthlyCost: "Costo mensile",
+    feeds: "Multi-feed prodotto",
+    included: "Incluso",
     notIncluded: "Non inclusi",
     unlimited: "Illimitati",
     free: "Gratuito",

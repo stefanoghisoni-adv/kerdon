@@ -23,6 +23,7 @@ import { deleteFeed, listFeeds, PLATFORMS, type Platform } from '~/lib/feeds/fee
 import { useNavLoading } from '~/components/Dashboard/nav-loading';
 import { MetaLogo } from '~/components/Catalogs/MetaLogo';
 import { GoogleLogo } from '~/components/Catalogs/GoogleLogo';
+import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { useT } from '~/lib/i18n/context';
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -131,9 +132,10 @@ export default function Catalogs() {
           {t.catalogs.intro}
         </Text>
 
-        {/* Dice perche' i pulsanti sono spenti. Senza, un pulsante che non
-            risponde si legge come un guasto: il merchant riprova, poi scrive. */}
-        {!canUseFeeds && <Banner tone="info">{t.catalogs.planRequired}</Banner>}
+        {/* Dice perche' i pulsanti sono spenti, e da li' si passa di piano
+            senza cambiare pagina: il modal e' lo stesso del tetto prodotti,
+            perche' la domanda e' la stessa — cosa ottengo passando di piano. */}
+        {!canUseFeeds && <ProductOverflowBanner reason="feeds" />}
 
         <InlineGrid columns={{ xs: 1, sm: 2, md: 3, lg: 4 }} gap="300">
           <PlatformCard

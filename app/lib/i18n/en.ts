@@ -570,6 +570,8 @@ export const en: typeof it = {
     products: "Products synced",
     customers: "Customers synced",
     monthlyCost: "Monthly cost",
+    feeds: "Multi product feed",
+    included: "Included",
     notIncluded: "Not included",
     unlimited: "Unlimited",
     free: "Free",

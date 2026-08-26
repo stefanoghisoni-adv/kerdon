@@ -22,6 +22,7 @@ export interface PlanForSuggestion {
   maxProducts: number | null;
   maxCustomers: number | null;
   customersSyncEnabled: boolean;
+  productFeedsEnabled?: boolean;
 }
 
 export function suggestPlanForProducts(
@@ -71,6 +72,8 @@ export function limitLabel(limit: number | null, t: Strings): string {
 
 export interface PlanComparisonRow {
   label: string;
+  /** Quanti ne ha adesso questo negozio, fra parentesi. */
+  note?: string;
   current: string;
   next: string;
 }
@@ -82,6 +85,13 @@ export interface PlanComparisonRow {
  * righe ripete lo stesso valore fa sembrare l'aggiornamento meno utile di
  * quanto sia, e costringe a cercare col dito la differenza.
  */
+export interface PlanComparisonCounts {
+  /** Prodotti attivi che il negozio ha davvero. */
+  products?: number | null;
+  /** Clienti che hanno prestato il consenso al marketing. */
+  customers?: number | null;
+}
+
 export function planComparisonRows(
   currentPlan: PlanForSuggestion,
   nextPlan: PlanForSuggestion,
@@ -89,21 +99,41 @@ export function planComparisonRows(
   currency: string,
   locale: Locale,
   t: Strings,
+  /**
+   * Quanti ne ha, questo negozio, adesso.
+   *
+   * Un tetto e' un numero astratto finche' non gli si mette accanto il proprio:
+   * "fino a 1000" non dice niente a chi non ricorda quanti prodotti ha. Con "(26)"
+   * accanto si capisce in un colpo d'occhio se il piano basta.
+   */
+  counts: PlanComparisonCounts = {},
 ): PlanComparisonRow[] {
   const rows: PlanComparisonRow[] = [
     {
       label: t.planCompare.products,
+      note: counts.products != null ? `(${counts.products.toLocaleString(locale)})` : undefined,
       current: limitLabel(currentPlan.maxProducts, t),
       next: limitLabel(nextPlan.maxProducts, t),
     },
     {
       label: t.planCompare.customers,
+      note: counts.customers != null ? `(${counts.customers.toLocaleString(locale)})` : undefined,
       current: currentPlan.customersSyncEnabled
         ? limitLabel(currentPlan.maxCustomers, t)
         : t.planCompare.notIncluded,
       next: nextPlan.customersSyncEnabled
         ? limitLabel(nextPlan.maxCustomers, t)
         : t.planCompare.notIncluded,
+    },
+    {
+      // Il multi-feed non ha un tetto: o c'e' o non c'e'. Sta comunque in
+      // elenco perche' e' una delle cose che cambiano passando di piano, e chi
+      // sceglie deve vederle tutte.
+      label: t.planCompare.feeds,
+      current: currentPlan.productFeedsEnabled
+        ? t.planCompare.included
+        : t.planCompare.notIncluded,
+      next: nextPlan.productFeedsEnabled ? t.planCompare.included : t.planCompare.notIncluded,
     },
     {
       label: t.planCompare.monthlyCost,
