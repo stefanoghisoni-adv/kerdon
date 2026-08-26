@@ -195,6 +195,16 @@ SELECT
   COALESCE(SUM(l.unit_price * l.quantity), 0) AS revenue,
   COALESCE(SUM((l.unit_price - p.cost_per_item) * l.quantity)
     FILTER (WHERE p.cost_per_item IS NOT NULL), 0) AS profit,
+  -- Su quante righe d'ordine il profitto si e' potuto calcolare davvero.
+  --
+  -- Il profitto qui sopra somma SOLO le righe il cui prodotto ha un costo noto,
+  -- e i prodotti presenti dipendono da quanti il piano ne sincronizza. Alzando
+  -- il piano ne entrano di piu', altre righe trovano il loro costo e il
+  -- profitto sale: nessun ordine e' cambiato, e' cambiato quanto se ne sa. Chi
+  -- guarda il grafico vede le barre muoversi e non ha modo di capire perche',
+  -- se questi due numeri non escono di qui.
+  COUNT(*) FILTER (WHERE p.cost_per_item IS NOT NULL) AS covered_lines,
+  COUNT(*) AS total_lines,
   MAX(o.currency) AS currency
 FROM orders o
 JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id

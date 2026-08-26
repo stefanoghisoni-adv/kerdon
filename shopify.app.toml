@@ -60,6 +60,19 @@ uri = "/webhooks/customers/update"
 topics = ["customers/delete"]
 uri = "/webhooks/customers/delete"
 
+# Gli ordini sono l'unica cosa che non aspetta la corsa periodica: e' il momento
+# in cui i numeri del negozio cambiano davvero, e saperlo fra sei ore e' tardi
+# per chi sta guardando come gira una campagna.
+# Due topic perche' un ordine cambia anche dopo: pagato, evaso, annullato — e un
+# ordine annullato che resta a bilancio racconta un profitto che non c'e'.
+[[webhooks.subscriptions]]
+topics = ["orders/create"]
+uri = "/webhooks/orders"
+
+[[webhooks.subscriptions]]
+topics = ["orders/updated"]
+uri = "/webhooks/orders"
+
 [[webhooks.subscriptions]]
 topics = ["app_subscriptions/update"]
 uri = "/webhooks/app-subscriptions/update"

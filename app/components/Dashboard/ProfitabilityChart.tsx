@@ -15,6 +15,18 @@ export interface ProfitabilityChartProps {
   ltv: number | null;
   ltp: number | null;
   currency: string;
+  /**
+   * Righe d'ordine di cui si conosce il costo, sul totale.
+   *
+   * Serve a spiegare una cosa che altrimenti sembra un errore: le barre del
+   * profitto si muovono anche quando non e' cambiato nessun ordine. Il profitto
+   * si calcola sulle sole righe con un costo noto, e quali prodotti siano
+   * sincronizzati dipende dal piano — alzandolo ne entrano di piu' e il
+   * profitto sale. Non perche' il negozio abbia guadagnato di piu': perche' se
+   * ne sa di piu'.
+   */
+  coveredLines?: number;
+  totalLines?: number;
   loading?: boolean;
 }
 
@@ -36,6 +48,8 @@ export function ProfitabilityChart({
   ltv,
   ltp,
   currency,
+  coveredLines,
+  totalLines,
   loading,
 }: ProfitabilityChartProps) {
   const t = useT();
@@ -45,6 +59,15 @@ export function ProfitabilityChart({
   useEffect(() => setMounted(true), []);
 
   const empty = aov == null && ltv == null;
+
+  // Solo quando manca davvero qualcosa: a copertura piena la riga direbbe
+  // "calcolato su 120 righe su 120", che e' rumore.
+  const partial =
+    !empty &&
+    totalLines != null &&
+    coveredLines != null &&
+    totalLines > 0 &&
+    coveredLines < totalLines;
 
   return (
     <div className="chart-card">
@@ -56,6 +79,11 @@ export function ProfitabilityChart({
           <Text as="p" tone="subdued">
             {t.dashboard.profitability.subtitle}
           </Text>
+          {partial && (
+            <Text as="p" tone="caution" variant="bodySm">
+              {t.dashboard.profitability.partial(coveredLines!, totalLines!)}
+            </Text>
+          )}
         </BlockStack>
 
         <div className="chart-card__body">

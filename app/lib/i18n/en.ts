@@ -313,6 +313,8 @@ export const en: typeof it = {
       perCustomer: "Per customer",
       value: "Value",
       profit: "Profit",
+      partial: (covered: number, total: number) =>
+        `Profit worked out from ${covered} of ${total} order lines: the rest have no product cost yet.`,
       empty: "Synced orders are needed to work this out.",
     },
     coverage: {
@@ -716,6 +718,7 @@ export const en: typeof it = {
       minutes: (n: number) => `${n} minutes`,
       oneHour: "one hour",
       hours: (n: number) => `${n} hours`,
+      hoursMinutes: (h: number, m: number) => `${h}h ${m}min`,
       oneDay: "one day",
       days: (n: number) => `${n} days`,
     },

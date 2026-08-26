@@ -126,6 +126,15 @@ export interface ShopAverages {
   /** Profitto portato da un cliente nel tempo. */
   ltp: number | null;
   currency: string;
+  /**
+   * Righe d'ordine su cui il profitto si e' potuto calcolare, sul totale.
+   *
+   * Non e' una statistica: e' la ragione per cui il profitto puo' cambiare
+   * senza che sia cambiato un ordine. Alzando il piano entrano piu' prodotti,
+   * piu' righe trovano il loro costo, il profitto sale.
+   */
+  coveredLines: number;
+  totalLines: number;
   unavailable: 'no_orders_access' | 'not_connected' | null;
 }
 
@@ -134,6 +143,8 @@ interface AveragesRow {
   customers: number | string;
   revenue: number | string;
   profit: number | string;
+  covered_lines: number | string;
+  total_lines: number | string;
   currency: string | null;
 }
 
@@ -149,6 +160,8 @@ export async function loadShopAverages(shopDomain: string): Promise<ShopAverages
     ltv: null,
     ltp: null,
     currency: 'EUR',
+    coveredLines: 0,
+    totalLines: 0,
     unavailable,
   });
 
@@ -179,6 +192,8 @@ export async function loadShopAverages(shopDomain: string): Promise<ShopAverages
     ltv: per(revenue, customers),
     ltp: per(profit, customers),
     currency: row?.currency ?? 'EUR',
+    coveredLines: num(row?.covered_lines),
+    totalLines: num(row?.total_lines),
     unavailable: null,
   };
 }

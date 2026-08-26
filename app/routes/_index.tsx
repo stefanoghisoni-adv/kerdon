@@ -1402,6 +1402,8 @@ export default function Dashboard() {
             ltv={profitFetcher.data?.averages?.ltv ?? null}
             ltp={profitFetcher.data?.averages?.ltp ?? null}
             currency={profitFetcher.data?.averages?.currency ?? 'EUR'}
+            coveredLines={profitFetcher.data?.averages?.coveredLines}
+            totalLines={profitFetcher.data?.averages?.totalLines}
             loading={!profitFetcher.data}
           />
 

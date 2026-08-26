@@ -55,11 +55,17 @@ export function formatCountdown(
     return minutes <= 1 ? t.sync.countdown.oneMinute : t.sync.countdown.minutes(minutes);
   }
 
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) {
-    return hours === 1 ? t.sync.countdown.oneHour : t.sync.countdown.hours(hours);
+  if (minutes < 24 * 60) {
+    // Ore E minuti, non ore arrotondate. `Math.round(minutes / 60)` faceva
+    // diventare "2 ore" un'ora e mezza: un'attesa raccontata con quasi un'ora
+    // di scarto, ed e' proprio il tempo in cui i numeri del merchant restano
+    // fermi. Sotto il giorno quello scarto pesa; sopra, no.
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (m === 0) return h === 1 ? t.sync.countdown.oneHour : t.sync.countdown.hours(h);
+    return t.sync.countdown.hoursMinutes(h, m);
   }
 
-  const days = Math.round(hours / 24);
+  const days = Math.round(minutes / (24 * 60));
   return days === 1 ? t.sync.countdown.oneDay : t.sync.countdown.days(days);
 }

@@ -61,3 +61,36 @@ describe('formatCountdown', () => {
     expect(formatCountdown(at('2026-08-01T00:00:00Z'), at('2026-08-01T00:00:00Z'), itDict)).toBeNull();
   });
 });
+
+describe('sotto il giorno si scrivono anche i minuti', () => {
+  it('ore e minuti insieme, non ore arrotondate', () => {
+    // "2 ore" per un'ora e mezza sbaglia di trenta minuti, e sono i minuti in
+    // cui i numeri del merchant restano fermi.
+    expect(
+      formatCountdown(at('2026-08-01T00:00:00Z'), at('2026-08-01T01:30:00Z'), itDict),
+    ).toBe('1h 30min');
+    expect(
+      formatCountdown(at('2026-08-01T00:00:00Z'), at('2026-08-01T03:50:00Z'), itDict),
+    ).toBe('3h 50min');
+  });
+
+  it('quando i minuti sono zero resta la sola ora', () => {
+    // "2h 0min" e' un modo goffo di dire "2 ore".
+    expect(
+      formatCountdown(at('2026-08-01T00:00:00Z'), at('2026-08-01T02:00:00Z'), itDict),
+    ).toBe('2 ore');
+  });
+
+  it('sopra il giorno i minuti non servono piu', () => {
+    // A quella distanza mezz'ora non cambia niente di quello che si fa.
+    expect(
+      formatCountdown(at('2026-08-01T00:00:00Z'), at('2026-08-03T04:30:00Z'), itDict),
+    ).toBe('2 giorni');
+  });
+
+  it('poco sotto le 24 ore resta un conto in ore, non "un giorno"', () => {
+    expect(
+      formatCountdown(at('2026-08-01T00:00:00Z'), at('2026-08-01T23:45:00Z'), itDict),
+    ).toBe('23h 45min');
+  });
+});

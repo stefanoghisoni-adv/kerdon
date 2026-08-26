@@ -335,6 +335,15 @@ export const it = {
       perCustomer: "Per cliente",
       value: "Valore",
       profit: "Profitto",
+      /**
+       * Perche' le barre del profitto si muovono senza che sia cambiato un
+       * ordine: il profitto si calcola sulle sole righe di cui si conosce il
+       * costo del prodotto, e i prodotti sincronizzati dipendono dal piano.
+       * Alzando il piano ne entrano di piu' e il profitto sale — non perche' il
+       * negozio abbia guadagnato di piu', ma perche' se ne sa di piu'.
+       */
+      partial: (covered: number, total: number) =>
+        `Profitto calcolato su ${covered} righe d\u2019ordine su ${total}: delle altre non si conosce ancora il costo del prodotto.`,
       empty: "Servono ordini sincronizzati per calcolarlo.",
     },
     coverage: {
@@ -790,6 +799,13 @@ export const it = {
       minutes: (n: number) => `${n} minuti`,
       oneHour: "un'ora",
       hours: (n: number) => `${n} ore`,
+      /**
+       * Sotto il giorno si scrivono anche i minuti. "3 ore" per tre ore e
+       * cinquanta minuti sbaglia di quasi un'ora, e chi aspetta la prossima
+       * corsa quell'ora la sente: e' il tempo in cui i suoi numeri restano
+       * fermi.
+       */
+      hoursMinutes: (h: number, m: number) => `${h}h ${m}min`,
       oneDay: "un giorno",
       days: (n: number) => `${n} giorni`,
     },
