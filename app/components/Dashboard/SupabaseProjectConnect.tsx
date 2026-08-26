@@ -429,7 +429,6 @@ export function SupabaseProjectConnect({
       clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provisioning, creatingRef, selectFetcher, connected]);
 
   // La creazione, dal clic al database pronto. Sono due fasi — la richiesta e
