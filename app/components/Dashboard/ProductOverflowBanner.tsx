@@ -167,9 +167,15 @@ export function ProductOverflowBanner({
           <Text as="p">
             {reason === 'feeds' ? (
               <>
-                <Link onClick={() => setConfirming(true)} removeUnderline>
-                  {t.account.upgradeTo(nextLabel)}
-                </Link>
+                {/* Dentro un Banner Polaris rende i Link monocromatici e li fa
+                    ereditare dal testo. Questo wrapper circoscrive ai soli
+                    cataloghi il blu da comando, senza cambiare gli altri link
+                    degli avvisi. */}
+                <span className="catalogs-plan-upgrade-link">
+                  <Link onClick={() => setConfirming(true)} removeUnderline>
+                    {t.account.upgradeTo(nextLabel)}
+                  </Link>
+                </span>
                 {t.catalogs.planRequired}
               </>
             ) : (

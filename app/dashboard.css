@@ -338,6 +338,27 @@
   white-space: nowrap;
 }
 
+/* Il comando di upgrade nei Cataloghi deve continuare a sembrare un link.
+
+   Polaris rende automaticamente monocromatici tutti i Link dentro un Banner:
+   per questo ereditava il nero del testo anche se era un comando. L'override
+   resta circoscritto al solo link del piano e mantiene tolta la sottolineatura
+   anche al passaggio del mouse. */
+.catalogs-plan-upgrade-link .Polaris-Link {
+  color: var(--p-color-text-link);
+  text-decoration: none;
+}
+
+.catalogs-plan-upgrade-link .Polaris-Link:hover {
+  color: var(--p-color-text-link-hover);
+  text-decoration: none;
+}
+
+.catalogs-plan-upgrade-link .Polaris-Link:active {
+  color: var(--p-color-text-link-active);
+  text-decoration: none;
+}
+
 /* Il valore scelto sul pulsante che apre la tendina.
 
    Polaris scrive in grassetto il testo dei pulsanti. Qui pero' il pulsante non
