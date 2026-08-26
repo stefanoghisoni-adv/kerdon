@@ -62,7 +62,12 @@ export function PlanOptionGrid({
   // altrimenti gli elenchi partono a quote diverse e le card affiancate
   // sembrano disallineate. Dove nessuno risparmia la riga non esiste proprio, e
   // nessuno paga uno spazio vuoto.
-  const anySaving = cards.some((card) => planSavingBadge(card, t, currency, locale) != null);
+  // Il risparmio esiste solo scegliendo l'annuale: sul mensile il badge
+  // annunciava una riduzione che quel prezzo non ha, ed era il prezzo che si
+  // stava guardando.
+  const showSaving = interval === 'yearly';
+  const anySaving =
+    showSaving && cards.some((card) => planSavingBadge(card, t, currency, locale) != null);
 
   return (
     <InlineGrid columns={{ xs: 1, sm: 2, lg: 4 }} gap="300">
@@ -126,7 +131,7 @@ export function PlanOptionGrid({
                         comparire vuoto. */}
                     {anySaving && (
                       <Box minHeight="20px">
-                        {planSavingBadge(card, t, currency, locale) && (
+                        {showSaving && planSavingBadge(card, t, currency, locale) && (
                           <InlineStack>
                             <Badge tone="info">
                               {planSavingBadge(card, t, currency, locale) as string}

@@ -232,19 +232,32 @@
   padding: 0;
 }
 
-/* Le caselle dei giorni quadrate, come nel selettore dell'analytics.
+/* Le caselle dei giorni: quadrate, e con le cifre incolonnate.
 
-   Polaris le disegna larghe e basse — sono celle di tabella, e l'altezza gliela
-   da' il testo — quindi il fondo colorato della selezione veniva fuori come una
-   pillola schiacciata invece che come un quadrato. Fissando l'altezza uguale
-   alla larghezza il numero sta nel mezzo e la selezione ha la forma giusta. */
+   Polaris disegna il giorno come un blocco che riempie la cella — larga un
+   settimo della tabella — con del padding intorno. Cosi' il fondo della
+   selezione esce rettangolare, largo quanto la colonna e alto quanto il testo.
+
+   Qui il giorno diventa un quadrato di misura fissa, centrato nella sua cella:
+   la selezione ha la forma che deve avere, e le sette colonne restano allineate
+   perche' la cella non cambia larghezza.
+
+   `tabular-nums` e' l'altra meta' della differenza: senza, "1" e' piu' stretto
+   di "8" e i numeri ballano da una riga all'altra. Con le cifre a larghezza
+   fissa la griglia si legge per colonne, come nel selettore dell'analytics. */
 .range-picker__calendar .Polaris-DatePicker__Day,
 .range-picker__calendar .Polaris-DatePicker__EmptyDay {
+  width: 2.25rem;
   height: 2.25rem;
+  min-width: 2.25rem;
+  padding: 0;
+  margin-inline: auto;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--p-border-radius-200);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--p-font-weight-regular);
 }
 
 /* L'intestazione dei giorni della settimana resta bassa: non e' una casella da

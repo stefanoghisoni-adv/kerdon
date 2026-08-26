@@ -371,6 +371,11 @@ export function SupabaseProjectConnect({
             projectsFetcher.load('/api/supabase/projects');
             limitsFetcher.load('/api/supabase/project-limits');
           } else {
+            // Alla prima configurazione il database appena nato diventa quello
+            // in uso. Il provisioning finisce qui, ma il lavoro no: `creatingNow`
+            // guarda anche questa richiesta, altrimenti fra il "pronto" e il
+            // collegamento il modulo tornava compilabile — con il passo ancora
+            // "In corso" — e sembrava che si potesse ricominciare.
             selectFetcher.submit(
               { ref: creatingRef },
               {
@@ -396,7 +401,8 @@ export function SupabaseProjectConnect({
   // La creazione, dal clic al database pronto. Sono due fasi — la richiesta e
   // il provisioning — ma per chi guarda sono una cosa sola, e i campi devono
   // restare spenti per tutte e due.
-  const creatingNow = createFetcher.state !== 'idle' || provisioning;
+  const creatingNow =
+    createFetcher.state !== 'idle' || provisioning || selectFetcher.state !== 'idle';
 
   const submitCreate = useCallback(() => {
     setCreateError(null);
