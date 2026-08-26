@@ -31,26 +31,28 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 type Outcome = 'ok' | 'ko';
 
 /**
- * Dove torna il merchant dopo l'approvazione.
+ * Dove torna il merchant dopo l'approvazione: sempre la dashboard.
  *
- * Di norma la tab Piano, da cui e' partito. Ma il piano si sceglie anche dal
- * terzo passo della dashboard, durante la configurazione: chi arriva da li'
- * deve tornare li', dove la sincronizzazione riparte da sola — non su una
- * pagina di listino che a quel punto non gli serve piu'.
+ * Prima chi era partito dalla tab Piano ci tornava, e l'indirizzo di rientro
+ * portava un sotto-percorso dopo l'id dell'app
+ * (`/store/<negozio>/apps/<id>/plan`). Quel giro finiva su un riquadro vuoto —
+ * niente contenuto, nemmeno il menu — e l'unico modo di uscirne era ricaricare
+ * la pagina intera o riaprire l'app dall'elenco. Dopo aver pagato.
  *
- * L'unico valore riconosciuto e' `dashboard`, e la destinazione e' scritta qui:
- * un indirizzo preso dalla querystring sarebbe un rimando aperto.
+ * Senza sotto-percorso l'indirizzo e' quello canonico con cui l'admin apre
+ * un'app, e il riquadro si carica come quando la si apre dal menu. La dashboard
+ * e' anche la destinazione piu' utile: il piano nuovo si vede li', e chi ha
+ * appena pagato non ha altro da fare sul listino.
+ *
+ * L'esito viaggia in `?billing=`, che la dashboard legge gia'.
  */
 function backToPlan(requestUrl: URL, shopDomain: string, outcome: Outcome): Response {
-  const dashboard = requestUrl.searchParams.get('return_to') === 'dashboard';
-
   // Si rientra dall'admin, non dall'indirizzo dell'app: cosi' e' l'admin ad
   // aprire il riquadro con la sessione gia' buona, invece di chiedere all'app
   // di rientrare da sola — un giro che, inceppandosi, lasciava il merchant
   // davanti a una pagina bianca dopo aver pagato.
   const adminUrl = adminAppUrl({
     shopDomain,
-    path: dashboard ? '' : '/plan',
     params: new URLSearchParams({ billing: outcome }),
   });
   if (adminUrl) return redirect(adminUrl);
@@ -59,7 +61,7 @@ function backToPlan(requestUrl: URL, shopDomain: string, outcome: Outcome): Resp
   // rotta diretta, con shop/host/embedded in coda perche' possa rientrare.
   const params = embeddedContextParams({ requestUrl, shopDomain });
   params.set('billing', outcome);
-  return redirect(`${dashboard ? '/' : '/plan'}?${params.toString()}`);
+  return redirect(`/?${params.toString()}`);
 }
 
 /**

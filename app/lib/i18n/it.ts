@@ -493,6 +493,13 @@ export const it = {
       customers: (amount: string) => `Fino a ${amount} clienti`,
       customersUnlimited: "Clienti illimitati",
       customersSync: "Sync clienti",
+      /**
+       * Il multi-feed. L'icona accanto spiega cosa vuol dire "feed" a chi non
+       * lo sa gia': senza, la riga si legge come un termine tecnico e chi sta
+       * scegliendo un piano non sa se gli serve.
+       */
+      feeds: "Multi-feed prodotto",
+      feedsHelp: "Crea e gestisci cataloghi prodotto via CSV, XML o URL",
       push: "Push manuale",
       chat: "Chat dedicata",
     },

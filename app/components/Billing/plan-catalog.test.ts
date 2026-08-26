@@ -19,6 +19,7 @@ const row = (over: Partial<PlanRow> = {}): PlanRow => ({
   maxCustomers: 0,
   maxSyncFrequencyHours: 168,
   customersSyncEnabled: false,
+  productFeedsEnabled: false,
   supportLevel: 'community',
   ...over,
 });
@@ -126,12 +127,35 @@ describe('buildPlanFeatures', () => {
     const has = (level: string, key: string) =>
       buildPlanFeatures(row({ supportLevel: level })).find((f) => f.key === key)!.included;
 
+    // Il livello di assistenza decide una riga sola: il push manuale. Email e
+    // chat non sono piu' in elenco — erano su tutte le card o su nessuna, e una
+    // riga uguale ovunque non aiuta a scegliere.
     expect(has('community', 'push')).toBe(false);
     expect(has('email', 'push')).toBe(false);
     expect(has('priority', 'push')).toBe(true);
     expect(has('dedicated', 'push')).toBe(true);
-    expect(has('priority', 'chat')).toBe(false);
-    expect(has('dedicated', 'chat')).toBe(true);
+  });
+
+  it('l elenco segue l ordine in cui si legge un piano', () => {
+    // Prima ogni quanto i dati si allineano, poi quanto ci sta, poi cosa si
+    // puo' farci: dal vincolo che si sente ogni giorno a quello che si nota
+    // una volta sola.
+    expect(buildPlanFeatures(row()).map((f) => f.key)).toEqual([
+      'sync',
+      'products',
+      'customers',
+      'feeds',
+      'push',
+    ]);
+  });
+
+  it('il multi-feed segue quello che il piano concede', () => {
+    const feeds = (enabled: boolean) =>
+      buildPlanFeatures(row({ productFeedsEnabled: enabled })).find((f) => f.key === 'feeds')!
+        .included;
+
+    expect(feeds(true)).toBe(true);
+    expect(feeds(false)).toBe(false);
   });
 
   it('le label restano corte in ogni lingua, altrimenti una card si alza sulle altre', () => {

@@ -460,6 +460,8 @@ export const en: typeof it = {
       customers: (amount: string) => `Up to ${amount} customers`,
       customersUnlimited: "Unlimited customers",
       customersSync: "Customer sync",
+      feeds: "Multi product feed",
+      feedsHelp: "Create and manage product catalogues via CSV, XML or URL",
       push: "Manual push",
       chat: "Dedicated chat",
     },

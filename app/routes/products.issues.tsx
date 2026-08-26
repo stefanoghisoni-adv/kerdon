@@ -348,7 +348,16 @@ export default function ProblemProducts() {
   const { error, shopDomain, blocked, readyCount, planLimit, soldOnly, hiddenByFilter } =
     loaderData;
 
+  // L'elenco vive in uno stato perche' salvando un costo la riga risolta se ne
+  // va senza ricaricare la pagina. Ma il valore iniziale di useState vale solo
+  // al primo montaggio: passando da ?sold=1 all'elenco completo Remix rilegge il
+  // loader senza rimontare il componente, e restavano a schermo le righe
+  // filtrate — il banner spariva e sotto non cambiava niente. Qui lo stato
+  // segue il loader ogni volta che porta righe nuove.
   const [rows, setRows] = useState<ProblemVariant[]>(loaderData.rows);
+  useEffect(() => {
+    setRows(loaderData.rows);
+  }, [loaderData.rows]);
   const [values, setValues] = useState<Record<number, string>>({});
   // Messaggio per riga: valore da correggere o salvataggio non riuscito.
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({});

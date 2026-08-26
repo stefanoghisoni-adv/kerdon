@@ -72,6 +72,54 @@ export function effectivePrice(
   };
 }
 
+/**
+ * Quanti cicli scontati restano, tenuto conto di quelli gia' fatti.
+ *
+ * Il conteggio dei cicli sta su `shops.discount_intervals` ed e' un totale, non
+ * un residuo. Passandolo tale e quale a ogni nuovo abbonamento, chi cambiava
+ * piano dopo tre mesi di sconto si ritrovava altri tre mesi di sconto sul piano
+ * nuovo: lo stesso accordo, concesso due volte. Bastava cambiare piano ogni tre
+ * mesi per non pagare mai il prezzo pieno.
+ *
+ * Da quando lo sconto e' partito lo dice il primo addebito attivato del
+ * negozio: e' un'approssimazione — il prezzo riservato si assegna a mano, e in
+ * teoria potrebbe arrivare dopo il primo pagamento — ma sbaglia dalla parte
+ * giusta, contando qualche ciclo in piu' invece che in meno.
+ *
+ * I cicli si contano nell'unita' dell'abbonamento che si sta creando: mesi per
+ * il mensile, anni per l'annuale. Non e' una conversione fra i due, ed e'
+ * voluto: "tre cicli scontati" su un annuale sono tre anni, non tre mesi.
+ *
+ * Restituisce null quando non c'e' un limite (sconto per sempre, o nessuno
+ * sconto configurato) e 0 quando i cicli concordati sono finiti.
+ */
+export function remainingDiscountIntervals(
+  total: number | null | undefined,
+  firstActivatedAt: Date | null | undefined,
+  interval: BillingInterval,
+  now: Date = new Date(),
+): number | null {
+  if (total == null || !(total > 0)) return null;
+  const limit = Math.floor(total);
+
+  // Nessun addebito attivato: lo sconto non e' ancora cominciato, e i cicli
+  // sono tutti da fare.
+  if (!firstActivatedAt) return limit;
+
+  const start = new Date(firstActivatedAt);
+  if (Number.isNaN(start.getTime()) || start.getTime() > now.getTime()) return limit;
+
+  const months =
+    (now.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+    (now.getUTCMonth() - start.getUTCMonth()) -
+    // Il mese non e' compiuto finche' non si arriva allo stesso giorno.
+    (now.getUTCDate() < start.getUTCDate() ? 1 : 0);
+
+  const consumed = interval === 'yearly' ? Math.floor(months / 12) : months;
+
+  return Math.max(0, limit - Math.max(0, consumed));
+}
+
 /** Sceglie il prezzo del ciclo di fatturazione richiesto. */
 export function priceForInterval(
   price: { priceMonthly: number; priceYearly: number },

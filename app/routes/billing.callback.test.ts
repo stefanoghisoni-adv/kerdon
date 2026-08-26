@@ -191,13 +191,18 @@ describe('/billing/callback', () => {
     delete process.env.SHOPIFY_API_KEY;
   });
 
-  it('dalla tab Piano si torna alla tab Piano, sempre dentro l admin', async () => {
+  it('si torna sempre in dashboard, senza sotto-percorso dopo l id dell app', async () => {
+    // Con /plan in coda il riquadro si apriva vuoto: niente contenuto, nemmeno
+    // il menu, e l'unico modo di uscirne era ricaricare la pagina intera. Dopo
+    // aver pagato. Senza sotto-percorso l'indirizzo e' quello canonico con cui
+    // l'admin apre un'app.
     process.env.SHOPIFY_API_KEY = 'chiave-app';
     getSubscription.mockResolvedValue(subscription());
 
     const url = location(await call());
 
-    expect(url.pathname).toBe('/store/test-shop/apps/chiave-app/plan');
+    expect(url.pathname).toBe('/store/test-shop/apps/chiave-app');
+    expect(url.searchParams.get('billing')).toBe('ok');
     delete process.env.SHOPIFY_API_KEY;
   });
 
@@ -206,7 +211,7 @@ describe('/billing/callback', () => {
 
     const url = location(await call());
 
-    expect(url.pathname).toBe('/plan');
+    expect(url.pathname).toBe('/');
     expect(url.searchParams.get('shop')).toBe('test-shop.myshopify.com');
     expect(url.searchParams.get('embedded')).toBe('1');
     expect(
@@ -214,20 +219,7 @@ describe('/billing/callback', () => {
     ).toBe('admin.shopify.com/store/test-shop');
   });
 
-  it('chi ha scelto il piano dal terzo passo torna in dashboard', async () => {
-    // Il piano si sceglie anche durante la configurazione: chi arriva da li'
-    // deve ritrovarsi dove la sincronizzazione riparte da sola, non sul listino.
-    getSubscription.mockResolvedValue(subscription());
-
-    const url = location(
-      await call('?charge_id=1234&shop=test-shop.myshopify.com&return_to=dashboard'),
-    );
-
-    expect(url.pathname).toBe('/');
-    expect(url.searchParams.get('billing')).toBe('ok');
-  });
-
-  it('un return_to inventato non porta da nessuna parte se non sul listino', async () => {
+  it('un return_to inventato non sposta la destinazione', async () => {
     // La destinazione la decide questo file: un indirizzo preso dalla
     // querystring sarebbe un rimando aperto.
     getSubscription.mockResolvedValue(subscription());
@@ -236,7 +228,8 @@ describe('/billing/callback', () => {
       await call('?charge_id=1234&shop=test-shop.myshopify.com&return_to=https://evil.example'),
     );
 
-    expect(url.pathname).toBe('/plan');
+    expect(url.pathname).toBe('/');
+    expect(url.origin).not.toBe('https://evil.example');
   });
 
   it('la chiusura del precedente non annulla l attivazione appena registrata', async () => {

@@ -12,12 +12,11 @@ import { isSelectablePlan } from './plan-access';
 // disponibilita' (spunta verde / X grigia) e il valore dentro la label. Cosi' le
 // righe delle card restano allineate e le card hanno la stessa altezza.
 export const FEATURE_ORDER = [
-  'products',
   'sync',
-  'email',
+  'products',
   'customers',
+  'feeds',
   'push',
-  'chat',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_ORDER)[number];
@@ -58,6 +57,8 @@ export interface PlanRow {
   maxSyncFrequencyHours: number;
   customersSyncEnabled: boolean;
   supportLevel: string;
+  /** I feed di catalogo: una funzione che il piano concede o no. */
+  productFeedsEnabled: boolean;
 }
 
 // Piano proposto per primo. Il confronto e' senza maiuscole perche' il nome nella
@@ -68,6 +69,10 @@ function productsFeature(plan: PlanRow): PlanFeature {
   return { key: 'products', included: true, value: plan.maxProducts };
 }
 
+function feedsFeature(plan: PlanRow): PlanFeature {
+  return { key: 'feeds', included: plan.productFeedsEnabled, value: null };
+}
+
 function customersFeature(plan: PlanRow): PlanFeature {
   if (!plan.customersSyncEnabled) {
     return { key: 'customers', included: false, value: null };
@@ -75,20 +80,24 @@ function customersFeature(plan: PlanRow): PlanFeature {
   return { key: 'customers', included: true, value: plan.maxCustomers };
 }
 
-// Assistenza: nella tabella c'e' un livello (`support_level`), qui diventa le tre
-// righe che il merchant legge.
+// Il livello di assistenza (`support_level`) decide una sola riga: se il push
+// manuale e' concesso. Le altre due che ne uscivano — email e chat — erano su
+// tutte le card o su nessuna, e una riga uguale ovunque non aiuta a scegliere.
 const PUSH_LEVELS = new Set(['priority', 'dedicated']);
-const CHAT_LEVELS = new Set(['dedicated']);
 
 export function buildPlanFeatures(plan: PlanRow): PlanFeature[] {
   const level = (plan.supportLevel ?? '').trim().toLowerCase();
+  // L'ordine va dal vincolo che si sente ogni giorno a quello che si nota una
+  // volta sola: prima ogni quanto i dati si allineano, poi quanti prodotti e
+  // quanti clienti ci stanno, poi cosa si puo' farci. L'assistenza non e' piu'
+  // in elenco: era su tutte le card uguale, e una riga identica ovunque non
+  // aiuta a scegliere.
   return [
-    productsFeature(plan),
     { key: 'sync', included: true, value: plan.maxSyncFrequencyHours },
-    { key: 'email', included: true, value: null },
+    productsFeature(plan),
     customersFeature(plan),
+    feedsFeature(plan),
     { key: 'push', included: PUSH_LEVELS.has(level), value: null },
-    { key: 'chat', included: CHAT_LEVELS.has(level), value: null },
   ];
 }
 

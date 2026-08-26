@@ -19,12 +19,11 @@ function card(overrides: Partial<PlanCard> = {}): PlanCard {
     partnerYearly: null,
     recommended: true,
     features: [
-      { key: 'products', included: true, value: 5000 },
       { key: 'sync', included: true, value: 6 },
-      { key: 'email', included: true, value: null },
+      { key: 'products', included: true, value: 5000 },
       { key: 'customers', included: true, value: 10_000 },
+      { key: 'feeds', included: true, value: null },
       { key: 'push', included: false, value: null },
-      { key: 'chat', included: false, value: null },
     ],
     ...overrides,
   };

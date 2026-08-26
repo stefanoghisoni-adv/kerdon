@@ -16,6 +16,7 @@ import { forcedTestCharge } from '~/lib/billing/test-charge';
 import {
   effectivePrice,
   priceForInterval,
+  remainingDiscountIntervals,
   type BillingInterval,
 } from '~/lib/billing/partner-pricing';
 import { samePlanName } from '~/lib/billing/plan-name';
@@ -118,6 +119,21 @@ export async function action({ request }: ActionFunctionArgs) {
       })
     : null;
 
+  // Da quando lo sconto e' in corso: il primo addebito che si e' attivato su
+  // questo negozio. Serve a contare i cicli gia' consumati, che non vanno
+  // regalati una seconda volta su un piano nuovo. Si legge solo se c'e' davvero
+  // uno sconto con una durata, altrimenti e' una query per niente.
+  const firstActivatedAt =
+    partnerPrice && shop.discountIntervals != null
+      ? (
+          await prisma.billingCharge.findFirst({
+            where: { shopId: shop.id, activatedAt: { not: null } },
+            orderBy: { activatedAt: 'asc' },
+            select: { activatedAt: true },
+          })
+        )?.activatedAt ?? null
+      : null;
+
   // In che valuta si addebita, e a che prezzo in quella valuta. E' la stessa
   // risposta che ha prodotto le card: un prezzo mostrato in una valuta e
   // addebitato in un'altra non e' un dettaglio, e' una cifra che il merchant
@@ -151,7 +167,10 @@ export async function action({ request }: ActionFunctionArgs) {
       { priceMonthly: Number(partnerPrice.priceMonthly), priceYearly: Number(partnerPrice.priceYearly) },
       interval,
     ) : null,
-    shop.discountIntervals,
+    // I cicli che restano, non quelli concordati: chi ha gia' fatto tre mesi di
+    // sconto sul piano precedente non ne ricomincia altri tre su quello nuovo.
+    // Lo sconto e' uno solo, e cambiare piano non lo rinnova.
+    remainingDiscountIntervals(shop.discountIntervals, firstActivatedAt, interval),
   );
 
   const price = effective.payablePrice;

@@ -24,17 +24,16 @@ export function featureLabel(
       // "Ogni 7 giorni" -> "Sync ogni 7 giorni": la cadenza arriva gia' scritta,
       // con la minuscola perche' entra in mezzo a una frase.
       return t.plan.features.sync(syncFrequencyLabel(feature.value, t).toLowerCase());
-    case 'email':
-      return t.plan.features.email;
+
     case 'customers':
       if (!feature.included) return t.plan.features.customersSync;
       return feature.value == null
         ? t.plan.features.customersUnlimited
         : t.plan.features.customers(amount(feature.value, locale));
+    case 'feeds':
+      return t.plan.features.feeds;
     case 'push':
       return t.plan.features.push;
-    case 'chat':
-      return t.plan.features.chat;
   }
 }
 

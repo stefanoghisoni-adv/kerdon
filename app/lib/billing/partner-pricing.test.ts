@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   effectivePrice,
   priceForInterval,
+  remainingDiscountIntervals,
   savingBadge,
 } from './partner-pricing';
 

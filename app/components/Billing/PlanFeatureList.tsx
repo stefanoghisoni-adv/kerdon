@@ -1,5 +1,5 @@
-import { BlockStack, InlineStack, Icon, Text } from '@shopify/polaris';
-import { CheckIcon, XIcon } from '@shopify/polaris-icons';
+import { BlockStack, InlineStack, Icon, Text, Tooltip } from '@shopify/polaris';
+import { CheckIcon, InfoIcon, XIcon } from '@shopify/polaris-icons';
 import type { PlanFeature } from './plan-catalog';
 import { sortFeatures } from './plan-features';
 import { featureLabel } from './feature-label';
@@ -29,6 +29,16 @@ export function PlanFeatureList({ features }: Props) {
           <Text as="span" tone={feature.included ? 'success' : 'subdued'}>
             {featureLabel(feature, t, locale)}
           </Text>
+          {/* "Multi-feed prodotto" e' l'unica riga che nomina una cosa invece
+              di misurarla: chi sta scegliendo un piano non sa per forza cosa
+              sia un feed, e senza spiegazione quella riga non lo aiuta a
+              decidere. La spiegazione sta nel tooltip perche' scritta per
+              esteso allungherebbe la card piu' delle altre tre. */}
+          {feature.key === 'feeds' && (
+            <Tooltip content={t.plan.features.feedsHelp}>
+              <Icon source={InfoIcon} tone="subdued" />
+            </Tooltip>
+          )}
         </InlineStack>
       ))}
     </BlockStack>

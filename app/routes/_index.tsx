@@ -188,6 +188,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         maxCustomers: p.maxCustomers,
         maxSyncFrequencyHours: p.maxSyncFrequencyHours,
         customersSyncEnabled: p.customersSyncEnabled,
+        productFeedsEnabled: p.productFeedsEnabled,
         supportLevel: p.supportLevel,
       })),
       { preferredCurrency: wantedCurrency(shop), hasReservedPrice: partnerPrices.length > 0 },
