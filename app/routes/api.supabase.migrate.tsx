@@ -4,6 +4,13 @@ import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { applyMerchantSchemaUpdate } from '~/lib/supabase/apply-schema-update.server';
 
+// Nessuna schermata chiama piu' questa rotta: l'allineamento delle tabelle
+// avviene da solo, all'apertura della dashboard e prima di ogni
+// sincronizzazione. Resta come via di riparazione — se su un negozio
+// l'automatismo non fosse passato, si puo' forzare da qui senza aspettare la
+// corsa successiva. E' autenticata e idempotente: chiamarla quando non c'e'
+// niente da fare non tocca niente.
+
 /**
  * Aggiornamento delle tabelle del merchant richiesto dal pulsante in dashboard.
  *

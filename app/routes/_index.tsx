@@ -54,7 +54,6 @@ import {
 import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-format';
 import { normalizePlanName, samePlanName } from '~/lib/billing/plan-name';
 import { authorizationBanners } from '~/components/Dashboard/authorization-banners';
-import { SchemaUpdateBanner } from '~/components/Dashboard/SchemaUpdateBanner';
 import { TrackingConflicts } from '~/components/Dashboard/TrackingConflicts';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { suggestPlanForProducts } from '~/components/Dashboard/plan-suggestion';
@@ -216,12 +215,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const supabaseConnected = !!shop.supabaseConfig?.connectionVerifiedAt;
-    // Tabelle del merchant indietro rispetto a cio' che l'app si aspetta: il
-    // tentativo parte subito in sottofondo (senza attesa, cosi' la dashboard non
-    // rallenta) e il banner resta finche' non e' andato a buon fine.
-    const schemaUpdatePending =
-      supabaseConnected && needsSchemaUpdate(shop.supabaseConfig?.schemaVersion);
-    if (schemaUpdatePending) {
+    // Tabelle del merchant indietro rispetto a cio' che l'app si aspetta:
+    // l'allineamento parte in sottofondo, senza attesa, cosi' la dashboard non
+    // rallenta.
+    //
+    // Non c'e' piu' un avviso ad accompagnarlo. Chiedeva un clic per una cosa
+    // che stava gia' avvenendo — qui, e di nuovo a ogni sincronizzazione — e su
+    // cui il merchant non ha niente da decidere: l'SQL e' additivo, non tocca i
+    // dati, e non gli serve aprire il database. Un avviso che non offre una
+    // scelta e' solo una cosa in piu' da chiudere, e riappariva a ogni versione
+    // dello schema fino alla corsa successiva.
+    if (supabaseConnected && needsSchemaUpdate(shop.supabaseConfig?.schemaVersion)) {
       triggerMerchantSchemaUpdate(shop.id);
     }
     const supabaseAccountConnected = oauthToken !== null;
@@ -279,7 +283,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       syncState,
       authorization,
       trackingAuthorization,
-      schemaUpdatePending,
       planChanged,
       currentMaxProducts: plan?.maxProducts ?? null,
       previousMaxProducts: previousPlan?.maxProducts ?? null,
@@ -479,7 +482,7 @@ interface ProductHistoryResponse {
 }
 
 export default function Dashboard() {
-  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, syncState, planChanged, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, schemaUpdatePending, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
+  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, syncState, planChanged, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
     useLoaderData<typeof loader>();
   const blocked = authorization !== 'ENABLED';
   const t = useT();
@@ -1240,7 +1243,6 @@ export default function Dashboard() {
         {/* Tabelle da allineare: non si chiude finche' l'aggiornamento non e'
             andato a buon fine. Di norma succede da solo e il banner nemmeno si
             vede. */}
-        {schemaUpdatePending && <SchemaUpdateBanner />}
 
         {/* L'avviso sul cambio di piano parla di una configurazione che gira
             gia': confronta il piano di adesso con quello dell'ultima
