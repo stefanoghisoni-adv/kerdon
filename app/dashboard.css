@@ -166,3 +166,24 @@
   min-height: auto;
   padding-block: 0.375rem;
 }
+
+/* La tendina che sceglie il dato di un campo di Google.
+
+   Due ritocchi che Polaris non espone come proprieta'.
+
+   Il primo: la voce attiva viene scritta in grassetto. Dentro questa tendina la
+   voce attiva e' quasi sempre quella consigliata, in cima, e il grassetto la
+   faceva sembrare di categoria diversa dalle altre invece che semplicemente
+   selezionata — cosa che lo sfondo dice gia'.
+
+   Il secondo: il badge "Consigliato" appoggia un pixel piu' in basso della riga
+   di testo che ha accanto. Si alza con una traslazione e non con un margine:
+   il margine sposterebbe anche cio' che gli sta intorno, la traslazione muove
+   solo il disegno. */
+.variable-picker .Polaris-ActionList__Item {
+  font-weight: var(--p-font-weight-regular);
+}
+
+.variable-picker .Polaris-ActionList__Item .Polaris-Badge {
+  transform: translateY(-1px);
+}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ActionList, Badge, Box, Button, InlineStack, Popover, Text } from '@shopify/polaris';
+import { ActionList, Badge, Box, Button, Popover } from '@shopify/polaris';
 import { VARIABLES, type Variable } from '~/lib/feeds/gmc';
 import { useT } from '~/lib/i18n/context';
 
@@ -119,29 +119,33 @@ export function VariablePicker({
         </Button>
       }
     >
+      {/* La classe serve a due ritocchi che Polaris non espone: togliere il
+          grassetto alla voce selezionata — qui la scelta corrente si riconosce
+          gia' dallo sfondo, e il grassetto la faceva sembrare di categoria
+          diversa dalle altre — e allineare il badge alla riga del testo. */}
       <Box minWidth="260px">
-        <ActionList actionRole="menuitem" sections={sections} />
+        <div className="variable-picker">
+          <ActionList actionRole="menuitem" sections={sections} />
+        </div>
       </Box>
     </Popover>
   );
 }
 
 /**
- * Il nome del campo di Google, con l'avviso quando e' obbligatorio.
+ * L'avviso "Obbligatorio", nella sua colonna.
  *
- * "Obbligatorio" qui non vuol dire che il modulo non si invia: vuol dire che un
+ * Sta in una colonna sua e non accanto al nome perche' i nomi dei campi hanno
+ * lunghezze molto diverse (`id` e `custom_label_0`): attaccato al nome, il
+ * badge cadeva ogni volta in un punto diverso, e per sapere quali campi sono
+ * obbligatori bisognava leggerli tutti. Incolonnato si contano a colpo d'occhio.
+ *
+ * "Obbligatorio" non vuol dire che il modulo non si invia: vuol dire che un
  * prodotto a cui quel campo manca resta fuori dal file, e quindi fuori dagli
- * annunci. Vale la pena dirlo accanto al nome, non in una legenda.
+ * annunci.
  */
-export function FieldName({ name, required }: { name: string; required: boolean }) {
+export function RequiredBadge({ required }: { required: boolean }) {
   const t = useT();
-
-  return (
-    <InlineStack gap="150" blockAlign="center" wrap={false}>
-      <Text as="span" variant="bodyMd" fontWeight="medium">
-        {name}
-      </Text>
-      {required && <Badge tone="attention">{t.catalogs.mapping.required}</Badge>}
-    </InlineStack>
-  );
+  if (!required) return null;
+  return <Badge tone="attention">{t.catalogs.mapping.required}</Badge>;
 }

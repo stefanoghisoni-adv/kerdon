@@ -30,7 +30,7 @@ import {
 import { GMC_FIELDS, isVariable, type Variable } from '~/lib/feeds/gmc';
 import { loadMapping, saveField } from '~/lib/feeds/mapping.server';
 import { GoogleLogo } from '~/components/Catalogs/GoogleLogo';
-import { FieldName, VariablePicker } from '~/components/Catalogs/VariablePicker';
+import { RequiredBadge, VariablePicker } from '~/components/Catalogs/VariablePicker';
 import { CopyIconButton } from '~/components/Dashboard/CopyIconButton';
 import { useLocale, useT } from '~/lib/i18n/context';
 
@@ -276,6 +276,9 @@ export default function CatalogGoogle() {
                   <thead>
                     <tr>
                       <Th>{t.catalogs.mapping.field}</Th>
+                      {/* Senza intestazione: la colonna porta un avviso, non un
+                          dato, e "Obbligatorio" si spiega da solo. */}
+                      <Th>{''}</Th>
                       <Th>{t.catalogs.mapping.variable}</Th>
                     </tr>
                   </thead>
@@ -283,7 +286,12 @@ export default function CatalogGoogle() {
                     {fields.map((field) => (
                       <tr key={field.name}>
                         <Td>
-                          <FieldName name={field.name} required={field.required} />
+                          <Text as="span" variant="bodyMd">
+                            {field.name}
+                          </Text>
+                        </Td>
+                        <Td>
+                          <RequiredBadge required={field.required} />
                         </Td>
                         <Td>
                           <VariablePicker
