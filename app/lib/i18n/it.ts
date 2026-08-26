@@ -628,11 +628,15 @@ export const it = {
      * nascosti, non quanti se ne vedono: il numero visibile e' gia' sotto gli
      * occhi, quello che manca no.
      */
-    soldOnly: (hidden: number) =>
-      hidden === 0
-        ? "Stai vedendo solo i prodotti già venduti: sono questi a rendere parziale il profitto dei clienti."
-        : `Stai vedendo solo i prodotti già venduti — quelli che rendono parziale il profitto dei clienti. Altri ${hidden} prodotti senza costo non sono ancora stati ordinati.`,
-    showAll: "Mostra tutti i prodotti",
+    filterAll: "Tutti",
+    filterSold: "Solo prodotti negli ordini",
+    /**
+     * Quanti prodotti il filtro sta tenendo fuori. Il numero visibile e' gia'
+     * sotto gli occhi; quello che manca no, ed e' l'unico modo per capire che
+     * un elenco corto e' corto per scelta e non perche' non c'e' altro.
+     */
+    hiddenCount: (hidden: number) =>
+      hidden === 1 ? "1 prodotto nascosto dal filtro" : `${hidden} prodotti nascosti dal filtro`,
     recheck: "Ricontrolla e aggiorna",
     listTitle: "Elenco prodotti non idonei",
     suspended:

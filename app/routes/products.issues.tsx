@@ -10,12 +10,15 @@ import type { Dictionary } from '~/lib/i18n/context';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useLoaderData, useFetcher } from '@remix-run/react';
+import { useLoaderData, useFetcher, useNavigate } from '@remix-run/react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Page,
   Card,
   Box,
+  Button,
+  ButtonGroup,
+  Tag,
   IndexTable,
   Banner,
   Text,
@@ -97,13 +100,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const allRows = error ? [] : collectProblemVariants(allProducts);
 
-  // "Solo quelli gia' venduti": ci si arriva dalla tab Clienti, da un cliente
-  // il cui profitto e' parziale. Li' la domanda non e' "cosa manca nel
-  // catalogo" ma "cosa sta falsando i miei numeri adesso", e sono due elenchi
-  // diversi — un prodotto mai ordinato non sporca nessun profitto.
-  const soldOnly = new URL(request.url).searchParams.get('sold') === '1';
-  const sold = soldOnly ? await loadSoldVariantIds(session.shop) : null;
-  const rows = sold ? allRows.filter((row) => sold.has(row.variantId)) : allRows;
+  // Due filtri che si sommano.
+  //
+  // "Solo prodotti negli ordini": un prodotto senza costo che nessuno ha mai
+  // ordinato non sporca nessun profitto, mentre uno che compare in venti ordini
+  // sta rendendo parziale il profitto di venti clienti adesso.
+  //
+  // E il singolo cliente, per chi arriva dalla tab Clienti premendo "Risolvi
+  // problemi": li' la domanda non e' nemmeno "cosa sta falsando i miei numeri"
+  // ma "cosa sta falsando i numeri di QUESTO cliente", ed e' un elenco ancora
+  // piu' corto.
+  const params = new URL(request.url).searchParams;
+  const askedCustomer = Number(params.get('customer'));
+  const customerId = Number.isSafeInteger(askedCustomer) && askedCustomer > 0
+    ? askedCustomer
+    : null;
+  const soldOnly = params.get('sold') === '1' || customerId != null;
+
+  const sold = soldOnly
+    ? await loadSoldVariantIds(session.shop, { customerId })
+    : { ids: null, customerName: null };
+
+  const rows = sold.ids ? allRows.filter((row) => sold.ids!.has(row.variantId)) : allRows;
 
   // Quota del piano: serve all'avviso di limite in esaurimento, lo stesso della
   // dashboard. I prodotti sono gia' in memoria, quindi il conteggio non costa
@@ -120,8 +138,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Il filtro e' attivo solo se e' stato chiesto E se si e' potuto applicare:
     // senza database collegato la pagina mostra tutto, e dire il contrario
     // farebbe credere che siano quelli i prodotti venduti.
-    soldOnly: soldOnly && sold !== null,
-    hiddenByFilter: sold ? allRows.length - rows.length : 0,
+    soldOnly: soldOnly && sold.ids !== null,
+    hiddenByFilter: sold.ids ? allRows.length - rows.length : 0,
+    // L'etichetta del cliente si mostra solo se si e' potuto leggerne il nome:
+    // un'etichetta senza nome non dice a chi si riferisce.
+    customerId: sold.customerName ? customerId : null,
+    customerName: sold.customerName,
   });
 }
 
@@ -345,8 +367,31 @@ function CostRow({
 export default function ProblemProducts() {
   const t = useT();
   const loaderData = useLoaderData<typeof loader>();
-  const { error, shopDomain, blocked, readyCount, planLimit, soldOnly, hiddenByFilter } =
-    loaderData;
+  const {
+    error,
+    shopDomain,
+    blocked,
+    readyCount,
+    planLimit,
+    soldOnly,
+    hiddenByFilter,
+    customerId,
+    customerName,
+  } = loaderData;
+  const navigate = useNavigate();
+
+  // I filtri stanno nell'indirizzo e non in uno stato: cosi' l'elenco che si
+  // sta guardando ha un link, e tornare indietro col browser riporta al filtro
+  // di prima invece che alla pagina intera.
+  const goTo = (next: { sold?: boolean; customer?: number | null }) => {
+    const params = new URLSearchParams();
+    // Il cliente implica gia' "solo negli ordini": tenere anche il primo
+    // parametro non cambierebbe niente e allungherebbe l'indirizzo.
+    if (next.customer) params.set('customer', String(next.customer));
+    else if (next.sold) params.set('sold', '1');
+    const query = params.toString();
+    navigate(query ? `/products/issues?${query}` : '/products/issues');
+  };
 
   // L'elenco vive in uno stato perche' salvando un costo la riga risolta se ne
   // va senza ricaricare la pagina. Ma il valore iniziale di useState vale solo
@@ -516,15 +561,36 @@ export default function ProblemProducts() {
             ristretto ai prodotti che lo riguardano. Va detto: un elenco piu'
             corto del previsto, senza spiegazione, si legge come un elenco
             incompleto. Il link toglie il filtro senza far cercare come. */}
-        {soldOnly && (
-          <Banner tone="info">
-            <InlineStack gap="200" blockAlign="center" wrap>
-              <Text as="span">{t.issues.soldOnly(hiddenByFilter)}</Text>
-              <Link url="/products/issues" removeUnderline>
-                {t.issues.showAll}
-              </Link>
-            </InlineStack>
-          </Banner>
+        {/* I filtri, sopra la tabella e allineati a sinistra: si leggono prima
+            dell'elenco che governano, non dopo.
+
+            L'etichetta del cliente sta accanto e non dentro i due filtri
+            perche' e' un'altra cosa: quelli scelgono FRA due elenchi, questa
+            ne restringe uno. Togliendola resta il filtro che c'era sotto. */}
+        {!error && (
+          <InlineStack gap="200" blockAlign="center" wrap>
+            <ButtonGroup variant="segmented">
+              <Button pressed={!soldOnly} onClick={() => goTo({ sold: false })}>
+                {t.issues.filterAll}
+              </Button>
+              <Button
+                pressed={soldOnly && !customerId}
+                onClick={() => goTo({ sold: true })}
+              >
+                {t.issues.filterSold}
+              </Button>
+            </ButtonGroup>
+
+            {customerId && customerName && (
+              <Tag onRemove={() => goTo({ sold: true })}>{customerName}</Tag>
+            )}
+
+            {soldOnly && hiddenByFilter > 0 && (
+              <Text as="span" tone="subdued" variant="bodySm">
+                {t.issues.hiddenCount(hiddenByFilter)}
+              </Text>
+            )}
+          </InlineStack>
         )}
 
         {blocked && !error && (

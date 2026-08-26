@@ -565,11 +565,10 @@ export const en: typeof it = {
 
   issues: {
     title: "Products not eligible",
-    soldOnly: (hidden: number) =>
-      hidden === 0
-        ? "Showing only products that have sold: these are the ones making customer profit partial."
-        : `Showing only products that have sold — the ones making customer profit partial. Another ${hidden} products without a cost have not been ordered yet.`,
-    showAll: "Show all products",
+    filterAll: "All",
+    filterSold: "Only products in orders",
+    hiddenCount: (hidden: number) =>
+      hidden === 1 ? "1 product hidden by the filter" : `${hidden} products hidden by the filter`,
     recheck: "Recheck and update",
     listTitle: "Products not eligible",
     suspended:

@@ -246,8 +246,13 @@ export default function Customers() {
                     {/* Solo dove c'e' qualcosa da risolvere. Un comando su ogni
                         riga, anche su quelle a posto, si smette di leggere: e'
                         la riga senza comando che deve saltare all'occhio. */}
+                    {/* Il cliente viaggia nell'indirizzo: di la' l'elenco si
+                        restringe ai soli prodotti che compaiono nei SUOI
+                        ordini. Chi preme "Risolvi problemi" da questa riga
+                        vuole sistemare il profitto di questo cliente, non fare
+                        le pulizie di primavera nel catalogo. */}
                     {row.coveredLines < row.totalLines && (
-                      <Link url="/products/issues?sold=1" removeUnderline>
+                      <Link url={`/products/issues?customer=${row.customerId}`} removeUnderline>
                         {t.customers.fixIssues}
                       </Link>
                     )}
