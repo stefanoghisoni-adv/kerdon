@@ -367,3 +367,27 @@
 .list-tight-titles .Polaris-Box:has(> .Polaris-Text--headingSm) {
   --pc-box-padding-block-start-xs: var(--p-space-100);
 }
+
+/* "Matching avanzato" quando il piano lo comprende.
+   Il viola e' scelto dal committente e non esiste fra i toni di Polaris: i
+   toni di `s-icon` sono info, success, warning, critical, auto, neutral e
+   caution, e nessuno di questi e' viola. Quindi il colore si scrive qui.
+
+   Si imposta sul contenitore e si lascia ereditare: il testo lo prende da
+   `color`, e l'icona dei web component disegna con `currentColor`, quindi una
+   dichiarazione sola tinge tutta e due le cose e non possono divergere. La
+   ripetizione su `s-icon` e' una rete: se un giorno quell'elemento smettesse
+   di ereditare, il fulmine resterebbe del colore giusto invece di tornare nero
+   accanto a una scritta viola. */
+.plan-feature-matching {
+  color: #5e0075;
+}
+
+.plan-feature-matching s-icon {
+  color: #5e0075;
+}
+
+/* Il testo di Polaris porta un colore proprio, che vincerebbe sull'ereditarieta'. */
+.plan-feature-matching .Polaris-Text--root {
+  color: inherit;
+}

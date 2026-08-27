@@ -185,6 +185,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="color-scheme" content="light" />
         <Meta />
         <Links />
+        {/* I web component di App Home (`s-icon` e compagnia).
+            Non arrivano con `app-bridge.js`, che AppProvider inietta gia': sono
+            una libreria a parte, con un suo script. Senza questa riga gli
+            elementi `s-*` restano tag sconosciuti — il browser non protesta, li
+            rende semplicemente vuoti, ed e' un guasto che si vede solo a video.
+            Serve per il fulmine del "Matching avanzato", che `polaris-icons` non
+            ha fra le sue icone. */}
+        <script src="https://cdn.shopify.com/shopifycloud/polaris.js" />
         {/* Dopo <Links />: in coda al documento vince sull'ordine, oltre che
             per !important. */}
         <style dangerouslySetInnerHTML={{ __html: FORCE_LIGHT_CRITICAL }} />

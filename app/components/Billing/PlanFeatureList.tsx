@@ -1,4 +1,4 @@
-import { BlockStack, Divider, InlineStack, Icon, Text, Tooltip } from '@shopify/polaris';
+import { BlockStack, Box, Divider, InlineStack, Icon, Text, Tooltip } from '@shopify/polaris';
 import { CheckCircleIcon, InfoIcon, XCircleIcon } from '@shopify/polaris-icons';
 import type { PlanFeature } from './plan-catalog';
 import { sortFeatures } from './plan-features';
@@ -59,8 +59,16 @@ export function PlanFeatureList({ features }: Props) {
       {matching && (
         <>
           {/* La riga di separazione porta tutto il peso: e' lei a dire che quel
-              che viene dopo e' di un altro ordine rispetto all'elenco sopra. */}
-          <Divider />
+              che viene dopo e' di un altro ordine rispetto all'elenco sopra.
+
+              Dentro un Box a tutta larghezza perche' la pila qui sopra ha
+              `inlineAlign="start"`, che stringe ogni figlio al proprio
+              contenuto: un `<hr>` non ne ha, quindi collassava a zero e la riga
+              c'era nel markup ma non si vedeva. */}
+          <Box width="100%">
+            <Divider />
+          </Box>
+          <div className={matching.included ? 'plan-feature-matching' : undefined}>
           <InlineStack align="start" gap="200" blockAlign="center" wrap={false}>
             {/* Il fulmine viene dai web component di App Home e non da
                 `polaris-icons`: quel pacchetto un fulmine non ce l'ha, e questa
@@ -77,7 +85,7 @@ export function PlanFeatureList({ features }: Props) {
                 promettere un esito — success direbbe "riuscito", warning
                 "attenzione", e qui non c'e' ne' l'uno ne' l'altro. */}
             {matching.included ? (
-              <s-icon type="bolt-filled" tone="info" />
+              <s-icon type="bolt-filled" />
             ) : (
               <s-icon type="bolt" color="subdued" />
             )}
@@ -85,6 +93,7 @@ export function PlanFeatureList({ features }: Props) {
               {featureLabel(matching, t, locale)}
             </Text>
           </InlineStack>
+          </div>
         </>
       )}
     </BlockStack>
