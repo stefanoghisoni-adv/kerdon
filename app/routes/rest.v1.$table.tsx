@@ -3,6 +3,7 @@ import {
   externalIdCookie,
   newExternalId,
   readExternalId,
+  EXTERNAL_ID_HEADER,
 } from '~/lib/tracking/external-id';
 import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
 import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
@@ -23,8 +24,9 @@ import {
   type AccessOutcome,
 } from '~/lib/read-proxy/access-log.server';
 
-// Risposta di blocco: JSON minimale. Stape tratta ogni status non 2xx come
-// "nessun dato", quindi il tracciamento prosegue senza errori all'utente finale.
+// Risposta di blocco: JSON minimale. I container server-side trattano ogni
+// status non 2xx come "nessun dato", quindi il tracciamento prosegue senza
+// errori all'utente finale.
 function deny(status: number, message: string): Response {
   return new Response(JSON.stringify({ error: message }), {
     status,
@@ -143,9 +145,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   //
   // Non dipende dall'esito della lettura: anche una richiesta rifiutata viene
   // da un browser che vale la pena riconoscere alla prossima.
-  if (!readExternalId(request.headers.get('Cookie'))) {
-    result.response.headers.append('Set-Cookie', externalIdCookie(newExternalId()));
+  const existing = readExternalId(request.headers.get('Cookie'));
+  const externalId = existing ?? newExternalId();
+
+  // Il cookie si riscrive solo se mancava: se il browser ce l'ha gia', rimandarglielo
+  // identico a ogni pagina e' peso sulla risposta che non cambia niente.
+  if (!existing) {
+    result.response.headers.append('Set-Cookie', externalIdCookie(externalId));
   }
+
+  // L'header c'e' sempre, sia che l'identificativo fosse gia' presente sia che
+  // sia stato creato ora. Un container server-side — quale che sia il fornitore,
+  // non presupponiamo nessuno in particolare — puo' cosi' leggerlo e piantarlo
+  // come cookie first-party sul
+  // dominio del negozio, dove nessun browser lo blocca — mentre un cookie
+  // `SameSite=None; Secure` dal nostro dominio e' di terze parti e Safari e
+  // Firefox lo scartano.
+  result.response.headers.set(EXTERNAL_ID_HEADER, externalId);
+
+  // Un header di risposta personalizzato non e' leggibile da JavaScript
+  // cross-origin se non e' elencato in `Access-Control-Expose-Headers`. Questo
+  // proxy puo' essere chiamato sia da container server-side (che non hanno
+  // restrizioni CORS) sia da JavaScript nel browser cross-origin (che le ha):
+  // esponendo l'header esplicitamente, lo rendiamo leggibile in entrambi i casi.
+  result.response.headers.set('Access-Control-Expose-Headers', EXTERNAL_ID_HEADER);
 
   return result.response;
 }

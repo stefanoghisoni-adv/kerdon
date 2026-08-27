@@ -15,7 +15,8 @@ export function hashReadProxyToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-// Stape invia lo stesso valore sia in Authorization: Bearer sia nell'header
+// I container server-side inviano lo stesso valore sia in Authorization: Bearer
+// sia nell'header
 // apikey: leggiamo il primo, con ripiego sul secondo.
 export function extractReadProxyToken(request: Request): string | null {
   const auth = request.headers.get('authorization');

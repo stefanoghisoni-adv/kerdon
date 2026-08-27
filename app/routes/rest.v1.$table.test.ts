@@ -324,3 +324,69 @@ describe('registro degli accessi ai dati personali', () => {
     expect(entry()).toEqual({ shopId: 's1', outcome: 'upstream_error', status: 500 });
   });
 });
+
+describe('identificativo esterno (external ID)', () => {
+  beforeEach(() => {
+    resolveShopReadContext.mockReset();
+    forwardRead.mockReset();
+    logCustomerDataAccess.mockClear();
+  });
+
+  it('senza cookie esistente → header presente con identificativo nuovo', async () => {
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+
+    const res = await call({ authorization: 'Bearer spx_x' });
+
+    const headerValue = res.headers.get('X-CoreW-External-Id');
+    expect(headerValue).toBeTruthy();
+    expect(headerValue).toMatch(/^corew_\d+_[A-Za-z0-9]{32}$/);
+  });
+
+  it('con cookie esistente → header presente con stesso valore del cookie', async () => {
+    const existingId = 'corew_1234567890_abcdefghijklmnopqrstuvwxyz123456';
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+
+    const res = await call(
+      { authorization: 'Bearer spx_x', cookie: `corew_eid=${existingId}` },
+    );
+
+    const headerValue = res.headers.get('X-CoreW-External-Id');
+    expect(headerValue).toBe(existingId);
+  });
+
+  it('header e cookie coerenti quando il cookie viene creato', async () => {
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+
+    const res = await call({ authorization: 'Bearer spx_x' });
+
+    const headerValue = res.headers.get('X-CoreW-External-Id');
+    const setCookieHeader = res.headers.get('Set-Cookie');
+
+    expect(headerValue).toBeTruthy();
+    expect(setCookieHeader).toBeTruthy();
+    expect(setCookieHeader).toContain(`corew_eid=${headerValue}`);
+  });
+
+  it('richiesta rifiutata → identificativo emesso comunque', async () => {
+    // Token mancante → 401, ma l'identificativo viene comunque emesso
+    const res = await call({});
+
+    expect(res.status).toBe(401);
+    const headerValue = res.headers.get('X-CoreW-External-Id');
+    expect(headerValue).toBeTruthy();
+    expect(headerValue).toMatch(/^corew_\d+_[A-Za-z0-9]{32}$/);
+  });
+
+  it('header esposto via Access-Control-Expose-Headers per letture cross-origin', async () => {
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+
+    const res = await call({ authorization: 'Bearer spx_x' });
+
+    const exposeHeaders = res.headers.get('Access-Control-Expose-Headers');
+    expect(exposeHeaders).toBe('X-CoreW-External-Id');
+  });
+});

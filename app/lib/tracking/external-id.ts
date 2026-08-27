@@ -65,6 +65,22 @@ export function newExternalId(now: number = Date.now()): string {
 /** Il nome del cookie. */
 export const EXTERNAL_ID_COOKIE = 'corew_eid';
 
+/**
+ * Il nome dell'header di risposta che porta l'identificativo.
+ *
+ * Un cookie `SameSite=None; Secure` dal nostro dominio e' di terze parti, e
+ * Safari e Firefox lo scartano. Quando il tracciamento passa da un container
+ * server-side — un GTM server-side ospitato da chiunque, o un backend del
+ * merchant — la chiamata al proxy la
+ * fa il container e non il browser: il `Set-Cookie` viene consumato li' e al
+ * browser non arriva mai.
+ *
+ * Restituendo l'identificativo anche in un header di risposta, un container
+ * server-side puo' leggerlo e piantarlo come cookie first-party sul dominio
+ * del negozio, dove nessun browser lo blocca.
+ */
+export const EXTERNAL_ID_HEADER = 'X-CoreW-External-Id';
+
 /** Un anno: piu' corto perderebbe il legame proprio con chi torna di rado. */
 const MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
