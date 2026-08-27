@@ -3,6 +3,7 @@ import { CheckCircleIcon, InfoIcon, XCircleIcon } from '@shopify/polaris-icons';
 import type { PlanFeature } from './plan-catalog';
 import { sortFeatures } from './plan-features';
 import { featureLabel } from './feature-label';
+import { BoltFilledIcon, BoltIcon } from './BoltIcon';
 import { useT, useLocale } from '~/lib/i18n/context';
 
 interface Props {
@@ -84,11 +85,10 @@ export function PlanFeatureList({ features }: Props) {
                 caution. Fra questi `info` e' l'unico che stacca dal testo senza
                 promettere un esito — success direbbe "riuscito", warning
                 "attenzione", e qui non c'e' ne' l'uno ne' l'altro. */}
-            {matching.included ? (
-              <s-icon type="bolt-filled" />
-            ) : (
-              <s-icon type="bolt" color="subdued" />
-            )}
+            <Icon
+              source={matching.included ? BoltFilledIcon : BoltIcon}
+              tone={matching.included ? undefined : 'subdued'}
+            />
             <Text as="span" tone={matching.included ? undefined : 'subdued'}>
               {featureLabel(matching, t, locale)}
             </Text>

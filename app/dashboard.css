@@ -374,17 +374,17 @@
    caution, e nessuno di questi e' viola. Quindi il colore si scrive qui.
 
    Si imposta sul contenitore e si lascia ereditare: il testo lo prende da
-   `color`, e l'icona dei web component disegna con `currentColor`, quindi una
-   dichiarazione sola tinge tutta e due le cose e non possono divergere. La
-   ripetizione su `s-icon` e' una rete: se un giorno quell'elemento smettesse
-   di ereditare, il fulmine resterebbe del colore giusto invece di tornare nero
-   accanto a una scritta viola. */
+   `color` e il fulmine disegna con `currentColor`, quindi una dichiarazione
+   sola tinge tutte e due le cose e non possono divergere. */
 .plan-feature-matching {
   color: #5e0075;
 }
 
-.plan-feature-matching s-icon {
-  color: #5e0075;
+/* L'icona di Polaris porta un colore proprio: senza questa riga il fulmine
+   resterebbe nero accanto a una scritta viola. */
+.plan-feature-matching .Polaris-Icon svg {
+  fill: currentColor;
+  color: inherit;
 }
 
 /* Il testo di Polaris porta un colore proprio, che vincerebbe sull'ereditarieta'. */
