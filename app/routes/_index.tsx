@@ -1507,9 +1507,18 @@ export default function Dashboard() {
                 schiacciare il testo in una colonna di due parole. */}
             <InlineStack align="space-between" blockAlign="center" gap="400">
               <Text as="span">{t.dashboard.soldWithoutCost.body(soldWithoutCost)}</Text>
-              <Button url="/products/issues?sold=1">
-                {t.dashboard.soldWithoutCost.fix}
-              </Button>
+              {/* Lo scostamento da destra tiene il pulsante lontano dalla X
+                  che chiude l'avviso: quella e' posizionata sopra al contenuto,
+                  e senza spazio i due bersagli finivano appaiati — con il
+                  rischio di chiudere l'avviso mentre si voleva premere il
+                  comando. 24px e' il passo di spaziatura di Polaris piu' vicino
+                  a quel che serve: meglio del numero tondo, perche' segue le
+                  stesse misure di tutto il resto. */}
+              <Box paddingInlineEnd="600">
+                <Button url="/products/issues?sold=1">
+                  {t.dashboard.soldWithoutCost.fix}
+                </Button>
+              </Box>
             </InlineStack>
           </Banner>
         )}
