@@ -30,11 +30,11 @@ redirect_urls = [
 ]
 
 [webhooks]
-# 2025-01 e non la piu' recente proposta dalla CLI: e' la versione con cui e'
-# scritto il codice (ApiVersion.January25 in app/shopify.server.ts, e
-# SHOPIFY_API_VERSION nelle variabili d'ambiente). Alzarla qui cambierebbe la
-# forma dei payload in arrivo senza che i gestori se ne accorgano.
-api_version = "2025-01"
+# 2026-07 e' la versione API piu' recente supportata (Shopify mantiene le ultime
+# 4 versioni trimestrali, cioe' 12 mesi, quindi al 27 agosto 2026 sono supportate
+# October25, January26, April26 e July26). Corrisponde a ApiVersion.July26 in
+# app/shopify.server.ts e a SHOPIFY_API_VERSION nelle variabili d'ambiente.
+api_version = "2026-07"
 
 [[webhooks.subscriptions]]
 topics = ["products/create"]

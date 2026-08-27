@@ -2,6 +2,10 @@ import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { verifyWebhook } from '~/lib/webhooks/verify.server';
 import { orderToRows } from '~/lib/customers/order-rows';
+import {
+  webhookOrderToShopifyOrder,
+  type WebhookOrderPayload,
+} from '~/lib/customers/order-webhook-payload';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
 import { syncIsActive } from '~/lib/sync/sync-active';
@@ -20,7 +24,112 @@ import { hasOrdersAccess } from '~/lib/sync/orders-access';
  * sincronizzazione completa e non deve diventarlo — se il webhook si perde,
  * l'ordine lo recupera comunque la corsa periodica, che li rilegge tutti.
  * Questa e' una scorciatoia, non l'unica strada.
+ *
+ * IL CORPO VA TRADOTTO PRIMA. Shopify manda l'ordine nei nomi della REST
+ * (`line_items`, `created_at`, `price`), mentre da qui in giu' tutto e' scritto
+ * per la forma normalizzata che produce `getOrders`. La traduzione, e il perche'
+ * si traduce invece di rileggere l'ordine dall'API come fanno i prodotti, stanno
+ * in lib/customers/order-webhook-payload.
+ *
+ * LA TRACCIA. Sotto si risponde 200 qualunque cosa vada storta, ed e' giusto
+ * cosi' (vedi il commento al `try`), ma rispondere 200 non e' tacere: ogni esito
+ * lascia una riga `[webhook orders]` nel log, e un fallimento lascia anche una
+ * riga nel registro dei job. E' lo stesso doppio canale dei webhook GDPR, per lo
+ * stesso motivo: il log si legge subito ma scorre via, il registro resta. Senza,
+ * un handler che risponde sempre "va tutto bene" e' indistinguibile da uno che
+ * non ha mai scritto niente — che e' esattamente com'e' stato per un po'.
  */
+
+/** Com'e' finita, in una forma sola per tutti e tre i canali. */
+interface OrderWebhookOutcome {
+  shopDomain: string;
+  orderId: number | null;
+  outcome: 'completed' | 'skipped' | 'failed';
+  /** Cos'e' successo, in italiano leggibile: e' quello che si cerca nel log. */
+  detail: string;
+  lines?: number;
+  /** `false` = l'elenco delle righe era troncato. Vedi il mapper. */
+  linesComplete?: boolean;
+}
+
+/**
+ * La riga nel log, sempre con la stessa forma cosi' da poterla ritrovare
+ * cercando `[webhook orders]`. Un fallimento va su `console.error` perche' e'
+ * l'unico canale che gli strumenti di allerta guardano davvero.
+ */
+function logOrderWebhook(outcome: OrderWebhookOutcome): void {
+  const line = JSON.stringify({
+    webhook: 'orders',
+    shop: outcome.shopDomain,
+    order: outcome.orderId,
+    status: outcome.outcome,
+    detail: outcome.detail,
+    ...(outcome.lines !== undefined ? { lines: outcome.lines } : {}),
+    ...(outcome.linesComplete !== undefined ? { lines_complete: outcome.linesComplete } : {}),
+    at: new Date().toISOString(),
+  });
+
+  if (outcome.outcome === 'failed') console.error(`[webhook orders] ${line}`);
+  else console.log(`[webhook orders] ${line}`);
+}
+
+/**
+ * Il fallimento anche nel registro dei job, dove non scorre via.
+ *
+ * Solo il fallimento: una riga per ogni ordine riuscito sarebbe una riga per
+ * ogni vendita del negozio, cioe' la tabella dei job trasformata in un giornale
+ * di cassa che nessuno legge. Il successo si accontenta del log — e' la
+ * differenza di volume fra questo webhook e quello dei prodotti a giustificare
+ * l'asimmetria.
+ *
+ * Il dettaglio finisce in `errors` per la stessa ragione per cui ci finisce la
+ * traccia GDPR: e' l'unica colonna libera, e questi job non compaiono nel log
+ * mostrato al merchant.
+ */
+async function recordOrderWebhookFailure(
+  shopId: string,
+  outcome: OrderWebhookOutcome,
+): Promise<void> {
+  try {
+    await prisma.syncJob.create({
+      data: {
+        shopId,
+        jobType: 'webhook',
+        status: 'failed',
+        completedAt: new Date(),
+        errors: {
+          message: outcome.detail,
+          order_webhook: {
+            order: outcome.orderId,
+            ...(outcome.lines !== undefined ? { lines: outcome.lines } : {}),
+            ...(outcome.linesComplete !== undefined
+              ? { lines_complete: outcome.linesComplete }
+              : {}),
+          },
+        },
+      },
+    });
+  } catch (error) {
+    // Se nemmeno la traccia si riesce a scrivere resta il log applicativo, che
+    // e' esattamente il motivo per cui i due canali esistono entrambi.
+    console.error(
+      `[webhook orders] traccia non salvata per ${outcome.shopDomain}:`,
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+  }
+}
+
+/** I due canali insieme: e' cosi' che si chiude ogni strada di questo handler. */
+async function saveOrderWebhookOutcome(
+  shopId: string | null,
+  outcome: OrderWebhookOutcome,
+): Promise<void> {
+  logOrderWebhook(outcome);
+  if (outcome.outcome === 'failed' && shopId) {
+    await recordOrderWebhookFailure(shopId, outcome);
+  }
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const body = await request.text();
   const hmac = request.headers.get('X-Shopify-Hmac-Sha256');
@@ -37,30 +146,78 @@ export async function action({ request }: ActionFunctionArgs) {
   // Da qui in giu' si risponde sempre 200, qualunque cosa vada storta. Un
   // errore restituito a Shopify fa ritentare la consegna e, dopo abbastanza
   // fallimenti, fa disattivare la sottoscrizione: un problema nostro finirebbe
-  // per spegnere il webhook di quel negozio.
+  // per spegnere il webhook di quel negozio. Rispondere 200 pero' non autorizza
+  // a non dire niente, ed e' il compito di `saveOrderWebhookOutcome`.
+  let shopId: string | null = null;
+  let orderId: number | null = null;
+
   try {
-    const order = JSON.parse(body);
-    if (!order?.id) return json({ ok: true }, { status: 200 });
+    const payload = JSON.parse(body) as WebhookOrderPayload;
+    const order = webhookOrderToShopifyOrder(payload);
+
+    // Senza id non c'e' ordine da riconoscere: alla corsa dopo ne nascerebbe un
+    // doppione, quindi si preferisce non scriverlo affatto.
+    if (!order) {
+      await saveOrderWebhookOutcome(null, {
+        shopDomain,
+        orderId: null,
+        outcome: 'skipped',
+        detail: 'payload senza id ordine',
+      });
+      return json({ ok: true }, { status: 200 });
+    }
+
+    orderId = order.id;
 
     const shop = await prisma.shop.findUnique({
       where: { shopDomain },
       include: { supabaseConfig: true },
     });
+    shopId = shop?.id ?? null;
 
     if (!shop?.supabaseConfig || !syncIsActive(shop.supabaseConfig)) {
+      await saveOrderWebhookOutcome(shopId, {
+        shopDomain,
+        orderId,
+        outcome: 'skipped',
+        detail: 'nessun progetto collegato e verificato: non c e dove scrivere',
+      });
       return json({ ok: true }, { status: 200 });
     }
 
     // Il permesso sugli ordini si concede riaprendo l'app: finche' manca, le
     // tabelle degli ordini non esistono nemmeno e scriverci fallirebbe.
     if (!hasOrdersAccess(shop.scopes)) {
+      await saveOrderWebhookOutcome(shopId, {
+        shopDomain,
+        orderId,
+        outcome: 'skipped',
+        detail: 'permesso sugli ordini non concesso',
+      });
       return json({ ok: true }, { status: 200 });
     }
 
+    // Da qui in poi e' la stessa trasformazione della corsa periodica, sulla
+    // stessa forma: e' tutto il senso di aver tradotto il payload prima.
     const rows = orderToRows(order);
-    // Un ordine senza righe utili — tutto rimborsato, o nessuna riga con un
-    // prodotto riconoscibile — non ha niente da scrivere.
-    if (!rows) return json({ ok: true }, { status: 200 });
+    if (!rows) {
+      await saveOrderWebhookOutcome(shopId, {
+        shopDomain,
+        orderId,
+        outcome: 'skipped',
+        detail: 'ordine non convertibile in righe',
+      });
+      return json({ ok: true }, { status: 200 });
+    }
+
+    // Un elenco troncato non e' un motivo per non scrivere: si scrive quel che
+    // c'e', e lo si dichiara per quello che e'. Le righe mancanti arrivano con
+    // la corsa periodica, che le rilegge tutte esaurendo la connessione.
+    if (order.lines_complete === false) {
+      console.warn(
+        `[webhook orders] elenco righe troncato per l ordine ${orderId} (${shopDomain}): scritte le prime ${rows.lines.length}, il resto arriva con la corsa periodica`,
+      );
+    }
 
     const supabase = createSupabaseClient(shop.supabaseConfig);
 
@@ -71,26 +228,59 @@ export async function action({ request }: ActionFunctionArgs) {
       .upsert([rows.order], { onConflict: 'shopify_order_id', ignoreDuplicates: false });
 
     if (orderError) {
-      console.warn(`[webhook orders] ordine non scritto (${shopDomain}):`, orderError.message);
+      await saveOrderWebhookOutcome(shopId, {
+        shopDomain,
+        orderId,
+        outcome: 'failed',
+        detail: `ordine non scritto: ${orderError.message}`,
+        lines: rows.lines.length,
+        linesComplete: order.lines_complete,
+      });
       return json({ ok: true }, { status: 200 });
     }
 
+    // Un ordine senza righe si scrive lo stesso: vale per i totali del negozio
+    // anche quando non ha nulla da raggruppargli sotto — un ordine di soli
+    // servizi, o uno le cui righe sono rimaste fuori perche' senza id.
     if (rows.lines.length > 0) {
       const { error: linesError } = await supabase
         .from('order_lines')
         .upsert(rows.lines, { onConflict: 'shopify_line_id', ignoreDuplicates: false });
 
       if (linesError) {
-        console.warn(`[webhook orders] righe non scritte (${shopDomain}):`, linesError.message);
+        await saveOrderWebhookOutcome(shopId, {
+          shopDomain,
+          orderId,
+          outcome: 'failed',
+          detail: `righe non scritte: ${linesError.message}`,
+          lines: rows.lines.length,
+          linesComplete: order.lines_complete,
+        });
+        return json({ ok: true }, { status: 200 });
       }
     }
 
+    await saveOrderWebhookOutcome(shopId, {
+      shopDomain,
+      orderId,
+      outcome: 'completed',
+      detail: 'ordine e righe scritti',
+      lines: rows.lines.length,
+      linesComplete: order.lines_complete,
+    });
+
     return json({ ok: true }, { status: 200 });
   } catch (error) {
-    console.error(
-      `[webhook orders] errore su ${shopDomain}:`,
-      error instanceof Error ? error.message : 'errore sconosciuto',
-    );
+    // Qui si finisce quando cade qualcosa che i passi sopra non sanno gestire:
+    // il corpo illeggibile, il database dell'app irraggiungibile, la chiave del
+    // progetto non decifrabile. Shopify si sente rispondere 200 lo stesso, ma la
+    // traccia deve restare: e' l'errore che per mesi non si e' visto.
+    await saveOrderWebhookOutcome(shopId, {
+      shopDomain,
+      orderId,
+      outcome: 'failed',
+      detail: error instanceof Error ? error.message : 'errore sconosciuto',
+    });
     return json({ ok: true }, { status: 200 });
   }
 }

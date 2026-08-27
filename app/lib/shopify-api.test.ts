@@ -33,7 +33,7 @@ describe('Shopify API Client (GraphQL)', () => {
     await client().getProductsCount();
 
     const [url, init] = (global.fetch as any).mock.calls[0];
-    expect(url).toBe('https://test.myshopify.com/admin/api/2025-01/graphql.json');
+    expect(url).toBe('https://test.myshopify.com/admin/api/2026-07/graphql.json');
     expect(init.method).toBe('POST');
   });
 

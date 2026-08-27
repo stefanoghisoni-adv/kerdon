@@ -61,7 +61,7 @@ npm run dev             # shopify app dev
    SHOPIFY_API_SECRET=xxx
    SHOPIFY_SCOPES=read_products,write_products,read_inventory,read_cost,read_customers,write_customers,read_metafields
    SHOPIFY_APP_URL=https://your-app.vercel.app
-   SHOPIFY_API_VERSION=2025-01
+   SHOPIFY_API_VERSION=2026-07
    DATABASE_URL=postgresql://...   # Supabase Free, pooler transaction mode
    REDIS_URL=rediss://...          # Upstash Free
    ENCRYPTION_SECRET=...           # 64 caratteri hex (vedi sotto)

@@ -730,11 +730,17 @@ export default function Dashboard() {
   // e resta disabilitato dopo il completamento (le successive sono automatiche).
   const revalidator = useRevalidator();
 
-  // Mentre la corsa manuale gira si ricontrolla ogni pochi secondi, e a ogni
-  // giro si rileggono anche i numeri che dipendono dai dati appena scritti —
-  // profitto e prodotti che rendono. Senza, il merchant vedeva finire la
-  // sincronizzazione e la tabella dei prodotti restava quella di prima: la
-  // corsa aveva funzionato, ma non c'era modo di accorgersene senza ricaricare.
+  // Mentre la corsa manuale gira si ricontrolla ogni pochi secondi SE e' finita.
+  // Solo quello: i numeri che dipendono dai dati appena scritti — profitto e
+  // prodotti che rendono — si rileggono una volta sola, alla fine.
+  //
+  // Prima si rileggevano a ogni giro, e con un controllo ogni quattro secondi su
+  // una corsa che puo' durare tre minuti significava far lampeggiare le stesse
+  // card fino a quarantacinque volte. Il guaio non era solo l'occhio: a meta'
+  // corsa quei numeri sono calcolati su una tabella che si sta ancora
+  // riempiendo, quindi ogni lampeggio mostrava una cifra sbagliata in modo
+  // diverso. L'unico momento in cui vale la pena rileggerli e' quando c'e'
+  // qualcosa di definitivo da leggere.
   //
   // Con una scadenza: se qualcosa si inceppa a monte il pulsante deve tornare
   // premibile, non restare spento per sempre.
@@ -752,7 +758,6 @@ export default function Dashboard() {
 
     const timer = setTimeout(() => {
       revalidator.revalidate();
-      reloadForPeriod(range, comparison);
     }, MANUAL_SYNC_POLL_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps

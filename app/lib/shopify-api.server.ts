@@ -213,7 +213,7 @@ export class ShopifyAPIClient {
   constructor(shopDomain: string, accessToken: string) {
     this.shopDomain = shopDomain;
     this.accessToken = accessToken;
-    this.apiVersion = process.env.SHOPIFY_API_VERSION || '2025-01';
+    this.apiVersion = process.env.SHOPIFY_API_VERSION || '2026-07';
   }
 
   // Unico modo corretto di costruire il client. Il token NON si legge piu' dalla
