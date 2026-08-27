@@ -116,12 +116,33 @@ describe("l'indirizzo del cliente", () => {
     expect(row.region).toBeNull();
   });
 
-  it('external_id e date_of_birth restano vuoti finche non c e da dove leggerli', () => {
-    // Shopify non li ha come campi del cliente. Metterci dentro l'id Shopify
+  it('external_id resta vuoto finche non c e da dove leggerlo', () => {
+    // Shopify non ce l'ha come campo del cliente. Metterci dentro l'id Shopify
     // sarebbe peggio del vuoto: chi legge crederebbe che sia il suo
     // identificativo esterno.
     const row = withAddress({ country: 'Italy' });
     expect(row.external_id).toBeNull();
+  });
+
+  // La differenza fra "chiave assente" e "chiave a null" qui non e' stilistica:
+  // una chiave assente esce dalla lista colonne dell'upsert e la colonna non
+  // viene toccata, mentre un null la sovrascrive. I metafield nel payload dei
+  // webhook non ci sono mai, quindi scrivere sempre null vorrebbe dire
+  // cancellare la data a ogni modifica del cliente — un ordine, un tag, un
+  // indirizzo cambiato.
+  it('senza aver letto il metafield la data di nascita non entra proprio nella riga', () => {
+    const row = withAddress({ country: 'Italy' });
+    expect('date_of_birth' in row).toBe(false);
+  });
+
+  it('letta e vuota, invece, la colonna si svuota davvero', () => {
+    const row = transformCustomer({ ...base, date_of_birth: null } as never);
+    expect('date_of_birth' in row).toBe(true);
     expect(row.date_of_birth).toBeNull();
+  });
+
+  it('la data letta si scrive senza separatori, come la vogliono le piattaforme', () => {
+    const row = transformCustomer({ ...base, date_of_birth: '1985-04-23' } as never);
+    expect(row.date_of_birth).toBe('19850423');
   });
 });

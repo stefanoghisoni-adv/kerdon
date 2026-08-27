@@ -1,6 +1,6 @@
-import type { LoaderFunctionArgs } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { useFetcher, useLoaderData } from '@remix-run/react';
 import { useState } from 'react';
 import {
   Badge,
@@ -31,6 +31,16 @@ import { isCalendarDate } from '~/lib/customers/customers-query';
 import { formatMoney } from '~/lib/billing/money';
 import { useLocale, useT } from '~/lib/i18n/context';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
+import { BirthdateMetafieldCard } from '~/components/Customers/BirthdateMetafieldCard';
+import { ShopifyAPIClient } from '~/lib/shopify-api.server';
+import {
+  BIRTHDATE_METAFIELD_KEY,
+  birthdateMetafieldOf,
+  formatMetafieldKey,
+  isDateMetafieldType,
+  parseMetafieldKey,
+} from '~/lib/customers/birthdate-metafield';
+import { customerMetafieldsUrl, storeHandle } from '~/utils/admin-page';
 
 /** Il mese in corso: il periodo che quasi tutti guardano per primo. */
 function currentMonth(now = new Date()): { from: string; to: string } {
@@ -58,7 +68,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // scura. Meglio entrare e trovare scritto perche' non c'e' niente.
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop },
-    select: { currentPlan: true },
+    select: {
+      currentPlan: true,
+      birthdateMetafieldNamespace: true,
+      birthdateMetafieldKey: true,
+    },
   });
   const plan = await findPlanByName(shop?.currentPlan);
   const customersIncluded = plan?.customersSyncEnabled ?? false;
@@ -80,6 +94,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   }
 
+  // I campi personalizzati che il negozio ha sui clienti.
+  //
+  // Una domanda sola a Shopify, che pero' ne risolve due: riempie la tendina da
+  // cui il merchant indica un campo che ha gia', e dice se il nostro c'e' —
+  // quest'ultima e' una rilevazione vera, non la deduzione da un tentativo di
+  // scrittura andato a vuoto. Chi il campo ce l'ha gia' deve vederselo scritto
+  // senza che l'app provi a scrivergli addosso per scoprirlo.
+  //
+  // Un guasto qui non porta via la pagina: l'elenco resta vuoto e il pulsante
+  // si comporta come se il campo mancasse. Crearlo due volte non fa danno,
+  // Shopify risponde che quella chiave e' gia' occupata.
+  let definitions: { key: string; name: string; type: string }[] = [];
+  let definitionsRead = false;
+  if (customersIncluded) {
+    definitions = await ShopifyAPIClient.forShop(session.shop)
+      .then((client) => client.listCustomerMetafieldDefinitions())
+      .then((list) => {
+        definitionsRead = true;
+        return list.map((d) => ({
+          key: formatMetafieldKey(d),
+          name: d.name,
+          type: d.type,
+        }));
+      })
+      .catch((error) => {
+        console.warn(
+          '[customers] campi personalizzati dei clienti non leggibili:',
+          error instanceof Error ? error.message : 'errore sconosciuto',
+        );
+        return [];
+      });
+  }
+
+  const configured = birthdateMetafieldOf(shop);
+  const configuredKey = formatMetafieldKey(configured);
+  const configuredDefinition = definitions.find((d) => d.key === configuredKey);
+
   // Anche col piano giusto una lettura puo' fallire — tabella non ancora
   // creata, progetto irraggiungibile. Un guasto sul database del merchant non
   // deve diventare una pagina d'errore dell'app.
@@ -97,14 +148,116 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...report,
     upgradePlan,
     range,
+    // Il riquadro del campo "Data di nascita": c'e' solo con un piano che
+    // sincronizza i clienti, perche' senza quel piano il campo non arriverebbe
+    // da nessuna parte e il merchant lo compilerebbe per niente.
+    birthdate: customersIncluded
+      ? {
+          /** Il campo da cui si legge oggi, vuoto se non ne e' stato scelto uno. */
+          configured: configuredKey,
+          /** La nostra definizione esiste gia' sul negozio? */
+          ourDefinitionPresent: definitionsRead
+            ? definitions.some((d) => d.key === formatMetafieldKey(BIRTHDATE_METAFIELD_KEY))
+            : null,
+          definitions,
+          /**
+           * Il campo in uso non contiene una data: si avvisa, perche' da un
+           * testo libero la data si ricava solo se e' scritta in modo
+           * riconoscibile, e quello che non lo e' lascia la colonna vuota.
+           * Nessun avviso quando il campo non e' fra le definizioni: di quello
+           * non si conosce il tipo, e un avviso a caso e' peggio di nessuno.
+           */
+          notADate: configuredDefinition != null && !isDateMetafieldType(configuredDefinition.type),
+          adminUrl: customerMetafieldsUrl(session.shop),
+        }
+      : null,
     // Per aprire la scheda del cliente: da qui il merchant vede l'anagrafica
     // vera, ed e' il gesto che segue la lettura di una riga.
-    adminBase: `https://admin.shopify.com/store/${session.shop.replace('.myshopify.com', '')}`,
+    adminBase: `https://admin.shopify.com/store/${storeHandle(session.shop)}`,
   });
 }
 
+/**
+ * Sceglie da quale campo del cliente leggere la data di nascita.
+ *
+ * Due strade, e finiscono allo stesso posto — due colonne sulla riga del
+ * negozio: `create` fa nascere il nostro campo e lo mette in uso, `use` punta a
+ * uno che il negozio ha gia'. La colonna sul database del merchant e' sempre
+ * `date_of_birth`: qui si decide da dove prende il valore, non dove finisce.
+ *
+ * Dopo la creazione si richiede a Shopify se il campo c'e', con una domanda
+ * mirata su namespace e chiave: e' l'unica cosa che autorizza a metterlo in
+ * uso. Fidarsi dell'esito della scrittura vorrebbe dire dare per riuscito
+ * anche quello che non lo e'.
+ */
+export async function action({ request }: ActionFunctionArgs) {
+  const { session } = await authenticate.admin(request);
+
+  if (request.method !== 'POST') {
+    return json({ ok: false as const, error: 'failed' as const }, { status: 405 });
+  }
+
+  // Lo stesso cancello del riquadro, ripetuto qui: quello nasconde i comandi,
+  // questo nega l'azione. Una richiesta non arriva per forza da un pulsante.
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain: session.shop },
+    select: { currentPlan: true },
+  });
+  const plan = await findPlanByName(shop?.currentPlan);
+  if (!plan?.customersSyncEnabled) {
+    return json({ ok: false as const, error: 'failed' as const }, { status: 403 });
+  }
+
+  const form = await request.formData();
+  const intent = String(form.get('intent') ?? '');
+
+  // Il campo che il merchant ha scelto o incollato. Quello che non si divide in
+  // namespace e chiave non si salva: una riga interpretata a naso lascerebbe la
+  // colonna vuota senza che si capisca il perche'.
+  if (intent === 'use') {
+    const chosen = parseMetafieldKey(String(form.get('metafield') ?? ''));
+    if (!chosen) {
+      return json({ ok: false as const, error: 'invalid' as const }, { status: 400 });
+    }
+
+    await prisma.shop.update({
+      where: { shopDomain: session.shop },
+      data: {
+        birthdateMetafieldNamespace: chosen.namespace,
+        birthdateMetafieldKey: chosen.key,
+      },
+    });
+    return json({ ok: true as const, error: null });
+  }
+
+  try {
+    const client = await ShopifyAPIClient.forShop(session.shop);
+    await client.createCustomerBirthdateDefinition();
+
+    if (!(await client.hasCustomerBirthdateDefinition())) {
+      return json({ ok: false as const, error: 'failed' as const }, { status: 502 });
+    }
+
+    await prisma.shop.update({
+      where: { shopDomain: session.shop },
+      data: {
+        birthdateMetafieldNamespace: BIRTHDATE_METAFIELD_KEY.namespace,
+        birthdateMetafieldKey: BIRTHDATE_METAFIELD_KEY.key,
+      },
+    });
+    return json({ ok: true as const, error: null });
+  } catch (error) {
+    console.error(
+      '[customers] creazione del campo data di nascita non riuscita:',
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+    return json({ ok: false as const, error: 'failed' as const }, { status: 500 });
+  }
+}
+
 export default function Customers() {
-  const { rows, currency, unavailable, upgradePlan, adminBase } = useLoaderData<typeof loader>();
+  const { rows, currency, unavailable, upgradePlan, adminBase, birthdate } =
+    useLoaderData<typeof loader>();
   const t = useT();
   const locale = useLocale();
 
@@ -166,6 +319,11 @@ export default function Customers() {
         {unavailable === 'failed' && (
           <Banner tone="warning">{t.customers.loadFailed}</Banner>
         )}
+
+        {/* Il campo "Data di nascita" sulla scheda cliente. Compare solo con un
+            piano che sincronizza i clienti: senza, sarebbe un campo che il
+            merchant compila e che poi non arriva da nessuna parte. */}
+        {birthdate && <BirthdateMetafieldCard {...birthdate} />}
 
         {/* Due filtri, come nei prodotti non idonei: a sinistra, sopra la
             tabella. "Richiedono un intervento" tiene solo le righe con la spia

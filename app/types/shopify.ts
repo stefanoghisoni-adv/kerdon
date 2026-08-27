@@ -87,6 +87,17 @@ export interface ShopifyCustomer {
   created_at?: string | null;
   updated_at?: string | null;
   /**
+   * La data di nascita, dal metafield `custom.data_di_nascita` (vedi
+   * `lib/customers/birthdate-metafield`). Shopify la restituisce come
+   * `1985-04-23`; qui arriva cosi' com'e' ed e' il transformer a compattarla.
+   *
+   * La distinzione fra assente e vuota conta: `undefined` vuol dire "non l'ho
+   * chiesta" — e' il caso del payload dei webhook, che i metafield non li porta
+   * — mentre `null` vuol dire "l'ho chiesta e il campo e' vuoto". Il transformer
+   * ci si appoggia per non cancellare una data che non ha mai letto.
+   */
+  date_of_birth?: string | null;
+  /**
    * L'indirizzo predefinito. Shopify ne restituisce anche l'elenco completo
    * (`addresses`), ma per un pubblico pubblicitario conta quello in uso: gli
    * altri sono indirizzi di spedizione occasionali, non dove il cliente vive.
@@ -126,12 +137,22 @@ export interface SupabaseCustomerRow {
   zipcode: string | null;
   region: string | null;
   /**
-   * Le due che Shopify non ha come campi propri. Restano null finche' non si
-   * decide da quale metafield leggerle: la colonna esiste perche' chi costruisce
-   * un pubblico trovi il posto gia' pronto, non perche' sia gia' riempita.
+   * Shopify non ce l'ha come campo proprio, e resta null finche' non si decide
+   * da quale metafield leggerlo: la colonna esiste perche' chi costruisce un
+   * pubblico trovi il posto gia' pronto, non perche' sia gia' riempita.
    */
   external_id: string | null;
-  date_of_birth: string | null;
+  /**
+   * La data di nascita come `YYYYMMDD`, dal metafield del cliente.
+   *
+   * OPZIONALE, e non per pigrizia: la chiave assente e la chiave a null sono
+   * due istruzioni diverse per PostgREST. Assente significa "questa colonna non
+   * la tocco" e lascia in pace quello che c'e' gia'; a null significa
+   * "svuotala". I webhook dei clienti non portano i metafield, quindi non
+   * sanno nulla di questo campo: se scrivessero null cancellerebbero a ogni
+   * modifica del cliente una data che solo la corsa periodica sa leggere.
+   */
+  date_of_birth?: string | null;
   synced_at: string;
 }
 

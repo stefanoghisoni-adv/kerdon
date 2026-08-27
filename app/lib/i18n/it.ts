@@ -528,6 +528,7 @@ export const it = {
        * scegliendo un piano non sa se gli serve.
        */
       feeds: "Multi-feed prodotto",
+      matching: "Matching avanzato",
       feedsHelp: "Crea e gestisci cataloghi prodotto via CSV, XML o URL",
       push: "Push manuale",
       chat: "Chat dedicata",
@@ -807,6 +808,46 @@ export const it = {
     noAccess:
       "Per calcolare i profitti serve l’accesso agli ordini del negozio. Riapri l’app per concederlo.",
     resource: { singular: "cliente", plural: "clienti" },
+
+    /**
+     * Il riquadro del campo "Data di nascita".
+     *
+     * Si dice cosa comparira' e dove, perche' e' li' che il merchant andra' a
+     * scrivere; non si dice come lo creiamo, che e' affar nostro.
+     */
+    birthdate: {
+      title: "Data di nascita dei clienti",
+      description:
+        "Il campo Data di nascita compare nella scheda di ogni cliente, dove tu e il tuo staff potete compilarlo: da l\u00ec viene sincronizzato insieme agli altri dati del cliente e diventa utilizzabile per costruire pubblici e segmenti pi\u00f9 precisi. Puoi farlo creare all\u2019app, oppure indicare un campo che il tuo negozio usa gi\u00e0.",
+      /** Il campo da cui si legge adesso. */
+      inUse: (key: string) => `Campo in uso: ${key}`,
+      noneInUse:
+        "Nessun campo in uso: la data di nascita non viene ancora sincronizzata.",
+      create: "Crea metafield",
+      useExisting: "Metafield esistente",
+      working: "Un attimo\u2026",
+      present: "Campo gi\u00e0 presente",
+      openAdmin: "Apri i metafield dei clienti",
+      chooseLabel: "Scegli fra i campi del tuo negozio",
+      choosePlaceholder: "Nessun campo scelto",
+      groupDates: "Campi data",
+      groupOthers: "Altri campi",
+      chooseEmpty: "Il tuo negozio non ha ancora campi personalizzati sui clienti.",
+      pasteLabel: "Oppure scrivi il campo",
+      /**
+       * Perche' la casella esiste accanto alla tendina: un campo puo' esserci
+       * sui clienti senza comparire nell'elenco. Detto come lo vive il
+       * merchant — "se non lo trovi, scrivilo" — senza spiegare il perche'
+       * tecnico, che a lui non serve.
+       */
+      pasteHelp:
+        "Nome del campo con il suo prefisso, come lo trovi nell\u2019admin: puoi copiarlo da l\u00ec e incollarlo qui. Serve anche quando il campo non compare nell\u2019elenco.",
+      invalid: "Questo campo non \u00e8 scritto in modo valido. Esempio: custom.data_di_nascita",
+      notADate:
+        "Il campo in uso non \u00e8 di tipo data: verranno sincronizzate solo le date scritte in modo riconoscibile, le altre resteranno vuote.",
+      failed:
+        "Non \u00e8 stato possibile salvare la scelta. Riprova fra poco.",
+    },
   },
 
   // La proposta di configurazione avanzata, in dashboard.

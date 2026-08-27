@@ -148,6 +148,7 @@ describe('buildPlanFeatures', () => {
       'customers',
       'feeds',
       'push',
+      'matching',
     ]);
   });
 

@@ -7,6 +7,8 @@
 // Qui si costruisce quella coda una volta sola, cosi' l'URL di ritorno passato a
 // Shopify e il rimando finale alla tab Piano non possono divergere.
 
+import { storeHandle } from '~/utils/admin-page';
+
 /**
  * Ricostruisce il parametro `host` a partire dal solo dominio del negozio.
  *
@@ -17,8 +19,10 @@
  * `admin.shopify.com/store/<negozio>`).
  */
 export function fallbackHost(shopDomain: string): string {
-  const handle = shopDomain.trim().replace(/\.myshopify\.com$/i, '');
-  return Buffer.from(`admin.shopify.com/store/${handle}`, 'utf8').toString('base64');
+  return Buffer.from(
+    `admin.shopify.com/store/${storeHandle(shopDomain)}`,
+    'utf8',
+  ).toString('base64');
 }
 
 export interface EmbeddedContextOptions {
@@ -47,11 +51,6 @@ export function embeddedContextParams(opts: EmbeddedContextOptions): URLSearchPa
   params.set('host', host);
   params.set('embedded', '1');
   return params;
-}
-
-/** Il nome del negozio senza il suffisso: "negozio.myshopify.com" -> "negozio". */
-function storeHandle(shopDomain: string): string {
-  return shopDomain.trim().replace(/\.myshopify\.com$/i, '');
 }
 
 export interface AdminAppUrlOptions {

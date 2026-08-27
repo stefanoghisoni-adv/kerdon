@@ -68,6 +68,11 @@ CREATE TABLE "shops" (
     "plan_banner_shown_at" TIMESTAMP(3),
     "read_proxy_token_hash" TEXT,
     "read_proxy_token_enc" TEXT,
+    -- Il metafield del cliente da cui leggere la data di nascita. Separati
+    -- perche' la query di Shopify li vuole separati: divisi una volta al
+    -- salvataggio, chi legge non deve rifare la divisione ogni volta.
+    "birthdate_metafield_namespace" TEXT,
+    "birthdate_metafield_key" TEXT,
     -- Listino riservato: partner di appartenenza e durata dello sconto in cicli
     -- di fatturazione (vuoto = per sempre).
     -- Riferimento al NOME del partner, non a un id opaco: la riga si legge

@@ -59,10 +59,16 @@ export function transformCustomer(customer: ShopifyCustomer): SupabaseCustomerRo
     // `external_id`, per dire — sarebbe peggio di lasciarla vuota: chi la legge
     // crederebbe che sia il suo identificativo.
     external_id: null,
-    // Nessun campo da cui leggerla, per ora: passa comunque di qui, cosi' il
-    // giorno in cui arrivera' da un metafield sara' gia' scritta come YYYYMMDD
-    // senza doversene ricordare.
-    date_of_birth: normalizeBirthdate(null),
+    // La data di nascita compare nella riga solo quando la si e' davvero
+    // chiesta a Shopify. Il payload dei webhook i metafield non li porta: se
+    // finisse comunque nella riga con dentro null, ogni modifica di un cliente
+    // — un ordine, un tag, un indirizzo cambiato — cancellerebbe la data che la
+    // corsa periodica aveva letto, e nessuno capirebbe perche' il campo si
+    // svuota da solo. La chiave assente dice a PostgREST di non toccare la
+    // colonna; il null, che il metafield e' stato letto ed e' vuoto.
+    ...(customer.date_of_birth !== undefined
+      ? { date_of_birth: normalizeBirthdate(customer.date_of_birth) }
+      : {}),
     synced_at: new Date().toISOString(),
   };
 }

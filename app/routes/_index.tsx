@@ -1496,15 +1496,21 @@ export default function Dashboard() {
             resta aperta — ma torna alla prossima apertura, perche' finche' quei
             costi mancano la notizia resta vera. */}
         {setupComplete && soldWithoutCost > 0 && !costWarningHidden && (
-          <Banner
-            tone="warning"
-            onDismiss={() => setCostWarningHidden(true)}
-            action={{
-              content: t.dashboard.soldWithoutCost.fix,
-              url: '/products/issues?sold=1',
-            }}
-          >
-            {t.dashboard.soldWithoutCost.body(soldWithoutCost)}
+          <Banner tone="warning" onDismiss={() => setCostWarningHidden(true)}>
+            {/* Il comando in fondo alla riga, non sotto il testo: la prop
+                `action` del Banner lo manderebbe a capo, e su un avviso di una
+                riga sola quel capo lascia in mezzo una fascia vuota che fa
+                sembrare l'avviso piu' importante di quel che e'.
+
+                Il ritorno a capo resta possibile ma solo quando serve: se lo
+                schermo e' stretto il pulsante scende sotto da solo, invece di
+                schiacciare il testo in una colonna di due parole. */}
+            <InlineStack align="space-between" blockAlign="center" gap="400">
+              <Text as="span">{t.dashboard.soldWithoutCost.body(soldWithoutCost)}</Text>
+              <Button url="/products/issues?sold=1">
+                {t.dashboard.soldWithoutCost.fix}
+              </Button>
+            </InlineStack>
           </Banner>
         )}
 

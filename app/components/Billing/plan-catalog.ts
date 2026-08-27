@@ -17,6 +17,10 @@ export const FEATURE_ORDER = [
   'customers',
   'feeds',
   'push',
+  // Ultima e staccata dalle altre: non e' una funzione in piu' nell'elenco, e'
+  // quello che il piano fa con i clienti che gia' sincronizza. Va dove l'occhio
+  // arriva per ultimo, dopo una riga di separazione.
+  'matching',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_ORDER)[number];
@@ -113,6 +117,10 @@ export function buildPlanFeatures(plan: PlanRow): PlanFeature[] {
     customersFeature(plan),
     feedsFeature(plan),
     { key: 'push', included: PUSH_LEVELS.has(level), value: null },
+    // Il riconoscimento di uno stesso cliente fra dispositivi diversi poggia
+    // sui dati dei clienti: dove quelli non si sincronizzano non c'e' niente su
+    // cui riconoscere nessuno, quindi la riga segue esattamente quella.
+    { key: 'matching', included: plan.customersSyncEnabled, value: null },
   ];
 }
 

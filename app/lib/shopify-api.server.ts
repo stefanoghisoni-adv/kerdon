@@ -1,4 +1,9 @@
 import { unauthenticated } from '~/shopify.server';
+import {
+  BIRTHDATE_METAFIELD,
+  BIRTHDATE_METAFIELD_OPTIONS,
+  type MetafieldKey,
+} from '~/lib/customers/birthdate-metafield';
 
 // Client Admin API in GraphQL.
 //
@@ -559,7 +564,26 @@ export class ShopifyAPIClient {
     limit?: number;
     pageInfo?: string;
     updatedAtMin?: string;
+    /**
+     * Il metafield da cui leggere la data di nascita, scelto dal merchant.
+     *
+     * Assente vuol dire "non chiederlo": i clienti tornano senza il campo
+     * `date_of_birth`, e la colonna sul database del merchant resta com'e'
+     * invece di essere svuotata. E' il comportamento giusto per chi non ha
+     * ancora scelto niente, e anche per chi chiama questo metodo per altro —
+     * le statistiche sul consenso, per dire, che della data non sanno che
+     * farsene e non hanno motivo di far costare di piu' la query.
+     */
+    birthdateMetafield?: MetafieldKey | null;
   } = {}) {
+    const birthdate = options.birthdateMetafield ?? null;
+    // Le variabili non usate sono un errore di GraphQL, non un di piu'
+    // innocuo: se si dichiarano `$namespace` e `$key` senza poi chiederle,
+    // Shopify rifiuta l'intera query. Quindi o entrano tutte e due le parti, o
+    // nessuna.
+    const birthdateVars = birthdate ? ', $namespace: String!, $key: String!' : '';
+    const birthdateField = birthdate ? 'metafield(namespace: $namespace, key: $key) { value }' : '';
+
     const data = await this.graphql<{
       customers: {
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
@@ -579,10 +603,19 @@ export class ShopifyAPIClient {
           taxExempt: boolean | null;
           createdAt: string | null;
           updatedAt: string | null;
+          defaultAddress: {
+            address1: string | null;
+            address2: string | null;
+            city: string | null;
+            province: string | null;
+            country: string | null;
+            zip: string | null;
+          } | null;
+          metafield?: { value: string | null } | null;
         }[];
       };
     }>(
-      `query Customers($first: Int!, $after: String, $query: String) {
+      `query Customers($first: Int!, $after: String, $query: String${birthdateVars}) {
         customers(first: $first, after: $after, query: $query) {
           pageInfo { hasNextPage endCursor }
           nodes {
@@ -591,6 +624,8 @@ export class ShopifyAPIClient {
             amountSpent { amount }
             numberOfOrders
             state tags note verifiedEmail taxExempt createdAt updatedAt
+            defaultAddress { address1 address2 city province country zip }
+            ${birthdateField}
           }
         }
       }`,
@@ -598,6 +633,7 @@ export class ShopifyAPIClient {
         first: options.limit || 250,
         after: options.pageInfo ?? null,
         query: !options.pageInfo && options.updatedAtMin ? `updated_at:>='${options.updatedAtMin}'` : null,
+        ...(birthdate ? { namespace: birthdate.namespace, key: birthdate.key } : {}),
       },
     );
 
@@ -626,9 +662,160 @@ export class ShopifyAPIClient {
         tax_exempt: c.taxExempt,
         created_at: c.createdAt,
         updated_at: c.updatedAt,
+        // L'indirizzo predefinito, nella stessa forma piatta che la REST dava e
+        // che il webhook dei clienti manda tuttora. Senza, la corsa periodica
+        // riscriveva a null paese, via, CAP e regione che il webhook aveva
+        // appena salvato: quattro colonne che si svuotavano da sole poche ore
+        // dopo essersi riempite.
+        default_address: c.defaultAddress
+          ? {
+              address1: c.defaultAddress.address1,
+              address2: c.defaultAddress.address2,
+              city: c.defaultAddress.city,
+              province: c.defaultAddress.province,
+              country: c.defaultAddress.country,
+              zip: c.defaultAddress.zip,
+            }
+          : null,
+        // La data di nascita non e' un campo dell'anagrafica Shopify: sta nel
+        // metafield che il merchant ha scelto nella tab Clienti. Se non ne ha
+        // scelto nessuno la chiave non compare affatto — che non e' lo stesso
+        // che comparire vuota: assente significa "non l'ho chiesta, non
+        // toccare la colonna", null significa "l'ho chiesta ed e' vuota".
+        ...(birthdate ? { date_of_birth: c.metafield?.value ?? null } : {}),
       })),
       nextPageInfo: data.customers.pageInfo.hasNextPage ? data.customers.pageInfo.endCursor : null,
     };
+  }
+
+  /**
+   * Le definizioni di metafield del CLIENTE presenti sul negozio.
+   *
+   * Riempiono la tendina con cui il merchant indica un campo che ha gia': senza
+   * elenco resterebbe solo la casella in cui incollare la chiave a mano, e un
+   * refuso li' produce una colonna vuota che nessuno sa spiegare.
+   *
+   * Il tipo viaggia con ognuna perche' serve a valle: puntare la data di
+   * nascita a un campo che non contiene una data e' permesso, ma va detto.
+   */
+  async listCustomerMetafieldDefinitions(): Promise<
+    { namespace: string; key: string; name: string; type: string }[]
+  > {
+    const data = await this.graphql<{
+      metafieldDefinitions: {
+        nodes: {
+          namespace: string;
+          key: string;
+          name: string;
+          type: { name: string } | null;
+        }[];
+      } | null;
+    }>(
+      `query CustomerMetafieldDefinitions($first: Int!) {
+        metafieldDefinitions(ownerType: CUSTOMER, first: $first, sortKey: NAME) {
+          nodes { namespace key name type { name } }
+        }
+      }`,
+      // 250 e' il massimo per pagina, ed e' molto piu' del numero di
+      // definizioni cliente che un negozio ha davvero: una tendina piu' lunga
+      // di cosi' non si scorre comunque, e la casella da incollare copre il
+      // caso limite.
+      { first: 250 },
+    );
+
+    return (data.metafieldDefinitions?.nodes ?? []).map((d) => ({
+      namespace: d.namespace,
+      key: d.key,
+      name: d.name,
+      type: d.type?.name ?? '',
+    }));
+  }
+
+  /**
+   * C'e' gia' la definizione del metafield della data di nascita?
+   *
+   * Si chiede prima di proporre di crearla, e si richiede dopo averla creata:
+   * la risposta e' l'unica cosa che autorizza il pulsante a dire "gia'
+   * presente". Dedurlo da un tentativo di scrittura andato a vuoto sarebbe
+   * peggio — vorrebbe dire provare a scrivere sul negozio del merchant ogni
+   * volta che apre la tab, per scoprire una cosa che una lettura dice meglio.
+   */
+  async hasCustomerBirthdateDefinition(): Promise<boolean> {
+    const data = await this.graphql<{
+      metafieldDefinitions: { nodes: { id: string }[] } | null;
+    }>(
+      `query BirthdateDefinition($namespace: String!, $key: String!) {
+        metafieldDefinitions(
+          ownerType: CUSTOMER
+          namespace: $namespace
+          key: $key
+          first: 1
+        ) {
+          nodes { id }
+        }
+      }`,
+      { namespace: BIRTHDATE_METAFIELD.namespace, key: BIRTHDATE_METAFIELD.key },
+    );
+
+    return (data.metafieldDefinitions?.nodes ?? []).length > 0;
+  }
+
+  /**
+   * Crea la definizione del metafield della data di nascita sul negozio.
+   *
+   * Se la definizione c'e' gia' NON viene toccata, nemmeno quando le sue
+   * opzioni sono diverse dalle nostre: quella definizione e' del merchant, e se
+   * l'ha modificata avra' avuto le sue ragioni. Riallinearla d'ufficio gli
+   * cambierebbe la configurazione sotto i piedi — magari togliendo un accesso
+   * che una sua integrazione usa — per un capriccio di uniformita' che a lui
+   * non serve. Ci si limita a rilevarla come presente.
+   *
+   * `TAKEN` vale come successo per la stessa ragione: e' la risposta di Shopify
+   * a "questa chiave e' gia' occupata", cioe' esattamente lo stato in cui
+   * volevamo arrivare. Continua a servire anche con la rilevazione a monte,
+   * perche' fra la lettura e la scrittura la definizione puo' essere comparsa —
+   * due schede aperte, o il merchant che la crea a mano nell'admin.
+   */
+  async createCustomerBirthdateDefinition(): Promise<boolean> {
+    const data = await this.graphql<{
+      metafieldDefinitionCreate: {
+        createdDefinition: { id: string } | null;
+        userErrors: { field: string[] | null; message: string; code: string | null }[];
+      } | null;
+    }>(
+      `mutation CreateBirthdateDefinition($definition: MetafieldDefinitionInput!) {
+        metafieldDefinitionCreate(definition: $definition) {
+          createdDefinition { id }
+          userErrors { field message code }
+        }
+      }`,
+      {
+        definition: {
+          ownerType: 'CUSTOMER',
+          namespace: BIRTHDATE_METAFIELD.namespace,
+          key: BIRTHDATE_METAFIELD.key,
+          name: BIRTHDATE_METAFIELD.name,
+          description: BIRTHDATE_METAFIELD.description,
+          type: BIRTHDATE_METAFIELD.type,
+          ...BIRTHDATE_METAFIELD_OPTIONS,
+        },
+      },
+    );
+
+    const userErrors = data.metafieldDefinitionCreate?.userErrors ?? [];
+    if (userErrors.some((e) => e.code === 'TAKEN')) return true;
+
+    // Ogni altro rifiuto e' un rifiuto: la mutation risponde 200 anche quando
+    // non ha creato niente, e trattarlo come successo lascerebbe il merchant
+    // davanti a un pulsante che dice "fatto" senza che sul suo negozio sia
+    // comparso alcun campo.
+    if (userErrors.length > 0) {
+      throw new Error(
+        `Shopify API error: ${userErrors.map((e) => e.message).join('; ').slice(0, 300)}`,
+      );
+    }
+
+    return data.metafieldDefinitionCreate?.createdDefinition != null;
   }
 
   /**

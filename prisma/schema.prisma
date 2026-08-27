@@ -123,6 +123,18 @@ model Shop {
   // garantisce che non riappaia dopo la chiusura dell'app.
   planBannerShownAt     DateTime?          @map("plan_banner_shown_at")
 
+  // Il metafield del cliente da cui leggere la data di nascita, scelto dal
+  // merchant nella tab Clienti. Vuoto = nessuno, e la colonna `date_of_birth`
+  // sul suo database resta com'e'.
+  //
+  // Due colonne e non una stringa "custom.data_di_nascita": la query di Shopify
+  // vuole namespace e chiave separati, quindi con un campo solo ogni lettura
+  // dovrebbe rifare la divisione — e una riga scritta male si scoprirebbe al
+  // momento della sincronizzazione, invece che quando il merchant la salva.
+  // Divisa una volta all'ingresso, chi legge trova due valori gia' buoni.
+  birthdateMetafieldNamespace String? @map("birthdate_metafield_namespace")
+  birthdateMetafieldKey       String? @map("birthdate_metafield_key")
+
   // Token-proxy per le letture di tracciamento (Stape/GTM). Persistito solo come
   // hash (lookup) + cifrato (per mostrarlo in Impostazioni), mai in chiaro.
   readProxyTokenHash String? @unique @map("read_proxy_token_hash")

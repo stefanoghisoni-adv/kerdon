@@ -34,6 +34,8 @@ export function featureLabel(
       return t.plan.features.feeds;
     case 'push':
       return t.plan.features.push;
+    case 'matching':
+      return t.plan.features.matching;
   }
 }
 

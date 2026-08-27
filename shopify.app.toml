@@ -20,7 +20,14 @@ embedded = true
 # write_products risulta non usato: l'unica scrittura verso Shopify e' su
 # inventory_items (costo per articolo). Resta finche' non si decide di toglierlo,
 # perche' ridurre gli scope fa ripassare i merchant dal consenso.
-scopes = "read_products,write_products,read_inventory,write_inventory,read_customers,read_publications,read_themes,read_orders,read_all_orders"
+#
+# write_customers serve a una cosa sola: creare la definizione del metafield
+# "Data di nascita" dalla tab Clienti. Shopify non ha uno scope dedicato alle
+# definizioni dei metafield — chiede quello di scrittura del tipo a cui la
+# definizione appartiene, quindi write_customers per i metafield del cliente.
+# Non e' il permesso di modificare le anagrafiche: l'app non scrive nessun
+# cliente, ne' il valore del campo, che resta del merchant e dei suoi clienti.
+scopes = "read_products,write_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 

@@ -10,14 +10,26 @@ const STORE_HANDLE = /^[a-z0-9][a-z0-9-]*$/;
 /** Client ID pubblico dell'app. */
 const API_KEY = /^[a-z0-9]+$/;
 
+/**
+ * Il nome del negozio senza il suffisso: "negozio.myshopify.com" -> "negozio".
+ *
+ * Sta qui, in un posto solo, perche' ogni indirizzo dell'admin comincia da
+ * questo pezzo: scriverlo a mano anche una volta sola significa consegnare al
+ * merchant l'admin di qualcun altro — di solito quello del negozio di prova su
+ * cui la funzione e' stata provata.
+ */
+export function storeHandle(shopDomain: string | null | undefined): string {
+  return (shopDomain ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\.myshopify\.com$/, '');
+}
+
 export function adminAppUrl(
   shopDomain: string | null | undefined,
   apiKey: string | null | undefined,
 ): string | null {
-  const handle = (shopDomain ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/\.myshopify\.com$/, '');
+  const handle = storeHandle(shopDomain);
   const key = (apiKey ?? '').trim().toLowerCase();
 
   // Entrambi finiscono dentro un indirizzo su cui si naviga: si accettano solo
@@ -27,6 +39,23 @@ export function adminAppUrl(
   if (!API_KEY.test(key)) return null;
 
   return `https://admin.shopify.com/store/${handle}/apps/${key}`;
+}
+
+/**
+ * La pagina dell'admin dove il merchant vede — e modifica — le definizioni dei
+ * metafield dei clienti.
+ *
+ * Serve accanto al pulsante che crea la definizione della data di nascita: chi
+ * l'ha appena creata vuole vedere dov'e' finita, e chi ce l'ha gia' vuole
+ * andarci senza cercarla nel menu delle impostazioni.
+ */
+export function customerMetafieldsUrl(
+  shopDomain: string | null | undefined,
+): string | null {
+  const handle = storeHandle(shopDomain);
+  if (!STORE_HANDLE.test(handle)) return null;
+
+  return `https://admin.shopify.com/store/${handle}/settings/custom_data/customer/metafields`;
 }
 
 /** Il minimo che serve di window: cosi' la funzione e' verificabile. */
