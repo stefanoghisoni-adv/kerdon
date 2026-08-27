@@ -1,7 +1,6 @@
-export type SyncState = 'idle' | 'in_progress' | 'completed';
+export type SyncState = 'idle' | 'in_progress' | 'completed' | 'failed';
 
 interface JobLike {
-  jobType: string;
   status: string;
   startedAt: Date | string;
 }
@@ -9,25 +8,34 @@ interface JobLike {
 /**
  * Stato della sincronizzazione iniziale/manuale, LEGATO ALLA CONNESSIONE CORRENTE.
  *
- * Considera solo i job `initial_bulk` avviati a partire da `connectionVerifiedAt`:
- * così, disconnettendo e ricollegando (anche a un progetto diverso/vuoto), i job
- * della connessione precedente non contano più e il pulsante torna abilitato.
- * Senza connessione verificata → 'idle'.
+ * Prende in ingresso l'ULTIMA corsa completa del negozio, non un elenco da
+ * filtrare. La differenza non e' di stile: prima questa funzione riceveva le
+ * ultime dieci righe di `sync_job` di qualunque tipo e ci cercava dentro il
+ * bulk piu' recente. Su un piano che sincronizza spesso, dieci controlli
+ * periodici bastavano a spingere il bulk fuori da quella finestra, e da quel
+ * momento la dashboard si comportava come se una sincronizzazione completa non
+ * fosse mai avvenuta. Chiedere direttamente l'ultimo bulk rende quell'errore
+ * impossibile da commettere di nuovo.
  *
- * `jobs` è atteso ordinato per startedAt desc (il primo match è il più recente).
+ * Vale solo se avviata a partire da `connectionVerifiedAt`: cosi',
+ * disconnettendo e ricollegando (anche a un progetto diverso o vuoto), la corsa
+ * della connessione precedente non conta piu' e il pulsante torna abilitato.
+ *
+ * `failed` e' uno stato a se' e non un ripiego su `idle`. Una corsa fallita non
+ * e' una corsa mai avvenuta: chi guarda deve poterlo sapere, e chi aspetta deve
+ * poter smettere di aspettare.
  */
 export function resolveSyncState(
-  jobs: JobLike[],
+  latestBulk: JobLike | null | undefined,
   connectionVerifiedAt: Date | string | null | undefined,
 ): SyncState {
-  if (!connectionVerifiedAt) return 'idle';
+  if (!connectionVerifiedAt || !latestBulk) return 'idle';
+
   const connectedAt = new Date(connectionVerifiedAt).getTime();
+  if (new Date(latestBulk.startedAt).getTime() < connectedAt) return 'idle';
 
-  const latestBulk = jobs.find(
-    (j) => j.jobType === 'initial_bulk' && new Date(j.startedAt).getTime() >= connectedAt,
-  );
-
-  if (latestBulk?.status === 'running') return 'in_progress';
-  if (latestBulk?.status === 'completed') return 'completed';
+  if (latestBulk.status === 'running') return 'in_progress';
+  if (latestBulk.status === 'completed') return 'completed';
+  if (latestBulk.status === 'failed') return 'failed';
   return 'idle';
 }

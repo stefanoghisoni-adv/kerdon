@@ -7,62 +7,37 @@ const after = new Date('2026-07-17T11:00:00Z');
 
 describe('resolveSyncState', () => {
   it('idle senza connessione verificata', () => {
-    expect(
-      resolveSyncState(
-        [{ jobType: 'initial_bulk', status: 'completed', startedAt: after }],
-        null,
-      ),
-    ).toBe('idle');
+    expect(resolveSyncState({ status: 'completed', startedAt: after }, null)).toBe('idle');
   });
 
-  it('completed se un bulk è completato DOPO la connessione', () => {
-    expect(
-      resolveSyncState(
-        [{ jobType: 'initial_bulk', status: 'completed', startedAt: after }],
-        connectedAt,
-      ),
-    ).toBe('completed');
+  it('idle senza nessuna corsa completa', () => {
+    expect(resolveSyncState(null, connectedAt)).toBe('idle');
   });
 
-  it('in_progress se un bulk è running dopo la connessione', () => {
-    expect(
-      resolveSyncState(
-        [{ jobType: 'initial_bulk', status: 'running', startedAt: after }],
-        connectedAt,
-      ),
-    ).toBe('in_progress');
+  it('completed se la corsa e completata DOPO la connessione', () => {
+    expect(resolveSyncState({ status: 'completed', startedAt: after }, connectedAt)).toBe(
+      'completed',
+    );
   });
 
-  it('idle: un bulk completato PRIMA della connessione non conta (riconnessione)', () => {
-    expect(
-      resolveSyncState(
-        [{ jobType: 'initial_bulk', status: 'completed', startedAt: before }],
-        connectedAt,
-      ),
-    ).toBe('idle');
+  it('in_progress se la corsa e running dopo la connessione', () => {
+    expect(resolveSyncState({ status: 'running', startedAt: after }, connectedAt)).toBe(
+      'in_progress',
+    );
   });
 
-  it('ignora job non initial_bulk', () => {
-    expect(
-      resolveSyncState(
-        [
-          { jobType: 'periodic_check', status: 'completed', startedAt: after },
-          { jobType: 'initial_bulk', status: 'running', startedAt: after },
-        ],
-        connectedAt,
-      ),
-    ).toBe('in_progress');
+  // Il caso da cui nasceva l'attesa senza fine: una corsa fallita veniva
+  // riportata come 'idle', cioe' indistinguibile da "mai avvenuta", e chi
+  // aspettava il passaggio a 'completed' non lo vedeva mai arrivare.
+  it('failed e uno stato suo, non un ripiego su idle', () => {
+    expect(resolveSyncState({ status: 'failed', startedAt: after }, connectedAt)).toBe('failed');
   });
 
-  it('prende il bulk più recente (lista desc)', () => {
-    expect(
-      resolveSyncState(
-        [
-          { jobType: 'initial_bulk', status: 'running', startedAt: after },
-          { jobType: 'initial_bulk', status: 'completed', startedAt: connectedAt },
-        ],
-        connectedAt,
-      ),
-    ).toBe('in_progress');
+  it('idle: una corsa completata PRIMA della connessione non conta (riconnessione)', () => {
+    expect(resolveSyncState({ status: 'completed', startedAt: before }, connectedAt)).toBe('idle');
+  });
+
+  it('uno stato sconosciuto vale come idle', () => {
+    expect(resolveSyncState({ status: 'queued', startedAt: after }, connectedAt)).toBe('idle');
   });
 });

@@ -44,6 +44,7 @@ import { prisma } from '~/db.server';
 import { getOrCreateShop } from '~/utils/shop.server';
 import { normalizeAuthorization, isAuthorized } from '~/utils/authorization.server';
 import { resolveSyncState } from '~/components/Dashboard/sync-state';
+import { latestBulkJob, lastSyncActivityAt } from '~/lib/sync/latest-jobs.server';
 import { enqueueManualSync, triggerSyncDrain } from '~/lib/queue/trigger.server';
 import { authenticate } from '~/shopify.server';
 import {
@@ -133,7 +134,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // il loader costa due round-trip in profondità invece di tre. Su Vercel il
     // DB è remoto, quindi ogni round-trip risparmiato è latenza in meno sul TTFB
     // — che è ciò che domina l'LCP di questa pagina.
-    const [plans, recentJobs, customersTableJob, oauthToken, syncRuns, partnerPrices, trackingSetup] = await Promise.all([
+    const [plans, recentJobs, latestBulk, lastActivityAt, customersTableJob, oauthToken, syncRuns, partnerPrices, trackingSetup] = await Promise.all([
       // Tutti i piani, non solo quello in uso: quando i clienti restano fuori
       // serve anche sapere quale piano li rimetterebbe dentro, e leggerli tutti
       // costa come leggerne uno (la tabella e' di poche righe).
@@ -143,6 +144,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         orderBy: { startedAt: 'desc' },
         take: 10,
       }),
+      // L'ultima corsa completa, chiesta per nome. Cercarla dentro le dieci
+      // righe qui sopra sembrava equivalente e non lo era: bastavano dieci
+      // controlli periodici a nasconderla, e con lei sparivano sia lo stato
+      // della sincronizzazione sia l'ancora del periodo di calma.
+      latestBulkJob(shop.id),
+      // L'ultima riga scritta di qualunque tipo: e' su questa che si misura se
+      // il negozio ha appena lavorato.
+      lastSyncActivityAt(shop.id),
       // La tabella dei clienti risulta gia' provveduta? Vale sia l'evento di
       // creazione sia una sincronizzazione che ci ha davvero scritto dentro (la
       // tabella poteva esistere gia' nel progetto, e in quel caso nessuno ha
@@ -238,7 +247,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // un progetto diverso o vuoto — riabilita il pulsante e non eredita lo stato
     // "completato" della connessione precedente. Guida lo stato del pulsante.
     const syncState = resolveSyncState(
-      recentJobs,
+      latestBulk,
       shop.supabaseConfig?.connectionVerifiedAt,
     );
 
@@ -260,12 +269,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const customersPending =
       supabaseConnected && customersEnabled && customersTableJob === null;
 
+    // Il recupero non si rinnesca mentre la corsa precedente e' ancora fresca,
+    // e l'ancora e' l'ULTIMA riga scritta di qualunque tipo — non la sola corsa
+    // completa. Da li' passava la tempesta: se la corsa completa non si trovava
+    // (mai avvenuta, oppure spinta fuori dalla finestra letta) il recupero
+    // risultava dovuto sempre, e questo loader lo innesca a ogni ricarica —
+    // cioe' ogni quattro secondi, finche' la dashboard aspettava. Ogni innesco
+    // scriveva una riga in piu', che spingeva la corsa completa ancora piu' in
+    // la': l'anello si stringeva da solo e non si apriva piu'.
+    //
+    // Una corsa fallita non e' un buon motivo per ripartire subito: se il piano
+    // resta disallineato perche' la sincronizzazione non riesce, riprovare ogni
+    // pochi secondi non la fa riuscire. Ci pensa il giro programmato.
     if (
+      syncState !== 'failed' &&
       shouldTriggerPlanCatchUp({
         planChanged: planChanged || customersPending,
         syncInProgress: syncState === 'in_progress',
-        lastBulkStartedAt:
-          recentJobs.find((job) => job.jobType === 'initial_bulk')?.startedAt ?? null,
+        lastBulkStartedAt: lastActivityAt,
       })
     ) {
       triggerSyncDrain();
@@ -792,10 +813,37 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncFetcher.data]);
 
+  // L'altra sponda del ponte: il database ha risposto, il ponte si abbassa.
+  useEffect(() => {
+    if (syncState === 'in_progress' || syncState === 'completed' || syncState === 'failed') {
+      setJustQueued(false);
+    }
+  }, [syncState]);
+
+  // E la scadenza, per il caso in cui il database non risponda affatto: se dopo
+  // due minuti dalla messa in coda non risulta ancora partito niente, si smette
+  // di aspettare. Meglio un pulsante che torna premibile di una pagina che si
+  // ricarica per sempre.
+  useEffect(() => {
+    if (!justQueued) return;
+    const id = setTimeout(() => setJustQueued(false), 120_000);
+    return () => clearTimeout(id);
+  }, [justQueued]);
+
   const syncCompleted = syncState === 'completed';
+  const syncFailed = syncState === 'failed';
   const submitting = syncFetcher.state !== 'idle';
+  // `justQueued` copre il tratto cieco fra "messo in coda" e "il database dice
+  // che sta girando". E' un ponte, e ogni ponte deve avere l'altra sponda: da
+  // solo restava alzato per sempre, perche' l'unica uscita prevista era il
+  // passaggio a "completata". Una corsa fallita non ci passava mai, e la
+  // dashboard restava ad aspettarla ricaricandosi ogni quattro secondi.
+  //
+  // Ora si abbassa appena il database dice qualcosa di definitivo — completata
+  // o fallita — e comunque dopo il tempo massimo qui sotto, cosi' nemmeno una
+  // coda che non parte piu' puo' tenerlo su.
   const inProgress =
-    submitting || syncState === 'in_progress' || (justQueued && !syncCompleted);
+    submitting || syncState === 'in_progress' || (justQueued && !syncCompleted && !syncFailed);
 
   // Terzo passo: il piano, e con esso la prima sincronizzazione. Se il piano
   // scelto e' gia' quello attivo non c'e' niente da acquistare e si sincronizza

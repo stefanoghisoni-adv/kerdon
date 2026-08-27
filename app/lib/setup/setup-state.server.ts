@@ -1,5 +1,6 @@
 import { prisma } from '~/db.server';
 import { resolveSyncState } from '~/components/Dashboard/sync-state';
+import { latestBulkJob } from '~/lib/sync/latest-jobs.server';
 import {
   allStepsComplete,
   resolveStepStates,
@@ -27,14 +28,12 @@ export async function loadSetupInput(shopDomain: string): Promise<StepInput | nu
 
   const connectedAt = shop.supabaseConfig?.connectionVerifiedAt ?? null;
 
-  // Le corse recenti servono solo a sapere se la prima sincronizzazione di
-  // QUESTO collegamento e' arrivata in fondo.
-  const recentJobs = await prisma.syncJob.findMany({
-    where: { shopId: shop.id },
-    orderBy: { startedAt: 'desc' },
-    take: 10,
-    select: { jobType: true, status: true, startedAt: true },
-  });
+  // Serve una cosa sola: se la prima sincronizzazione di QUESTO collegamento e'
+  // arrivata in fondo. Si chiede quella, non le ultime righe di sync_job da
+  // filtrare — su un piano a cadenza stretta i controlli periodici la
+  // spingevano fuori dalla finestra letta, e la configurazione tornava a
+  // risultare incompleta a negozio funzionante.
+  const bulk = await latestBulkJob(shop.id);
 
   // Vale per il collegamento di adesso, non per uno precedente: e' la stessa
   // regola che governa i passi nella dashboard.
@@ -47,7 +46,7 @@ export async function loadSetupInput(shopDomain: string): Promise<StepInput | nu
     trackingChecked: forThisConnection(shop.trackingCheckedAt),
     planConfirmed:
       forThisConnection(shop.planConfirmedAt) &&
-      resolveSyncState(recentJobs, connectedAt) === 'completed',
+      resolveSyncState(bulk, connectedAt) === 'completed',
   };
 }
 
