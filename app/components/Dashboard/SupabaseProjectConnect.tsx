@@ -911,6 +911,7 @@ export function SupabaseProjectConnect({
                       </BlockStack>
                     </Box>
                   ) : (
+                    <div className="list-tight-titles">
                     <OptionList
                       sections={indentedRegionGroups}
                       selected={[region]}
@@ -922,6 +923,7 @@ export function SupabaseProjectConnect({
                         setRegionPopoverActive(false);
                       }}
                     />
+                    </div>
                   )}
                 </Popover.Pane>
               </Popover>

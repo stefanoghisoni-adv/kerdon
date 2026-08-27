@@ -182,16 +182,23 @@ export function BirthdateMetafieldCard({
                   preferredAlignment="left"
                   onClose={() => setListOpen(false)}
                   activator={
-                    <Button
-                      id="birthdate-metafield-choice"
-                      onClick={() => setListOpen((open) => !open)}
-                      disclosure
-                      fullWidth
-                      textAlign="left"
-                      disabled={busy || definitions.length === 0}
-                    >
-                      {activatorLabel}
-                    </Button>
+                    // Stretto, non a tutta riga: e' un comando che sceglie una
+                    // voce, non un campo da compilare, e disteso su tutta la
+                    // larghezza della card prometteva un'importanza che non ha.
+                    // Il tetto sta sul contenitore e non sul pulsante, cosi' la
+                    // larghezza non balla al cambiare della voce scelta.
+                    <Box maxWidth="280px">
+                      <Button
+                        id="birthdate-metafield-choice"
+                        onClick={() => setListOpen((open) => !open)}
+                        disclosure
+                        fullWidth
+                        textAlign="left"
+                        disabled={busy || definitions.length === 0}
+                      >
+                        {activatorLabel}
+                      </Button>
+                    </Box>
                   }
                 >
                   {/* Come nel selettore delle preferenze: l'elenco scorre da
@@ -199,6 +206,7 @@ export function BirthdateMetafieldCard({
                       alla pagina sotto. */}
                   <Box minWidth="320px">
                     <div
+                      className="list-tight-titles"
                       style={{
                         maxHeight: 240,
                         overflowY: 'auto',

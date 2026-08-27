@@ -348,3 +348,22 @@
 .gmc-mapping .Polaris-Button {
   font-weight: var(--p-font-weight-regular);
 }
+
+/* I titoli di sezione dentro un elenco a tendina — "Campi data" fra i metafield,
+   "Europa" fra le region. Polaris riserva sopra a ciascuno uno spazio pensato
+   per elenchi lunghi, dove le sezioni vanno staccate bene fra loro; nelle
+   nostre tendine le sezioni sono due o tre e cortissime, e quello spazio faceva
+   partire l'elenco troppo in basso rispetto al bordo del riquadro — con il
+   primo titolo che sembrava scollato dall'alto.
+
+   Si agisce sulla variabile del Box invece che sul padding: e' la stessa leva
+   che usa Polaris, quindi resta una regolazione del suo sistema di spaziature e
+   non uno scavalcamento. `:has()` colpisce il solo Box che contiene un titolo,
+   senza dipendere dai nomi di classe interni dell'OptionList.
+
+   Una classe sola per tutte le tendine che ne hanno bisogno: la spaziatura di
+   un elenco e' la stessa decisione ovunque, e tenerne due copie vorrebbe dire
+   ritoccarne una e dimenticare l'altra. */
+.list-tight-titles .Polaris-Box:has(> .Polaris-Text--headingSm) {
+  --pc-box-padding-block-start-xs: var(--p-space-100);
+}
