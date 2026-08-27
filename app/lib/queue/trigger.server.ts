@@ -19,12 +19,24 @@ export async function enqueueManualSync(shopId: string): Promise<void> {
 // chiamata fallisce, il cron ogni 30 min drena comunque la coda. waitUntil
 // mantiene viva l'invocazione finché la richiesta è consegnata, senza però
 // ritardare la risposta all'utente.
-export function triggerSyncDrain(): void {
+export function triggerSyncDrain(shopId?: string): void {
   const appUrl = process.env.SHOPIFY_APP_URL;
   const secret = process.env.CRON_SECRET;
   if (!appUrl || !secret) return;
 
-  const run = fetch(`${appUrl}/api/cron/sync`, {
+  // Con un negozio indicato si chiede la corsia veloce: si drena la sua coda e
+  // basta. Senza, e' il giro completo del cron.
+  //
+  // La differenza si sente tutta quando il gesto e' manuale. Quel giro completo
+  // pota il registro degli accessi, poi passa in rassegna OGNI negozio per lo
+  // snapshot di idoneita' e il controllo di cadenza: lavoro dovuto, ma che con
+  // il pulsante appena premuto non c'entra niente — e che chi sta guardando la
+  // rotellina si aspetta finisca prima di vedere i suoi numeri.
+  const url = shopId
+    ? `${appUrl}/api/cron/sync?shopId=${encodeURIComponent(shopId)}`
+    : `${appUrl}/api/cron/sync`;
+
+  const run = fetch(url, {
     headers: { Authorization: `Bearer ${secret}` },
   })
     .then(() => undefined)

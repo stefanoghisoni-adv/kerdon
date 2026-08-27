@@ -194,7 +194,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // conferma del piano.
     try {
       await enqueueManualSync(shop.id);
-      triggerSyncDrain();
+      triggerSyncDrain(shop.id);
     } catch (syncErr) {
       console.warn(
         '[api.supabase.select-project] collegamento riuscito ma avvio della sincronizzazione fallito:',

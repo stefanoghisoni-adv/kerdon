@@ -36,6 +36,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // La corsia veloce: un negozio indicato vuol dire "drena la sua coda e
+  // basta". Ci si arriva da un gesto manuale — il pulsante di sincronizzazione,
+  // o il recupero dopo un cambio di piano — e in quel momento la potatura del
+  // registro e il giro su tutti i negozi sono lavoro che qualcuno sta
+  // aspettando senza averlo chiesto. Restano dovuti, e li fa il giro completo,
+  // che parte comunque dal cron.
+  const onlyShopId = new URL(request.url).searchParams.get('shopId');
+
   const results = {
     drained: 0,
     periodicChecks: 0,
@@ -48,11 +56,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Potatura del registro accessi. Prima di tutto il resto e fuori dai cicli:
   // e' una sola query, non dipende da nessun negozio, e messa qui gira anche
   // quando la parte di sync si interrompe a meta'.
-  results.accessLogPruned = await pruneAccessLog();
+  if (!onlyShopId) results.accessLogPruned = await pruneAccessLog();
 
   // 1. Drain jobs enqueued from the UI (manual-sync, initial-bulk-sync, periodic-sync-check)
   const syncQueue = await getSyncQueue();
-  const pendingJobs = await syncQueue.getJobs(['waiting', 'delayed'], 0, 20);
+  const queued = await syncQueue.getJobs(['waiting', 'delayed'], 0, 20);
+  // In corsia veloce si guardano solo i job di quel negozio: gli altri li
+  // prende il giro completo, e intanto chi aspetta non paga il loro tempo.
+  const pendingJobs = onlyShopId
+    ? queued.filter((job) => job.data?.shopId === onlyShopId)
+    : queued;
 
   for (const job of pendingJobs) {
     try {
@@ -78,6 +91,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   // 2. Periodic check for shops whose plan interval has elapsed
+  //
+  // Salta del tutto in corsia veloce: e' la parte che costa, ed e' anche quella
+  // che con il gesto appena compiuto non c'entra niente.
+  if (onlyShopId) return json({ ok: true, ...results });
+
   const shops = await prisma.shop.findMany({
     where: {
       uninstalledAt: null,

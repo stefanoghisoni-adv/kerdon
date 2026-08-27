@@ -289,7 +289,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         lastBulkStartedAt: lastActivityAt,
       })
     ) {
-      triggerSyncDrain();
+      // Anche questo riguarda un negozio solo: non c'e' ragione di far passare
+      // in rassegna tutti gli altri per recuperare il ritardo di questo.
+      triggerSyncDrain(shop.id);
     }
 
     // Il banner del cambio di piano si mostra finche' c'e' un cambio da
@@ -463,7 +465,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // trigger fallisce, il cron ogni 30 min drena comunque la coda. Le sync
     // periodiche restano gestite dal cron secondo l'intervallo in Impostazioni.
     await enqueueManualSync(shop.id);
-    triggerSyncDrain();
+    triggerSyncDrain(shop.id);
 
     if (manualOnly) return json({ queued: true });
 
@@ -533,7 +535,7 @@ interface ProductHistoryResponse {
 }
 
 /** Ogni quanto si ricontrolla se la corsa manuale e' finita. */
-const MANUAL_SYNC_POLL_MS = 4_000;
+const MANUAL_SYNC_POLL_MS = 1_500;
 
 /**
  * Dopo quanto si smette di aspettare.

@@ -888,6 +888,7 @@ export async function processInitialBulkSync(
     // progetto gia' popolato. Le righe non toccate da questa corsa vengono
     // spazzate alla fine confrontando `synced_at` con questo istante.
     const runStartedAt = new Date().toISOString();
+    const syncStartedAtMs = Date.now();
 
     do {
       // Fetch products batch (250 per page)
@@ -1065,7 +1066,18 @@ export async function processInitialBulkSync(
 
     await pruneOldEvents(shop.id);
 
-    console.log(`Bulk sync completed: ${totalProducts} products, ${totalVariants} variants, ${totalCustomers} customers`);
+    // Quanto e' durata davvero, in chiaro nel log.
+    //
+    // Serve a separare due cose che dal browser sembrano una sola: il tempo
+    // della sincronizzazione e il tempo che ci mette a cominciare — la coda, il
+    // risveglio della funzione, il giro fino al drain. Se qui si leggono due
+    // secondi e chi guarda ne aspetta novanta, il lavoro non c'entra e va
+    // cercato altrove; senza questa riga si finisce per ottimizzare la parte
+    // sbagliata.
+    console.log(
+      `Bulk sync completed in ${Date.now() - syncStartedAtMs}ms: ` +
+        `${totalProducts} products, ${totalVariants} variants, ${totalCustomers} customers`,
+    );
 
   } catch (error) {
     // Anche una corsa interrotta ha fatto qualcosa prima di fermarsi: il
