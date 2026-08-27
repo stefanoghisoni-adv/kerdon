@@ -427,3 +427,290 @@ describe('Shopify API Client (GraphQL)', () => {
     warn.mockRestore();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Connessioni annidate: `variants(first: N)` non e' "le varianti del prodotto",
+// e' "le prime N". Shopify ne ammette fino a 2048, e chi legge deve poter
+// distinguere un elenco finito da un elenco troncato — perche' a valle quella
+// differenza diventa una cancellazione.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** N varianti finte, numerate a partire da `from`. */
+function variantNodes(from: number, count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `gid://shopify/ProductVariant/${from + i}`,
+    title: `V${from + i}`,
+    sku: null,
+    barcode: null,
+    price: '10.00',
+    compareAtPrice: null,
+    position: i + 1,
+    inventoryQuantity: 0,
+    inventoryPolicy: 'DENY',
+    taxable: true,
+    selectedOptions: [],
+    image: null,
+    inventoryItem: null,
+  }));
+}
+
+/** Una pagina di prodotti con dentro un solo prodotto e le sue varianti. */
+function productsPage(variants: {
+  nodes: ReturnType<typeof variantNodes>;
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}) {
+  return {
+    products: {
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [
+        {
+          id: 'gid://shopify/Product/1',
+          title: 'Maglietta',
+          createdAt: '2026-01-01T00:00:00Z',
+          images: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          variants,
+        },
+      ],
+    },
+  };
+}
+
+describe('Paginazione delle connessioni annidate', () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+
+  it('101 varianti: la prima pagina si ferma a 100, la coda porta la centunesima', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok(
+          productsPage({
+            nodes: variantNodes(1, 100),
+            pageInfo: { hasNextPage: true, endCursor: 'dopo-la-100' },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          node: {
+            variants: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: variantNodes(101, 1),
+            },
+          },
+        }),
+      );
+
+    const { products } = await client().getProducts({ limit: 250 });
+
+    expect(products[0].variants).toHaveLength(101);
+    expect(products[0].variants[100].id).toBe(101);
+    // Il bit che autorizza a cancellare: l'elenco e' andato fino in fondo.
+    expect(products[0].variants_complete).toBe(true);
+    // La coda parte dal cursore della prima pagina, non da capo.
+    expect(sentBody(1).variables.after).toBe('dopo-la-100');
+  });
+
+  it('250 varianti su piu pagine: si arriva in fondo e si dichiara completo', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok(
+          productsPage({
+            nodes: variantNodes(1, 100),
+            pageInfo: { hasNextPage: true, endCursor: 'c1' },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          node: {
+            variants: { pageInfo: { hasNextPage: true, endCursor: 'c2' }, nodes: variantNodes(101, 100) },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          node: {
+            variants: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: variantNodes(201, 50) },
+          },
+        }),
+      );
+
+    const { products } = await client().getProducts({ limit: 250 });
+
+    expect(products[0].variants).toHaveLength(250);
+    expect(products[0].variants.map((v) => v.id)).toEqual(
+      Array.from({ length: 250 }, (_, i) => i + 1),
+    );
+    expect(products[0].variants_complete).toBe(true);
+    expect(sentBody(2).variables.after).toBe('c2');
+  });
+
+  it('errore sulla seconda pagina: elenco NON completo, e non si perde quel che era arrivato', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok(
+          productsPage({
+            nodes: variantNodes(1, 100),
+            pageInfo: { hasNextPage: true, endCursor: 'c1' },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        text: async () => 'boom',
+      });
+
+    const { products } = await client().getProducts({ limit: 250 });
+
+    // L'errore non si propaga: la sincronizzazione prosegue con quel che ha.
+    expect(products[0].variants).toHaveLength(100);
+    // Ma dichiara di non sapere: e' questo `false` che, a valle, blocca ogni
+    // cancellazione per differenza.
+    expect(products[0].variants_complete).toBe(false);
+    warn.mockRestore();
+  });
+
+  it('un prodotto che sta in una pagina sola non costa nessuna richiesta in piu', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok(
+        productsPage({
+          nodes: variantNodes(1, 3),
+          pageInfo: { hasNextPage: false, endCursor: null },
+        }),
+      ),
+    );
+
+    const { products } = await client().getProducts({});
+
+    expect((global.fetch as any).mock.calls).toHaveLength(1);
+    expect(products[0].variants_complete).toBe(true);
+  });
+
+  it('anche le immagini si esauriscono: la undicesima non resta fuori', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok({
+          products: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                id: 'gid://shopify/Product/1',
+                title: 'Maglietta',
+                createdAt: '2026-01-01T00:00:00Z',
+                images: {
+                  pageInfo: { hasNextPage: true, endCursor: 'img-10' },
+                  nodes: Array.from({ length: 10 }, (_, i) => ({
+                    id: `gid://shopify/ProductImage/${i + 1}`,
+                    url: `https://cdn/${i + 1}.png`,
+                  })),
+                },
+                variants: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          node: {
+            images: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [{ id: 'gid://shopify/ProductImage/11', url: 'https://cdn/11.png' }],
+            },
+          },
+        }),
+      );
+
+    const { products } = await client().getProducts({});
+
+    // Serve davvero: una variante che punta all'undicesima immagine, senza
+    // questa coda, finirebbe nel feed senza foto.
+    expect(products[0].images).toHaveLength(11);
+    expect(products[0].images_complete).toBe(true);
+  });
+
+  it('getProductById esaurisce le varianti come la query di elenco', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok({
+          product: {
+            id: 'gid://shopify/Product/5',
+            title: 'Scarpa',
+            createdAt: '2026-01-01T00:00:00Z',
+            images: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+            variants: {
+              pageInfo: { hasNextPage: true, endCursor: 'c1' },
+              nodes: variantNodes(1, 250),
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          node: {
+            variants: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: variantNodes(251, 10) },
+          },
+        }),
+      );
+
+    const product = await client().getProductById(5);
+
+    expect(product?.variants).toHaveLength(260);
+    expect(product?.variants_complete).toBe(true);
+  });
+
+  it('le righe di un ordine oltre le prime cento non spariscono dal margine', async () => {
+    const lineNodes = (from: number, count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        id: `gid://shopify/LineItem/${from + i}`,
+        title: `Riga ${from + i}`,
+        quantity: 1,
+        product: null,
+        variant: null,
+        discountedUnitPriceSet: { shopMoney: { amount: '5.00' } },
+        originalUnitPriceSet: null,
+        totalDiscountSet: null,
+      }));
+
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok({
+          orders: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                id: 'gid://shopify/Order/900',
+                name: '#1001',
+                createdAt: '2026-01-01T00:00:00Z',
+                updatedAt: '2026-01-01T00:00:00Z',
+                cancelledAt: null,
+                displayFinancialStatus: 'PAID',
+                currentTotalPriceSet: { shopMoney: { amount: '600.00', currencyCode: 'EUR' } },
+                customer: null,
+                lineItems: {
+                  pageInfo: { hasNextPage: true, endCursor: 'l100' },
+                  nodes: lineNodes(1, 100),
+                },
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          node: {
+            lineItems: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: lineNodes(101, 20) },
+          },
+        }),
+      );
+
+    const { orders } = await client().getOrders({});
+
+    expect(orders[0].lines).toHaveLength(120);
+    expect(orders[0].lines_complete).toBe(true);
+  });
+});

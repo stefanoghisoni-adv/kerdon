@@ -11,8 +11,8 @@ vi.mock('~/lib/read-proxy/forward.server', async () => {
   );
   return {
     allowedReadTables: (c: boolean) => (c ? ['products', 'customers'] : ['products']),
-    selectEmbedsForbiddenTable: actual.selectEmbedsForbiddenTable,
-    selectEmbedsCustomers: actual.selectEmbedsCustomers,
+    allowedEmbedTables: actual.allowedEmbedTables,
+    inspectReadQuery: actual.inspectReadQuery,
     forwardRead: (...a: unknown[]) => forwardRead(...a),
   };
 });
@@ -122,6 +122,41 @@ describe('proxy loader', () => {
     );
     expect(res.status).toBe(403);
     expect(forwardRead).not.toHaveBeenCalled();
+  });
+
+  // La falla vera: l'elenco dei divieti copriva solo products e customers, e
+  // qualunque ALTRA tabella raggiungibile per chiave esterna usciva inoltrata
+  // con la service_role, che le RLS non le vede.
+  it.each([
+    ['orders', 'https://app/rest/v1/products?select=*,orders(*)'],
+    ['order_lines', 'https://app/rest/v1/products?select=*,order_lines(id)'],
+    ['tabella arbitraria del merchant', 'https://app/rest/v1/products?select=*,fatture(*)'],
+    ['embedding annidato', 'https://app/rest/v1/products?select=*,orders(id,customers(email_address))'],
+    ['alias', 'https://app/rest/v1/products?select=*,o:orders(*)'],
+    ['hint di join', 'https://app/rest/v1/products?select=*,orders!inner(*)'],
+    ['select ripetuto', 'https://app/rest/v1/products?select=*&select=*,orders(*)'],
+    ['filtro su risorsa collegata', 'https://app/rest/v1/products?select=*&orders.limit=1'],
+    ['select non interpretabile', 'https://app/rest/v1/products?select=*,%22orders%22(*)'],
+  ])('%s → 403 e nessun inoltro', async (_nome, url) => {
+    resolveShopReadContext.mockResolvedValueOnce(okCtx({ customersEnabled: true }));
+    const res = await call({ authorization: 'Bearer spx_x' }, 'products', url);
+    expect(res.status).toBe(403);
+    expect(forwardRead).not.toHaveBeenCalled();
+  });
+
+  // Il tracciamento in produzione legge cosi': niente embedding, filtri e
+  // proiezioni sulla sola tabella richiesta. Deve continuare a passare.
+  it('lettura legittima con select, filtro, order e limit → inoltrata', async () => {
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[{"sku":"A"}]', contentType: 'application/json' });
+    const res = await call(
+      { authorization: 'Bearer spx_x' },
+      'products',
+      'https://app/rest/v1/products?select=sku,price&sku=eq.A&order=updated_at.desc&limit=10',
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('[{"sku":"A"}]');
+    expect(forwardRead).toHaveBeenCalledTimes(1);
   });
 
   it('tabella non ammessa dal piano → 403', async () => {

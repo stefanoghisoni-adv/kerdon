@@ -346,9 +346,9 @@ describe('Initial bulk sync processor', () => {
     // Una sola pagina con 3 prodotti (più del limite) e un cursore successivo:
     // il cap deve fermare la paginazione senza chiedere la pagina 2.
     const page = [
-      { id: 1, title: 'P1', variants: [{ id: 101 }] },
-      { id: 2, title: 'P2', variants: [{ id: 201 }] },
-      { id: 3, title: 'P3', variants: [{ id: 301 }] },
+      { id: 1, title: 'P1', variants_complete: true, variants: [{ id: 101 }] },
+      { id: 2, title: 'P2', variants_complete: true, variants: [{ id: 201 }] },
+      { id: 3, title: 'P3', variants_complete: true, variants: [{ id: 301 }] },
     ];
     const mockGetProducts = vi.fn().mockResolvedValue({ products: page, nextPageInfo: 'page-2' });
     vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
@@ -547,7 +547,7 @@ describe('Initial bulk sync processor', () => {
     };
     (createSupabaseClient as any).mockReturnValue(supabaseMock);
     (ShopifyAPIClient as any).mockImplementation(() => ({
-      getProducts: vi.fn().mockResolvedValue({ products: [{ id: 1 }], nextPageInfo: null }),
+      getProducts: vi.fn().mockResolvedValue({ products: [{ id: 1, variants_complete: true }], nextPageInfo: null }),
     }));
     (transformProduct as any).mockReturnValue([
       { shopify_product_id: 1, shopify_variant_id: 10, cost_per_item: 5 },
@@ -642,7 +642,10 @@ describe('Initial bulk sync processor', () => {
     };
     (createSupabaseClient as any).mockReturnValue(supabaseMock);
     (ShopifyAPIClient as any).mockImplementation(() => ({
-      getProducts: vi.fn().mockResolvedValue({ products: [{ id: 1 }, { id: 2 }], nextPageInfo: 'p2' }),
+      getProducts: vi.fn().mockResolvedValue({
+        products: [{ id: 1, variants_complete: true }, { id: 2, variants_complete: true }],
+        nextPageInfo: 'p2',
+      }),
     }));
     (transformProduct as any).mockImplementation((p: any) => [
       { shopify_product_id: p.id, shopify_variant_id: p.id * 10, cost_per_item: 5 },
@@ -878,7 +881,7 @@ describe('Initial bulk sync processor', () => {
     } as any);
 
     vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
-      getProducts: vi.fn().mockResolvedValue({ products: [{ id: 1 }], nextPageInfo: null }),
+      getProducts: vi.fn().mockResolvedValue({ products: [{ id: 1, variants_complete: true }], nextPageInfo: null }),
     }) as any);
     vi.mocked(transformProduct).mockReturnValue([
       { shopify_product_id: 1, shopify_variant_id: 10, product_title: 'Maglietta', variant_title: 'S', cost_per_item: 5, net_value: 5 },
@@ -1079,7 +1082,7 @@ describe('Initial bulk sync processor', () => {
       }),
     } as any);
     vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
-      getProducts: vi.fn().mockResolvedValue({ products: [{ id: 1 }], nextPageInfo: null }),
+      getProducts: vi.fn().mockResolvedValue({ products: [{ id: 1, variants_complete: true }], nextPageInfo: null }),
     }) as any);
     vi.mocked(transformProduct).mockReturnValue([
       { shopify_product_id: 1, shopify_variant_id: 10, product_title: 'Maglietta', variant_title: null, cost_per_item: 5, net_value: 5 },

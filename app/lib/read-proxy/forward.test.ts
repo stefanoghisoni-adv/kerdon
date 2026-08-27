@@ -1,17 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   allowedReadTables,
+  allowedEmbedTables,
   buildSupabaseReadUrl,
   forwardRead,
-  selectEmbedsForbiddenTable,
+  inspectReadQuery,
   embeddedTableNames,
-  selectEmbedsCustomers,
 } from './forward.server';
 
 describe('allowedReadTables', () => {
   it('solo products senza clienti; products+customers con clienti', () => {
     expect(allowedReadTables(false)).toEqual(['products']);
     expect(allowedReadTables(true)).toEqual(['products', 'customers']);
+  });
+});
+
+describe('allowedEmbedTables', () => {
+  // Se un giorno questo elenco non e' piu' vuoto, chi lo riempie deve passare
+  // di qui e spiegare come la nuova risorsa supera i controlli di piano e di
+  // consenso. Il test e' li' per obbligarlo a fermarsi.
+  it('nessun embedding e ammesso oggi', () => {
+    expect(allowedEmbedTables()).toEqual([]);
   });
 });
 
@@ -23,7 +32,7 @@ describe('embeddedTableNames', () => {
 
   it('select semplice → array vuoto', () => {
     expect(embeddedTableNames('?select=*')).toEqual([]);
-    expect(embeddedTableNames('?select=id,email')).toEqual([]);
+    expect(embeddedTableNames('?select=id,email_address')).toEqual([]);
   });
 
   it('cattura embedding base', () => {
@@ -36,6 +45,18 @@ describe('embeddedTableNames', () => {
 
   it('cattura embedding con hint di join', () => {
     expect(embeddedTableNames('?select=*,customers!inner(*)')).toEqual(['customers']);
+    expect(embeddedTableNames('?select=*,orders!fk_orders_products(id)')).toEqual(['orders']);
+  });
+
+  it('cattura embedding con spread', () => {
+    expect(embeddedTableNames('?select=*,...customers(email_address)')).toEqual(['customers']);
+  });
+
+  it('cattura embedding annidati a piu livelli', () => {
+    expect(embeddedTableNames('?select=*,orders(id,order_lines(id))')).toEqual([
+      'orders',
+      'order_lines',
+    ]);
   });
 
   it('cattura multipli embedding', () => {
@@ -45,59 +66,119 @@ describe('embeddedTableNames', () => {
   it('normalizza a lowercase', () => {
     expect(embeddedTableNames('?select=*,Customers(*)')).toEqual(['customers']);
   });
-});
 
-describe('selectEmbedsForbiddenTable', () => {
-  const noCustomers = ['products'];
-  const withCustomers = ['products', 'customers'];
-
-  it('nessun select → consentito', () => {
-    expect(selectEmbedsForbiddenTable('', noCustomers)).toBe(false);
-    expect(selectEmbedsForbiddenTable('?sku=eq.X', noCustomers)).toBe(false);
+  it('legge TUTTI i select, non solo il primo', () => {
+    expect(embeddedTableNames('?select=*&select=*,orders(*)')).toEqual(['orders']);
   });
 
-  it('select semplice → consentito', () => {
-    expect(selectEmbedsForbiddenTable('?select=*', noCustomers)).toBe(false);
-    expect(selectEmbedsForbiddenTable('?select=sku,price', noCustomers)).toBe(false);
+  it('gli aggregati non sono embedding', () => {
+    expect(embeddedTableNames('?select=count()')).toEqual([]);
+    expect(embeddedTableNames('?select=price.sum()')).toEqual([]);
+    expect(embeddedTableNames('?select=id,price.max(),price.min()')).toEqual([]);
   });
 
-  it('embedding di una tabella gestita ma esclusa dal piano → bloccato', () => {
-    expect(selectEmbedsForbiddenTable('?select=*,customers(*)', noCustomers)).toBe(true);
-    expect(selectEmbedsForbiddenTable('?select=sku,customers(email)', noCustomers)).toBe(true);
-    expect(selectEmbedsForbiddenTable('?select=*,customers!inner(email)', noCustomers)).toBe(true);
-    expect(selectEmbedsForbiddenTable('?select=*,alias:customers(*)', noCustomers)).toBe(true);
-  });
-
-  it('la stessa embedding è consentita quando il piano include i clienti', () => {
-    expect(selectEmbedsForbiddenTable('?select=*,customers(*)', withCustomers)).toBe(false);
-  });
-
-  it('gli aggregati PostgREST non sono scambiati per embedding', () => {
-    expect(selectEmbedsForbiddenTable('?select=count()', noCustomers)).toBe(false);
-    expect(selectEmbedsForbiddenTable('?select=price.sum()', noCustomers)).toBe(false);
+  it('non interpretabile → null', () => {
+    // Identificatore fra virgolette: il nostro riconoscitore non lo vede, quello
+    // di PostgREST si.
+    expect(embeddedTableNames('?select=*,"orders"(*)')).toBeNull();
+    // Parentesi sbilanciate.
+    expect(embeddedTableNames('?select=*,orders(*')).toBeNull();
+    expect(embeddedTableNames('?select=*,orders*)')).toBeNull();
+    // Parentesi vuote che non sono un aggregato noto.
+    expect(embeddedTableNames('?select=*,orders()')).toBeNull();
   });
 });
 
-describe('selectEmbedsCustomers', () => {
-  it('embedding di customers → true', () => {
-    expect(selectEmbedsCustomers('?select=*,customers(*)')).toBe(true);
+describe('inspectReadQuery', () => {
+  const noEmbeds: readonly string[] = [];
+
+  it('query legittime passano', () => {
+    expect(inspectReadQuery('', noEmbeds).ok).toBe(true);
+    expect(inspectReadQuery('?sku=eq.ABC', noEmbeds).ok).toBe(true);
+    expect(inspectReadQuery('?select=*&sku=eq.ABC&limit=10', noEmbeds).ok).toBe(true);
+    expect(inspectReadQuery('?select=sku,price,net_value&order=updated_at.desc', noEmbeds).ok).toBe(
+      true,
+    );
+    expect(inspectReadQuery('?email_address=eq.foo@bar.com&select=*', noEmbeds).ok).toBe(true);
+    expect(inspectReadQuery('?or=(sku.eq.A,sku.eq.B)&limit=5', noEmbeds).ok).toBe(true);
+    expect(inspectReadQuery('?select=count()', noEmbeds).ok).toBe(true);
+    expect(inspectReadQuery('?select=price.sum()', noEmbeds).ok).toBe(true);
   });
 
-  it('embedding con alias → true', () => {
-    expect(selectEmbedsCustomers('?select=*,c:customers(*)')).toBe(true);
+  it('embedding di una tabella gestita non ammessa dal piano → negato', () => {
+    expect(inspectReadQuery('?select=*,customers(*)', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=sku,customers(email_address)', noEmbeds).ok).toBe(false);
   });
 
-  it('embedding con hint di join → true', () => {
-    expect(selectEmbedsCustomers('?select=*,customers!inner(*)')).toBe(true);
+  it('embedding di orders → negato', () => {
+    expect(inspectReadQuery('?select=*,orders(*)', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*,order_lines(*)', noEmbeds).ok).toBe(false);
   });
 
-  it('nessun embedding → false', () => {
-    expect(selectEmbedsCustomers('?select=*')).toBe(false);
-    expect(selectEmbedsCustomers('?select=id,email')).toBe(false);
+  it('embedding di una tabella qualunque del merchant → negato', () => {
+    // E' il caso che l'elenco dei divieti non poteva coprire: non sappiamo che
+    // tabelle abbia il merchant nel suo progetto, e non serve saperlo.
+    expect(inspectReadQuery('?select=*,fatture(*)', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*,auth_users(*)', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*,segreti_del_merchant(colonna)', noEmbeds).ok).toBe(false);
   });
 
-  it('embedding di altre tabelle → false', () => {
-    expect(selectEmbedsCustomers('?select=*,orders(*)')).toBe(false);
+  it('embedding annidato a due livelli → negato', () => {
+    expect(inspectReadQuery('?select=*,orders(id,customers(email_address))', noEmbeds).ok).toBe(
+      false,
+    );
+    expect(inspectReadQuery('?select=id,a(b(c))', noEmbeds).ok).toBe(false);
+  });
+
+  it('alias e hint di join non nascondono l embedding', () => {
+    expect(inspectReadQuery('?select=*,alias:orders(*)', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*,orders!inner(*)', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*,o:orders!inner(id)', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*,...orders(id)', noEmbeds).ok).toBe(false);
+  });
+
+  it('select ripetuto non aggira il controllo', () => {
+    expect(inspectReadQuery('?select=*&select=*,orders(*)', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*,orders(*)&select=*', noEmbeds).ok).toBe(false);
+  });
+
+  it('select non interpretabile → negato (fail-closed)', () => {
+    expect(inspectReadQuery('?select=*,"orders"(*)', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*,orders(*', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*,orders()', noEmbeds).ok).toBe(false);
+  });
+
+  it('filtri, ordinamenti e limiti su risorse collegate → negati', () => {
+    expect(inspectReadQuery('?customers.email_address=eq.x', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*&orders.limit=1', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*&orders.order=id.desc', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?select=*&orders.or=(id.eq.1,id.eq.2)', noEmbeds).ok).toBe(false);
+  });
+
+  it('la negazione logica al livello top resta legittima', () => {
+    expect(inspectReadQuery('?not.or=(sku.eq.A,sku.eq.B)', noEmbeds).ok).toBe(true);
+    expect(inspectReadQuery('?not.and=(sku.eq.A,price.gt.10)', noEmbeds).ok).toBe(true);
+  });
+
+  it('parametri di scrittura su una lettura → negati', () => {
+    expect(inspectReadQuery('?columns=sku,price', noEmbeds).ok).toBe(false);
+    expect(inspectReadQuery('?on_conflict=sku', noEmbeds).ok).toBe(false);
+  });
+
+  it('customers non e embeddabile nemmeno se finisse in elenco', () => {
+    // Il consenso marketing e' applicato al livello top: un customers raggiunto
+    // per chiave esterna uscirebbe senza che nessuno lo abbia controllato.
+    expect(inspectReadQuery('?select=*,customers(*)', ['customers', 'products']).ok).toBe(false);
+  });
+
+  it('un embedding in elenco passerebbe', () => {
+    expect(inspectReadQuery('?select=*,products(sku)', ['products']).ok).toBe(true);
+  });
+
+  it('il motivo del rifiuto nomina la risorsa', () => {
+    const v = inspectReadQuery('?select=*,orders(*)', noEmbeds);
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toContain('orders');
   });
 });
 

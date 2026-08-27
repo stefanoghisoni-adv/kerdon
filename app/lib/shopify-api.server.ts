@@ -53,6 +53,17 @@ interface GqlVariant {
   } | null;
 }
 
+/** Il `pageInfo` di una connessione annidata, quando lo si e' chiesto. */
+interface GqlPageInfo {
+  hasNextPage: boolean;
+  endCursor: string | null;
+}
+
+interface GqlConnection<T> {
+  nodes: T[];
+  pageInfo?: GqlPageInfo;
+}
+
 interface GqlProduct {
   id: string;
   title: string;
@@ -64,8 +75,21 @@ interface GqlProduct {
   tags?: string[];
   publishedAt?: string | null;
   createdAt?: string | null;
-  images?: { nodes: { id: string; url: string }[] };
-  variants?: { nodes: GqlVariant[] };
+  images?: GqlConnection<{ id: string; url: string }>;
+  variants?: GqlConnection<GqlVariant>;
+}
+
+/**
+ * Quanto e' completo l'elenco annidato che abbiamo in mano.
+ *
+ * E' l'unica informazione che autorizza chi sta a valle a cancellare per
+ * differenza. Non e' un dettaglio diagnostico: senza, un elenco troncato e un
+ * elenco vero sono indistinguibili, e la sincronizzazione "riconcilia" via le
+ * righe che semplicemente non ha mai chiesto.
+ */
+interface ConnectionCompleteness {
+  variantsComplete: boolean;
+  imagesComplete: boolean;
 }
 
 function mapVariant(v: GqlVariant, productId: number) {
@@ -106,7 +130,7 @@ function mapVariant(v: GqlVariant, productId: number) {
   };
 }
 
-function mapProduct(p: GqlProduct) {
+function mapProduct(p: GqlProduct, completeness: ConnectionCompleteness) {
   const id = gidToId(p.id) as number;
   return {
     id,
@@ -125,6 +149,11 @@ function mapProduct(p: GqlProduct) {
     created_at: p.createdAt ?? null,
     images: (p.images?.nodes ?? []).map((img) => ({ id: gidToId(img.id), src: img.url })),
     variants: (p.variants?.nodes ?? []).map((v) => mapVariant(v, id)),
+    // I due bit che dicono se gli elenchi qui sopra sono TUTTO quello che
+    // Shopify ha, o solo la parte che siamo riusciti a leggere. Chi cancella
+    // per differenza deve guardare qui prima di farlo.
+    variants_complete: completeness.variantsComplete,
+    images_complete: completeness.imagesComplete,
   };
 }
 
@@ -139,6 +168,39 @@ const VARIANT_FIELDS = `
     measurement { weight { value unit } }
   }
 `;
+
+const IMAGE_FIELDS = 'id url';
+
+const LINE_ITEM_FIELDS = `
+  id title quantity
+  product { id }
+  variant { id }
+  discountedUnitPriceSet { shopMoney { amount } }
+  originalUnitPriceSet { shopMoney { amount } }
+  totalDiscountSet { shopMoney { amount } }
+`;
+
+// Quante varianti (e quante immagini, e quante righe d'ordine) si chiedono nella
+// PRIMA pagina, dentro la query d'elenco.
+//
+// Restano i numeri di prima e non si alzano: il costo che Shopify calcola per
+// una query e' il prodotto dei `first` annidati, e una pagina da 250 prodotti
+// per 250 varianti verrebbe rifiutata in blocco. Meglio una prima pagina stretta
+// piu' qualche coda mirata sui pochi prodotti che la superano, che una query che
+// non parte affatto.
+const VARIANTS_FIRST_IN_LIST = 100;
+const IMAGES_FIRST_IN_LIST = 10;
+const LINE_ITEMS_FIRST_IN_LIST = 100;
+
+// Nelle code invece il genitore e' uno solo, quindi si prende il massimo che
+// l'API concede: meno giri, meno occasioni di rompersi a meta'.
+const NESTED_PAGE_SIZE = 250;
+
+// Shopify ammette fino a 2048 varianti per prodotto: a 250 per giro bastano nove
+// pagine. Il tetto e' largo il doppio e serve solo a non restare intrappolati se
+// l'API ci ridesse all'infinito lo stesso cursore — in quel caso si esce
+// dichiarando l'elenco incompleto, che e' l'esito prudente.
+const MAX_NESTED_PAGES = 20;
 
 export class ShopifyAPIClient {
   private shopDomain: string;
@@ -220,6 +282,131 @@ export class ShopifyAPIClient {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  /**
+   * Svuota una connessione annidata a partire da dove la prima pagina si e'
+   * fermata, e dice se ci e' riuscita.
+   *
+   * Le connessioni dentro una query di elenco hanno un tetto proprio: chiedere
+   * `variants(first: 100)` non e' "le varianti del prodotto", e' "le prime cento".
+   * Su un prodotto con centocinquanta taglie le altre cinquanta non arrivano mai,
+   * e per chi legge non esistono. Da qui in poi si continua a chiedere finche'
+   * `hasNextPage` non dice di no.
+   *
+   * Perche' non le Bulk Operations, che con una sola richiesta darebbero l'intero
+   * catalogo senza connessioni troncate: sono asincrone (si avvia, si interroga,
+   * si scarica un JSONL), una sola per negozio alla volta, e restituiscono tutto
+   * o niente. La sincronizzazione qui e' a flusso — pagina, scrive, riporta
+   * l'avanzamento — e soprattutto ha bisogno di sapere prodotto per prodotto se
+   * l'elenco e' completo, che e' esattamente cio' che autorizza una cancellazione.
+   * Con il cursore quel bit ce l'abbiamo per costruzione; con il bulk avremmo un
+   * file da fidarsi in blocco e nessun modo di isolare il prodotto andato storto.
+   *
+   * L'errore NON si propaga: si restituisce quel che si e' raccolto con
+   * `complete: false`. Una pagina persa deve costare un aggiornamento parziale,
+   * mai una cancellazione — ed e' proprio il chiamante, vedendo `false`, a
+   * rinunciare a riconciliare.
+   */
+  private async drainConnection<TNode>(opts: {
+    parentGid: string;
+    parentType: 'Product' | 'Order';
+    field: 'variants' | 'images' | 'lineItems';
+    nodeFields: string;
+    after: string | null;
+  }): Promise<{ nodes: TNode[]; complete: boolean }> {
+    const nodes: TNode[] = [];
+    let after = opts.after;
+
+    // `node(id:)` piu' il frammento sul tipo del genitore: una sola forma di
+    // query per varianti, immagini e righe d'ordine.
+    const query = `
+      query DrainConnection($id: ID!, $first: Int!, $after: String) {
+        node(id: $id) {
+          ... on ${opts.parentType} {
+            ${opts.field}(first: $first, after: $after) {
+              pageInfo { hasNextPage endCursor }
+              nodes { ${opts.nodeFields} }
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      for (let page = 0; page < MAX_NESTED_PAGES; page++) {
+        const data = await this.graphql<{
+          node: Record<string, GqlConnection<TNode> | undefined> | null;
+        }>(query, { id: opts.parentGid, first: NESTED_PAGE_SIZE, after });
+
+        const connection = data.node?.[opts.field];
+        // Nodo sparito o tipo inatteso: non si e' letto nulla, e nulla si puo'
+        // dichiarare completo.
+        if (!connection) return { nodes, complete: false };
+
+        nodes.push(...(connection.nodes ?? []));
+
+        const info = connection.pageInfo;
+        if (!info) return { nodes, complete: false };
+        if (!info.hasNextPage) return { nodes, complete: true };
+        if (!info.endCursor) return { nodes, complete: false };
+        after = info.endCursor;
+      }
+    } catch (error) {
+      console.warn(
+        `Paginazione di ${opts.field} su ${opts.parentGid} interrotta:`,
+        error instanceof Error ? error.message : error,
+      );
+      return { nodes, complete: false };
+    }
+
+    console.warn(`Paginazione di ${opts.field} su ${opts.parentGid}: superato il tetto di pagine`);
+    return { nodes, complete: false };
+  }
+
+  /**
+   * Porta a termine le connessioni annidate di un prodotto, aggiungendo in coda
+   * agli elenchi gia' ricevuti quel che mancava.
+   *
+   * Se una connessione non e' stata nemmeno chiesta (accade con `fields`
+   * ristretti) risulta incompleta, non completa: l'assenza di dati non e' la
+   * prova che non ci sia nulla, ed e' meglio rinunciare a una riconciliazione
+   * legittima che autorizzarne una cieca.
+   */
+  private async completeProductConnections(p: GqlProduct): Promise<ConnectionCompleteness> {
+    const gid = p.id;
+
+    const drain = async <TNode>(
+      connection: GqlConnection<TNode> | undefined,
+      field: 'variants' | 'images',
+      nodeFields: string,
+    ): Promise<boolean> => {
+      if (!connection) return false;
+      const info = connection.pageInfo;
+      if (!info) return false;
+      if (!info.hasNextPage) return true;
+
+      const rest = await this.drainConnection<TNode>({
+        parentGid: gid,
+        parentType: 'Product',
+        field,
+        nodeFields,
+        after: info.endCursor,
+      });
+      connection.nodes = [...(connection.nodes ?? []), ...rest.nodes];
+      return rest.complete;
+    };
+
+    // In sequenza e non in parallelo: il serbatoio dei punti e' uno solo, e due
+    // code che corrono insieme lo svuotano il doppio piu' in fretta.
+    const variantsComplete = await drain<GqlVariant>(p.variants, 'variants', VARIANT_FIELDS);
+    const imagesComplete = await drain<{ id: string; url: string }>(
+      p.images,
+      'images',
+      IMAGE_FIELDS,
+    );
+
+    return { variantsComplete, imagesComplete };
+  }
+
   async getProducts(options: {
     limit?: number;
     pageInfo?: string;
@@ -244,8 +431,15 @@ export class ShopifyAPIClient {
       wants('tags') ? 'tags' : '',
       wants('published_at') ? 'publishedAt' : '',
       'createdAt',
-      wants('images') ? 'images(first: 10) { nodes { id url } }' : '',
-      wants('variants') ? `variants(first: 100) { nodes { ${VARIANT_FIELDS} } }` : '',
+      // Il `pageInfo` non e' un extra: e' cio' che distingue "il prodotto ha
+      // dieci immagini" da "gliene abbiamo chieste dieci". Senza, la risposta e'
+      // la stessa in entrambi i casi.
+      wants('images')
+        ? `images(first: ${IMAGES_FIRST_IN_LIST}) { pageInfo { hasNextPage endCursor } nodes { ${IMAGE_FIELDS} } }`
+        : '',
+      wants('variants')
+        ? `variants(first: ${VARIANTS_FIRST_IN_LIST}) { pageInfo { hasNextPage endCursor } nodes { ${VARIANT_FIELDS} } }`
+        : '',
     ].filter(Boolean).join('\n');
 
     const query = `
@@ -269,8 +463,17 @@ export class ShopifyAPIClient {
       query: !options.pageInfo && options.updatedAtMin ? `updated_at:>='${options.updatedAtMin}'` : null,
     });
 
+    // Le code prima della mappatura: un prodotto esce di qui solo quando le sue
+    // connessioni sono state portate a termine (o dichiarate incomplete). Nel
+    // caso normale — quasi tutti i prodotti stanno sotto il tetto della prima
+    // pagina — non parte nessuna richiesta in piu'.
+    const products = [];
+    for (const node of data.products.nodes) {
+      products.push(mapProduct(node, await this.completeProductConnections(node)));
+    }
+
     return {
-      products: data.products.nodes.map(mapProduct),
+      products,
       nextPageInfo: data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor : null,
     };
   }
@@ -280,13 +483,16 @@ export class ShopifyAPIClient {
       `query Product($id: ID!) {
         product(id: $id) {
           id title descriptionHtml vendor productType handle status tags publishedAt createdAt
-          images(first: 10) { nodes { id url } }
-          variants(first: 100) { nodes { ${VARIANT_FIELDS} } }
+          images(first: ${NESTED_PAGE_SIZE}) { pageInfo { hasNextPage endCursor } nodes { ${IMAGE_FIELDS} } }
+          variants(first: ${NESTED_PAGE_SIZE}) { pageInfo { hasNextPage endCursor } nodes { ${VARIANT_FIELDS} } }
         }
       }`,
       { id: `gid://shopify/Product/${productId}` },
     );
-    return data.product ? mapProduct(data.product) : null;
+    if (!data.product) return null;
+    // Qui il prodotto e' uno solo: si puo' chiedere subito il massimo per
+    // pagina, e le code partono solo oltre le 250 varianti.
+    return mapProduct(data.product, await this.completeProductConnections(data.product));
   }
 
   async getProductsCount(): Promise<number> {
@@ -453,18 +659,16 @@ export class ShopifyAPIClient {
           displayFinancialStatus: string | null;
           currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
           customer: { id: string; firstName: string | null; lastName: string | null } | null;
-          lineItems: {
-            nodes: {
-              id: string;
-              title: string | null;
-              quantity: number | null;
-              product: { id: string } | null;
-              variant: { id: string } | null;
-              discountedUnitPriceSet: { shopMoney: { amount: string } } | null;
-              originalUnitPriceSet: { shopMoney: { amount: string } } | null;
-              totalDiscountSet: { shopMoney: { amount: string } } | null;
-            }[];
-          };
+          lineItems: GqlConnection<{
+            id: string;
+            title: string | null;
+            quantity: number | null;
+            product: { id: string } | null;
+            variant: { id: string } | null;
+            discountedUnitPriceSet: { shopMoney: { amount: string } } | null;
+            originalUnitPriceSet: { shopMoney: { amount: string } } | null;
+            totalDiscountSet: { shopMoney: { amount: string } } | null;
+          }>;
         }[];
       };
     }>(
@@ -475,15 +679,9 @@ export class ShopifyAPIClient {
             id name createdAt updatedAt cancelledAt displayFinancialStatus
             currentTotalPriceSet { shopMoney { amount currencyCode } }
             customer { id firstName lastName }
-            lineItems(first: 100) {
-              nodes {
-                id title quantity
-                product { id }
-                variant { id }
-                discountedUnitPriceSet { shopMoney { amount } }
-                originalUnitPriceSet { shopMoney { amount } }
-                totalDiscountSet { shopMoney { amount } }
-              }
+            lineItems(first: ${LINE_ITEMS_FIRST_IN_LIST}) {
+              pageInfo { hasNextPage endCursor }
+              nodes { ${LINE_ITEM_FIELDS} }
             }
           }
         }
@@ -501,8 +699,29 @@ export class ShopifyAPIClient {
       },
     );
 
-    return {
-      orders: data.orders.nodes.map((o) => ({
+    // Un ordine da piu' di cento righe e' raro ma esiste (ingrosso, carrelli
+    // composti a mano), e le righe che restassero fuori sarebbero venduto che
+    // non entra nel margine: il profitto risulterebbe piu' alto del vero, cioe'
+    // l'errore che meno si nota.
+    const orders = [];
+    for (const o of data.orders.nodes) {
+      const info = o.lineItems.pageInfo;
+      let lineNodes = o.lineItems.nodes ?? [];
+      let linesComplete = !!info && !info.hasNextPage;
+
+      if (info?.hasNextPage) {
+        const rest = await this.drainConnection<(typeof lineNodes)[number]>({
+          parentGid: o.id,
+          parentType: 'Order',
+          field: 'lineItems',
+          nodeFields: LINE_ITEM_FIELDS,
+          after: info.endCursor,
+        });
+        lineNodes = [...lineNodes, ...rest.nodes];
+        linesComplete = rest.complete;
+      }
+
+      orders.push({
         id: gidToId(o.id),
         order_number: o.name,
         placed_at: o.createdAt,
@@ -516,7 +735,7 @@ export class ShopifyAPIClient {
         customer_id: o.customer ? gidToId(o.customer.id) : null,
         customer_first_name: o.customer?.firstName ?? null,
         customer_last_name: o.customer?.lastName ?? null,
-        lines: o.lineItems.nodes.map((l) => ({
+        lines: lineNodes.map((l) => ({
           id: gidToId(l.id),
           title: l.title,
           quantity: l.quantity ?? 0,
@@ -528,7 +747,15 @@ export class ShopifyAPIClient {
             null,
           total_discount: l.totalDiscountSet?.shopMoney.amount ?? null,
         })),
-      })),
+        // Le righe d'ordine oggi si aggiungono soltanto, nessuno le cancella per
+        // differenza. Il bit viaggia comunque, cosi' chi un domani volesse
+        // riconciliarle trova gia' la sola cosa che glielo permette.
+        lines_complete: linesComplete,
+      });
+    }
+
+    return {
+      orders,
       nextPageInfo: data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null,
     };
   }

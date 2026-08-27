@@ -30,6 +30,12 @@ export interface ShopifyOrder {
   customer_first_name: string | null;
   customer_last_name: string | null;
   lines: ShopifyOrderLine[];
+  /**
+   * `lines` e' tutto l'ordine o solo le prime righe lette? Vale quanto detto per
+   * le varianti: oggi le righe si aggiungono soltanto, ma il bit c'e' perche'
+   * nessuno possa un domani riconciliarle senza sapere cosa ha in mano.
+   */
+  lines_complete?: boolean;
 }
 
 export interface OrderRow {

@@ -8,9 +8,9 @@ import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
 import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
 import {
   allowedReadTables,
+  allowedEmbedTables,
   forwardRead,
-  selectEmbedsForbiddenTable,
-  selectEmbedsCustomers,
+  inspectReadQuery,
 } from '~/lib/read-proxy/forward.server';
 import {
   isCustomerIdentifierLookup,
@@ -68,15 +68,13 @@ async function handleRead(request: Request, table: string): Promise<ReadResult> 
   }
 
   const search = new URL(request.url).search;
-  // L'allowlist sul path non copre l'embedding PostgREST dentro `select`.
-  if (selectEmbedsForbiddenTable(search, allowed)) {
-    return denied(403, 'Tabella non disponibile.', 'denied_table', ctx.shopId);
-  }
-
-  // Il consenso clienti vale solo al top-level: un customers embeddato aggirerebbe
-  // il gate, quindi lo vietiamo sempre (difesa in profondità: oggi lo schema non
-  // ha FK, ma un progetto merchant preesistente potrebbe averne).
-  if (selectEmbedsCustomers(search)) {
+  // L'allowlist sul path dice QUALE tabella si legge, ma PostgREST sa tirarsi
+  // dietro tutto cio' che e' collegato da una chiave esterna — dentro `select`
+  // e anche fuori, con i filtri sulle risorse embeddate. Qui si pretende che
+  // ogni risorsa toccata dalla query sia in elenco, e in dubbio si nega: la
+  // chiave con cui inoltriamo non vede le RLS del merchant, quindi una lettura
+  // che non sappiamo leggere non e' una lettura da inoltrare.
+  if (!inspectReadQuery(search, allowedEmbedTables()).ok) {
     return denied(403, 'Tabella non disponibile.', 'denied_table', ctx.shopId);
   }
 

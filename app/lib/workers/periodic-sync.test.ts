@@ -107,9 +107,12 @@ describe('Periodic sync check processor', () => {
     vi.mocked(prisma.syncJob.update).mockResolvedValue({} as any);
 
     // Mock Shopify API client - only updated products since lastSyncTime
+    // `variants_complete: true` e' la promessa che il client GraphQL fa dopo aver
+    // esaurito la connessione annidata: senza, il processor si rifiuta di
+    // cancellare per differenza (vedi variant-reconciliation.test.ts).
     const mockUpdatedProducts = [
       // Product 1: has 2 variants currently
-      { id: 1, title: 'Product 1', variants: [{ id: 101, title: 'Variant 1' }, { id: 102, title: 'Variant 2' }] },
+      { id: 1, title: 'Product 1', variants_complete: true, variants: [{ id: 101, title: 'Variant 1' }, { id: 102, title: 'Variant 2' }] },
     ];
 
     const mockGetProducts = vi.fn().mockResolvedValueOnce({
@@ -568,7 +571,7 @@ describe('Periodic sync check processor', () => {
     (ShopifyAPIClient as any).mockImplementation(() => ({
       getProducts: vi
         .fn()
-        .mockResolvedValueOnce({ products: [{ id: 1 }], nextPageInfo: null })
+        .mockResolvedValueOnce({ products: [{ id: 1, variants_complete: true }], nextPageInfo: null })
         .mockResolvedValue({ products: [], nextPageInfo: null }),
     }));
     // Il prodotto ora ha variante 11 senza costo e 12 con costo.
@@ -730,7 +733,7 @@ describe('Periodic sync check processor', () => {
     (ShopifyAPIClient as any).mockImplementation(() => ({
       getProducts: vi
         .fn()
-        .mockResolvedValueOnce({ products: [{ id: 1 }], nextPageInfo: null })
+        .mockResolvedValueOnce({ products: [{ id: 1, variants_complete: true }], nextPageInfo: null })
         .mockResolvedValue({ products: [], nextPageInfo: null }),
     }));
     // Ora il prodotto ha la 11 (già presente) e la 12 (nuova).
@@ -809,7 +812,7 @@ describe('Periodic sync check processor', () => {
     (ShopifyAPIClient as any).mockImplementation(() => ({
       getProducts: vi
         .fn()
-        .mockResolvedValueOnce({ products: [{ id: 1 }], nextPageInfo: null })
+        .mockResolvedValueOnce({ products: [{ id: 1, variants_complete: true }], nextPageInfo: null })
         .mockResolvedValue({ products: [], nextPageInfo: null }),
     }));
     (transformProduct as any).mockReturnValue([

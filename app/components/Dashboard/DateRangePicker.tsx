@@ -56,18 +56,14 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
 
   // Bozza: quello che si sta scegliendo, finche' non si conferma.
   const [draft, setDraft] = useState<DateRange>(value);
-  const [{ month, year }, setVisible] = useState(() => {
-    const start = fromIso(value.from);
-    return { month: start.getUTCMonth(), year: start.getUTCFullYear() };
-  });
+  const [{ month, year }, setVisible] = useState(() => monthsEndingAt(value.to, localToday()));
 
   // Riaprendo si riparte da quello che c'e' adesso, non da dove si era rimasti:
   // la tendina chiusa senza applicare non deve lasciare tracce.
   useEffect(() => {
     if (!open) return;
     setDraft(value);
-    const start = fromIso(value.from);
-    setVisible({ month: start.getUTCMonth(), year: start.getUTCFullYear() });
+    setVisible(monthsEndingAt(value.to, localToday()));
   }, [open, value]);
 
   const selectedPreset = useMemo(() => matchPreset(draft), [draft]);
@@ -76,8 +72,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
     const range = presetRange(preset);
     if (!range) return;
     setDraft(range);
-    const start = fromIso(range.from);
-    setVisible({ month: start.getUTCMonth(), year: start.getUTCFullYear() });
+    setVisible(monthsEndingAt(range.to, localToday()));
   }, []);
 
   const apply = () => {
@@ -136,7 +131,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
             <div className="range-picker__fields">
               <DateField
                 value={draft.from}
-                onCommit={(next) => setDraft(orderRange(next, draft.to))}
+                onCommit={(next) => setDraft(orderRange(notInTheFuture(next), draft.to))}
               />
               {/* Una freccia, non un pulsante spento: indica il verso e basta,
                   e un pulsante disabilitato invita a premerlo. */}
@@ -145,7 +140,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
               </span>
               <DateField
                 value={draft.to}
-                onCommit={(next) => setDraft(orderRange(draft.from, next))}
+                onCommit={(next) => setDraft(orderRange(draft.from, notInTheFuture(next)))}
               />
             </div>
 
@@ -159,6 +154,11 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
                 // parli, e una settimana che parte di domenica sposta di un
                 // giorno la lettura di "questa settimana".
                 weekStartsOn={1}
+                // Il futuro non si sceglie: di la' non ci sono ordini, e un
+                // periodo che finisce fra due settimane restituisce card vuote
+                // che sembrano un guasto. Spegnerlo nel calendario e' meglio
+                // che spiegarlo dopo con un messaggio d'errore.
+                disableDatesAfter={localToday()}
                 selected={{ start: fromIso(draft.from), end: fromIso(draft.to) }}
                 onMonthChange={(nextMonth, nextYear) =>
                   setVisible({ month: nextMonth, year: nextYear })
@@ -183,6 +183,52 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
       </div>
     </Popover>
   );
+}
+
+/**
+ * Oggi, come data civile locale.
+ *
+ * Il calendario di Polaris ragiona in date locali, quindi il confine del futuro
+ * va espresso nella stessa lingua: presa in UTC, a est di Greenwich la sera
+ * "domani" sarebbe gia' scattato e l'ultimo giorno buono risulterebbe spento.
+ */
+/**
+ * Una data scritta a mano non puo' superare oggi.
+ *
+ * Il calendario il futuro non lo lascia nemmeno premere, ma i due campi si
+ * possono battere a macchina: senza questo, quella strada resterebbe aperta e
+ * la regola varrebbe solo per chi usa il mouse. Il confronto fra stringhe
+ * `YYYY-MM-DD` e' un confronto fra date, in quel formato.
+ */
+function notInTheFuture(value: string): string {
+  const today = iso(toUtc(localToday()));
+  return value > today ? today : value;
+}
+
+function localToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+/**
+ * I due mesi da mostrare, ancorati alla FINE del periodo.
+ *
+ * Il calendario ne affianca due: quello indicato e il successivo. Ancorandolo
+ * all'inizio si finiva per mostrare il mese corrente e quello dopo — cioe' una
+ * meta' di calendario tutta nel futuro, da saltare ogni volta. Ci si ancora
+ * invece alla fine, che e' il punto che si sta guardando, e si arretra di uno:
+ * a destra il mese della fine, a sinistra quello prima.
+ *
+ * L'ancora non supera il mese corrente, cosi' la meta' destra non finisce mai
+ * oltre l'oggi. Il conto si fa in mesi assoluti proprio per non dover trattare
+ * gennaio a parte: arretrare da gennaio da' dicembre dell'anno prima da solo.
+ */
+export function monthsEndingAt(endIso: string, today: Date): { month: number; year: number } {
+  const end = fromIso(endIso);
+  const endIndex = end.getUTCFullYear() * 12 + end.getUTCMonth();
+  const todayIndex = today.getFullYear() * 12 + today.getMonth();
+  const shown = Math.min(endIndex, todayIndex) - 1;
+  return { month: ((shown % 12) + 12) % 12, year: Math.floor(shown / 12) };
 }
 
 /**

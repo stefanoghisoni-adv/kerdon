@@ -14,6 +14,23 @@ export interface ShopifyProduct {
   created_at?: string | null;
   variants: ShopifyVariant[];
   images?: ShopifyImage[];
+  /**
+   * `variants` e' l'elenco COMPLETO delle varianti su Shopify, oppure solo la
+   * parte che si e' riusciti a leggere?
+   *
+   * Le connessioni annidate di GraphQL hanno un tetto per pagina, quindi un
+   * prodotto con centocinquanta taglie puo' benissimo arrivare qui con cento
+   * varianti e nessun segno che ne mancassero altre. Chi cancella per differenza
+   * — "questa riga non c'e' piu' su Shopify, quindi via" — deve pretendere `true`
+   * prima di procedere: su un elenco troncato quella differenza e' inventata, e
+   * cancellerebbe varianti vive.
+   *
+   * Opzionale, e assente vale come `false`: un chiamante che costruisce un
+   * prodotto a mano non sta dimostrando nulla sulla completezza.
+   */
+  variants_complete?: boolean;
+  /** Stessa domanda per `images`, che ha lo stesso tetto per pagina. */
+  images_complete?: boolean;
 }
 
 export interface ShopifyVariant {

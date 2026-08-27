@@ -651,9 +651,31 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
         // presente in Shopify. Copre sia le varianti rimosse sia le transizioni
         // multi→single (le vecchie righe variante diventano orfane). Include
         // eventuali righe legacy con variant_id NULL create prima di questo fix.
-        const orphanedVariantIds = (existingRows || [])
-          .map(row => row.shopify_variant_id as number | null)
-          .filter((id): id is number => id != null && !currentVariantIds.has(id));
+        //
+        // Ma prima una condizione che qui mancava, ed e' costata varianti vere:
+        // cancellare per differenza ha senso solo se `currentVariantIds` e'
+        // davvero l'elenco delle varianti di Shopify. Se l'elenco e' troncato o
+        // interrotto a meta' — connessione annidata non esaurita, una pagina
+        // andata storta — la differenza non descrive cio' che il merchant ha
+        // tolto, descrive cio' che noi non abbiamo chiesto. Senza la prova di
+        // completezza si aggiorna e basta: qualche riga obsoleta di troppo si
+        // sistema alla corsa dopo, una variante cancellata no.
+        const variantsAreComplete = product.variants_complete === true;
+        if (!variantsAreComplete) {
+          console.warn(
+            `Elenco varianti incompleto per il prodotto ${product.id}: riconciliazione saltata, nessuna cancellazione`,
+          );
+        }
+
+        const orphanedVariantIds = !variantsAreComplete
+          ? []
+          : (existingRows || [])
+              .map(row => row.shopify_variant_id as number | null)
+              .filter((id): id is number => id != null && !currentVariantIds.has(id));
+        // Le righe con variant_id NULL invece non le decide nessun confronto:
+        // sono resti di una vecchia versione dell'app, irraggiungibili
+        // dall'upsert (in SQL NULL non entra mai in conflitto con NULL) e
+        // destinate a duplicarsi. Vanno via comunque, elenco completo o no.
         const hasLegacyNullRows = (existingRows || []).some(row => row.shopify_variant_id == null);
 
         if (orphanedVariantIds.length > 0) {
@@ -689,8 +711,11 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
           }
         }
 
-        // Se non resta alcuna variante idonea, la riconciliazione sopra ha già
-        // rimosso le righe del prodotto: non si upserta e non si consuma quota.
+        // Se non resta alcuna variante idonea non c'è nulla da scrivere e non si
+        // consuma quota. Con l'elenco completo la riconciliazione sopra ha già
+        // ripulito il prodotto; con l'elenco incompleto le righe restano dove
+        // sono, che è il punto: "non ho visto varianti idonee" non è "non ce ne
+        // sono".
         if (eligibleRows.length === 0) continue;
 
         // Upsert delle sole righe idonee con la chiave univoca.
@@ -832,6 +857,11 @@ export async function processInitialBulkSync(
   let totalProducts = 0;
   let totalVariants = 0;
   let nextPageInfo: string | null = null;
+  // Quanti prodotti sono arrivati con l'elenco delle varianti troncato o
+  // interrotto. Basta che ne esista uno perche' la premessa della spazzata
+  // finale — "tutto cio' che doveva restare e' stato riscritto adesso" — sia
+  // falsa. Vedi il commento sulla spazzata.
+  let productsWithIncompleteVariants = 0;
 
   // Dettaglio della corsa (cosa e' entrato, cosa e' uscito): vive fuori dal try
   // perche' anche il percorso di errore deve poterlo salvare.
@@ -885,6 +915,12 @@ export async function processInitialBulkSync(
       const addedRows: SupabaseProductRow[] = [];
       for (const product of sortByCreatedAtAsc(products as ShopifyProduct[])) {
         if (maxProducts != null && totalProducts >= maxProducts) break;
+        // Si conta PRIMA di qualunque scarto: un prodotto le cui varianti sono
+        // arrivate a meta' puo' benissimo sembrare senza righe idonee, e uscire
+        // di scena qui sotto senza che nessuno sappia piu' che era monco. E'
+        // esattamente il caso in cui la spazzata finale gli porterebbe via le
+        // righe buone.
+        if (product.variants_complete !== true) productsWithIncompleteVariants++;
         const eligibleRows = filterEligibleProductRows(transformProduct(product));
         if (eligibleRows.length === 0) continue; // nessuna variante idonea: niente quota
         if (knownVariantIds != null) {
@@ -956,20 +992,35 @@ export async function processInitialBulkSync(
     //
     // Le righe con synced_at NULL sopravvivono (in SQL un confronto con NULL non
     // e' mai vero): non le ha scritte l'app, non le tocchiamo.
-    const { rows: sweptRows, error: sweepError } = await runReturningRows<RemovedProductRow>(
-      supabase
-        .from(shop.supabaseConfig.tableNameProducts)
-        .delete()
-        .lt('synced_at', runStartedAt) as unknown as ReturningBuilder,
-      REMOVED_PRODUCT_COLUMNS,
-    );
-
-    if (sweepError) {
-      // Non fatale: i prodotti idonei sono gia' stati scritti. Le righe obsolete
-      // verranno rimosse alla corsa successiva.
-      console.warn('Spazzata dei prodotti obsoleti fallita:', sweepError);
+    //
+    // E la stessa prudenza vale un gradino piu' in basso, dove il guasto e' meno
+    // vistoso di una pagina che lancia: la spazzata poggia tutta sull'idea che
+    // "non riscritto adesso" significhi "non esiste piu' su Shopify". Se anche un
+    // solo prodotto e' arrivato con l'elenco delle varianti monco, quelle che non
+    // abbiamo letto non sono state riscritte pur essendo vivissime, e la spazzata
+    // le porterebbe via tutte in una query — silenziosamente, e per l'intero
+    // catalogo. Allora si salta: le righe davvero obsolete resteranno un giro in
+    // piu', che e' un prezzo senza paragone rispetto a varianti perse.
+    if (productsWithIncompleteVariants > 0) {
+      console.warn(
+        `Spazzata dei prodotti obsoleti saltata: ${productsWithIncompleteVariants} prodotti con elenco varianti incompleto in questa corsa`,
+      );
     } else {
-      collectRemovedProducts(collector, sweptRows);
+      const { rows: sweptRows, error: sweepError } = await runReturningRows<RemovedProductRow>(
+        supabase
+          .from(shop.supabaseConfig.tableNameProducts)
+          .delete()
+          .lt('synced_at', runStartedAt) as unknown as ReturningBuilder,
+        REMOVED_PRODUCT_COLUMNS,
+      );
+
+      if (sweepError) {
+        // Non fatale: i prodotti idonei sono gia' stati scritti. Le righe obsolete
+        // verranno rimosse alla corsa successiva.
+        console.warn('Spazzata dei prodotti obsoleti fallita:', sweepError);
+      } else {
+        collectRemovedProducts(collector, sweptRows);
+      }
     }
 
     // Sync customers if the shop's plan includes customer sync
