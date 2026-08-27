@@ -653,7 +653,21 @@ export default function Dashboard() {
   // secondo. Legando il pulsante alla sola richiesta, si riaccendeva mentre la
   // corsa stava ancora girando e i numeri sotto erano ancora quelli vecchi.
   const [manualStartedAt, setManualStartedAt] = useState<number | null>(null);
-  const manualSyncing = manualSyncFetcher.state !== 'idle' || manualStartedAt !== null;
+  // In corso significa tre cose diverse, e servono tutte e tre.
+  //
+  // Le prime due vivono in questa pagina: la richiesta in volo, e il tratto fra
+  // il "messo in coda" e il momento in cui il database lo conferma. Ma sono
+  // memoria del browser, e la corsa no: il job sta su Redis e lo esegue
+  // un'invocazione a parte, quindi continua anche cambiando scheda, uscendo da
+  // CoreWard o chiudendo tutto. Riaprendo, di quelle due non resta niente e
+  // l'avviso spariva su una sincronizzazione che stava ancora girando.
+  //
+  // La terza e' il database: se risulta una corsa in stato "running", sta
+  // girando davvero — e quello lo sa anche un browser appena riaperto.
+  const manualSyncing =
+    manualSyncFetcher.state !== 'idle' ||
+    manualStartedAt !== null ||
+    syncState === 'in_progress';
 
   const startManualSync = useCallback(() => {
     const data = new FormData();
@@ -1358,9 +1372,17 @@ export default function Dashboard() {
         )}
 
         {/* Fra i filtri e le card, dove cade lo sguardo appena premuto il
-            pulsante. Non e' un avviso da chiudere: sparisce da solo quando la
-            corsa e' partita. */}
-        {manualSyncing && <Banner tone="info">{t.dashboard.manualSync.running}</Banner>}
+            pulsante. Non e' un avviso da chiudere: resta finche' la corsa non e'
+            finita davvero, ricariche comprese — la corsa vive sul server, e
+            l'avviso adesso lo sa.
+
+            Solo a configurazione conclusa: prima il push manuale non c'e', e
+            durante i passi sono quelli a raccontare cosa sta succedendo. Due
+            racconti della stessa cosa, uno sopra l'altro, si contraddicono al
+            primo scarto. */}
+        {setupComplete && manualSyncing && (
+          <Banner tone="info">{t.dashboard.manualSync.running}</Banner>
+        )}
 
         {/* Gli avvisi stanno in una pila propria, stretta: sono una lista da
             leggere in fila, non sezioni indipendenti. Tenendoli nel contenitore
