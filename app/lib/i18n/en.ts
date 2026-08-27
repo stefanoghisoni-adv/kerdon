@@ -136,6 +136,7 @@ export const en: typeof it = {
     },
     trackingCheck: {
       title: "Channels and theme check",
+      proceed: "Continue to the next step",
       complete: "Completed",
       locked: "Connect a database to check what already sends data.",
     },

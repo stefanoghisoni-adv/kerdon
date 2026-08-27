@@ -149,6 +149,7 @@ export const it = {
     },
     trackingCheck: {
       title: "Controllo canali e tema",
+      proceed: "Procedi al prossimo step",
       complete: "Completato",
       locked: "Collega un database per controllare cosa trasmette già dati.",
     },

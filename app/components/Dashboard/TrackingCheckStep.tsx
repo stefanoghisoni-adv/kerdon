@@ -1,11 +1,29 @@
-import { BlockStack, InlineStack, Spinner, Text } from '@shopify/polaris';
+import { useEffect, useState } from 'react';
+import { BlockStack, Button, InlineStack, Spinner, Text } from '@shopify/polaris';
 import { TrackingConflicts, type TrackingConflictsProps } from './TrackingConflicts';
 import { useT } from '~/lib/i18n/context';
 
 export interface TrackingCheckStepProps extends Omit<TrackingConflictsProps, 'variant'> {
   /** Il controllo e' ancora in corso. */
   loading: boolean;
+  /** Il merchant ha gia' dichiarato di aver letto: il passo e' chiuso. */
+  confirmed: boolean;
+  /** La conferma e' in viaggio verso il server. */
+  confirming?: boolean;
+  onConfirm: () => void;
 }
+
+/**
+ * Quanti secondi il comando resta spento prima di poter essere premuto.
+ *
+ * Non e' un'attesa tecnica — non c'e' niente da caricare — ed e' l'unico punto
+ * dell'app in cui si fa aspettare di proposito. Questo passo esiste per far
+ * leggere un elenco: un pulsante gia' pronto sotto di esso si preme prima di
+ * arrivare alla seconda riga, e il passo diventa un ostacolo da togliere invece
+ * che una cosa da guardare. Cinque secondi bastano a posare l'occhio, e sono
+ * pochi abbastanza da non irritare chi quell'elenco lo conosce gia'.
+ */
+const COUNTDOWN_SECONDS = 5;
 
 /**
  * Terzo passo: cosa, su questo negozio, sta gia' mandando eventi.
@@ -15,8 +33,26 @@ export interface TrackingCheckStepProps extends Omit<TrackingConflictsProps, 'va
  * scelta del piano perche' e' li' che il merchant capisce cosa sta comprando —
  * un tracciamento che sostituisce quello che ha, non uno che ci si somma.
  */
-export function TrackingCheckStep({ loading, findings, ...rest }: TrackingCheckStepProps) {
+export function TrackingCheckStep({
+  loading,
+  findings,
+  confirmed,
+  confirming,
+  onConfirm,
+  ...rest
+}: TrackingCheckStepProps) {
   const t = useT();
+
+  // Il conto alla rovescia parte quando c'e' qualcosa da leggere, non quando il
+  // passo si apre: farlo scorrere sotto lo spinner vorrebbe dire consumarlo
+  // mentre non c'e' ancora niente sotto gli occhi.
+  const [left, setLeft] = useState(COUNTDOWN_SECONDS);
+  useEffect(() => {
+    if (loading || confirmed || left === 0) return;
+    const timer = setTimeout(() => setLeft((n) => n - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [loading, confirmed, left]);
+
   if (loading) {
     return (
       <InlineStack gap="200" blockAlign="center" wrap={false}>
@@ -28,19 +64,36 @@ export function TrackingCheckStep({ loading, findings, ...rest }: TrackingCheckS
     );
   }
 
-  if (findings.length === 0) {
-    return (
-      <BlockStack gap="200">
-        <Text as="p">{t.tracking.nothingFound}</Text>
-        {/* Dirlo apertamente: l'elenco e' per forza parziale, e "non ho trovato
-            nulla" letto come "sei a posto" e' esattamente cio' che non possiamo
-            garantire. */}
-        <Text as="p" tone="subdued" variant="bodySm">
-          {t.tracking.partialNote}
-        </Text>
-      </BlockStack>
-    );
-  }
+  return (
+    <BlockStack gap="400">
+      {findings.length === 0 ? (
+        <BlockStack gap="200">
+          <Text as="p">{t.tracking.nothingFound}</Text>
+          {/* Dirlo apertamente: l'elenco e' per forza parziale, e "non ho trovato
+              nulla" letto come "sei a posto" e' esattamente cio' che non possiamo
+              garantire. */}
+          <Text as="p" tone="subdued" variant="bodySm">
+            {t.tracking.partialNote}
+          </Text>
+        </BlockStack>
+      ) : (
+        <TrackingConflicts findings={findings} variant="plain" {...rest} />
+      )}
 
-  return <TrackingConflicts findings={findings} variant="plain" {...rest} />;
+      {/* Il passo lo chiude il merchant, non il controllo.
+          A sinistra perche' e' la fine di una lettura, e la lettura comincia da
+          li'. Dopo la conferma resta a video, spento: toglierlo farebbe
+          scomparire la riga e saltare in su tutto il resto. */}
+      <InlineStack align="start">
+        <Button
+          variant="primary"
+          disabled={confirmed || left > 0 || confirming}
+          loading={confirming}
+          onClick={onConfirm}
+        >
+          {left > 0 && !confirmed ? String(left) : t.steps.trackingCheck.proceed}
+        </Button>
+      </InlineStack>
+    </BlockStack>
+  );
 }

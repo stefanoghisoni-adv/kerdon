@@ -1033,8 +1033,30 @@ export default function Dashboard() {
   // solo catalogo non c'e' niente da fare.
   // Il controllo e' fatto se il server lo sa gia' (apertura successiva) oppure
   // se la risposta e' appena arrivata (la prima volta).
-  const trackingChecked =
-    supabaseConnected && (trackingCheckedForConnection || conflictsFetcher.data != null);
+  // Il passo e' concluso solo se il merchant l'ha dichiarato.
+  //
+  // Prima bastava che il controllo avesse risposto, e la risposta arriva da
+  // sola: il terzo passo si chiudeva nell'istante in cui si apriva e sbloccava
+  // il quarto insieme, lasciando davanti due passi aperti di cui uno mai letto.
+  const trackingChecked = supabaseConnected && trackingCheckedForConnection;
+
+  const trackingConfirmFetcher = useFetcher<{ ok?: boolean }>();
+  const confirmTrackingCheck = useCallback(() => {
+    trackingConfirmFetcher.submit(null, {
+      method: 'post',
+      action: '/api/tracking/confirm',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Confermato: il loader si rilegge, cosi' il passo si chiude e il quarto si
+  // apre senza che serva ricaricare a mano.
+  useEffect(() => {
+    if (trackingConfirmFetcher.state === 'idle' && trackingConfirmFetcher.data?.ok) {
+      revalidator.revalidate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackingConfirmFetcher.state, trackingConfirmFetcher.data]);
 
   // Il piano e' deciso quando c'e' una scelta alle spalle e la sincronizzazione
   // di questa connessione e' arrivata in fondo. Le due cose contano a parte:
@@ -1245,10 +1267,16 @@ export default function Dashboard() {
       lockedHint: t.steps.trackingCheck.locked,
       content: (
         <TrackingCheckStep
-          loading={!trackingChecked}
+          // Il controllo sta ancora girando finche' non e' tornato con una
+          // risposta. Prima qui si guardava se il passo risultava concluso, che
+          // e' un'altra domanda: adesso quelle due cose sono separate.
+          loading={conflictsFetcher.data == null}
           findings={conflictsFetcher.data?.findings ?? []}
           adminBase={conflictsFetcher.data?.adminBase}
           themeId={conflictsFetcher.data?.themeId}
+          confirmed={trackingChecked}
+          confirming={trackingConfirmFetcher.state !== 'idle'}
+          onConfirm={confirmTrackingCheck}
         />
       ),
     },

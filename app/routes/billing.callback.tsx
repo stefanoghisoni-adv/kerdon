@@ -200,6 +200,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
       now,
     });
 
+    // Approvare un piano a pagamento E' confermare il piano: e' il quarto passo
+    // della configurazione, fatto nel modo piu' esplicito che esista — pagando.
+    //
+    // Si segna qui e non al rientro nel browser perche' li' non e' garantito
+    // che succeda: l'effetto che lo faceva partiva solo se non risultava gia'
+    // una sincronizzazione completata, quindi chi cambiava piano avendone gia'
+    // fatta una tornava su una configurazione che non si chiudeva piu'. E un
+    // segno che dipende dal fatto che il browser resti aperto sul percorso
+    // giusto non e' un segno, e' una speranza.
+    await prisma.shop.update({
+      where: { id: shop.id },
+      data: { planConfirmedAt: now },
+    });
+
     await cancelPreviousSubscriptions(admin, shop.id, gid);
 
     return backToPlan(requestUrl, shopDomain, 'ok');

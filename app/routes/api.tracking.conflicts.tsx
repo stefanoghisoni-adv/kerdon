@@ -68,23 +68,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   }
 
-  // Il controllo ha dato una risposta: da qui in poi il passo risulta fatto
-  // anche a pagina ricaricata. Senza questa riga la risposta viveva solo nel
-  // browser, e a ogni apertura la configurazione ripartiva incompleta — i passi
-  // ricomparivano per qualche secondo sopra una dashboard gia' pronta.
-  //
-  // Best effort: il controllo e' andato, e non deve fallire per questo.
-  try {
-    await prisma.shop.update({
-      where: { id: shop.id },
-      data: { trackingCheckedAt: new Date() },
-    });
-  } catch (err) {
-    console.warn(
-      '[api.tracking.conflicts] segnare il controllo come fatto non e riuscito:',
-      err instanceof Error ? err.message : 'errore sconosciuto',
-    );
-  }
+  // Qui NON si segna niente come fatto. Il controllo ha una risposta, ma averla
+  // non vuol dire che qualcuno l'abbia letta: il passo si chiude quando il
+  // merchant lo dice, da `api.tracking.confirm`. Segnandolo qui, il terzo passo
+  // si completava nell'istante in cui si apriva e sbloccava il quarto insieme,
+  // lasciando davanti due passi aperti di cui uno mai guardato.
 
   return json({
     findings: findings.filter((f) => !isDismissed(f)),
