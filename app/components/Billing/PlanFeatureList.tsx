@@ -71,20 +71,15 @@ export function PlanFeatureList({ features }: Props) {
           </Box>
           <div className={matching.included ? 'plan-feature-matching' : undefined}>
           <InlineStack align="start" gap="200" blockAlign="center" wrap={false}>
-            {/* Il fulmine viene dai web component di App Home e non da
-                `polaris-icons`: quel pacchetto un fulmine non ce l'ha, e questa
-                riga il fulmine lo vuole. Gli elementi li registra
-                `app-bridge.js`, che l'app carica gia' — lo inietta AppProvider.
+            {/* Pieno dove la funzione c'e', vuoto dove non c'e': la
+                differenza si coglie prima di leggere, ed e' la stessa
+                distinzione che passa fra il cerchio spuntato e quello sbarrato
+                nelle righe sopra.
 
-                Pieno dove la funzione c'e', vuoto dove non c'e': la differenza
-                si coglie prima di leggere, ed e' la stessa distinzione che
-                passa fra il cerchio spuntato e quello sbarrato sopra.
-
-                Il tono non puo' essere il viola che si vorrebbe: `s-icon`
-                ammette solo info, success, warning, critical, auto, neutral e
-                caution. Fra questi `info` e' l'unico che stacca dal testo senza
-                promettere un esito — success direbbe "riuscito", warning
-                "attenzione", e qui non c'e' ne' l'uno ne' l'altro. */}
+                Il fulmine sta in un file nostro perche' `polaris-icons` non ne
+                ha uno: il perche' della scelta e' scritto li'. Il viola arriva
+                dal foglio di stile e non da una prop — fra i toni dell'`Icon`
+                quel viola non c'e'. */}
             <Icon
               source={matching.included ? BoltFilledIcon : BoltIcon}
               tone={matching.included ? undefined : 'subdued'}

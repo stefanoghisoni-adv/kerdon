@@ -369,9 +369,9 @@
 }
 
 /* "Matching avanzato" quando il piano lo comprende.
-   Il viola e' scelto dal committente e non esiste fra i toni di Polaris: i
-   toni di `s-icon` sono info, success, warning, critical, auto, neutral e
-   caution, e nessuno di questi e' viola. Quindi il colore si scrive qui.
+   Il viola e' scelto dal committente e fra i toni di Polaris non esiste: la
+   tavolozza dell'`Icon` arriva fino a `magic`, che e' un altro viola. Quindi
+   questo colore si scrive qui, ed e' l'unico posto in cui compare.
 
    Si imposta sul contenitore e si lascia ereditare: il testo lo prende da
    `color` e il fulmine disegna con `currentColor`, quindi una dichiarazione

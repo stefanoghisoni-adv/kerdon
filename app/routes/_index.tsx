@@ -582,6 +582,12 @@ export default function Dashboard() {
   // La pagina dei prodotti non idonei interroga Shopify pagina per pagina:
   // l'attesa si sente, e senza un segnale il merchant clicca due volte.
   const issuesNav = useNavLoading('/products/issues');
+  // L'avviso dei costi mancanti porta alla stessa pagina, ma con uno stato suo:
+  // condividendo quello sopra, un clic avrebbe acceso il cerchietto anche sugli
+  // altri due comandi che ci portano — e un pulsante che si accende senza che
+  // nessuno l'abbia premuto e' esattamente cio' che questo hook esiste per
+  // evitare.
+  const costFixNav = useNavLoading('/products/issues');
 
   // Stato del collegamento Supabase per il badge del primo step: Non collegato
   // (grigio) → In corso (arancione) → Fallito (rosso) / Collegato (verde).
@@ -1515,7 +1521,15 @@ export default function Dashboard() {
                   a quel che serve: meglio del numero tondo, perche' segue le
                   stesse misure di tutto il resto. */}
               <Box paddingInlineEnd="600">
-                <Button url="/products/issues?sold=1">
+                {/* La pagina interroga Shopify prodotto per prodotto e ci mette
+                    qualche istante: senza un segnale, chi preme crede di non
+                    aver premuto e ci riprova. */}
+                <Button
+                  url="/products/issues?sold=1"
+                  onClick={costFixNav.start}
+                  loading={costFixNav.loading}
+                  disabled={costFixNav.loading}
+                >
                   {t.dashboard.soldWithoutCost.fix}
                 </Button>
               </Box>
