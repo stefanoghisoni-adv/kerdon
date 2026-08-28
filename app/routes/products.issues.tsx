@@ -50,7 +50,10 @@ import {
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { filterProblemVariants, pageCount, pageSlice } from '~/lib/stats/problem-filter';
-import { selectSoldProblemVariants } from '~/lib/stats/sold-without-cost';
+import {
+  selectSoldProblemVariants,
+  soldVariantsMissingFromCatalog,
+} from '~/lib/stats/sold-without-cost';
 import { useFilterNav } from '~/components/Dashboard/filter-nav';
 import { loadSoldVariantIds } from '~/lib/stats/sold-variants.server';
 import {
@@ -144,6 +147,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // senza database collegato la pagina mostra tutto, e dire il contrario
     // farebbe credere che siano quelli i prodotti venduti.
     soldOnly: soldOnly && sold.ids !== null,
+    // Vendute ma non piu' nel catalogo: l'unica differenza che puo' restare fra
+    // il numero annunciato e le righe mostrate, e va detta invece che subita.
+    soldMissingFromCatalog: error
+      ? 0
+      : soldVariantsMissingFromCatalog(allProducts, sold.ids),
     hiddenByFilter: sold.ids ? allRows.length - rows.length : 0,
     // L'etichetta del cliente si mostra solo se si e' potuto leggerne il nome:
     // un'etichetta senza nome non dice a chi si riferisce.
@@ -389,6 +397,7 @@ export default function ProblemProducts() {
     readyCount,
     planLimit,
     soldOnly,
+    soldMissingFromCatalog,
     hiddenByFilter,
     customerId,
     customerName,
@@ -675,6 +684,15 @@ export default function ProblemProducts() {
         {!error && rows.length === 0 && (
           <Banner tone="success">
             {t.issues.allGood}
+          </Banner>
+        )}
+
+        {/* Fra i filtri e la tabella: e' li' che ci si accorge che i numeri non
+            tornano, ed e' li' che va spiegato perche'. Solo quando il filtro
+            delle vendite e' attivo — altrove non si sta confrontando niente. */}
+        {soldOnly && soldMissingFromCatalog > 0 && (
+          <Banner tone="info">
+            {t.issues.soldMissingFromCatalog(soldMissingFromCatalog)}
           </Banner>
         )}
 

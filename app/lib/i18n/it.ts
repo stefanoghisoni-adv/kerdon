@@ -661,6 +661,21 @@ export const it = {
      */
     hiddenCount: (hidden: number) =>
       hidden === 1 ? "1 prodotto nascosto dal filtro" : `${hidden} prodotti nascosti dal filtro`,
+    /**
+     * Perche' il numero annunciato puo' non tornare con le righe mostrate.
+     *
+     * Si nomina la causa piu' probabile invece di lasciarla indovinare, e si
+     * dice subito che non c'e' niente da fare: chi legge un numero che non torna
+     * cerca il proprio errore, e qui l'errore non e' suo.
+     */
+    soldMissingFromCatalog: (missing: number) =>
+      (missing === 1
+        ? "1 variante venduta non è più nel catalogo"
+        : `${missing} varianti vendute non sono più nel catalogo`) +
+      ". Di solito succede quando un prodotto viene modificato: Shopify rifà le " +
+      "sue varianti, e gli ordini vecchi restano legati a quelle di prima. Non " +
+      "si possono correggere da qui, e per quelle righe il profitto resta " +
+      "approssimato.",
     recheck: "Ricontrolla e aggiorna",
     listTitle: "Elenco prodotti non idonei",
     suspended:

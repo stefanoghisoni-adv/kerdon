@@ -587,6 +587,13 @@ export const en: typeof it = {
     filterSold: "Only products in orders",
     hiddenCount: (hidden: number) =>
       hidden === 1 ? "1 product hidden by the filter" : `${hidden} products hidden by the filter`,
+    soldMissingFromCatalog: (missing: number) =>
+      (missing === 1
+        ? "1 sold variant is no longer in your catalogue"
+        : `${missing} sold variants are no longer in your catalogue`) +
+      ". This usually happens when a product is edited: Shopify recreates its " +
+      "variants, and older orders stay tied to the previous ones. They can't be " +
+      "fixed from here, and profit stays approximate for those lines.",
     recheck: "Recheck and update",
     listTitle: "Products",
     suspended:

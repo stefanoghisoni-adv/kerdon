@@ -99,3 +99,37 @@ export function countSoldWithoutCostInCatalog(
 ): number {
   return countSoldProblemVariants(collectProblemVariants(products), soldIds);
 }
+
+/**
+ * Le varianti vendute che nel catalogo non si trovano piu'.
+ *
+ * Sono la sola ragione per cui l'avviso e l'elenco possono ancora non
+ * coincidere, adesso che li calcola la stessa funzione: se una riga d'ordine
+ * punta a una variante che Shopify non restituisce piu', quella vendita esiste
+ * ma non c'e' niente da mostrare ne' da correggere.
+ *
+ * Non vuol dire "prodotto cancellato". Il caso piu' comune e' l'opposto: il
+ * prodotto c'e' ancora, ma e' stato modificato. Cambiando le opzioni di un
+ * prodotto Shopify non rinomina le varianti — le rifa', con id nuovi — e gli
+ * ordini vecchi continuano a puntare a quelli di prima, che non esistono piu'.
+ *
+ * Si contano per poterlo dire al merchant invece di lasciargli un numero che
+ * non torna: e' una differenza che non puo' chiudere, e non saperlo e' peggio.
+ */
+export function soldVariantsMissingFromCatalog(
+  products: ShopifyProduct[],
+  soldIds: Set<number> | null,
+): number {
+  if (!soldIds) return 0;
+
+  const inCatalog = new Set<number>();
+  for (const product of products) {
+    for (const variant of product.variants) {
+      if (variant.id != null) inCatalog.add(variant.id);
+    }
+  }
+
+  let missing = 0;
+  for (const id of soldIds) if (!inCatalog.has(id)) missing++;
+  return missing;
+}

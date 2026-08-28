@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   soldVariantsSQL,
   selectSoldProblemVariants,
+  soldVariantsMissingFromCatalog,
   countSoldProblemVariants,
   countSoldWithoutCostInCatalog,
 } from './sold-without-cost';
@@ -160,5 +161,35 @@ describe('quando non si sa che cosa sia stato venduto', () => {
   it('l’avviso invece tace: parla di venduti, e di venduti non ne conosce', () => {
     const rows = collectProblemVariants([product(1, null), product(2, null)]);
     expect(countSoldProblemVariants(rows, null)).toBe(0);
+  });
+});
+
+describe('soldVariantsMissingFromCatalog', () => {
+  const catalogo = (varianti: number[]) =>
+    [
+      {
+        id: 1,
+        title: 'Maglietta',
+        variants: varianti.map((id) => ({ id, title: 'M', cost: null })),
+      },
+    ] as never;
+
+  it('senza vendite note non annuncia niente', () => {
+    expect(soldVariantsMissingFromCatalog(catalogo([10, 11]), null)).toBe(0);
+  });
+
+  it('vendite tutte presenti: nessuna differenza da spiegare', () => {
+    expect(soldVariantsMissingFromCatalog(catalogo([10, 11]), new Set([10, 11]))).toBe(0);
+  });
+
+  // Il caso vero: il prodotto c'e' ancora, ma e' stato modificato e Shopify ha
+  // rifatto le varianti con id nuovi. Gli ordini vecchi puntano a quelli di
+  // prima, che nel catalogo non esistono piu'.
+  it('conta le varianti vendute che il catalogo non contiene piu', () => {
+    expect(soldVariantsMissingFromCatalog(catalogo([10]), new Set([10, 98, 99]))).toBe(2);
+  });
+
+  it('un catalogo vuoto rende irraggiungibili tutte le vendite', () => {
+    expect(soldVariantsMissingFromCatalog([], new Set([1, 2, 3]))).toBe(3);
   });
 });
