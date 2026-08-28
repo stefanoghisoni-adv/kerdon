@@ -813,7 +813,7 @@ export const en: typeof it = {
       "Your existing catalogues and shops are not changed by this deletion.",
     deleteConfirm: "Delete integration",
     planRequired:
-      "Catalogue feeds are not part of your plan. The integrations stay here, ready: activating them needs a plan that includes them.",
+      "Catalogue feeds are not part of your plan. The integrations stay where they are, ready: activating them needs a plan that includes them.",
     manage: "Manage",
     google: {
       name: "Google Merchant Center",

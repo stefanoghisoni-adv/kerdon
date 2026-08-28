@@ -932,7 +932,7 @@ export const it = {
       "Gli attuali cataloghi e shop non subiranno modifiche con l\u2019eliminazione.",
     deleteConfirm: "Elimina integrazione",
     planRequired:
-      "I feed di catalogo non sono compresi nel tuo piano. Le integrazioni restano qui, pronte: per attivarle serve un piano che li preveda.",
+      "I feed di catalogo non sono compresi nel tuo piano. Le integrazioni restano dove sono, pronte: per attivarle serve un piano che le preveda.",
     manage: "Gestisci",
     google: {
       name: "Google Merchant Center",

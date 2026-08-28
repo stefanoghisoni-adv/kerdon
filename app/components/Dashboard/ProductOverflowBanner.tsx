@@ -166,11 +166,15 @@ export function ProductOverflowBanner({
         <BlockStack gap="300">
           <Text as="p">
             {reason === 'feeds' ? (
+              // Prima il motivo, poi l'invito: al contrario si leggeva "Aggiorna
+              // a Business" senza sapere ancora perche', e i due pezzi — figli
+              // JSX adiacenti — finivano pure attaccati, "BusinessI feed di
+              // catalogo". Lo spazio va scritto: JSX non ne mette fra due nodi.
               <>
+                {t.catalogs.planRequired}{' '}
                 <Link onClick={() => setConfirming(true)} removeUnderline>
                   {t.account.upgradeTo(nextLabel)}
                 </Link>
-                {t.catalogs.planRequired}
               </>
             ) : (
               t.overflow.body(excluded, nextLabel)
