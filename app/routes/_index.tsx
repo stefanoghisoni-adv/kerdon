@@ -1410,14 +1410,24 @@ export default function Dashboard() {
                   reloadForPeriod(next, comparison);
                 }}
               />
-              <ComparisonSelect
-                value={comparison}
-                range={range}
-                onChange={(next) => {
-                  setComparison(next);
-                  reloadForPeriod(range, next);
-                }}
-              />
+              {/* Il confronto fra periodi e' messo via, non tolto.
+                  Il componente resta scritto e funzionante, e lo stato che lo
+                  alimenta pure: `comparison` vale "nessun confronto" e continua
+                  a viaggiare fino alle letture, che sanno gia' gestirlo. Per
+                  rimetterlo servira' togliere questa condizione e nient'altro.
+
+                  Va nascosto al revisore, quindi non basta spegnerlo: non deve
+                  proprio comparire. */}
+              {false && (
+                <ComparisonSelect
+                  value={comparison}
+                  range={range}
+                  onChange={(next) => {
+                    setComparison(next);
+                    reloadForPeriod(range, next);
+                  }}
+                />
+              )}
             </InlineStack>
 
             {/* Se il piano non lo prevede non compare affatto: mostrarlo spento
