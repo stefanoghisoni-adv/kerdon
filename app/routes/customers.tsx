@@ -25,7 +25,7 @@ import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
-import { firstPlanWithCustomersSync, planLabel } from '~/components/Dashboard/account-format';
+import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-format';
 import { BASE_CURRENCY } from '~/lib/billing/money';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { loadCustomersReport } from '~/lib/customers/customers.server';
@@ -34,6 +34,7 @@ import { matchesCustomerSearch } from '~/lib/customers/customer-search';
 import { formatMoney } from '~/lib/billing/money';
 import { useLocale, useT } from '~/lib/i18n/context';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
+import { PlanUpgradeAction } from '~/components/Dashboard/PlanUpgradeAction';
 import { BirthdateMetafieldCard } from '~/components/Customers/BirthdateMetafieldCard';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
@@ -331,9 +332,12 @@ export default function Customers() {
         {unavailable === 'plan_required' && (
           <Banner tone="info">
             <Text as="p">
-              <Link url="/plan" removeUnderline>
-                {t.account.upgradeTo(planLabel(upgradePlan))}
-              </Link>
+              {/* Lo stesso invito della card dei clienti in dashboard, e lo
+                  stesso comportamento: il confronto fra i due piani si apre
+                  qui. Portare sulla tab Piano da questa pagina e non dall'altra
+                  vorrebbe dire due risposte diverse alla stessa domanda, fatta
+                  a due giorni di distanza dallo stesso merchant. */}
+              <PlanUpgradeAction plan={upgradePlan} />
               {t.customers.planRequired}
             </Text>
           </Banner>

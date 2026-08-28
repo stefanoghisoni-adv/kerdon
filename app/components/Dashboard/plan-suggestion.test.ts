@@ -78,12 +78,19 @@ describe('planComparisonRows', () => {
     expect(rows.map((r) => r.label)).toEqual([
       'Prodotti sincronizzabili',
       'Clienti sincronizzabili',
+      'Matching avanzato',
       'Costo mensile',
     ]);
-    expect(rows[0]).toEqual({ label: 'Prodotti sincronizzabili', current: '50', next: '200' });
+    expect(rows[0]).toEqual({
+      key: 'products',
+      label: 'Prodotti sincronizzabili',
+      current: '50',
+      next: '200',
+    });
     expect(rows[1].current).toBe('Non inclusi');
     expect(rows[1].next).toBe('500');
-    expect({ ...rows[2], next: rows[2].next.replace(/\u00a0/g, ' ') }).toEqual({
+    expect({ ...rows[3], next: rows[3].next.replace(/\u00a0/g, ' ') }).toEqual({
+      key: 'monthlyCost',
       label: 'Costo mensile',
       current: 'Gratuito',
       next: '$ 19/mese',
@@ -97,7 +104,68 @@ describe('planComparisonRows', () => {
     const enterprise = PLANS[3];
     const rows = planComparisonRows(business, enterprise, 'USD', 'it', itDict);
     expect(rows.map((r) => r.label)).not.toContain('Sincronizzazione clienti');
-    expect(rows.every((r) => r.current !== r.next)).toBe(true);
+    // Il matching e' l'unica riga che resta anche quando non cambia: vedi il
+    // caso qui sotto.
+    expect(rows.filter((r) => r.key !== 'matching').every((r) => r.current !== r.next)).toBe(
+      true,
+    );
+  });
+
+  it('il matching dice se il piano proposto lo comprende', () => {
+    // Free non sincronizza i clienti, Pro si': senza clienti da riconoscere non
+    // c'e' matching, e la riga lo dice con le stesse parole delle card.
+    const rows = planComparisonRows(free, pro, 'USD', 'it', itDict);
+    const matching = rows.find((r) => r.key === 'matching')!;
+    expect(matching.label).toBe('Matching avanzato');
+    expect(matching.current).toBe('Non incluso');
+    expect(matching.next).toBe('Incluso');
+    // Da qui esce anche il colore: al testo non si puo' chiedere cosa dice.
+    expect(matching.nextIncluded).toBe(true);
+  });
+
+  it('il matching manca dove mancano i clienti, e si vede', () => {
+    // Un piano piu' caro che pero' i clienti non li sincronizza: il matching
+    // segue loro, non il prezzo.
+    const senzaClienti: PlanForSuggestion = {
+      planName: 'basic',
+      priceMonthly: 9,
+      priceYearly: 90,
+      maxProducts: 100,
+      maxCustomers: 0,
+      customersSyncEnabled: false,
+    };
+    const rows = planComparisonRows(free, senzaClienti, 'USD', 'it', itDict);
+    const matching = rows.find((r) => r.key === 'matching')!;
+    // Al singolare: qui si parla di una funzione, non dei clienti esclusi.
+    expect(matching.next).toBe('Non incluso');
+    expect(matching.nextIncluded).toBe(false);
+  });
+
+  it('il matching resta anche quando i due piani lo comprendono entrambi', () => {
+    // Tutte le altre righe uguali spariscono; questa no. Non e' una voce fra le
+    // voci: e' quello che il piano fa con i clienti che gia' sincronizza, e chi
+    // sta per pagare vuole leggerlo comunque.
+    const business = PLANS[2];
+    const enterprise = PLANS[3];
+    const rows = planComparisonRows(business, enterprise, 'USD', 'it', itDict);
+    const matching = rows.find((r) => r.key === 'matching')!;
+    expect(matching.current).toBe('Incluso');
+    expect(matching.next).toBe('Incluso');
+  });
+
+  it('il matching sta sempre attaccato al costo, appena sopra', () => {
+    // Ancorato al prezzo e non a una posizione fissa: si legge per ultimo,
+    // quando si e' finito di leggere cosa si ottiene e un attimo prima di
+    // leggere quanto costa. Vale con molte righe sopra...
+    const rows = planComparisonRows(free, PLANS[3], 'USD', 'it', itDict);
+    const matching = rows.findIndex((r) => r.key === 'matching');
+    expect(rows[matching + 1].key).toBe('monthlyCost');
+
+    // ...e vale anche quando il costo e' l'unica riga rimasta, perche' fra i due
+    // piani non cambia altro.
+    const caro: PlanForSuggestion = { ...PLANS[2], planName: 'business-plus', priceMonthly: 69 };
+    const soloPrezzo = planComparisonRows(PLANS[2], caro, 'USD', 'it', itDict);
+    expect(soloPrezzo.map((r) => r.key)).toEqual(['matching', 'monthlyCost']);
   });
 
   it('scrive per esteso l assenza di tetto', () => {

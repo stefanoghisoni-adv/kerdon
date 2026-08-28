@@ -24,6 +24,8 @@ export const it = {
     inactive: "Non attiva",
     connected: "Collegato",
     notConnected: "Non collegato",
+    /** Il cerchietto di attesa accanto a un comando, per chi legge con lo schermo. */
+    loading: "Caricamento in corso",
   },
 
   nav: {
@@ -629,6 +631,12 @@ export const it = {
     confirm: "Conferma e procedi",
     cancel: "Annulla",
     whatChanges: "Cosa cambia",
+    /**
+     * Chi arriva qui sta per premere un pulsante che parla di soldi: prima di
+     * premerlo deve sapere che il pagamento lo conferma lui, altrove.
+     */
+    chargeNote:
+      "L’addebito viene confermato da te su Shopify: da qui non parte nessun pagamento.",
   },
 
   // Il confronto fra il piano in uso e quello proposto.
@@ -639,6 +647,11 @@ export const it = {
     feeds: "Multi-feed prodotto",
     included: "Incluso",
     notIncluded: "Non inclusi",
+    /**
+     * Al singolare: le righe che nominano una funzione sola — il matching — non
+     * possono usare il plurale scritto per i clienti che restano fuori.
+     */
+    notIncludedOne: "Non incluso",
     unlimited: "Illimitati",
     free: "Gratuito",
     perMonth: (price: string) => `${price}/mese`,
@@ -864,6 +877,8 @@ export const it = {
       missingOnStore: (key: string) =>
         `Campo scelto (${key}) non presente sul negozio: la data di nascita non viene sincronizzata.`,
       create: "Crea nuovo metafield",
+      doneTitle: "Data di nascita attiva",
+      change: "Cambia campo",
       useExisting: "Utilizza esistente",
       working: "Un attimo\u2026",
       present: "Campo gi\u00e0 presente",
@@ -1002,6 +1017,8 @@ export const it = {
       barcode: "Codice a barre",
       price: "Prezzo",
       compare_at_price: "Prezzo di confronto",
+      list_price: "Prezzo pieno (di confronto, o il prezzo)",
+      discounted_price: "Prezzo scontato (solo se in sconto)",
       image_url: "Immagine",
       option1: "Opzione 1",
       option2: "Opzione 2",

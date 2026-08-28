@@ -83,6 +83,9 @@ export function BirthdateMetafieldCard({
 }: BirthdateMetafieldCardProps) {
   const t = useT();
   const fetcher = useFetcher<{ ok: boolean; error: 'invalid' | 'failed' | null }>();
+  // Il merchant ha chiesto di rivedere la scelta gia' fatta. Vive nel browser e
+  // non sul server: e' un ripensamento momentaneo, non una configurazione.
+  const [reopened, setReopened] = useState(false);
 
   // Il pannello "Utilizza esistente" si apre solo se richiesto: chi arriva qui
   // per la prima volta ha davanti due pulsanti e un'anteprima, non un modulo.
@@ -117,6 +120,28 @@ export function BirthdateMetafieldCard({
   ];
 
   const activatorLabel = chosen || t.customers.birthdate.choosePlaceholder;
+
+  // Sistemato: la card ha finito il suo lavoro e si toglie di mezzo.
+  //
+  // Restare aperta dopo che il campo e' stato scelto vorrebbe dire tenere in
+  // pagina un modulo da compilare per una cosa gia' fatta — e la tab Clienti
+  // serve a guardare i clienti, non a riguardare una configurazione conclusa.
+  // Resta il banner, che dice qual e' il campo, e una via per cambiarlo: senza
+  // quella la scelta diventerebbe irreversibile a fronte di un clic.
+  if (state === 'in_use' && !reopened) {
+    return (
+      <Banner
+        tone="success"
+        title={t.customers.birthdate.doneTitle}
+        action={{
+          content: t.customers.birthdate.change,
+          onAction: () => setReopened(true),
+        }}
+      >
+        <Text as="p">{t.customers.birthdate.inUse(configured)}</Text>
+      </Banner>
+    );
+  }
 
   return (
     <Card>
@@ -168,7 +193,17 @@ export function BirthdateMetafieldCard({
         <InlineStack gap="300" blockAlign="center" wrap>
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="create" />
-            <Button submit variant="primary" loading={busy}>
+            {/* Spento quando quel campo sul negozio c'e' gia': premerlo non
+                creerebbe niente — Shopify risponde che esiste — e un comando
+                che non fa niente e' peggio di un comando assente, perche' fa
+                dubitare di aver sbagliato qualcosa. Chi lo vuole usare passa
+                da "Utilizza esistente", che e' li' accanto. */}
+            <Button
+              submit
+              variant="primary"
+              loading={busy}
+              disabled={busy || ourDefinitionPresent === true}
+            >
               {t.customers.birthdate.create}
             </Button>
           </fetcher.Form>

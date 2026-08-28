@@ -1,7 +1,7 @@
-import { Card, BlockStack, Box, Divider, InlineStack, Text, Button } from '@shopify/polaris';
+import { Card, BlockStack, Box, Divider, InlineStack, Text } from '@shopify/polaris';
 import { MetricRow } from './MetricRow';
 import { planLabel, syncStatusBadge } from './account-format';
-import { useNavLoading } from './nav-loading';
+import { PlanUpgradeAction } from './PlanUpgradeAction';
 import { useT } from '~/lib/i18n/context';
 import {
   PreferencesSelect,
@@ -46,11 +46,6 @@ export function AccountCard({
   localeSaving,
 }: AccountCardProps) {
   const t = useT();
-  // Stesso comportamento degli altri link della dashboard: mentre Remix carica
-  // /plan il link mostra lo spinner e si disabilita.
-  // Lo spinner si accende solo se e' stato questo link a far partire la
-  // navigazione: dal menu laterale dell'admin deve restare fermo.
-  const plan = useNavLoading('/plan');
 
   const upgrade = !customersSyncActive && Boolean(customersUpgradePlan);
   // Stessa regola dei clienti: dire "non ce l'hai" senza dire come averlo
@@ -74,38 +69,20 @@ export function AccountCard({
           // stessa cosa e in piu' dice cosa farci. Il badge resta quando la sync
           // e' attiva, o quando non c'e' nessun piano da proporre — altrimenti
           // la riga rimarrebbe senza risposta.
-          action={
-            upgrade ? (
-              <Button
-                variant="plain"
-                url="/plan"
-                onClick={plan.start}
-                disabled={plan.loading}
-                loading={plan.loading}
-              >
-                {t.account.upgradeTo(planLabel(customersUpgradePlan))}
-              </Button>
-            ) : undefined
-          }
+          //
+          // Questo invito e quello dei feed sono due comandi distinti e ognuno
+          // porta il proprio stato, perche' sta in un componente suo: prima
+          // condividevano quello della navigazione verso /plan — stessa
+          // destinazione, quindi stesso cerchietto — e premendone uno partivano
+          // tutti e due.
+          action={upgrade ? <PlanUpgradeAction plan={customersUpgradePlan} /> : undefined}
           badge={upgrade ? undefined : syncStatusBadge(customersSyncActive, t)}
         />
         {/* Sotto i clienti: e' la terza cosa che il piano concede o no, e si
             legge con gli stessi due badge delle altre due. */}
         <MetricRow
           label={t.account.productFeeds}
-          action={
-            feedsUpgrade ? (
-              <Button
-                variant="plain"
-                url="/plan"
-                onClick={plan.start}
-                disabled={plan.loading}
-                loading={plan.loading}
-              >
-                {t.account.upgradeTo(planLabel(feedsUpgradePlan))}
-              </Button>
-            ) : undefined
-          }
+          action={feedsUpgrade ? <PlanUpgradeAction plan={feedsUpgradePlan} /> : undefined}
           badge={feedsUpgrade ? undefined : syncStatusBadge(productFeedsActive, t)}
         />
 

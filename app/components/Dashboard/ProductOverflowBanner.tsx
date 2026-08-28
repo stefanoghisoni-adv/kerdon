@@ -1,32 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
-import {
-  Badge,
-  Banner,
-  BlockStack,
-  Box,
-  Button,
-  InlineStack,
-  Link,
-  Modal,
-  Text,
-} from '@shopify/polaris';
+import { Banner, BlockStack, InlineStack, Text } from '@shopify/polaris';
 import { planLabel } from './account-format';
+import { PlanUpgradeAction } from './PlanUpgradeAction';
+import type { PlanUpgradeData } from './plan-upgrade-action';
 import { BASE_CURRENCY } from '~/lib/billing/money';
-import { useLocale, useT } from '~/lib/i18n/context';
-import {
-  planComparisonRows,
-  suggestPlanForProducts,
-  type PlanForSuggestion,
-} from './plan-suggestion';
-
-/** Larghezza delle due colonne dei valori: uguale, cosi' restano incolonnate. */
-const VALUE_COLUMN = '120px';
-
-type SubscribeResponse =
-  | { confirmationUrl: string }
-  | { ok: true }
-  | { error: string };
+import { useT } from '~/lib/i18n/context';
+import { suggestPlanForProducts, type PlanForSuggestion } from './plan-suggestion';
 
 export interface ProductOverflowBannerProps {
   disabled?: boolean;
@@ -68,15 +48,11 @@ export function ProductOverflowBanner({
   disabled,
   reason = 'products',
 }: ProductOverflowBannerProps) {
-  const [confirming, setConfirming] = useState(false);
   // Chiuso per questa visita, non per sempre: il tetto resta superato finche'
   // non si cambia piano, quindi alla prossima apertura la notizia e' ancora
   // vera. Ma va potuta togliere di mezzo per guardare il resto della pagina.
   const [dismissed, setDismissed] = useState(false);
-  const locale = useLocale();
   const t = useT();
-  const fetcher = useFetcher<SubscribeResponse>();
-  const submitting = fetcher.state !== 'idle';
 
   // I dati se li procura il componente, invece di riceverli: cosi' le pagine che
   // lo mostrano — dashboard, prodotti non idonei, logs — non devono ognuna
@@ -87,9 +63,9 @@ export function ProductOverflowBanner({
   // dashboard non costa una lettura del catalogo.
   const limits = useFetcher<LimitsResponse>();
   const readiness = useFetcher<ReadinessResponse>();
-  // Quanti clienti hanno dato il consenso: serve solo dentro il modal, accanto
-  // al tetto del piano. Si chiede insieme agli altri due perche' il modal si
-  // apre da un clic e a quel punto e' tardi per andarlo a prendere.
+  // Quanti clienti hanno dato il consenso: serve solo dentro il confronto fra i
+  // piani, accanto al tetto. Si chiede insieme agli altri due perche' il
+  // confronto si apre da un clic e a quel punto e' tardi per andarlo a prendere.
   const customerStats = useFetcher<{ optIn?: number }>();
   useEffect(() => {
     if (limits.state === 'idle' && !limits.data) limits.load('/api/plan/limits');
@@ -115,22 +91,6 @@ export function ProductOverflowBanner({
         ? suggestPlanForProducts(plans, currentPlan.planName, totalProducts)
         : null;
 
-  const confirm = useCallback(() => {
-    if (!suggestedPlan) return;
-    fetcher.submit(
-      { plan: suggestedPlan.planName },
-      { method: 'POST', action: '/billing/subscribe' },
-    );
-  }, [fetcher, suggestedPlan]);
-
-  // Shopify vuole la conferma dell'addebito fuori dal riquadro dell'app: si
-  // esce dall'iframe, non si naviga dentro.
-  const confirmationUrl =
-    fetcher.data && 'confirmationUrl' in fetcher.data ? fetcher.data.confirmationUrl : null;
-  if (confirmationUrl && typeof window !== 'undefined') {
-    window.top?.location.replace(confirmationUrl);
-  }
-
   // Senza database collegato l'avviso non ha oggetto: nessun prodotto sta
   // restando fuori, perche' non ne sta entrando nessuno. Vale su tutte e tre le
   // pagine che lo mostrano.
@@ -146,140 +106,53 @@ export function ProductOverflowBanner({
     currentPlan.maxProducts == null || totalProducts == null
       ? 0
       : totalProducts - currentPlan.maxProducts;
-  const rows = planComparisonRows(
+
+  // Qui il listino e i conteggi ci sono gia' — senza, l'avviso non saprebbe
+  // nemmeno se comparire — quindi il comando li riceve invece di richiederli:
+  // il confronto si apre subito, senza un'attesa che non serve a niente.
+  const upgradeData: PlanUpgradeData = {
     currentPlan,
-    suggestedPlan,
-    limits.data?.currency ?? BASE_CURRENCY,
-    locale,
-    t,
-    { products: totalProducts, customers: customerStats.data?.optIn ?? null },
-  );
-  const error = fetcher.data && 'error' in fetcher.data ? fetcher.data.error : null;
+    plans,
+    currency: limits.data?.currency ?? BASE_CURRENCY,
+    totalProducts,
+    optIn: customerStats.data?.optIn ?? null,
+  };
 
   return (
-    <>
-      <Banner
-        tone={reason === 'feeds' ? 'info' : 'warning'}
-        title={reason === 'feeds' ? undefined : t.overflow.title}
-        onDismiss={() => setDismissed(true)}
-      >
-        <BlockStack gap="300">
-          <Text as="p">
-            {reason === 'feeds' ? (
-              // Prima il motivo, poi l'invito: al contrario si leggeva "Aggiorna
-              // a Business" senza sapere ancora perche', e i due pezzi — figli
-              // JSX adiacenti — finivano pure attaccati, "BusinessI feed di
-              // catalogo". Lo spazio va scritto: JSX non ne mette fra due nodi.
-              <>
-                {t.catalogs.planRequired}{' '}
-                <Link onClick={() => setConfirming(true)} removeUnderline>
-                  {t.account.upgradeTo(nextLabel)}
-                </Link>
-              </>
-            ) : (
-              t.overflow.body(excluded, nextLabel)
-            )}
-          </Text>
-          {error && <Text as="p" tone="critical">{error}</Text>}
-          {/* Nel modo "feed" il comando e' gia' il link dentro la frase: un
-              pulsante sotto direbbe la stessa cosa una seconda volta. */}
-          {reason === 'products' && (
-            <InlineStack>
-              <Button
-                variant="primary"
-                onClick={() => setConfirming(true)}
-                disabled={disabled || submitting}
-              >
-                {t.overflow.upgradeNow(nextLabel)}
-              </Button>
-            </InlineStack>
+    <Banner
+      tone={reason === 'feeds' ? 'info' : 'warning'}
+      title={reason === 'feeds' ? undefined : t.overflow.title}
+      onDismiss={() => setDismissed(true)}
+    >
+      <BlockStack gap="300">
+        <Text as="p">
+          {reason === 'feeds' ? (
+            // Prima il motivo, poi l'invito: al contrario si leggeva "Aggiorna
+            // a Business" senza sapere ancora perche', e i due pezzi — figli
+            // JSX adiacenti — finivano pure attaccati, "BusinessI feed di
+            // catalogo". Lo spazio va scritto: JSX non ne mette fra due nodi.
+            <>
+              {t.catalogs.planRequired}{' '}
+              <PlanUpgradeAction plan={suggestedPlan.planName} data={upgradeData} />
+            </>
+          ) : (
+            t.overflow.body(excluded, nextLabel)
           )}
-        </BlockStack>
-      </Banner>
-
-      <Modal
-        open={confirming}
-        onClose={() => setConfirming(false)}
-        title={t.overflow.modalTitle(nextLabel)}
-        primaryAction={{
-          content: t.overflow.confirm,
-          onAction: confirm,
-          loading: submitting,
-          disabled: submitting,
-        }}
-        secondaryActions={[
-          { content: t.overflow.cancel, onAction: () => setConfirming(false), disabled: submitting },
-        ]}
-      >
-        <Modal.Section>
-          <BlockStack gap="300">
-            {/* Le due colonne dei valori hanno la STESSA larghezza fissa. Senza,
-                ognuna si dimensionava sul proprio contenuto e i numeri finivano
-                addosso all'intestazione della colonna accanto, riga per riga in
-                posizioni diverse: la tabella smetteva di leggersi per colonne. */}
-            <InlineStack gap="400" align="space-between" blockAlign="center">
-              <Text as="span" variant="bodySm" tone="subdued">
-                {t.overflow.whatChanges}
-              </Text>
-              <InlineStack gap="300" blockAlign="center">
-                <Box minWidth={VALUE_COLUMN}>
-                  <InlineStack align="end">
-                    <Text as="span" variant="bodySm" tone="subdued">
-                      {planLabel(currentPlan.planName)}
-                    </Text>
-                  </InlineStack>
-                </Box>
-                <Box minWidth={VALUE_COLUMN}>
-                  <InlineStack align="end">
-                    <Text as="span" variant="bodySm" tone="subdued">
-                      {nextLabel}
-                    </Text>
-                  </InlineStack>
-                </Box>
-              </InlineStack>
-            </InlineStack>
-
-            {rows.map((row) => (
-              <InlineStack key={row.label} gap="400" align="space-between" blockAlign="center">
-                <Text as="span">
-                  {row.label}
-                  {/* Il numero di adesso, nello stesso grigio della riga in
-                      fondo al modal: e' un termine di paragone, non un altro
-                      dato da leggere. */}
-                  {row.note && (
-                    <>
-                      {' '}
-                      <Text as="span" tone="subdued">
-                        {row.note}
-                      </Text>
-                    </>
-                  )}
-                </Text>
-                <InlineStack gap="300" blockAlign="center">
-                  {/* Il valore che si lascia resta in grigio: e' il termine di
-                      paragone, non una cosa da leggere per prima. */}
-                  <Box minWidth={VALUE_COLUMN}>
-                    <InlineStack align="end">
-                      <Text as="span" tone="subdued">
-                        {row.current}
-                      </Text>
-                    </InlineStack>
-                  </Box>
-                  <Box minWidth={VALUE_COLUMN}>
-                    <InlineStack align="end">
-                      <Badge tone="success">{row.next}</Badge>
-                    </InlineStack>
-                  </Box>
-                </InlineStack>
-              </InlineStack>
-            ))}
-
-            <Text as="p" tone="subdued">
-              L&apos;addebito viene confermato da te su Shopify: da qui non parte nessun pagamento.
-            </Text>
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
-    </>
+        </Text>
+        {/* Nel modo "feed" il comando e' gia' il collegamento dentro la frase:
+            un pulsante sotto direbbe la stessa cosa una seconda volta. */}
+        {reason === 'products' && (
+          <InlineStack>
+            <PlanUpgradeAction
+              plan={suggestedPlan.planName}
+              data={upgradeData}
+              variant="primary"
+              label={t.overflow.upgradeNow(nextLabel)}
+              disabled={disabled}
+            />
+          </InlineStack>
+        )}
+      </BlockStack>
+    </Banner>
   );
 }

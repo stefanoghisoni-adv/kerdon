@@ -22,6 +22,7 @@ export const en: typeof it = {
     inactive: "Not active",
     connected: "Connected",
     notConnected: "Not connected",
+    loading: "Loading",
   },
 
   nav: {
@@ -567,6 +568,7 @@ export const en: typeof it = {
     confirm: "Confirm and continue",
     cancel: "Cancel",
     whatChanges: "What changes",
+    chargeNote: "You confirm the charge on Shopify: nothing is billed from here.",
   },
 
   planCompare: {
@@ -576,6 +578,8 @@ export const en: typeof it = {
     feeds: "Multi product feed",
     included: "Included",
     notIncluded: "Not included",
+    /** In inglese suona come il plurale; in italiano no, ed e' li' che serve. */
+    notIncludedOne: "Not included",
     unlimited: "Unlimited",
     free: "Free",
     perMonth: (price: string) => `${price}/month`,
@@ -737,6 +741,8 @@ export const en: typeof it = {
       missingOnStore: (key: string) =>
         `The selected field (${key}) isn't on your store: date of birth is not being synced.`,
       create: "Create new metafield",
+      doneTitle: "Date of birth is active",
+      change: "Change field",
       useExisting: "Use existing",
       working: "One moment\u2026",
       present: "Field already there",
@@ -854,6 +860,8 @@ export const en: typeof it = {
       barcode: "Barcode",
       price: "Price",
       compare_at_price: "Compare-at price",
+      list_price: "Full price (compare-at, or the price)",
+      discounted_price: "Sale price (only when discounted)",
       image_url: "Image",
       option1: "Option 1",
       option2: "Option 2",

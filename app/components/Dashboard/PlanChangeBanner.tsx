@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Banner, BlockStack, Button, InlineStack, Text } from '@shopify/polaris';
-import { useT } from '~/lib/i18n/context';
-import { planLabel } from './account-format';
+import { Banner, BlockStack, InlineStack, Text } from '@shopify/polaris';
+import { PlanUpgradeAction } from './PlanUpgradeAction';
 
 /**
  * L'avviso del cambio di piano, su qualunque tab.
@@ -40,7 +39,6 @@ export interface PlanChangeBannerProps {
 }
 
 export function PlanChangeBanner({ upgradePlan, skip }: PlanChangeBannerProps) {
-  const t = useT();
   const [stored, setStored] = useState<StoredPlanBanner | null>(null);
 
   // Solo nel browser: il sessionStorage non esiste durante il render sul
@@ -91,11 +89,14 @@ export function PlanChangeBanner({ upgradePlan, skip }: PlanChangeBannerProps) {
           ))}
         </BlockStack>
 
+        {/* L'invito e' lo stesso che compare in dashboard e in Impostazioni, e
+            si comporta allo stesso modo: apre il confronto fra i due piani
+            invece di portare sulla tab Piano. Chi ha appena cambiato piano sta
+            leggendo cosa e' cambiato, e se gli si propone un altro passo la
+            risposta a "cosa ci guadagno" deve arrivare senza cambiare pagina. */}
         {upgradePlan && (
           <InlineStack>
-            <Button variant="primary" url="/plan">
-              {t.account.upgradeTo(planLabel(upgradePlan))}
-            </Button>
+            <PlanUpgradeAction plan={upgradePlan} />
           </InlineStack>
         )}
       </BlockStack>

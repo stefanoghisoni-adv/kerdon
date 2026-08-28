@@ -1,9 +1,13 @@
 import { isSelectablePlan } from '~/components/Billing/plan-access';
+import { matchingIncluded } from '~/components/Billing/plan-catalog';
 import { formatMoney } from '~/lib/billing/money';
 import type { Locale } from '~/lib/i18n/locales';
 import type { Dictionary } from '~/lib/i18n/context';
 
-type Strings = Pick<Dictionary, 'planCompare'>;
+// Serve anche `plan` perche' il matching si chiama qui come si chiama nelle card
+// dei prezzi: e' la stessa funzione, e leggerla con due nomi diversi a seconda
+// di dove la si incontra e' gia' un modo per farla sembrare due cose.
+type Strings = Pick<Dictionary, 'planCompare' | 'plan'>;
 
 /**
  * Quale piano proporre a chi ha piu' prodotti di quanti il suo ne sincronizzi.
@@ -66,17 +70,36 @@ export function suggestPlanForProducts(
 }
 
 /** Come si scrive un tetto nel confronto fra piani. */
-export function limitLabel(limit: number | null, t: Strings): string {
+export function limitLabel(limit: number | null, t: Pick<Dictionary, 'planCompare'>): string {
   return limit == null ? t.planCompare.unlimited : String(limit);
 }
 
 export interface PlanComparisonRow {
+  /**
+   * Che riga e'. Serve alle poche che non si disegnano come tutte le altre —
+   * oggi il matching, che porta il suo colore — e a ritrovare il costo, che e'
+   * l'ancora a cui il matching si aggancia.
+   */
+  key: PlanComparisonKey;
   label: string;
   /** Quanti ne ha adesso questo negozio, fra parentesi. */
   note?: string;
   current: string;
   next: string;
+  /**
+   * Se il piano proposto comprende la funzione. Lo chiede solo il matching, a
+   * cui il testo non basta: da qui esce anche il suo colore, e il testo non si
+   * puo' interrogare per sapere che cosa dice senza riconoscerlo dalla frase.
+   */
+  nextIncluded?: boolean;
 }
+
+export type PlanComparisonKey =
+  | 'products'
+  | 'customers'
+  | 'feeds'
+  | 'matching'
+  | 'monthlyCost';
 
 /**
  * Le righe del confronto fra il piano in uso e quello proposto.
@@ -110,12 +133,14 @@ export function planComparisonRows(
 ): PlanComparisonRow[] {
   const rows: PlanComparisonRow[] = [
     {
+      key: 'products',
       label: t.planCompare.products,
       note: counts.products != null ? `(${counts.products.toLocaleString(locale)})` : undefined,
       current: limitLabel(currentPlan.maxProducts, t),
       next: limitLabel(nextPlan.maxProducts, t),
     },
     {
+      key: 'customers',
       label: t.planCompare.customers,
       note: counts.customers != null ? `(${counts.customers.toLocaleString(locale)})` : undefined,
       current: currentPlan.customersSyncEnabled
@@ -126,6 +151,7 @@ export function planComparisonRows(
         : t.planCompare.notIncluded,
     },
     {
+      key: 'feeds',
       // Il multi-feed non ha un tetto: o c'e' o non c'e'. Sta comunque in
       // elenco perche' e' una delle cose che cambiano passando di piano, e chi
       // sceglie deve vederle tutte.
@@ -136,16 +162,70 @@ export function planComparisonRows(
       next: nextPlan.productFeedsEnabled ? t.planCompare.included : t.planCompare.notIncluded,
     },
     {
+      key: 'monthlyCost',
       label: t.planCompare.monthlyCost,
       current: priceLabel(currentPlan.priceMonthly, currency, locale, t),
       next: priceLabel(nextPlan.priceMonthly, currency, locale, t),
     },
   ];
 
-  return rows.filter((row) => row.current !== row.next);
+  return withMatching(
+    rows.filter((row) => row.current !== row.next),
+    currentPlan,
+    nextPlan,
+    t,
+  );
 }
 
-function priceLabel(price: number, currency: string, locale: Locale, t: Strings): string {
+/**
+ * La riga del matching avanzato, messa al suo posto.
+ *
+ * Resta anche quando i due piani dicono la stessa cosa, mentre tutte le altre
+ * spariscono se non cambiano: non e' una voce fra le voci, e' quello che il
+ * piano fa con i clienti che gia' sincronizza, e chi sta per pagare vuole
+ * saperlo comunque — anche quando la risposta e' che non cambia.
+ *
+ * Va per ultima prima del costo, come in fondo alle card dei prezzi sta
+ * staccata da una riga di separazione: si legge quando si e' finito di leggere
+ * cosa si ottiene, un attimo prima di leggere quanto costa. La posizione la
+ * decide il costo e non un indice fisso, cosi' resta quella giusta anche se un
+ * domani in mezzo se ne aggiungessero altre — o se il costo fosse l'unica riga
+ * rimasta.
+ */
+function withMatching(
+  rows: PlanComparisonRow[],
+  currentPlan: PlanForSuggestion,
+  nextPlan: PlanForSuggestion,
+  t: Strings,
+): PlanComparisonRow[] {
+  const included = matchingIncluded(nextPlan);
+  const matching: PlanComparisonRow = {
+    key: 'matching',
+    // Lo stesso nome che porta nelle card dei prezzi: e' la stessa funzione.
+    label: t.plan.features.matching,
+    // Al singolare: qui si parla di una funzione sola, non dei clienti che
+    // restano fuori.
+    current: matchingIncluded(currentPlan)
+      ? t.planCompare.included
+      : t.planCompare.notIncludedOne,
+    next: included ? t.planCompare.included : t.planCompare.notIncludedOne,
+    nextIncluded: included,
+  };
+
+  const price = rows.findIndex((row) => row.key === 'monthlyCost');
+  // Nessun costo in elenco vorrebbe dire due piani che costano uguale: caso che
+  // non si presenta proponendo un aggiornamento, ma se si presentasse il posto
+  // giusto resta l'ultimo.
+  const at = price === -1 ? rows.length : price;
+  return [...rows.slice(0, at), matching, ...rows.slice(at)];
+}
+
+function priceLabel(
+  price: number,
+  currency: string,
+  locale: Locale,
+  t: Pick<Dictionary, 'planCompare'>,
+): string {
   return price === 0
     ? t.planCompare.free
     : t.planCompare.perMonth(formatMoney(price, currency, locale));

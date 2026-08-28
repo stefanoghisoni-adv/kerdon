@@ -134,3 +134,37 @@ describe('missingFields', () => {
     expect(missingFields(product(), defaultMapping(), opts)).toEqual([]);
   });
 });
+
+describe('i prezzi verso Google', () => {
+  const prodotto = (price: string, compare: string | null) =>
+    ({ price, compare_at_price: compare }) as never;
+  const opts = { currency: 'EUR', domain: 'negozio.it' } as never;
+
+  // Il caso che ha motivato le due variabili: mandare il prezzo di confronto su
+  // `sale_price` metterebbe il numero piu' alto nel campo dello sconto, e
+  // Google scarta l'articolo.
+  it('in sconto: il pieno va sul listino, il ribassato sullo sconto', () => {
+    const p = prodotto('20.00', '30.00');
+    expect(valueOf('list_price', p, opts)).toBe('30.00 EUR');
+    expect(valueOf('discounted_price', p, opts)).toBe('20.00 EUR');
+  });
+
+  it('senza sconto il listino resta pieno e lo sconto resta vuoto', () => {
+    const p = prodotto('20.00', null);
+    // Mai vuoto: per Google il prezzo e' obbligatorio, e un prodotto senza
+    // prezzo di confronto verrebbe scartato.
+    expect(valueOf('list_price', p, opts)).toBe('20.00 EUR');
+    // Vuoto vuol dire "nessuna promozione". Uno sconto pari al prezzo sarebbe
+    // una promozione dello zero per cento, cioe' finta.
+    expect(valueOf('discounted_price', p, opts)).toBe('');
+  });
+
+  it.each([
+    ['confronto uguale al prezzo', '20.00', '20.00'],
+    ['confronto piu basso del prezzo', '20.00', '15.00'],
+  ])('%s non e uno sconto', (_caso, price, compare) => {
+    const p = prodotto(price, compare);
+    expect(valueOf('list_price', p, opts)).toBe(`${price} EUR`);
+    expect(valueOf('discounted_price', p, opts)).toBe('');
+  });
+});

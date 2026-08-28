@@ -104,6 +104,22 @@ export function manualSyncAllowed(supportLevel: string | null | undefined): bool
   return PUSH_LEVELS.has((supportLevel ?? '').trim().toLowerCase());
 }
 
+/**
+ * Se il piano comprende il matching avanzato.
+ *
+ * Il riconoscimento di uno stesso cliente fra dispositivi diversi poggia sui
+ * dati dei clienti: dove quelli non si sincronizzano non c'e' niente su cui
+ * riconoscere nessuno, quindi la risposta segue esattamente quella.
+ *
+ * Sta in una funzione e non nel confronto scritto due volte perche' la stessa
+ * domanda ormai si fa in due posti — la riga in fondo alle card dei prezzi e la
+ * riga del confronto nel modal di aggiornamento — e due letture dello stesso
+ * dato sono due posti da cui un domani possono uscire risposte diverse.
+ */
+export function matchingIncluded(plan: { customersSyncEnabled: boolean }): boolean {
+  return plan.customersSyncEnabled;
+}
+
 export function buildPlanFeatures(plan: PlanRow): PlanFeature[] {
   const level = (plan.supportLevel ?? '').trim().toLowerCase();
   // L'ordine va dal vincolo che si sente ogni giorno a quello che si nota una
@@ -120,7 +136,7 @@ export function buildPlanFeatures(plan: PlanRow): PlanFeature[] {
     // Il riconoscimento di uno stesso cliente fra dispositivi diversi poggia
     // sui dati dei clienti: dove quelli non si sincronizzano non c'e' niente su
     // cui riconoscere nessuno, quindi la riga segue esattamente quella.
-    { key: 'matching', included: plan.customersSyncEnabled, value: null },
+    { key: 'matching', included: matchingIncluded(plan), value: null },
   ];
 }
 

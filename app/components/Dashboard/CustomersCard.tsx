@@ -1,8 +1,7 @@
-import { Card, BlockStack, Text, Box, Link, Tooltip } from '@shopify/polaris';
+import { Card, BlockStack, Text, Box, Tooltip } from '@shopify/polaris';
 import { MetricRow } from './MetricRow';
-import { useNavLoading } from './nav-loading';
+import { PlanUpgradeAction } from './PlanUpgradeAction';
 import { useT } from '~/lib/i18n/context';
-import { planLabel } from './account-format';
 
 export interface CustomersCardProps {
   enabled: boolean;
@@ -24,10 +23,6 @@ export function CustomersCard({
 }: CustomersCardProps) {
   const t = useT();
   const value = (n: number) => (loading ? '—' : String(n));
-
-  // Stesso comportamento degli altri pulsanti-link della dashboard: mentre Remix
-  // carica /plan il pulsante mostra lo spinner e si disabilita.
-  const plan = useNavLoading('/plan');
 
   return (
     <Card>
@@ -75,12 +70,15 @@ export function CustomersCard({
           <BlockStack gap="200" inlineAlign="center">
             {/* Il piano da prendere sta dentro la frase, come link: prima era
                 un invito generico sopra un pulsante generico, e il nome del
-                piano non compariva da nessuna parte — restava da cercare. */}
+                piano non compariva da nessuna parte — restava da cercare.
+
+                Premendolo si apre qui il confronto fra i due piani, invece di
+                spedire il merchant sulla tab Piano a ricostruirselo da solo:
+                l'invito e' lo stesso che compare altrove nell'app, ed e' giusto
+                che risponda allo stesso modo. */}
             <Box paddingInline="400">
               <Text as="p" tone="subdued" alignment="center" variant="bodySm">
-                <Link url="/plan" onClick={plan.start} removeUnderline>
-                  {t.account.upgradeTo(planLabel(upgradePlan))}
-                </Link>
+                <PlanUpgradeAction plan={upgradePlan} />
                 {t.dashboard.customers.upsell}
               </Text>
             </Box>

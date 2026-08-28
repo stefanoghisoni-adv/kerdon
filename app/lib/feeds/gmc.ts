@@ -28,6 +28,32 @@ export const VARIABLES = [
   'barcode',
   'price',
   'compare_at_price',
+  /**
+   * Il prezzo pieno: il prezzo di confronto se c'e', altrimenti il prezzo.
+   *
+   * Google e Shopify chiamano "prezzo" due cose diverse. Per Shopify `price` e'
+   * quello che il cliente paga adesso e `compare_at_price` il pieno barrato;
+   * per Google `price` e' il listino e `sale_price` lo sconto in corso, che
+   * DEVE essere il minore dei due. Mandare il prezzo di confronto su
+   * `sale_price` mette il numero piu' alto nel campo dello sconto, e Google
+   * scarta l'articolo.
+   *
+   * Il ribaltamento giusto — pieno su `price`, scontato su `sale_price` — non si
+   * puo' fare con le due colonne cosi' come sono: il prezzo di confronto e'
+   * vuoto su tutti i prodotti non scontati, e `price` per Google e'
+   * obbligatorio. Quindi la si ricava: mai vuota, e pari al prezzo quando
+   * sconto non ce n'e'.
+   */
+  'list_price',
+  /**
+   * Il prezzo scontato: il prezzo, ma solo quando uno sconto esiste davvero.
+   *
+   * Vuota quando manca il prezzo di confronto, ed e' voluto: per Google un
+   * `sale_price` assente vuol dire "nessuna promozione", mentre uno pari al
+   * prezzo dichiarerebbe uno sconto dello zero per cento — che e' una
+   * promozione finta, e le promozioni finte Google le contesta.
+   */
+  'discounted_price',
   'image_url',
   'option1',
   'option2',
@@ -48,6 +74,20 @@ export const VARIABLES = [
 ] as const;
 
 export type Variable = (typeof VARIABLES)[number];
+
+/**
+ * Il prodotto e' in sconto: c'e' un prezzo di confronto e supera il prezzo.
+ *
+ * Il confronto non e' pignoleria. Shopify lascia salvare un prezzo di confronto
+ * uguale o minore del prezzo — capita riportando un prodotto a listino pieno
+ * senza svuotare il campo — e in quel caso di sconto non ce n'e': trattarlo come
+ * tale darebbe a Google uno sconto nullo o negativo.
+ */
+function hasDiscount(product: FeedProduct): boolean {
+  const full = Number(product.compare_at_price);
+  const now = Number(product.price);
+  return Number.isFinite(full) && Number.isFinite(now) && full > now;
+}
 
 export function isVariable(value: string): value is Variable {
   return (VARIABLES as readonly string[]).includes(value);
@@ -75,7 +115,7 @@ export const GMC_FIELDS: GmcField[] = [
   { name: 'link', required: true, suggested: 'product_link' },
   { name: 'image_link', required: true, suggested: 'image_url' },
   { name: 'availability', required: true, suggested: 'availability_state' },
-  { name: 'price', required: true, suggested: 'price' },
+  { name: 'price', required: true, suggested: 'list_price' },
   { name: 'condition', required: true, suggested: 'condition_new' },
   // Marca e codici: Google li chiede insieme, e ne bastano due su tre. Senza
   // nessuno dei tre il prodotto entra ma non partecipa alle corrispondenze,
@@ -83,7 +123,7 @@ export const GMC_FIELDS: GmcField[] = [
   { name: 'brand', required: true, suggested: 'vendor' },
   { name: 'gtin', required: false, suggested: 'barcode' },
   { name: 'mpn', required: false, suggested: 'sku' },
-  { name: 'sale_price', required: false, suggested: 'none' },
+  { name: 'sale_price', required: false, suggested: 'discounted_price' },
   { name: 'item_group_id', required: false, suggested: 'shopify_product_id' },
   { name: 'product_type', required: false, suggested: 'product_type' },
   { name: 'shipping_weight', required: false, suggested: 'weight' },
@@ -133,6 +173,10 @@ export function valueOf(
         ? `${amount.toFixed(2)} ${opts.currency}`
         : '';
     }
+    case 'list_price':
+      return valueOf(hasDiscount(product) ? 'compare_at_price' : 'price', product, opts);
+    case 'discounted_price':
+      return hasDiscount(product) ? valueOf('price', product, opts) : '';
     case 'weight': {
       const amount = Number(product.weight);
       return Number.isFinite(amount) && amount > 0 ? `${amount} kg` : '';
