@@ -298,6 +298,14 @@ export default function CatalogMeta() {
           </Card>
         )}
 
+        {/* L'elenco dei prodotti compare solo a integrazione attivata, come nel
+            Merchant Center.
+            Prima si vedeva subito, e prometteva una cosa che non stava
+            succedendo: quei prodotti nel catalogo di Meta non c'erano ancora, e
+            leggerli in tabella faceva credere il contrario. Finche' il feed non
+            esiste non c'e' niente da mostrare — c'e' da attivarlo, e il comando
+            per farlo e' nella card qui sopra. */}
+        {feed && (
         <Card padding="0">
           <Box padding="400">
             <BlockStack gap="300">
@@ -402,6 +410,7 @@ export default function CatalogMeta() {
             ))}
           </IndexTable>
         </Card>
+        )}
       </BlockStack>
 
       <Modal

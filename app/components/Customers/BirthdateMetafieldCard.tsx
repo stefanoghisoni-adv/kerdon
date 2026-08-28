@@ -22,6 +22,9 @@ import {
   type BirthdateFieldState,
 } from '~/lib/customers/birthdate-metafield';
 
+/** Dove si ricorda per quale campo l'avviso di conferma e' gia' stato chiuso. */
+const DISMISSED_KEY = 'coreward.birthdate.dismissedFor';
+
 interface Definition {
   /** La chiave per intero, namespace compreso: `custom.data_di_nascita`. */
   key: string;
@@ -86,6 +89,34 @@ export function BirthdateMetafieldCard({
   // Il merchant ha chiesto di rivedere la scelta gia' fatta. Vive nel browser e
   // non sul server: e' un ripensamento momentaneo, non una configurazione.
   const [reopened, setReopened] = useState(false);
+
+  // Per quale campo l'avviso e' gia' stato chiuso.
+  //
+  // Sta nel browser e non sul server perche' non e' una configurazione: e' cosa
+  // questa persona ha gia' letto. Sopravvive alla ricarica — altrimenti "non
+  // mostrare piu'" durerebbe fino al primo aggiornamento di pagina — ma non
+  // viaggia con il negozio, e va bene cosi': l'ha letto chi l'ha chiuso.
+  //
+  // Ogni lettura e scrittura e' protetta: in una finestra anonima, o con i dati
+  // dei siti bloccati, l'accesso stesso puo' lanciare. In quel caso l'avviso
+  // ricompare, che e' il male minore.
+  const [dismissedFor, setDismissedFor] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(DISMISSED_KEY);
+    } catch {
+      return null;
+    }
+  });
+
+  const rememberDismissed = (field: string) => {
+    setDismissedFor(field);
+    try {
+      localStorage.setItem(DISMISSED_KEY, field);
+    } catch {
+      // Senza memoria l'avviso tornera' alla prossima apertura: fastidioso,
+      // non rotto.
+    }
+  };
 
   // Il pannello "Utilizza esistente" si apre solo se richiesto: chi arriva qui
   // per la prima volta ha davanti due pulsanti e un'anteprima, non un modulo.
@@ -153,10 +184,20 @@ export function BirthdateMetafieldCard({
   // Resta il banner, che dice qual e' il campo, e una via per cambiarlo: senza
   // quella la scelta diventerebbe irreversibile a fronte di un clic.
   if (state === 'in_use' && !reopened) {
+    // Chiuso una volta, non torna piu' — a meno che il campo non cambi.
+    //
+    // La chiusura si ricorda insieme AL CAMPO per cui e' stata fatta, non come
+    // un si'/no: e' l'unico modo perche' l'avviso taccia su una configurazione
+    // che il merchant ha gia' visto e riparli quando c'e' qualcosa di nuovo da
+    // dire. Un "non mostrare piu'" secco avrebbe nascosto per sempre anche il
+    // giorno in cui il campo diventa un altro.
+    if (dismissedFor === configured) return null;
+
     return (
       <Banner
         tone="success"
         title={t.customers.birthdate.doneTitle}
+        onDismiss={() => rememberDismissed(configured)}
         action={{
           content: t.customers.birthdate.change,
           onAction: () => setReopened(true),
