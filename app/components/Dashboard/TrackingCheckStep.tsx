@@ -47,6 +47,7 @@ export function TrackingCheckStep({
   // passo si apre: farlo scorrere sotto lo spinner vorrebbe dire consumarlo
   // mentre non c'e' ancora niente sotto gli occhi.
   const [left, setLeft] = useState(COUNTDOWN_SECONDS);
+  const counting = left > 0 && !confirmed;
   useEffect(() => {
     if (loading || confirmed || left === 0) return;
     const timer = setTimeout(() => setLeft((n) => n - 1), 1000);
@@ -85,14 +86,23 @@ export function TrackingCheckStep({
           li'. Dopo la conferma resta a video, spento: toglierlo farebbe
           scomparire la riga e saltare in su tutto il resto. */}
       <InlineStack align="start">
-        <Button
-          variant="primary"
-          disabled={confirmed || left > 0 || confirming}
-          loading={confirming}
-          onClick={onConfirm}
-        >
-          {left > 0 && !confirmed ? String(left) : t.steps.trackingCheck.proceed}
-        </Button>
+        {/* Il pulsante porta SEMPRE il testo vero, anche mentre conta: e' lui a
+            dargli la larghezza definitiva. Durante il conteggio il testo si fa
+            trasparente e il numero gli sta sopra, centrato. Scambiare i due
+            contenuti faceva nascere il pulsante stretto quanto una cifra e
+            allargarsi di colpo alla fine — uno scatto che sposta anche quel che
+            sta sotto. */}
+        <div className="countdown-button" data-counting={counting ? '' : undefined}>
+          <Button
+            variant="primary"
+            disabled={confirmed || counting || confirming}
+            loading={confirming}
+            onClick={onConfirm}
+          >
+            {t.steps.trackingCheck.proceed}
+          </Button>
+          {counting && <span className="countdown-button__count">{left}</span>}
+        </div>
       </InlineStack>
     </BlockStack>
   );

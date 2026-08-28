@@ -67,7 +67,9 @@ export function PlanFeatureList({ features }: Props) {
               contenuto: un `<hr>` non ne ha, quindi collassava a zero e la riga
               c'era nel markup ma non si vedeva. */}
           <Box width="100%">
-            <Divider />
+            <div className="plan-feature-divider">
+              <Divider />
+            </div>
           </Box>
           <div className={matching.included ? 'plan-feature-matching' : undefined}>
           <InlineStack align="start" gap="200" blockAlign="center" wrap={false}>

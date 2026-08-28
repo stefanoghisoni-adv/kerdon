@@ -391,3 +391,40 @@
 .plan-feature-matching .Polaris-Text--root {
   color: inherit;
 }
+
+/* Il pulsante che aspetta qualche secondo prima di potersi premere.
+   Il testo vero resta nel pulsante anche mentre il conto scorre — e' lui a
+   dargli la larghezza — ma si fa trasparente, e il numero gli sta sopra
+   centrato. Scambiare i due contenuti faceva nascere il pulsante stretto quanto
+   una cifra e allargarsi di colpo alla fine, uno scatto che spostava anche il
+   contenuto sotto. */
+.countdown-button {
+  position: relative;
+  display: inline-block;
+}
+
+.countdown-button[data-counting] .Polaris-Button {
+  color: transparent;
+}
+
+.countdown-button__count {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Il clic deve arrivare al pulsante sotto, non fermarsi qui. */
+  pointer-events: none;
+  color: var(--p-color-text-disabled);
+  font-weight: var(--p-font-weight-medium);
+}
+
+/* La riga che stacca il "Matching avanzato" dalle voci sopra.
+   Piu' sottile e piu' scura di quella predefinita di Polaris: la separazione
+   qui non divide due sezioni della pagina, segna uno scalino dentro un elenco
+   corto, e il tratto di serie risultava troppo chiaro per leggersi fra le
+   voci. Mezzo pixel in meno e un grigio piu' deciso lo rendono visibile senza
+   trasformarlo in un bordo. */
+.plan-feature-divider hr {
+  border-block-start: 0.75px solid rgba(47, 47, 47, 0.5);
+}

@@ -892,7 +892,24 @@ export default function Dashboard() {
     setSelectedPlan(name);
   }, []);
   const [planError, setPlanError] = useState<string | null>(null);
-  const subscribing = subscribeFetcher.state !== 'idle';
+  // Si sta uscendo verso la pagina di approvazione di Shopify.
+  //
+  // Serve perche' il fetcher torna `idle` appena ha in mano l'indirizzo, cioe'
+  // un istante PRIMA che il browser ci vada: in quell'istante il pulsante si
+  // riaccendeva e tornava premibile, e chi guardava vedeva un comando che
+  // sembrava aver fallito in silenzio — subito prima di ritrovarsi altrove.
+  //
+  // Non si spegne da solo: da qui in poi la pagina se ne va. La scadenza qui
+  // sotto e' solo per il caso in cui non se ne vada davvero — un popup bloccato,
+  // per dire — cosi' il comando non resta morto per sempre.
+  const [leavingToBilling, setLeavingToBilling] = useState(false);
+  useEffect(() => {
+    if (!leavingToBilling) return;
+    const timer = setTimeout(() => setLeavingToBilling(false), 15_000);
+    return () => clearTimeout(timer);
+  }, [leavingToBilling]);
+
+  const subscribing = subscribeFetcher.state !== 'idle' || leavingToBilling;
 
   const startSync = useCallback(() => {
     syncFetcher.submit({}, { method: 'post' });
@@ -923,6 +940,11 @@ export default function Dashboard() {
     if ('confirmationUrl' in data) {
       // Fuori dal riquadro: la pagina di approvazione di Shopify non si lascia
       // incorniciare. App Bridge intercetta il '_top' e naviga il contenitore.
+      //
+      // Il comando resta spento da qui fino a quando la pagina se ne va: il
+      // viaggio dura un attimo, ma e' un attimo in cui un pulsante tornato vivo
+      // racconta che qualcosa e' andato storto.
+      setLeavingToBilling(true);
       window.open(data.confirmationUrl, '_top');
       return;
     }
@@ -979,12 +1001,19 @@ export default function Dashboard() {
   // l'acquisto — "Conferma e sincronizza" — mantenuta dall'altra parte del giro.
   const [searchParams, setSearchParams] = useSearchParams();
   const billingApproved = searchParams.get('billing') === 'ok';
+  // Il piano appena approvato e' il PRIMO del negozio: lo dice il callback, che
+  // e' l'unico a sapere se la configurazione era ancora aperta al momento
+  // dell'approvazione. Si legge una volta sola al montaggio perche' un istante
+  // dopo il parametro viene tolto dall'indirizzo, e la risposta serve anche
+  // dopo — l'avviso lo decide un effetto che gira piu' tardi.
+  const [firstPlanEver] = useState(() => searchParams.get('first') === '1');
   useEffect(() => {
     if (!billingApproved) return;
     // Il parametro si toglie subito: ricaricando la pagina non deve rilanciare
     // una seconda sincronizzazione.
     const next = new URLSearchParams(searchParams);
     next.delete('billing');
+    next.delete('first');
     setSearchParams(next, { replace: true });
     if (supabaseConnected && !syncCompleted) startSync();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1168,7 +1197,15 @@ export default function Dashboard() {
       sessionStorage.removeItem(BANNER_KEY);
     }
 
-    if (planBanner) {
+    // Il primo piano non e' un aggiornamento.
+    //
+    // Durante la configurazione una sincronizzazione parte gia' al collegamento
+    // del database, con il piano gratuito che nessuno ha scelto: passando poi a
+    // un piano a pagamento il confronto risulta "cambiato", e la dashboard
+    // annunciava "Piano aggiornato" a chi il suo primo piano l'aveva appena
+    // scelto. Non si scrive nemmeno nello storage, altrimenti ricomparirebbe
+    // alla ricarica successiva.
+    if (planBanner && !firstPlanEver) {
       const fresh = { at: Date.now(), plan: bannerPlanId, value: planBanner };
       sessionStorage.setItem(BANNER_KEY, JSON.stringify(fresh));
       setBanner(fresh);
@@ -1710,10 +1747,18 @@ export default function Dashboard() {
         </InlineGrid>
 
 
-        {/* In fondo, e chiudibile: e' una proposta, non una cosa da fare.
+        {/* Messa via, non cancellata.
+            La proposta com'e' scritta chiede al merchant se vuole una mano, ma
+            dall'altra parte non c'e' ancora niente che gliela dia: finche' le
+            richieste di preventivo non esistono, una domanda a cui non segue
+            nulla e' peggio di nessuna domanda. Il componente resta pronto, e
+            questa condizione e' l'unico punto da riaprire quando ci sara' un
+            seguito.
+
+            In fondo, e chiudibile: e' una proposta, non una cosa da fare.
             Sparisce per sempre appena il merchant risponde — o dice "non
             adesso" con la x. */}
-        {serverSideAnswer === null && (
+        {false && serverSideAnswer === null && (
           <AdvancedSetupCard
             selected={selectedPlatforms}
             onSelectedChange={setSelectedPlatforms}

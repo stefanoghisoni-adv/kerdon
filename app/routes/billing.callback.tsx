@@ -46,22 +46,28 @@ type Outcome = 'ok' | 'ko';
  *
  * L'esito viaggia in `?billing=`, che la dashboard legge gia'.
  */
-function backToPlan(requestUrl: URL, shopDomain: string, outcome: Outcome): Response {
+function backToPlan(
+  requestUrl: URL,
+  shopDomain: string,
+  outcome: Outcome,
+  firstPlan = false,
+): Response {
   // Si rientra dall'admin, non dall'indirizzo dell'app: cosi' e' l'admin ad
   // aprire il riquadro con la sessione gia' buona, invece di chiedere all'app
   // di rientrare da sola — un giro che, inceppandosi, lasciava il merchant
   // davanti a una pagina bianca dopo aver pagato.
-  const adminUrl = adminAppUrl({
-    shopDomain,
-    params: new URLSearchParams({ billing: outcome }),
-  });
+  const params = new URLSearchParams({ billing: outcome });
+  if (firstPlan) params.set('first', '1');
+
+  const adminUrl = adminAppUrl({ shopDomain, params });
   if (adminUrl) return redirect(adminUrl);
 
   // Senza la chiave dell'app quell'indirizzo non si compone: si ripiega sulla
   // rotta diretta, con shop/host/embedded in coda perche' possa rientrare.
-  const params = embeddedContextParams({ requestUrl, shopDomain });
-  params.set('billing', outcome);
-  return redirect(`/?${params.toString()}`);
+  const fallback = embeddedContextParams({ requestUrl, shopDomain });
+  fallback.set('billing', outcome);
+  if (firstPlan) fallback.set('first', '1');
+  return redirect(`/?${fallback.toString()}`);
 }
 
 /**
@@ -216,7 +222,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     await cancelPreviousSubscriptions(admin, shop.id, gid);
 
-    return backToPlan(requestUrl, shopDomain, 'ok');
+    // Se la configurazione non era ancora conclusa, questo e' il primo piano che
+    // il merchant sceglie, non un passaggio da un piano a un altro. Se lo sa
+    // solo qui — un istante dopo, la configurazione risultera' chiusa e quel
+    // "prima" non sara' piu' ricostruibile — quindi glielo si dice adesso, e la
+    // dashboard evita di annunciare un aggiornamento che non e' avvenuto.
+    return backToPlan(requestUrl, shopDomain, 'ok', shop.setupCompletedAt == null);
   } catch (e) {
     console.error(
       '[billing.callback]',
