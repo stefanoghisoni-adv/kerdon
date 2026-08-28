@@ -189,6 +189,8 @@ export function userSeenRow(visitor: SeenVisitor): UserSeenRow {
 export interface UserRow {
   external_id: string;
   first_seen_at?: string | null;
+  /** Serve a scegliere quali browser tenere quando un cliente ne accumula troppi. */
+  last_seen_at?: string | null;
   merged_into?: string | null;
 }
 
@@ -319,6 +321,57 @@ export function normalizePhone(value: string | null | undefined): string | null 
  * intatta quella piccola e preziosa.
  */
 export const ANONYMOUS_USER_RETENTION_DAYS = 90;
+
+/**
+ * Quanti browser si tengono per ogni cliente.
+ *
+ * Non e' il numero di dispositivi che una persona possiede: e' il numero di
+ * identificativi che accumula. Ogni volta che svuota i cookie, riapre in
+ * incognito o cambia telefono ne nasce uno nuovo, e in qualche anno anche chi
+ * usa sempre lo stesso portatile puo' arrivare a decine. Senza un tetto quella
+ * coda cresce e basta, e serve a niente: per riconoscere qualcuno bastano i
+ * browser da cui passa davvero, non tutti quelli da cui e' passato una volta.
+ *
+ * Dieci e' largo abbastanza da coprire chi usa lavoro, casa, telefono e tablet
+ * insieme, e stretto abbastanza da non lasciar crescere la coda all'infinito.
+ */
+export const MAX_BROWSERS_PER_CUSTOMER = 10;
+
+/**
+ * Quali righe di un cliente vanno lasciate andare, tenendo le piu' recenti.
+ *
+ * Due righe non si toccano mai, qualunque sia la loro eta':
+ *
+ * Quelle a cui punta un'altra riga. Il canonico di una fusione e' il piu'
+ * VECCHIO — vince chi ha la storia piu' lunga — quindi e' esattamente il tipo di
+ * riga che un tetto "tieni le piu' recenti" porterebbe via per prima, lasciando
+ * i puntatori delle altre nel vuoto.
+ *
+ * E quelle che sono esse stesse un rimando: sono minuscole e sono l'unico modo
+ * di ritrovare la strada da un identificativo vecchio, che negli eventi gia'
+ * partiti continua a comparire.
+ */
+export function browsersToForget(
+  rows: readonly UserRow[],
+  max: number = MAX_BROWSERS_PER_CUSTOMER,
+): string[] {
+  const pointedTo = new Set(
+    rows.map((row) => row.merged_into).filter((id): id is string => Boolean(id)),
+  );
+
+  const candidates = rows.filter(
+    (row) => !row.merged_into && !pointedTo.has(row.external_id),
+  );
+  if (candidates.length <= max) return [];
+
+  // Dalla piu' recente alla piu' vecchia: si tengono le prime, si lasciano
+  // andare quelle in coda.
+  const byRecency = [...candidates].sort(
+    (a, b) =>
+      new Date(b.last_seen_at ?? 0).getTime() - new Date(a.last_seen_at ?? 0).getTime(),
+  );
+  return byRecency.slice(max).map((row) => row.external_id);
+}
 
 /** Prima di questo istante, una riga mai identificata non serve piu'. */
 export function anonymousUserCutoff(now: Date = new Date()): Date {

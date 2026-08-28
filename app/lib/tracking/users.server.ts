@@ -3,6 +3,7 @@ import type { ShopReadContext } from '~/lib/read-proxy/context.server';
 import {
   USERS_TABLE,
   anonymousUserCutoff,
+  browsersToForget,
   normalizeEmail,
   normalizePhone,
   planMerge,
@@ -248,7 +249,36 @@ async function mergeBrowsersOfCustomer(
     return { canonical: plan.canonical, merged: [] };
   }
 
+  await forgetOldestBrowsers(supabase, data as UserRow[]);
+
   return { canonical: plan.canonical, merged: plan.toMerge };
+}
+
+/**
+ * Toglie i browser piu' vecchi quando un cliente ne ha accumulati troppi.
+ *
+ * Si fa QUI e non nel giro periodico perche' questo e' l'unico istante in cui
+ * quel conto puo' crescere: un browser entra nell'elenco di un cliente solo
+ * legandosi a lui. Guardare un cliente solo, nel momento giusto, costa una
+ * query; spazzare l'intera tabella ogni notte per trovare i pochi che hanno
+ * sforato ne costerebbe molte, e la maggior parte a vuoto.
+ *
+ * Non solleva mai: un elenco un po' piu' lungo del previsto non e' un guasto, e
+ * non deve far fallire il riconoscimento che l'ha appena prodotto.
+ */
+async function forgetOldestBrowsers(
+  supabase: SupabaseClient,
+  rows: readonly UserRow[],
+): Promise<void> {
+  const toForget = browsersToForget(rows);
+  if (toForget.length === 0) return;
+
+  const { error } = await supabase.from(USERS_TABLE).delete().in('external_id', toForget);
+  if (error) {
+    console.warn(
+      `[users] browser in eccesso non rimossi: ${error.message ?? 'errore sconosciuto'}`,
+    );
+  }
 }
 
 /**

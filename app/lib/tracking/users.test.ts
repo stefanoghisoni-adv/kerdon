@@ -8,6 +8,7 @@ import {
   externalIdMintedAt,
   normalizeEmail,
   normalizePhone,
+  browsersToForget,
   oldestExternalId,
   planMerge,
   postgrestFilterValue,
@@ -227,5 +228,62 @@ describe('postgrestFilterValue', () => {
     expect(postgrestFilterValue('eq.')).toBeNull();
     expect(postgrestFilterValue('  ')).toBeNull();
     expect(postgrestFilterValue(null)).toBeNull();
+  });
+});
+
+describe('browsersToForget', () => {
+  const riga = (id: string, lastSeen: string, mergedInto: string | null = null) => ({
+    external_id: id,
+    last_seen_at: lastSeen,
+    merged_into: mergedInto,
+  });
+
+  it('sotto il tetto non si lascia andare niente', () => {
+    const rows = Array.from({ length: 10 }, (_, i) =>
+      riga(`corew_${i}`, `2026-08-${String(i + 1).padStart(2, '0')}T00:00:00Z`),
+    );
+    expect(browsersToForget(rows)).toEqual([]);
+  });
+
+  it('oltre il tetto si tengono le piu recenti', () => {
+    const rows = Array.from({ length: 12 }, (_, i) =>
+      riga(`corew_${i}`, `2026-08-${String(i + 1).padStart(2, '0')}T00:00:00Z`),
+    );
+    // Le due piu' vecchie: quelle del primo e del due agosto.
+    expect(browsersToForget(rows).sort()).toEqual(['corew_0', 'corew_1']);
+  });
+
+  // Il canonico di una fusione e' il piu' VECCHIO, quindi e' proprio quello che
+  // un tetto "tieni le piu' recenti" porterebbe via per primo — lasciando i
+  // puntatori delle altre righe nel vuoto.
+  it('non si tocca una riga a cui punta un altra, per quanto vecchia', () => {
+    const rows = [
+      riga('canonico', '2020-01-01T00:00:00Z'),
+      riga('rimando', '2026-08-28T00:00:00Z', 'canonico'),
+      ...Array.from({ length: 11 }, (_, i) =>
+        riga(`corew_${i}`, `2026-08-${String(i + 1).padStart(2, '0')}T00:00:00Z`),
+      ),
+    ];
+    expect(browsersToForget(rows)).not.toContain('canonico');
+  });
+
+  it('i rimandi non si potano: sono la strada per ritrovare un id vecchio', () => {
+    const rows = [
+      riga('vecchio_rimando', '2019-01-01T00:00:00Z', 'canonico'),
+      riga('canonico', '2026-08-28T00:00:00Z'),
+      ...Array.from({ length: 11 }, (_, i) =>
+        riga(`corew_${i}`, `2026-08-${String(i + 1).padStart(2, '0')}T00:00:00Z`),
+      ),
+    ];
+    expect(browsersToForget(rows)).not.toContain('vecchio_rimando');
+  });
+
+  it('il tetto si puo stringere per i test e per un ripensamento', () => {
+    const rows = [
+      riga('a', '2026-08-01T00:00:00Z'),
+      riga('b', '2026-08-02T00:00:00Z'),
+      riga('c', '2026-08-03T00:00:00Z'),
+    ];
+    expect(browsersToForget(rows, 1)).toEqual(['b', 'a']);
   });
 });
