@@ -6,6 +6,24 @@ vi.mock('~/db.server', () => ({
   prisma: { shop: { findUnique: vi.fn() }, syncJob: { create: vi.fn() } },
 }));
 
+// Il riconoscimento del visitatore: qui interessa che il webhook gli passi la
+// coppia giusta — id cliente e identificativo del browser — non cosa scrive.
+// Quello ha i suoi test, in lib/tracking/users.server.test.
+// `vi.hoisted` perche' la fabbrica del mock viene issata sopra a tutto: una
+// costante dichiarata qui sotto, al momento in cui la fabbrica gira, non
+// esisterebbe ancora.
+const { linkUserToCustomer } = vi.hoisted(() => ({
+  linkUserToCustomer: vi.fn(async () => ({
+    outcome: 'linked' as const,
+    canonical: null,
+    merged: [] as string[],
+  })),
+}));
+vi.mock('~/lib/tracking/users.server', () => ({ linkUserToCustomer }));
+vi.mock('~/lib/supabase/ensure-users-table.server', () => ({
+  provisionUsersTable: vi.fn(async () => true),
+}));
+
 import { action } from './webhooks.orders';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
@@ -352,5 +370,89 @@ describe('webhook orders — quando non c e niente da fare', () => {
 
     expect(createSupabaseClient).not.toHaveBeenCalled();
     expect(lastTrace(logged)).toMatchObject({ status: 'skipped' });
+  });
+});
+
+/**
+ * L'ordine come momento in cui un browser si rivela.
+ *
+ * E' il legame piu' forte che esista: nella stessa busta arrivano l'id del
+ * cliente Shopify e l'identificativo del browser che ha riempito il carrello.
+ * Non serve che il cliente abbia fatto login, basta che abbia comprato.
+ */
+describe('webhook orders — il browser che ha comprato', () => {
+  const VISITATORE = 'corew_1700000000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+  /** L'attributo di carrello, com'e' scritto nel corpo REST del webhook. */
+  function conAttributo(value: string, name = '_corew_external_id') {
+    return orderPayload({ note_attributes: [{ name: 'consegna', value: 'al piano' }, { name, value }] });
+  }
+
+  it('lega il browser al cliente leggendo l attributo di carrello', async () => {
+    mockShop();
+    mockSupabase();
+
+    await action({ request: req(conAttributo(VISITATORE)) } as any);
+
+    expect(linkUserToCustomer).toHaveBeenCalledWith(
+      expect.anything(),
+      { externalId: VISITATORE, shopifyCustomerId: 77 },
+      expect.any(Function),
+    );
+  });
+
+  it('l attributo si chiama con l underscore davanti, che per Shopify vuol dire privato', async () => {
+    // Senza l'underscore l'identificativo comparirebbe nel carrello e sulla
+    // conferma d'ordine del cliente: rumore per chi compra e una domanda in
+    // piu' per il merchant.
+    mockShop();
+    mockSupabase();
+
+    await action({ request: req(conAttributo(VISITATORE, 'corew_external_id')) } as any);
+
+    expect(linkUserToCustomer).not.toHaveBeenCalled();
+  });
+
+  it('acquisto come ospite: non c e nessuno a cui legare il browser', async () => {
+    mockShop();
+    mockSupabase();
+
+    const payload = { ...conAttributo(VISITATORE), customer: null };
+    await action({ request: req(payload) } as any);
+
+    expect(linkUserToCustomer).not.toHaveBeenCalled();
+  });
+
+  it('negozio senza tracciamento configurato: nessun attributo, nessun legame', async () => {
+    mockShop();
+    mockSupabase();
+
+    await action({ request: req(orderPayload()) } as any);
+
+    expect(linkUserToCustomer).not.toHaveBeenCalled();
+  });
+
+  it('un valore inventato nel carrello non entra nella tabella', async () => {
+    // Nel carrello puo' scrivere chiunque: un tema, un'altra app, il cliente
+    // con la console aperta.
+    mockShop();
+    mockSupabase();
+
+    await action({ request: req(conAttributo('pippo')) } as any);
+
+    expect(linkUserToCustomer).not.toHaveBeenCalled();
+  });
+
+  it('il legame non puo far fallire il webhook, ne fermare la scrittura delle righe', async () => {
+    mockShop();
+    const { writes } = mockSupabase();
+    linkUserToCustomer.mockRejectedValueOnce(new Error('supabase giu'));
+
+    const res = await action({ request: req(conAttributo(VISITATORE)) } as any);
+
+    expect(res.status).toBe(200);
+    expect(writes.orders).toHaveLength(1);
+    expect(writes.order_lines).toHaveLength(2);
+    expect(lastTrace(logged)).toMatchObject({ status: 'completed' });
   });
 });

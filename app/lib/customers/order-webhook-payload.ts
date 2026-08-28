@@ -78,6 +78,16 @@ export interface WebhookOrderPayload {
     last_name?: string | null;
   } | null;
   line_items?: WebhookOrderLineItem[] | null;
+  /**
+   * Gli attributi del carrello, che nella REST si chiamano cosi'.
+   *
+   * Non entrano nella forma normalizzata e non finiscono in nessuna colonna
+   * degli ordini: li legge il solo riconoscimento dei visitatori, che da qui
+   * tira fuori l'identificativo del browser che ha riempito il carrello (vedi
+   * lib/tracking/users). Sono dichiarati qui perche' e' qui che il corpo del
+   * webhook e' descritto, non perche' la traduzione se ne occupi.
+   */
+  note_attributes?: { name?: string | null; value?: string | null }[] | null;
 }
 
 /** Gli id REST sono numeri, ma un payload puo' darli come stringa: si accetta. */

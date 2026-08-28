@@ -128,8 +128,14 @@ WHERE phone_number = '';
  * confrontano: telefono in sole cifre, data di nascita come YYYYMMDD. Ha un
  * passo esplicito perche' cambia un tipo e riscrive dati gia' presenti, cose
  * che la DDL additiva non sa fare.
+ *
+ * La 7 porta `users`, la tabella dei browser conosciuti. Nessun passo
+ * esplicito: e' una tabella nuova, e per quelle basta la DDL idempotente — che
+ * pero' viaggia solo se questo numero e' salito. Senza il numero, i progetti
+ * gia' collegati resterebbero senza la tabella e il riconoscimento del
+ * visitatore non partirebbe mai per nessuno di loro.
  */
-export const LATEST_SCHEMA_VERSION = 6;
+export const LATEST_SCHEMA_VERSION = 7;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

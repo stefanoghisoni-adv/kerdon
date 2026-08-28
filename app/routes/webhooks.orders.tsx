@@ -10,6 +10,10 @@ import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
 import { syncIsActive } from '~/lib/sync/sync-active';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { externalIdFromNoteAttributes } from '~/lib/tracking/users';
+import { linkUserToCustomer } from '~/lib/tracking/users.server';
+import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 
 /**
  * Un ordine appena arrivato, scritto subito.
@@ -130,6 +134,49 @@ async function saveOrderWebhookOutcome(
   }
 }
 
+/**
+ * Lega al cliente il browser che ha riempito il carrello.
+ *
+ * L'identificativo viaggia come attributo di carrello privato — il nome
+ * comincia con un underscore, e Shopify per quello non lo mostra ne' al cliente
+ * ne' sulla conferma d'ordine — e arriva qui dentro `note_attributes`, che e'
+ * come la REST chiama gli attributi del carrello. Chi lo pianta e' il
+ * tracciamento della vetrina, che l'identificativo ce l'ha gia' nel cookie
+ * first-party.
+ *
+ * Si esce in silenzio in due casi, ed e' giusto cosi': un ordine senza account
+ * cliente (acquisto come ospite) non ha nessuno a cui legare il browser, e un
+ * ordine senza l'attributo viene da un negozio che il tracciamento non l'ha
+ * ancora configurato. Nessuno dei due e' un errore da segnalare.
+ *
+ * Tutto best effort: un legame mancato si recupera alla prossima
+ * identificazione o al prossimo ordine, un webhook fallito no.
+ */
+async function linkVisitorToCustomer(
+  shopId: string,
+  supabase: SupabaseClient,
+  payload: WebhookOrderPayload,
+  shopifyCustomerId: number | null,
+): Promise<void> {
+  if (shopifyCustomerId === null) return;
+
+  const externalId = externalIdFromNoteAttributes(payload.note_attributes);
+  if (!externalId) return;
+
+  try {
+    await linkUserToCustomer(
+      supabase,
+      { externalId, shopifyCustomerId },
+      () => provisionUsersTable(shopId, supabase),
+    );
+  } catch (error) {
+    console.warn(
+      '[webhook orders] legame browser-cliente non riuscito:',
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+  }
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const body = await request.text();
   const hmac = request.headers.get('X-Shopify-Hmac-Sha256');
@@ -238,6 +285,17 @@ export async function action({ request }: ActionFunctionArgs) {
       });
       return json({ ok: true }, { status: 200 });
     }
+
+    // Il legame piu' forte che esiste fra un browser e una persona, e arriva
+    // gratis: nella stessa busta ci sono l'id del cliente Shopify e
+    // l'identificativo del browser che ha riempito quel carrello. Non serve che
+    // il cliente abbia fatto login, non serve che si sia iscritto a niente,
+    // basta che abbia comprato.
+    //
+    // Dopo la scrittura dell'ordine e non prima: l'ordine e' cio' per cui
+    // questo handler esiste, e una riga di `users` non deve poterlo rallentare
+    // ne' farlo fallire. `linkVisitorToCustomer` non solleva mai.
+    await linkVisitorToCustomer(shop.id, supabase, payload, order.customer_id);
 
     // Un ordine senza righe si scrive lo stesso: vale per i totali del negozio
     // anche quando non ha nulla da raggruppargli sotto — un ordine di soli

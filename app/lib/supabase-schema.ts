@@ -189,6 +189,66 @@ const ORDER_LINES_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_order_lines_variant ON order_lines(shopify_variant_id) WHERE shopify_variant_id IS NOT NULL;`,
 ];
 
+// I browser che hanno visitato il negozio. UNA RIGA PER BROWSER, non per
+// persona: chi compra dal telefono, dal tablet e dal portatile ha tre righe qui
+// e una sola in `customers`. Non e' duplicazione, e' una relazione — l'insieme
+// delle righe con lo stesso `shopify_customer_id` E' l'elenco dei suoi browser,
+// ed e' l'unico posto dove quell'elenco esiste.
+//
+// Da qui non si sposta e non si cancella niente quando il visitatore diventa
+// cliente: si riempie `shopify_customer_id` e basta. Spostarlo in `customers`
+// sarebbe impossibile e sbagliato insieme — impossibile perche' li'
+// `shopify_customer_id` e' UNIQUE NOT NULL e un browser anonimo non ci puo'
+// entrare, sbagliato perche' cancellare le righe svuoterebbe l'elenco dei
+// browser proprio per i clienti, che sono gli unici per cui serve: al ritorno
+// quel browser risulterebbe di nuovo di uno sconosciuto.
+const USERS_COLUMNS: Column[] = [
+  // La chiave primaria e' l'identificativo stesso, non un UUID generato: e' gia'
+  // unico per costruzione (32 caratteri casuali), arriva dal browser in ogni
+  // richiesta, e averlo come PK vuol dire che l'aggiornamento al ritorno e' un
+  // upsert su una chiave che il chiamante conosce gia' — senza prima cercare la
+  // riga per sapere quale numero le era stato dato.
+  { name: 'external_id', type: 'TEXT', constraints: 'PRIMARY KEY' },
+  // NULL finche' non si sa chi sia. Riempirlo e' tutto cio' che succede quando
+  // la persona si identifica o compra: nessuna riga nasce, nessuna muore.
+  { name: 'shopify_customer_id', type: 'BIGINT' },
+  // COLONNE, non pezzi dell'identificativo. Metterli dentro l'id era la
+  // proposta iniziale e sarebbe stato un errore senza rimedio: il dispositivo
+  // e' una SUPPOSIZIONE (iPadOS si dichiara Macintosh, un browser dentro
+  // un'app si dichiara quel che gli pare) mentre l'identificativo e' per
+  // sempre. Una supposizione sbagliata dentro l'id non si corregge piu'; in una
+  // colonna si riscrive alla visita dopo.
+  //
+  // Restano vuote se il container non le manda: sono un di piu' per segmentare,
+  // mai una condizione per riconoscere qualcuno.
+  { name: 'browser', type: 'TEXT' },
+  { name: 'device_type', type: 'TEXT' },
+  // Il DEFAULT non e' un dettaglio: la scrittura al ritorno non manda
+  // `first_seen_at`, cosi' l'upsert la valorizza solo all'inserimento e non la
+  // tocca mai piu'. E' il modo in cui la prima comparsa resta la prima comparsa
+  // senza dover leggere la riga prima di scriverla.
+  { name: 'first_seen_at', type: 'TIMESTAMP DEFAULT NOW()' },
+  { name: 'last_seen_at', type: 'TIMESTAMP DEFAULT NOW()' },
+  // Quando due browser si rivelano la stessa persona, il piu' recente PUNTA al
+  // piu' vecchio invece di essere cancellato. Cancellarlo sembrerebbe pulizia e
+  // sarebbe una perdita: gli eventi gia' partiti sotto quell'identificativo
+  // esistono dentro Meta e GA4, dove non possiamo entrare, e restare senza la
+  // riga qui li lascerebbe orfani per sempre. Vince il piu' vecchio perche' ha
+  // la storia piu' lunga alle spalle.
+  { name: 'merged_into', type: 'TEXT' },
+];
+
+const USERS_INDEXES = [
+  // I browser di un cliente: e' la lettura per cui questa tabella esiste. Il
+  // parziale tiene fuori gli anonimi, che sono la maggioranza delle righe e non
+  // si cercano mai per questa via.
+  `CREATE INDEX IF NOT EXISTS idx_users_customer ON users(shopify_customer_id) WHERE shopify_customer_id IS NOT NULL;`,
+  // L'esatto contrario, e serve alla potatura: gli anonimi ordinati per
+  // ultima visita. Senza, il giro periodico leggerebbe tutta la tabella per
+  // trovare le poche righe da togliere.
+  `CREATE INDEX IF NOT EXISTS idx_users_anonymous_last_seen ON users(last_seen_at) WHERE shopify_customer_id IS NULL;`,
+];
+
 function columnCreateDef(col: Column): string {
   return `${col.name} ${col.type}${col.constraints ? ` ${col.constraints}` : ''}`;
 }
@@ -226,6 +286,18 @@ export function buildCustomersSchemaSQL(): string {
   return buildTableSQL('customers', CUSTOMERS_COLUMNS, CUSTOMERS_INDEXES);
 }
 
+/**
+ * La tabella dei browser conosciuti.
+ *
+ * Non dipende ne' dal piano ne' dai permessi, a differenza di clienti e ordini:
+ * il riconoscimento del visitatore e' il primo anello di tutto il resto, e un
+ * negozio che non lo tiene da subito non puo' recuperarlo dopo — gli eventi
+ * passati sotto un identificativo che non abbiamo mai scritto non tornano.
+ */
+export function buildUsersSchemaSQL(): string {
+  return buildTableSQL('users', USERS_COLUMNS, USERS_INDEXES);
+}
+
 export function buildOrdersSchemaSQL(): string {
   return (
     buildTableSQL('orders', ORDERS_COLUMNS, ORDERS_INDEXES) +
@@ -234,13 +306,17 @@ export function buildOrdersSchemaSQL(): string {
 }
 
 /**
- * DDL per le sole tabelle abilitate: `products` sempre, `customers` se il piano
- * include la sincronizzazione clienti, `orders` se il negozio ci ha concesso di
- * leggere gli ordini.
+ * DDL per le sole tabelle abilitate: `products` e `users` sempre, `customers`
+ * se il piano include la sincronizzazione clienti, `orders` se il negozio ci ha
+ * concesso di leggere gli ordini.
  *
  * Gli ordini non dipendono dal piano ma dal permesso: senza, le tabelle non
  * verrebbero mai riempite, e crearle vuote nel database di qualcuno che non le
  * usera' mai e' spazio occupato per niente.
+ *
+ * `users` invece non ha nessuna condizione, per il motivo scritto sopra la sua
+ * DDL: e' l'unica tabella che, se non la si tiene da subito, non si puo'
+ * ricostruire dopo.
  */
 export function buildMerchantSchemaSQL(
   includeCustomers: boolean,
@@ -248,6 +324,7 @@ export function buildMerchantSchemaSQL(
 ): string {
   return (
     buildProductsSchemaSQL() +
+    buildUsersSchemaSQL() +
     (includeCustomers ? buildCustomersSchemaSQL() : '') +
     (includeOrders ? buildOrdersSchemaSQL() : '')
   );

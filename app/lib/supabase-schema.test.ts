@@ -5,6 +5,7 @@ import {
   MERCHANT_TABLES_SQL,
   buildMerchantSchemaSQL,
   buildOrdersSchemaSQL,
+  buildUsersSchemaSQL,
 } from './supabase-schema';
 
 describe('supabase-schema', () => {
@@ -78,5 +79,63 @@ describe('buildMerchantSchemaSQL', () => {
   it('gli ordini si creano solo quando li si potra riempire', () => {
     expect(buildMerchantSchemaSQL(true)).not.toContain('CREATE TABLE IF NOT EXISTS orders');
     expect(buildMerchantSchemaSQL(true, true)).toContain('CREATE TABLE IF NOT EXISTS orders');
+  });
+});
+
+/**
+ * La tabella dei browser conosciuti.
+ *
+ * Una riga per BROWSER, non per persona: chi compra dal telefono, dal tablet e
+ * dal portatile ha tre righe qui e una sola in `customers`.
+ */
+describe('tabella users', () => {
+  const sql = buildUsersSchemaSQL();
+
+  it('la chiave e l identificativo stesso, non un numero inventato', () => {
+    // Arriva dal browser in ogni richiesta: averlo come chiave vuol dire che il
+    // ritorno e' un upsert su una chiave che il chiamante conosce gia'.
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS users');
+    expect(sql).toContain('external_id TEXT PRIMARY KEY');
+  });
+
+  it('browser e dispositivo sono COLONNE, non pezzi dell identificativo', () => {
+    // Il dispositivo e' una supposizione (iPadOS si dichiara Macintosh) e
+    // l'identificativo e' per sempre: una supposizione sbagliata dentro l id
+    // non si corregge piu', in una colonna si riscrive alla visita dopo.
+    expect(sql).toContain('browser TEXT');
+    expect(sql).toContain('device_type TEXT');
+  });
+
+  it('la prima comparsa ha un DEFAULT, perche non viaggia mai nel corpo', () => {
+    // E' cio' che permette all upsert del ritorno di non riscriverla.
+    expect(sql).toContain('first_seen_at TIMESTAMP DEFAULT NOW()');
+    expect(sql).toContain('last_seen_at TIMESTAMP DEFAULT NOW()');
+  });
+
+  it('merged_into c e, perche una riga unita non si cancella', () => {
+    // Gli eventi gia' partiti sotto quell identificativo vivono dentro Meta e
+    // GA4: cancellare la riga li lascerebbe orfani per sempre.
+    expect(sql).toContain('merged_into TEXT');
+    expect(sql).not.toMatch(/DROP\s+(TABLE|COLUMN)/i);
+  });
+
+  it('un indice per i browser di un cliente e uno per la potatura', () => {
+    expect(sql).toContain('idx_users_customer');
+    expect(sql).toContain('idx_users_anonymous_last_seen');
+  });
+
+  it('si allinea anche su una tabella gia esistente', () => {
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS shopify_customer_id');
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS merged_into');
+    // La chiave primaria non si ri-aggiunge mai.
+    expect(sql).not.toContain('ADD COLUMN IF NOT EXISTS external_id ');
+  });
+
+  it('non dipende ne dal piano ne dai permessi', () => {
+    // E' l'unica tabella che, se non la si tiene da subito, non si puo'
+    // ricostruire dopo: gli eventi passati sotto un identificativo mai scritto
+    // non tornano.
+    expect(buildMerchantSchemaSQL(false)).toContain('CREATE TABLE IF NOT EXISTS users');
+    expect(buildMerchantSchemaSQL(true, true)).toContain('CREATE TABLE IF NOT EXISTS users');
   });
 });

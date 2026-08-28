@@ -122,3 +122,20 @@ describe('formato dei campi che le piattaforme confrontano', () => {
     expect(pendingMigrations(LATEST_SCHEMA_VERSION)).toEqual([]);
   });
 });
+
+describe('la versione 7 porta i browser conosciuti', () => {
+  it('chi si era collegato prima riceve la tabella users', () => {
+    // Senza il numero alzato, la DDL idempotente non viaggerebbe e i progetti
+    // gia' collegati resterebbero senza la tabella: il riconoscimento del
+    // visitatore non partirebbe mai per nessuno di loro.
+    const sql = buildSchemaUpdateSQL(6, true, true);
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS users');
+    expect(sql).toContain('merged_into');
+  });
+
+  it('la porta anche a un piano che non sincronizza i clienti', () => {
+    const sql = buildSchemaUpdateSQL(6, false);
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS users');
+    expect(sql).not.toContain('CREATE TABLE IF NOT EXISTS customers');
+  });
+});

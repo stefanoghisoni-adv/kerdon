@@ -13,6 +13,8 @@ import { isAuthorized } from '~/utils/authorization.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { SYNC_ACTIVE_CONFIG_FILTER } from '~/lib/sync/sync-active';
 import { pruneAccessLog } from '~/lib/read-proxy/access-log.server';
+import { pruneAnonymousUsers } from '~/lib/tracking/users.server';
+import { createSupabaseClient } from '~/lib/supabase.server';
 
 /**
  * Cron-triggered sync endpoint (replaces the long-running BullMQ worker on the
@@ -50,6 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     planCatchUps: 0,
     snapshots: 0,
     accessLogPruned: 0,
+    anonymousUsersPruned: 0,
     errors: [] as string[],
   };
 
@@ -112,6 +115,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if (result === 'written') results.snapshots++;
     } catch (error) {
       console.error(`Snapshot idoneita' fallito per ${shop.shopDomain}:`, error);
+    }
+
+    // Potatura dei browser mai identificati e fermi da oltre un anno. Vive nel
+    // giro del cron perche' e' un lavoro che non ha un momento suo: nessuno
+    // aspetta il suo esito, e farla altrove vorrebbe dire farla pagare a
+    // qualcuno che sta aspettando un'altra cosa.
+    //
+    // Il filtro tiene fuori le righe legate a un cliente, qualunque sia la loro
+    // eta': quelle sono l'elenco dei dispositivi di una persona che dal negozio
+    // ci e' passata davvero, ed e' esattamente cio' per cui la tabella esiste.
+    // Le altre non diventeranno mai utili — vedi `pruneAnonymousUsers`.
+    //
+    // In un try/catch suo, come lo snapshot: un progetto che non risponde non
+    // deve impedire la sincronizzazione di quel negozio.
+    try {
+      if (shop.supabaseConfig) {
+        results.anonymousUsersPruned += await pruneAnonymousUsers(
+          createSupabaseClient(shop.supabaseConfig),
+        );
+      }
+    } catch (error) {
+      console.error(`Potatura dei visitatori anonimi fallita per ${shop.shopDomain}:`, error);
     }
 
     try {
