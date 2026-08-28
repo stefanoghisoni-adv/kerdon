@@ -1,5 +1,5 @@
 import { useFetcher } from '@remix-run/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Badge,
   Banner,
@@ -97,8 +97,32 @@ export function BirthdateMetafieldCard({
   // lo richiude, ed e' il comportamento che ci si aspetta da una tendina.
   const [listOpen, setListOpen] = useState(false);
 
-  const busy = fetcher.state !== 'idle';
+  // QUALE azione e' in volo, non "se ce n'e' una".
+  //
+  // I due comandi vivono in due form diverse ma condividono la fetcher: con un
+  // solo booleano, confermando la scelta di un campo esistente partiva il
+  // cerchietto anche su "Crea nuovo metafield", che con quel gesto non c'entra.
+  // Il nome dell'intento arriva dalla form appena inviata, senza tenerne una
+  // copia a parte: una seconda fonte per la stessa cosa e' una seconda cosa da
+  // tenere allineata.
+  const running = fetcher.state === 'idle' ? null : String(fetcher.formData?.get('intent') ?? '');
+  const busy = running !== null;
+  const creating = running === 'create';
+  const choosingBusy = running === 'use';
   const failed = !busy && fetcher.data?.ok === false;
+
+  // Andata a buon fine: si richiude quello che si era riaperto.
+  //
+  // Senza, dopo aver confermato un campo nuovo la card restava aperta: lo stato
+  // sul server diceva "in uso", ma qui `reopened` era ancora acceso e teneva
+  // la card al posto dell'avviso. Il ripensamento e' finito nel momento in cui
+  // la scelta e' stata fatta.
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcher.data?.ok) {
+      setReopened(false);
+      setChoosing(false);
+    }
+  }, [fetcher.state, fetcher.data]);
 
   // Le definizioni di tipo data per prime: sono quelle che fanno quello che
   // serve qui. Le altre restano scegliibili — un negozio puo' tenere la data di
@@ -201,7 +225,7 @@ export function BirthdateMetafieldCard({
             <Button
               submit
               variant="primary"
-              loading={busy}
+              loading={creating}
               disabled={busy || ourDefinitionPresent === true}
             >
               {t.customers.birthdate.create}
@@ -305,7 +329,12 @@ export function BirthdateMetafieldCard({
               </Labelled>
 
               <InlineStack gap="300">
-                <Button submit variant="primary" loading={busy} disabled={!chosen}>
+                <Button
+                  submit
+                  variant="primary"
+                  loading={choosingBusy}
+                  disabled={busy || !chosen}
+                >
                   {t.common.confirm}
                 </Button>
                 <Button
