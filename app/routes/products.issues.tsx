@@ -329,6 +329,11 @@ function CostRow({
   /** Esito dell'ultimo aggiornamento per questa riga, se non e' andato a buon fine. */
   error: string | undefined;
 }) {
+  // Serve solo per l'etichetta del campo, che e' nascosta e vive per chi legge
+  // con un lettore di schermo: senza, quella persona sente il nome del campo API
+  // invece di quello che tutti gli altri vedono in cima alla colonna.
+  const t = useT();
+
   return (
     <IndexTable.Row id={String(row.variantId)} position={index}>
       <IndexTable.Cell>
@@ -347,7 +352,7 @@ function CostRow({
             merchant non preme "Ricontrolla e aggiorna". */}
         <div style={{ maxWidth: 120 }}>
           <TextField
-            label="cost_per_item"
+            label={t.issues.columns.cost}
             labelHidden
             type="number"
             inputMode="decimal"
@@ -669,7 +674,7 @@ export default function ProblemProducts() {
 
         {!error && rows.length === 0 && (
           <Banner tone="success">
-            {t.issues.allGood} <code>cost_per_item</code>.
+            {t.issues.allGood}
           </Banner>
         )}
 
@@ -694,9 +699,7 @@ export default function ProblemProducts() {
                     </Text>
                   ) : (
                     <Text as="p" tone="subdued">
-                      {t.issues.intro.before}
-                      <code>cost_per_item</code>
-                      {t.issues.intro.after}
+                      {t.issues.intro}
                     </Text>
                   )}
                   {/* Tre quarti della colonna, allineata a destra: a piena

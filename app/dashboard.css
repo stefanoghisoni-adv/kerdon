@@ -364,8 +364,15 @@
    Una classe sola per tutte le tendine che ne hanno bisogno: la spaziatura di
    un elenco e' la stessa decisione ovunque, e tenerne due copie vorrebbe dire
    ritoccarne una e dimenticare l'altra. */
-.list-tight-titles .Polaris-Box:has(> .Polaris-Text--headingSm) {
+.list-tight-titles .Polaris-Box:has(.Polaris-Text--headingSm) {
+  /* Due leve invece di una. La variabile e' quella che Polaris usa davvero
+     quando compone il Box, ma non e' detto che il titolo sia sempre figlio
+     diretto ne' che la spaziatura passi sempre di li': la dichiarazione secca
+     copre il caso in cui il padding sia scritto e non calcolato. Applicarle
+     entrambe costa nulla e toglie la dipendenza da come Polaris annida il
+     titolo, che e' un dettaglio suo e puo' cambiare. */
   --pc-box-padding-block-start-xs: var(--p-space-100);
+  padding-block-start: var(--p-space-100);
 }
 
 /* "Matching avanzato" quando il piano lo comprende.

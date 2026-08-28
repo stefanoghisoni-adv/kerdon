@@ -58,6 +58,16 @@ export interface SupabaseProjectConnectProps {
    * il banner deve stare sopra tutte le card. Senza, l'avviso resta qui.
    */
   onPlanLimit?: (info: { planLabel: string | null; billingUrl: string | null }) => void;
+  /**
+   * Il modulo per creare un database e' aperto, oppure si e' chiuso.
+   *
+   * Lo stato vive qui ma serve a chi ci sta intorno: in Impostazioni, sotto
+   * questo componente, c'e' la riga con il nome del database in uso, e mentre se
+   * ne sta creando un altro quella riga risponde a una domanda che nessuno sta
+   * facendo — con il rischio di leggerla come il nome di quello che si sta
+   * creando. Chi la rende la nasconde, ma solo se sa che il modulo e' aperto.
+   */
+  onCreatingChange?: (creating: boolean) => void;
   // Disconnessione riuscita: il parent mostra il banner di conferma in cima alla
   // dashboard. Qui non lo si puo' fare, il componente viene rimontato subito dopo.
 }
@@ -77,6 +87,7 @@ export function SupabaseProjectConnect({
   authorization = 'ENABLED',
   variant = 'buttons',
   onPlanLimit,
+  onCreatingChange,
 }: SupabaseProjectConnectProps) {
   const t = useT();
   const revalidator = useRevalidator();
@@ -160,6 +171,19 @@ export function SupabaseProjectConnect({
     onPlanLimit({ planLabel: limits?.planLabel ?? null, billingUrl: planLimitBillingUrl });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planLimitFromCreate, planLimitBillingUrl, limits?.planLabel]);
+
+  // Il padre viene avvisato a ogni apertura e chiusura del modulo, e anche
+  // quando questo componente sparisce: senza l'ultimo caso, chi lo ascolta
+  // resterebbe convinto che si stia ancora creando qualcosa.
+  useEffect(() => {
+    onCreatingChange?.(showCreate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCreate]);
+
+  useEffect(() => {
+    return () => onCreatingChange?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [regionPopoverActive, setRegionPopoverActive] = useState(false);
   // Se la richiesta delle region non arriva mai in porto (rete giù, 500), dopo

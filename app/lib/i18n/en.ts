@@ -603,13 +603,11 @@ export const en: typeof it = {
       `${n} ${
         n === 1 ? "variant fixed and removed" : "variants fixed and removed"
       } from the list. ` + "The count on your dashboard is up to date.",
-    allGood: "No products with issues: every variant has a value for",
-    intro: {
-      before: "The products listed here have no value for ",
-      after:
-        " (product cost), so they can’t be synced until you fill it in. The value is written " +
-        "both to your database and to Shopify once you click «Recheck and update».",
-    },
+    allGood: "No products with issues: every variant has a cost per item.",
+    intro:
+      "The products listed here have no cost per item, so they can’t be synced " +
+      "until you fill it in. The value is written both to your database and to " +
+      "Shopify once you click «Recheck and update».",
     noResults: (query: string, total: number) =>
       `No results for «${query}». There are ${total} variants with issues: try a different search.`,
     search: "Search",
@@ -620,7 +618,7 @@ export const en: typeof it = {
       variant: "Variant",
       sku: "SKU",
       price: "Price",
-      cost: "Product cost",
+      cost: "Cost per item",
     },
     pageOf: (page: number, total: number) => `${page} of ${total}`,
     rowError: {

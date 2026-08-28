@@ -677,14 +677,21 @@ export const it = {
       `${n} ${
         n === 1 ? "variante risolta e rimossa" : "varianti risolte e rimosse"
       } dall’elenco. ` + "Il conteggio in Dashboard è aggiornato.",
-    allGood: "Nessun prodotto con problemi: tutte le varianti hanno il valore",
-    intro: {
-      before: "I prodotti elencati non presentano un valore per il parametro ",
-      after:
-        " (costo prodotto) pertanto non potranno essere sincronizzati fino al loro adeguamento. " +
-        "Il valore verrà aggiornato sia sul database che su Shopify dopo aver cliccato " +
-        "«Ricontrolla e aggiorna».",
-    },
+    allGood:
+      "Nessun prodotto con problemi: tutte le varianti hanno il costo per articolo.",
+    /**
+     * Una frase sola, non due pezzi con un nome di campo in mezzo.
+     *
+     * Prima diceva "non presentano un valore per il parametro `cost_per_item`
+     * (costo prodotto)": il nome dell'API, che nell'admin di Shopify non compare
+     * da nessuna parte — li' quel campo si chiama "Costo per articolo" — seguito
+     * dalla sua traduzione fra parentesi, cioe' due nomi per la stessa cosa di
+     * cui uno introvabile.
+     */
+    intro:
+      "I prodotti elencati non hanno un costo per articolo, quindi non potranno " +
+      "essere sincronizzati finché non lo compili. Il valore verrà aggiornato sia " +
+      "sul database sia su Shopify dopo aver cliccato «Ricontrolla e aggiorna».",
     noResults: (query: string, total: number) =>
       `Nessun risultato per «${query}». Le varianti con problemi sono ${total}: prova a ` +
       "modificare la ricerca.",
@@ -696,7 +703,7 @@ export const it = {
       variant: "Variante",
       sku: "SKU",
       price: "Prezzo",
-      cost: "Costo prodotto",
+      cost: "Costo per articolo",
     },
     pageOf: (page: number, total: number) => `${page} di ${total}`,
     rowError: {

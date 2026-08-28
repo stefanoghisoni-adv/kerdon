@@ -166,6 +166,10 @@ export default function SupabaseSettings() {
   const t = useT();
   // L'avviso sul limite dei database: lo accende il menu dentro la card, e lo
   // rende questa pagina, in cima.
+  // Il modulo di creazione di un database e' aperto: lo dice il componente che
+  // lo ospita, perche' lo stato e' suo ma la riga da nascondere e' qui.
+  const [creatingDatabase, setCreatingDatabase] = useState(false);
+
   const [planLimit, setPlanLimit] = useState<{
     planLabel: string | null;
     billingUrl: string | null;
@@ -305,12 +309,19 @@ export default function SupabaseSettings() {
                         projectUrl={config?.databaseUrl ?? undefined}
                         authorization={authorization}
                         onPlanLimit={setPlanLimit}
+                        onCreatingChange={setCreatingDatabase}
                       />
                       {/* Il ref e' una sigla: il nome e' quello che dice al
                           merchant quale database sia. Compare solo se lo
                           conosciamo — i collegamenti fatti prima che lo
                           registrassimo non ce l'hanno. */}
-                      {config?.projectName && (
+                      {/* Mentre si sta creando un database la riga sparisce:
+                          risponde a una domanda che in quel momento nessuno sta
+                          facendo, e affiancata al modulo di creazione si legge
+                          come se fosse il nome di quello che si sta creando.
+                          Torna appena il modulo si chiude, per creazione
+                          riuscita o per ripensamento. */}
+                      {config?.projectName && !creatingDatabase && (
                         <InlineStack
                           align="space-between"
                           blockAlign="center"
