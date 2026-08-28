@@ -209,6 +209,42 @@ describe('recordUserSeen', () => {
     });
   });
 
+  // Il caso che sembra un problema e non lo e', purche' la scrittura del
+  // passaggio non tocchi il legame.
+  //
+  // Un cliente che svuota i cookie o apre da un browser nuovo atterra come
+  // chiunque altro, e la riga che nasce e' anonima: giusto cosi', in quel
+  // momento non sappiamo ancora chi sia. Il guaio sarebbe l'opposto — che
+  // tornando su un browser GIA' riconosciuto la scrittura del passaggio
+  // riportasse il legame a zero. Da quel momento quella persona sarebbe di
+  // nuovo un'estranea sul suo stesso dispositivo, e nessuno se ne accorgerebbe.
+  it('un browser gia legato resta legato anche dopo un nuovo passaggio', async () => {
+    const store = db([
+      {
+        external_id: TELEFONO,
+        shopify_customer_id: 77,
+        first_seen_at: '2026-01-01T00:00:00.000Z',
+        merged_into: null,
+      },
+    ]);
+    store.now = () => '2026-08-28T10:00:00.000Z';
+
+    await recordUserSeen(store.client(), {
+      externalId: TELEFONO,
+      browser: 'Safari',
+      deviceType: 'mobile',
+      seenAt: new Date('2026-08-28T10:00:00Z'),
+    });
+
+    expect(store.tables.users).toHaveLength(1);
+    expect(store.tables.users[0]).toMatchObject({
+      shopify_customer_id: 77,
+      first_seen_at: '2026-01-01T00:00:00.000Z',
+      last_seen_at: '2026-08-28T10:00:00.000Z',
+      browser: 'Safari',
+    });
+  });
+
   it('al ritorno la riga si aggiorna e non si duplica', async () => {
     const store = db();
     store.now = () => '2026-08-01T10:00:00.000Z';
