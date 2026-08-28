@@ -10,7 +10,7 @@ import type { Dictionary } from '~/lib/i18n/context';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useLoaderData, useFetcher, useNavigate, useNavigation } from '@remix-run/react';
+import { useLoaderData, useFetcher, useNavigate } from '@remix-run/react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Page,
@@ -50,6 +50,8 @@ import {
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { filterProblemVariants, pageCount, pageSlice } from '~/lib/stats/problem-filter';
+import { selectSoldProblemVariants } from '~/lib/stats/sold-without-cost';
+import { useFilterNav } from '~/components/Dashboard/filter-nav';
 import { loadSoldVariantIds } from '~/lib/stats/sold-variants.server';
 import {
   costFieldDisabled,
@@ -122,7 +124,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? await loadSoldVariantIds(session.shop, { customerId })
     : { ids: null, customerName: null };
 
-  const rows = sold.ids ? allRows.filter((row) => sold.ids!.has(row.variantId)) : allRows;
+  // La stessa funzione che il conteggio dell'avviso usa per contare: e' cio'
+  // che impedisce all'avviso e a questo elenco di tornare a dire numeri diversi.
+  const rows = selectSoldProblemVariants(allRows, sold.ids);
 
   // Quota del piano: serve all'avviso di limite in esaurimento, lo stesso della
   // dashboard. I prodotti sono gia' in memoria, quindi il conteggio non costa
@@ -282,6 +286,11 @@ export async function action({ request }: ActionFunctionArgs) {
     if (resolved > 0) {
       const cached = await getReadinessCache(shop.id);
       if (cached) {
+        // `soldWithoutCost` resta deliberatamente fuori: di quelle varianti
+        // risolte non sappiamo quali fossero gia' state vendute, e tramandare il
+        // numero di prima significherebbe rimandare il merchant in dashboard con
+        // un avviso che annuncia problemi appena sistemati. Omesso, l'avviso non
+        // compare finche' il ricalcolo live non dice quanti ne restano.
         await setReadinessCache(shop.id, {
           totalProducts: cached.totalProducts,
           readyCount: cached.readyCount + resolved,
@@ -385,17 +394,21 @@ export default function ProblemProducts() {
   // due si puo' premere. La lettura non e' istantanea — l'elenco si ricostruisce
   // dai prodotti di Shopify — e senza un segno il primo clic sembra non aver
   // fatto niente, cosi' si preme di nuovo.
-  const navigation = useNavigation();
-  const goingTo =
-    navigation.state === 'loading' ? navigation.location?.search ?? '' : null;
-  const switching = goingTo !== null;
-  const loadingAll = goingTo === '';
-  const loadingSold = goingTo != null && goingTo.includes('sold=1');
+  //
+  // Ma il segno deve accendersi solo per chi ha premuto qui: la sola
+  // `useNavigation` non distingue un filtro premuto dal merchant che sta
+  // uscendo dalla tab col menu dell'admin, e li' i filtri si spegnevano da soli
+  // mentre si stava gia' andando altrove.
+  const filterNav = useFilterNav('/products/issues');
+  const { switching, loadingAll, loadingSold } = filterNav;
 
   // I filtri stanno nell'indirizzo e non in uno stato: cosi' l'elenco che si
   // sta guardando ha un link, e tornare indietro col browser riporta al filtro
   // di prima invece che alla pagina intera.
   const goTo = (next: { sold?: boolean; customer?: number | null }) => {
+    // Il consenso di chi il clic l'ha ricevuto davvero: da qui in poi la
+    // navigazione che parte e' di questi filtri, e loro possono mostrarlo.
+    filterNav.start();
     const params = new URLSearchParams();
     // Il cliente implica gia' "solo negli ordini": tenere anche il primo
     // parametro non cambierebbe niente e allungherebbe l'indirizzo.
@@ -715,7 +728,7 @@ export default function ProblemProducts() {
                 { title: t.issues.columns.variant },
                 { title: t.issues.columns.sku },
                 { title: t.issues.columns.price },
-                { title: 'cost_per_item' },
+                { title: t.issues.columns.cost },
                 { title: '%' },
               ]}
             >

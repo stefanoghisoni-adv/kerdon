@@ -51,6 +51,18 @@ export interface ReadinessStats {
   totalProducts: number;
   readyCount: number;
   problemCount: number;
+  /**
+   * Prodotti gia' venduti a cui manca il costo: e' il numero dell'avviso in
+   * dashboard, ed e' la lunghezza esatta dell'elenco che la tab Prodotti mostra
+   * col filtro "Solo prodotti negli ordini".
+   *
+   * Opzionale perche' non tutti sanno calcolarlo: il ricontrollo della tab
+   * Prodotti riscrive pronti/problemi ma non sa quali delle varianti risolte
+   * fossero vendute, quindi lo lascia fuori invece di tramandare un numero
+   * vecchio. Assente = l'avviso non si mostra finche' non arriva il ricalcolo
+   * live, che e' meglio di un avviso che mente.
+   */
+  soldWithoutCost?: number;
 }
 
 // TTL alto: è solo un limite massimo di obsolescenza. In pratica ogni apertura

@@ -620,6 +620,7 @@ export const en: typeof it = {
       variant: "Variant",
       sku: "SKU",
       price: "Price",
+      cost: "Product cost",
     },
     pageOf: (page: number, total: number) => `${page} of ${total}`,
     rowError: {
@@ -714,6 +715,9 @@ export const en: typeof it = {
     filterIssues: "Need attention",
     hiddenCount: (n: number) =>
       n === 1 ? "1 customer with no issues hidden" : `${n} customers with no issues hidden`,
+    search: "Search",
+    searchPlaceholder: "Search by first name, last name, email or phone",
+    searchNoResults: (query: string) => `No customers for \u00ab${query}\u00bb.`,
     notConnected: "Connect a database to see profit per customer.",
     noAccess:
       "Calculating profit needs access to your store’s orders. Reopen the app to grant it.",
@@ -725,20 +729,21 @@ export const en: typeof it = {
         "The Date of birth field shows on every customer record, for you and your staff to fill in: from there it syncs along with the rest of the customer's data, ready to build sharper audiences and segments. Let the app create it, or point to a field your store already uses.",
       inUse: (key: string) => `Field in use: ${key}`,
       noneInUse: "No field in use: date of birth is not being synced yet.",
-      create: "Create metafield",
-      useExisting: "Existing metafield",
+      missingOnStore: (key: string) =>
+        `The selected field (${key}) isn't on your store: date of birth is not being synced.`,
+      create: "Create new metafield",
+      useExisting: "Use existing",
       working: "One moment\u2026",
       present: "Field already there",
       openAdmin: "Open customer metafields",
+      previewNameLabel: "Metafield name",
+      previewValueLabel: "Value",
+      fieldName: "Date of birth",
       chooseLabel: "Pick one of your store's fields",
       choosePlaceholder: "No field selected",
       groupDates: "Date fields",
       groupOthers: "Other fields",
-      chooseEmpty: "Your store has no custom customer fields yet.",
-      pasteLabel: "Or type the field",
-      pasteHelp:
-        "The field name with its prefix, as shown in your admin: you can copy it from there and paste it here. It also covers fields that don't show in the list.",
-      invalid: "That field name isn't valid. Example: custom.data_di_nascita",
+      invalid: "That field name isn't valid.",
       notADate:
         "The field in use isn't a date field: only clearly written dates will sync, the rest stay empty.",
       failed: "The choice could not be saved. Try again shortly.",

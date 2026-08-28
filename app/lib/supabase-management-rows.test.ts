@@ -27,7 +27,26 @@ describe('runQueryRows', () => {
   });
 
   it('errore HTTP → eccezione', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 }) as unknown as typeof fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => '',
+    }) as unknown as typeof fetch;
     await expect(runQueryRows('tok', 'ref123', 'SELECT 1;')).rejects.toThrow('500');
+  });
+
+  // Il numero da solo non dice niente: 400 e' la risposta a una tabella che non
+  // esiste, a una colonna sbagliata e a una sintassi storta. Il messaggio di
+  // Postgres deve arrivare fino ai log, o la diagnosi si fa a tentoni.
+  it('il motivo vero del rifiuto finisce nel messaggio', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => '{"message":"relation \\"orders\\" does not exist"}',
+    }) as unknown as typeof fetch;
+
+    await expect(runQueryRows('tok', 'ref123', 'SELECT 1;')).rejects.toThrow(
+      /does not exist/,
+    );
   });
 });

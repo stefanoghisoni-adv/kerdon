@@ -696,6 +696,7 @@ export const it = {
       variant: "Variante",
       sku: "SKU",
       price: "Prezzo",
+      cost: "Costo prodotto",
     },
     pageOf: (page: number, total: number) => `${page} di ${total}`,
     rowError: {
@@ -805,6 +806,15 @@ export const it = {
     filterIssues: "Richiedono un intervento",
     hiddenCount: (n: number) =>
       n === 1 ? "1 cliente senza problemi nascosto" : `${n} clienti senza problemi nascosti`,
+    search: "Cerca",
+    /**
+     * Si nominano anche email e telefono, che in tabella non si vedono: senza
+     * dirlo, nessuno proverebbe a cercarli, e sono i due modi in cui un cliente
+     * si ritrova quando del nome non si e' sicuri.
+     */
+    searchPlaceholder: "Cerca per nome, cognome, email o telefono",
+    searchNoResults: (query: string) =>
+      `Nessun cliente per \u00ab${query}\u00bb.`,
     notConnected: "Collega un database per vedere i profitti per cliente.",
     noAccess:
       "Per calcolare i profitti serve l’accesso agli ordini del negozio. Riapri l’app per concederlo.",
@@ -824,26 +834,33 @@ export const it = {
       inUse: (key: string) => `Campo in uso: ${key}`,
       noneInUse:
         "Nessun campo in uso: la data di nascita non viene ancora sincronizzata.",
-      create: "Crea metafield",
-      useExisting: "Metafield esistente",
+      /**
+       * Scelto, ma sul negozio quel campo non c'e'. Dirlo per intero invece di
+       * annunciarlo come attivo: il merchant crederebbe di star raccogliendo
+       * una data che non arriver\u00e0 mai, e non avrebbe modo di accorgersene.
+       */
+      missingOnStore: (key: string) =>
+        `Campo scelto (${key}) non presente sul negozio: la data di nascita non viene sincronizzata.`,
+      create: "Crea nuovo metafield",
+      useExisting: "Utilizza esistente",
       working: "Un attimo\u2026",
       present: "Campo gi\u00e0 presente",
       openAdmin: "Apri i metafield dei clienti",
+      /** L'anteprima di cosa comparir\u00e0 sulla scheda cliente. */
+      previewNameLabel: "Nome metafield",
+      previewValueLabel: "Valore",
+      /**
+       * Il nome che il campo prende sul negozio. Sta nel dizionario e non nel
+       * componente perche' \u00e8 la lingua del negozio a deciderlo: su un negozio
+       * inglese il campo si chiama "Date of birth", su uno italiano "Data di
+       * nascita", ed \u00e8 Shopify stessa a nominarlo cos\u00ec.
+       */
+      fieldName: "Data di nascita",
       chooseLabel: "Scegli fra i campi del tuo negozio",
       choosePlaceholder: "Nessun campo scelto",
       groupDates: "Campi data",
       groupOthers: "Altri campi",
-      chooseEmpty: "Il tuo negozio non ha ancora campi personalizzati sui clienti.",
-      pasteLabel: "Oppure scrivi il campo",
-      /**
-       * Perche' la casella esiste accanto alla tendina: un campo puo' esserci
-       * sui clienti senza comparire nell'elenco. Detto come lo vive il
-       * merchant — "se non lo trovi, scrivilo" — senza spiegare il perche'
-       * tecnico, che a lui non serve.
-       */
-      pasteHelp:
-        "Nome del campo con il suo prefisso, come lo trovi nell\u2019admin: puoi copiarlo da l\u00ec e incollarlo qui. Serve anche quando il campo non compare nell\u2019elenco.",
-      invalid: "Questo campo non \u00e8 scritto in modo valido. Esempio: custom.data_di_nascita",
+      invalid: "Questo campo non \u00e8 scritto in modo valido.",
       notADate:
         "Il campo in uso non \u00e8 di tipo data: verranno sincronizzate solo le date scritte in modo riconoscibile, le altre resteranno vuote.",
       failed:

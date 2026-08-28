@@ -242,6 +242,22 @@ export async function getProjectApiKeys(
   return { anon, serviceRole };
 }
 
+/**
+ * Il motivo vero di una query rifiutata, non il solo numero.
+ *
+ * `Supabase query error: 400` non dice niente: 400 e' la risposta a una tabella
+ * che non esiste, a una colonna sbagliata, a una sintassi storta e a una decina
+ * d'altre cose. Il corpo invece contiene il messaggio di Postgres — "relation
+ * \"orders\" does not exist" — che e' esattamente cio' che serve leggere nei log
+ * per capire cosa fare. Buttarlo via e' costato una diagnosi a tentoni.
+ */
+async function queryError(res: Response): Promise<Error> {
+  const detail = await res.text().catch(() => '');
+  return new Error(
+    `Supabase query error: ${res.status}${detail ? ` \u2014 ${detail.slice(0, 300)}` : ''}`,
+  );
+}
+
 export async function runQuery(
   accessToken: string,
   ref: string,
@@ -255,7 +271,7 @@ export async function runQuery(
     },
     body: JSON.stringify({ query }),
   });
-  if (!res.ok) throw new Error(`Supabase query error: ${res.status}`);
+  if (!res.ok) throw await queryError(res);
 }
 
 // Come runQuery, ma restituisce le righe. runQuery è pensata per la DDL e
@@ -273,7 +289,7 @@ export async function runQueryRows<T = Record<string, unknown>>(
     },
     body: JSON.stringify({ query }),
   });
-  if (!res.ok) throw new Error(`Supabase query error: ${res.status}`);
+  if (!res.ok) throw await queryError(res);
   const data = await res.json();
   return Array.isArray(data) ? (data as T[]) : [];
 }

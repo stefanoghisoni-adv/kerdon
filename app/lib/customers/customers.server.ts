@@ -1,7 +1,12 @@
 import { prisma } from '~/db.server';
 import { getValidAccessToken } from '~/lib/supabase-oauth.server';
-import { runQueryRows } from '~/lib/supabase-management.server';
+import { runQuery, runQueryRows } from '~/lib/supabase-management.server';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
+import {
+  existingReportTablesSQL,
+  missingReportTables,
+  missingReportTablesSQL,
+} from '~/lib/supabase/report-tables';
 import {
   customersInRangeSQL,
   lifetimeProfitSQL,
@@ -35,6 +40,13 @@ export interface CustomerRow {
   totalLines: number;
   /** Il cliente e' fra quelli sincronizzati (ha dato consenso al marketing). */
   synced: boolean;
+  /**
+   * Email e telefono non si mostrano in tabella, ma la riga se li porta: sono i
+   * due modi in cui un cliente si ritrova quando del nome non si e' sicuri, e
+   * la ricerca lavora sulle righe gia' caricate.
+   */
+  email: string | null;
+  phone: string | null;
 }
 
 export interface CustomersReport {
@@ -55,6 +67,8 @@ interface RangeRow {
   total_lines: number | string;
   currency: string | null;
   synced: boolean | null;
+  email: string | null;
+  phone: string | null;
 }
 
 interface LifetimeRow {
@@ -101,6 +115,8 @@ export async function loadCustomersReport(opts: {
   const ref = shop.supabaseConfig.supabaseProjectRef;
   const before = previousRange(opts.from, opts.to);
 
+  await ensureReportTables(token, ref);
+
   const [current, previous, lifetime] = await Promise.all([
     runQueryRows<RangeRow>(token, ref, customersInRangeSQL({ ...opts, limit: opts.limit })),
     runQueryRows<RangeRow>(token, ref, customersInRangeSQL({ ...before, limit: opts.limit })),
@@ -133,6 +149,8 @@ export async function loadCustomersReport(opts: {
       coveredLines: num(row.covered_lines),
       totalLines: num(row.total_lines),
       synced: row.synced === true,
+      email: row.email,
+      phone: row.phone,
     };
   });
 
@@ -141,4 +159,44 @@ export async function loadCustomersReport(opts: {
     currency: current.find((row) => row.currency)?.currency ?? 'EUR',
     unavailable: null,
   };
+}
+
+/**
+ * Provvede alle tabelle che questa lettura richiede, quando ne manca qualcuna.
+ *
+ * Non e' zelo: le tabelle del merchant nascono al collegamento, e nascono
+ * quelle che il negozio meritava allora. Un piano che sale, il permesso sugli
+ * ordini concesso dopo, un collegamento a un progetto nuovo fatto in un momento
+ * diverso — e la tabella che serve qui non c'e'. La query la cercava lo stesso,
+ * Postgres rispondeva "relation does not exist" e la Management API lo girava
+ * come un 400 senza una parola dentro: a schermo diventava "non e' stato
+ * possibile leggere i clienti", per sempre, senza un gesto che potesse
+ * risolverlo.
+ *
+ * Best effort di proposito: se anche la DDL non riuscisse, le tre query
+ * partono comunque e il loro errore — adesso parlante — dice cosa e' successo.
+ * Fermare qui la lettura aggiungerebbe un modo di fallire senza toglierne uno.
+ */
+async function ensureReportTables(token: string, ref: string): Promise<void> {
+  try {
+    const rows = await runQueryRows<{ table_name: string }>(
+      token,
+      ref,
+      existingReportTablesSQL(),
+    );
+    const existing = rows.map((r) => r.table_name).filter(Boolean);
+    const ddl = missingReportTablesSQL(existing);
+    if (!ddl) return;
+
+    console.warn(
+      '[customers] tabelle mancanti nel database del merchant, le creo:',
+      missingReportTables(existing).join(', '),
+    );
+    await runQuery(token, ref, ddl);
+  } catch (error) {
+    console.warn(
+      '[customers] verifica delle tabelle non riuscita:',
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+  }
 }

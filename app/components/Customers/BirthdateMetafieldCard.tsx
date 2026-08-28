@@ -13,10 +13,14 @@ import {
   OptionList,
   Popover,
   Text,
-  TextField,
 } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
-import { isDateMetafieldType } from '~/lib/customers/birthdate-metafield';
+import {
+  BIRTHDATE_METAFIELD_KEY,
+  formatMetafieldKey,
+  isDateMetafieldType,
+  type BirthdateFieldState,
+} from '~/lib/customers/birthdate-metafield';
 
 interface Definition {
   /** La chiave per intero, namespace compreso: `custom.data_di_nascita`. */
@@ -28,6 +32,12 @@ interface Definition {
 interface BirthdateMetafieldCardProps {
   /** Il campo da cui si legge oggi. Vuoto = nessuno scelto. */
   configured: string;
+  /**
+   * Cosa dire di quel campo: nessuno, in uso, oppure scelto ma non presente
+   * sul negozio. Lo decide il server, che e' l'unico ad avere sotto mano sia la
+   * scelta salvata sia l'elenco vero delle definizioni.
+   */
+  state: BirthdateFieldState;
   /**
    * Il nostro campo esiste gia' sul negozio? `null` quando non si e' potuto
    * chiedere a Shopify: in quel caso si propone comunque di crearlo, perche'
@@ -50,9 +60,14 @@ interface BirthdateMetafieldCardProps {
  * e' guardandoli che viene voglia di sapere quando sono nati.
  *
  * Due strade, perche' due sono i punti di partenza. Chi non ha niente si fa
- * creare il campo. Chi ha gia' il suo lo indica: dalla tendina se c'e', oppure
- * scrivendone la chiave — e questa seconda via non e' un ripiego, perche' un
- * campo puo' esistere sui clienti senza comparire fra quelli in elenco.
+ * creare il campo, e non ha niente da decidere: nome e valore sono quelli
+ * ufficiali di Shopify, e l'anteprima qui sotto glieli mostra prima che
+ * succeda. Chi ha gia' il suo campo lo indica dall'elenco del negozio.
+ *
+ * Sparita la casella in cui si scriveva la chiave a mano: era una liberta' che
+ * serviva solo a sbagliare — un refuso li' dentro produceva una colonna vuota
+ * che nessuno sapeva spiegare — e i campi che si possono scegliere sono
+ * comunque tutti nell'elenco.
  *
  * Il collegamento all'admin esce dall'iframe (`target="_top"`) come gia' fa il
  * nome del cliente in tabella: aperto dentro il riquadro dell'app, l'admin di
@@ -60,6 +75,7 @@ interface BirthdateMetafieldCardProps {
  */
 export function BirthdateMetafieldCard({
   configured,
+  state,
   ourDefinitionPresent,
   definitions,
   notADate,
@@ -68,12 +84,12 @@ export function BirthdateMetafieldCard({
   const t = useT();
   const fetcher = useFetcher<{ ok: boolean; error: 'invalid' | 'failed' | null }>();
 
-  // Il pannello "Metafield esistente" si apre solo se richiesto: chi arriva qui
-  // per la prima volta ha davanti un pulsante e una frase, non un modulo.
+  // Il pannello "Utilizza esistente" si apre solo se richiesto: chi arriva qui
+  // per la prima volta ha davanti due pulsanti e un'anteprima, non un modulo.
   const [choosing, setChoosing] = useState(false);
-  // Quello che finira' salvato. La tendina lo riempie, la casella lo lascia
-  // correggere: un valore solo, e si vede prima di confermarlo.
-  const [typed, setTyped] = useState('');
+  // Quello che finira' salvato: lo riempie l'elenco, e si vede scritto prima di
+  // confermarlo.
+  const [chosen, setChosen] = useState('');
   // L'elenco e' aperto. Vive qui e non dentro il pulsante: sceglierne una voce
   // lo richiude, ed e' il comportamento che ci si aspetta da una tendina.
   const [listOpen, setListOpen] = useState(false);
@@ -100,12 +116,7 @@ export function BirthdateMetafieldCard({
       : []),
   ];
 
-  // Quale voce risulta scelta nell'elenco: solo se quel che c'e' scritto nel
-  // campo corrisponde davvero a una definizione del negozio. Chi scrive a mano
-  // una chiave che l'elenco non conosce non deve vedersi evidenziare una riga a
-  // caso.
-  const listed = definitions.some((d) => d.key === typed);
-  const activatorLabel = typed || t.customers.birthdate.choosePlaceholder;
+  const activatorLabel = chosen || t.customers.birthdate.choosePlaceholder;
 
   return (
     <Card>
@@ -117,32 +128,64 @@ export function BirthdateMetafieldCard({
           {t.customers.birthdate.description}
         </Text>
 
-        {/* Cosa si sta leggendo adesso, sempre a schermo: senza, cambiare campo
-            sarebbe un gesto al buio. */}
+        {/* Cosa si sta leggendo adesso, sempre a schermo. Tre stati e non due:
+            annunciare come "in uso" un campo che sul negozio non esiste
+            lascerebbe il merchant convinto di raccogliere una data che non
+            arrivera' mai. */}
         <Text as="p">
-          {configured
-            ? t.customers.birthdate.inUse(configured)
-            : t.customers.birthdate.noneInUse}
+          {state === 'none' && t.customers.birthdate.noneInUse}
+          {state === 'in_use' && t.customers.birthdate.inUse(configured)}
+          {state === 'missing' && t.customers.birthdate.missingOnStore(configured)}
         </Text>
 
         {notADate && <Banner tone="warning">{t.customers.birthdate.notADate}</Banner>}
 
-        <InlineStack gap="300" blockAlign="center" wrap>
-          {ourDefinitionPresent ? (
-            <Badge tone="success">{t.customers.birthdate.present}</Badge>
-          ) : (
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="create" />
-              <Button submit variant="primary" loading={busy}>
-                {t.customers.birthdate.create}
-              </Button>
-            </fetcher.Form>
-          )}
+        {/* L'anteprima di cio' che comparira' sulla scheda cliente. Si guarda,
+            non si tocca: nome e valore sono quelli con cui Shopify conosce
+            questo campo, e cambiarli vorrebbe dire creare un campo diverso che
+            nessun altro strumento saprebbe leggere. */}
+        <Box background="bg-surface-secondary" borderRadius="200" padding="300">
+          <BlockStack gap="100">
+            <InlineStack gap="150" wrap>
+              <Text as="span" tone="subdued">
+                {t.customers.birthdate.previewNameLabel}:
+              </Text>
+              <Text as="span" fontWeight="semibold">
+                {t.customers.birthdate.fieldName}
+              </Text>
+            </InlineStack>
+            <InlineStack gap="150" wrap>
+              <Text as="span" tone="subdued">
+                {t.customers.birthdate.previewValueLabel}:
+              </Text>
+              <Text as="span" fontWeight="semibold">
+                {formatMetafieldKey(BIRTHDATE_METAFIELD_KEY)}
+              </Text>
+            </InlineStack>
+          </BlockStack>
+        </Box>
 
+        <InlineStack gap="300" blockAlign="center" wrap>
+          <fetcher.Form method="post">
+            <input type="hidden" name="intent" value="create" />
+            <Button submit variant="primary" loading={busy}>
+              {t.customers.birthdate.create}
+            </Button>
+          </fetcher.Form>
+
+          {/* Spento quando il negozio non ha campi da offrire: un pulsante che
+              apre un elenco vuoto e' una promessa non mantenuta. */}
           {!choosing && (
-            <Button onClick={() => setChoosing(true)} disabled={busy}>
+            <Button
+              onClick={() => setChoosing(true)}
+              disabled={busy || definitions.length === 0}
+            >
               {t.customers.birthdate.useExisting}
             </Button>
+          )}
+
+          {ourDefinitionPresent && (
+            <Badge tone="success">{t.customers.birthdate.present}</Badge>
           )}
 
           {/* Lo stato intermedio ha bisogno di una parola: il solo cerchietto
@@ -169,12 +212,12 @@ export function BirthdateMetafieldCard({
              chiede conferma invece di collegare al clic. */
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="use" />
+            <input type="hidden" name="metafield" value={chosen} />
             <BlockStack gap="300">
               {/* Stessa forma del selettore lingua/valuta in Impostazioni: un
                   pulsante che dice cosa e' scelto adesso e apre un elenco.
-                  Scegliere qui non salva niente — riempie il campo qui sotto,
-                  cosi' si legge per intero quel che si e' scelto prima di
-                  confermarlo. La conferma resta una sola, in fondo. */}
+                  Scegliere qui non salva niente: la conferma resta una sola, in
+                  fondo. */}
               <Labelled id="birthdate-metafield-choice" label={t.customers.birthdate.chooseLabel}>
                 <Popover
                   active={listOpen}
@@ -194,7 +237,7 @@ export function BirthdateMetafieldCard({
                         disclosure
                         fullWidth
                         textAlign="left"
-                        disabled={busy || definitions.length === 0}
+                        disabled={busy}
                       >
                         {activatorLabel}
                       </Button>
@@ -215,9 +258,9 @@ export function BirthdateMetafieldCard({
                     >
                       <OptionList
                         sections={sections}
-                        selected={listed ? [typed] : []}
+                        selected={chosen ? [chosen] : []}
                         onChange={(next) => {
-                          if (next[0]) setTyped(next[0]);
+                          if (next[0]) setChosen(next[0]);
                           setListOpen(false);
                         }}
                       />
@@ -226,35 +269,14 @@ export function BirthdateMetafieldCard({
                 </Popover>
               </Labelled>
 
-              {definitions.length === 0 && (
-                <Text as="span" tone="subdued" variant="bodySm">
-                  {t.customers.birthdate.chooseEmpty}
-                </Text>
-              )}
-
-              <TextField
-                label={t.customers.birthdate.pasteLabel}
-                name="metafield"
-                value={typed}
-                onChange={setTyped}
-                autoComplete="off"
-                placeholder="custom.data_di_nascita"
-                helpText={t.customers.birthdate.pasteHelp}
-                error={
-                  fetcher.data?.error === 'invalid'
-                    ? t.customers.birthdate.invalid
-                    : undefined
-                }
-              />
-
               <InlineStack gap="300">
-                <Button submit variant="primary" loading={busy} disabled={!typed.trim()}>
+                <Button submit variant="primary" loading={busy} disabled={!chosen}>
                   {t.common.confirm}
                 </Button>
                 <Button
                   onClick={() => {
                     setChoosing(false);
-                    setTyped('');
+                    setChosen('');
                   }}
                   disabled={busy}
                 >
@@ -265,8 +287,12 @@ export function BirthdateMetafieldCard({
           </fetcher.Form>
         )}
 
-        {failed && fetcher.data?.error !== 'invalid' && (
-          <Banner tone="critical">{t.customers.birthdate.failed}</Banner>
+        {failed && (
+          <Banner tone="critical">
+            {fetcher.data?.error === 'invalid'
+              ? t.customers.birthdate.invalid
+              : t.customers.birthdate.failed}
+          </Banner>
         )}
       </BlockStack>
     </Card>

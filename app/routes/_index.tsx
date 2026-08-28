@@ -70,7 +70,6 @@ import { SyncCard } from '~/components/Dashboard/SyncCard';
 import { RecentRunsCard } from '~/components/Dashboard/RecentRunsCard';
 import { loadSyncRuns, syncTimingFrom } from '~/lib/sync/sync-timing.server';
 import { buildPlanCards, manualSyncAllowed } from '~/components/Billing/plan-catalog';
-import { countSoldWithoutCost } from '~/lib/stats/sold-variants.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { canAccessPlanTab } from '~/components/Billing/plan-access';
 import type { SubscribeResponse } from '~/routes/billing.subscribe';
@@ -309,10 +308,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       authorization,
       trackingAuthorization,
       planChanged,
-      // Quanti prodotti venduti non hanno un costo: e' il numero che spiega
-      // perche' il profitto mostrato e' piu' alto del vero. Una riga di
-      // conteggio sul database del merchant, non una passata sul catalogo.
-      soldWithoutCost: await countSoldWithoutCost(session.shop),
       // Il push manuale e' una funzione del piano: senza, il pulsante non
       // compare affatto. Mostrarlo spento sarebbe peggio — inviterebbe a
       // premere una cosa che non si puo' avere, e la card del piano dice gia'
@@ -513,6 +508,16 @@ interface ReadinessResponse {
   totalVariants: number;
   readyCount: number;
   problemCount: number;
+  /**
+   * Prodotti gia' venduti a cui manca il costo. Viaggia insieme alla readiness
+   * perche' nasce dalla stessa lettura del catalogo: e' il numero dell'avviso, e
+   * il catalogo e' l'unico posto che sa davvero se un costo c'e'.
+   *
+   * null quando la risposta viene da una cache scritta da qualcun altro, che
+   * quel numero non sapeva ricalcolarlo: l'avviso resta nascosto fino al
+   * ricalcolo live.
+   */
+  soldWithoutCost?: number | null;
   // true se il risultato arriva dalla cache: il client innesca poi il refresh live.
   cached?: boolean;
 }
@@ -548,7 +553,7 @@ const MANUAL_SYNC_POLL_MS = 1_500;
 const MANUAL_SYNC_TIMEOUT_MS = 3 * 60_000;
 
 export default function Dashboard() {
-  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, syncState, planChanged, soldWithoutCost, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
+  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
     useLoaderData<typeof loader>();
   const blocked = authorization !== 'ENABLED';
   const t = useT();
@@ -745,6 +750,12 @@ export default function Dashboard() {
   const readiness = readinessRefreshFetcher.data ?? readinessFetcher.data;
   const customerStats = customerStatsRefreshFetcher.data ?? customerStatsFetcher.data;
   const readinessLoading = !readiness;
+  // L'avviso dei costi mancanti viaggia con la readiness e non con il loader:
+  // e' la stessa lettura del catalogo a dire quali costi mancano, ed e' l'unico
+  // modo perche' il numero annunciato qui e le righe elencate nella tab Prodotti
+  // siano lo stesso numero. Finche' non e' arrivato vale zero, cioe' nessun
+  // avviso: e' un attimo, ed e' meglio di un avviso da correggere subito dopo.
+  const soldWithoutCost = readiness?.soldWithoutCost ?? 0;
   const customerStatsLoading = !customerStats;
 
   // Sync in background durabile (coda + drain). Il pulsante mostra il loader

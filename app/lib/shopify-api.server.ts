@@ -1,9 +1,21 @@
 import { unauthenticated } from '~/shopify.server';
 import {
   BIRTHDATE_METAFIELD,
-  BIRTHDATE_METAFIELD_OPTIONS,
+  BIRTHDATE_METAFIELD_ACCESS,
+  BIRTHDATE_METAFIELD_CAPABILITIES,
+  supportedCapabilities,
   type MetafieldKey,
 } from '~/lib/customers/birthdate-metafield';
+
+/**
+ * Le capability dei metafield che la versione dell'API in uso conosce.
+ *
+ * Vive fuori dalla classe perche' non dipende dal negozio ma dalla versione:
+ * un client nuovo per ogni richiesta rifarebbe la stessa domanda ogni volta per
+ * ricevere sempre la stessa risposta. `undefined` = non ancora chiesto, `null` =
+ * chiesto e non saputo.
+ */
+let capabilityFieldsCache: ReadonlySet<string> | null | undefined;
 
 // Client Admin API in GraphQL.
 //
@@ -734,11 +746,11 @@ export class ShopifyAPIClient {
   /**
    * C'e' gia' la definizione del metafield della data di nascita?
    *
-   * Si chiede prima di proporre di crearla, e si richiede dopo averla creata:
-   * la risposta e' l'unica cosa che autorizza il pulsante a dire "gia'
-   * presente". Dedurlo da un tentativo di scrittura andato a vuoto sarebbe
-   * peggio — vorrebbe dire provare a scrivere sul negozio del merchant ogni
-   * volta che apre la tab, per scoprire una cosa che una lettura dice meglio.
+   * Si chiede prima di proporre di abilitarla, e si richiede dopo averla
+   * abilitata: la risposta e' l'unica cosa che autorizza a dire che il campo
+   * c'e'. Dedurlo da un tentativo di scrittura andato a vuoto sarebbe peggio —
+   * vorrebbe dire provare a scrivere sul negozio del merchant ogni volta che
+   * apre la tab, per scoprire una cosa che una lettura dice meglio.
    */
   async hasCustomerBirthdateDefinition(): Promise<boolean> {
     const data = await this.graphql<{
@@ -761,52 +773,113 @@ export class ShopifyAPIClient {
   }
 
   /**
-   * Crea la definizione del metafield della data di nascita sul negozio.
+   * Le capability che QUESTA versione dell'API dichiara di conoscere.
    *
-   * Se la definizione c'e' gia' NON viene toccata, nemmeno quando le sue
-   * opzioni sono diverse dalle nostre: quella definizione e' del merchant, e se
-   * l'ha modificata avra' avuto le sue ragioni. Riallinearla d'ufficio gli
-   * cambierebbe la configurazione sotto i piedi — magari togliendo un accesso
-   * che una sua integrazione usa — per un capriccio di uniformita' che a lui
-   * non serve. Ci si limita a rilevarla come presente.
+   * Serve perche' un campo sconosciuto in una input di GraphQL non viene
+   * ignorato: fa fallire la richiesta in fase di validazione, prima che venga
+   * eseguita. Chiederlo alla documentazione non basta — quella descrive la
+   * versione piu' recente, non quella a cui siamo agganciati — mentre lo schema
+   * risponde per la versione che stiamo davvero chiamando, qualunque essa sia.
    *
-   * `TAKEN` vale come successo per la stessa ragione: e' la risposta di Shopify
-   * a "questa chiave e' gia' occupata", cioe' esattamente lo stato in cui
-   * volevamo arrivare. Continua a servire anche con la rilevazione a monte,
-   * perche' fra la lettura e la scrittura la definizione puo' essere comparsa —
-   * due schede aperte, o il merchant che la crea a mano nell'admin.
+   * La risposta si tiene da parte per tutto il processo: dipende dalla versione
+   * dell'API e non dal negozio, quindi non cambia fra una chiamata e l'altra.
+   * Se la domanda non riesce si restituisce `null`, che a valle vuol dire "non
+   * mandare capability": senza sapere cosa e' ammesso, non mandare niente e'
+   * l'unica mossa che non rompe la mutation.
    */
-  async createCustomerBirthdateDefinition(): Promise<boolean> {
+  private async metafieldCapabilityFields(): Promise<ReadonlySet<string> | null> {
+    if (capabilityFieldsCache !== undefined) return capabilityFieldsCache;
+
+    try {
+      const data = await this.graphql<{
+        __type: { inputFields: { name: string }[] | null } | null;
+      }>(
+        `query MetafieldCapabilityFields {
+          __type(name: "MetafieldCapabilityCreateInput") {
+            inputFields { name }
+          }
+        }`,
+      );
+      const names = data.__type?.inputFields?.map((f) => f.name) ?? [];
+      capabilityFieldsCache = names.length > 0 ? new Set(names) : null;
+    } catch (error) {
+      console.warn(
+        '[shopify-api] capability dei metafield non interrogabili:',
+        error instanceof Error ? error.message : 'errore sconosciuto',
+      );
+      capabilityFieldsCache = null;
+    }
+
+    return capabilityFieldsCache;
+  }
+
+  /**
+   * Abilita sul negozio la definizione standard della data di nascita.
+   *
+   * Non `metafieldDefinitionCreate`: `facts` e' un namespace riservato di
+   * Shopify e `facts.birth_date` una definizione standard gia' prevista, che
+   * non si crea da zero ma si accende. La mutation giusta e'
+   * `standardMetafieldDefinitionEnable`, e la differenza non e' formale — e'
+   * lei che fa comparire il campo con il nome e la descrizione ufficiali,
+   * tradotti da Shopify nella lingua del negozio, e che lo rende quello che
+   * temi, segmenti e altre app si aspettano di trovare.
+   *
+   * Della definizione decidiamo solo cio' che la mutation lascia decidere: gli
+   * accessi e il fatto che sia appuntata in cima alla scheda cliente. Nome,
+   * descrizione e tipo sono di Shopify, ed e' precisamente il motivo per cui
+   * questa e' la strada giusta.
+   *
+   * `TAKEN` vale come successo: e' la risposta a "questa chiave e' gia'
+   * occupata", cioe' esattamente lo stato in cui volevamo arrivare. Serve anche
+   * con la rilevazione a monte, perche' fra la lettura e la scrittura la
+   * definizione puo' essere comparsa — due schede aperte, o il merchant che la
+   * abilita a mano nell'admin.
+   */
+  async enableCustomerBirthdateDefinition(): Promise<boolean> {
+    const capabilities = supportedCapabilities(
+      BIRTHDATE_METAFIELD_CAPABILITIES,
+      await this.metafieldCapabilityFields(),
+    );
+
     const data = await this.graphql<{
-      metafieldDefinitionCreate: {
+      standardMetafieldDefinitionEnable: {
         createdDefinition: { id: string } | null;
         userErrors: { field: string[] | null; message: string; code: string | null }[];
       } | null;
     }>(
-      `mutation CreateBirthdateDefinition($definition: MetafieldDefinitionInput!) {
-        metafieldDefinitionCreate(definition: $definition) {
+      `mutation EnableBirthdateDefinition(
+        $namespace: String!
+        $key: String!
+        $access: StandardMetafieldDefinitionAccessInput
+        $capabilities: MetafieldCapabilityCreateInput
+      ) {
+        standardMetafieldDefinitionEnable(
+          ownerType: CUSTOMER
+          namespace: $namespace
+          key: $key
+          access: $access
+          capabilities: $capabilities
+          pin: true
+        ) {
           createdDefinition { id }
           userErrors { field message code }
         }
       }`,
       {
-        definition: {
-          ownerType: 'CUSTOMER',
-          namespace: BIRTHDATE_METAFIELD.namespace,
-          key: BIRTHDATE_METAFIELD.key,
-          name: BIRTHDATE_METAFIELD.name,
-          description: BIRTHDATE_METAFIELD.description,
-          type: BIRTHDATE_METAFIELD.type,
-          ...BIRTHDATE_METAFIELD_OPTIONS,
-        },
+        namespace: BIRTHDATE_METAFIELD.namespace,
+        key: BIRTHDATE_METAFIELD.key,
+        access: BIRTHDATE_METAFIELD_ACCESS,
+        // `null` e non l'omissione: la variabile e' dichiarata, e un argomento
+        // nullo e' il modo di GraphQL per dire "lascia stare".
+        capabilities: capabilities ?? null,
       },
     );
 
-    const userErrors = data.metafieldDefinitionCreate?.userErrors ?? [];
+    const userErrors = data.standardMetafieldDefinitionEnable?.userErrors ?? [];
     if (userErrors.some((e) => e.code === 'TAKEN')) return true;
 
     // Ogni altro rifiuto e' un rifiuto: la mutation risponde 200 anche quando
-    // non ha creato niente, e trattarlo come successo lascerebbe il merchant
+    // non ha abilitato niente, e trattarlo come successo lascerebbe il merchant
     // davanti a un pulsante che dice "fatto" senza che sul suo negozio sia
     // comparso alcun campo.
     if (userErrors.length > 0) {
@@ -815,7 +888,7 @@ export class ShopifyAPIClient {
       );
     }
 
-    return data.metafieldDefinitionCreate?.createdDefinition != null;
+    return data.standardMetafieldDefinitionEnable?.createdDefinition != null;
   }
 
   /**

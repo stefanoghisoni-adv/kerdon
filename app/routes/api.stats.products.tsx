@@ -4,10 +4,16 @@ import { json } from '@remix-run/node';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
-import { computeProductReadiness } from '~/lib/stats/product-readiness';
+import {
+  collectProblemVariants,
+  computeProductReadiness,
+  type ProblemVariant,
+} from '~/lib/stats/product-readiness';
 import { enrichVariantCosts } from '~/lib/stats/inventory-cost.server';
 import { getReadinessCache, setReadinessCache } from '~/lib/cache/stats-cache.server';
 import { upsertTodayEligibilitySnapshot } from '~/lib/stats/eligibility-snapshot.server';
+import { loadSoldVariantIds } from '~/lib/stats/sold-variants.server';
+import { countSoldProblemVariants } from '~/lib/stats/sold-without-cost';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -31,6 +37,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         totalVariants: cached.readyCount + cached.problemCount,
         readyCount: cached.readyCount,
         problemCount: cached.problemCount,
+        // Puo' mancare: le scritture in cache fatte altrove (il ricontrollo
+        // della tab Prodotti) non sanno ricalcolarlo. Assente vuol dire che
+        // l'avviso non si mostra finche' non arriva il ricalcolo live — meglio
+        // di un avviso che annuncia un numero vecchio.
+        soldWithoutCost: cached.soldWithoutCost ?? null,
         cached: true,
       });
     }
@@ -42,6 +53,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let readyCount = 0;
   let problemCount = 0;
   let pageInfo: string | undefined;
+  // Le righe senza costo, non solo il loro numero: da qui esce anche l'avviso
+  // dei prodotti venduti senza costo, e quell'avviso deve annunciare la
+  // lunghezza dell'elenco vero — non una stima presa da un'altra parte.
+  const problemRows: ProblemVariant[] = [];
 
   // Scomposizione pronti/problemi: richiede il dato per-variante, quindi la
   // paginazione completa è inevitabile. La alleggeriamo però al minimo indispensabile
@@ -60,10 +75,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalProducts += counts.totalProducts;
     readyCount += counts.readyCount;
     problemCount += counts.problemCount;
+    problemRows.push(...collectProblemVariants(enriched));
     pageInfo = nextPageInfo ?? undefined;
   } while (pageInfo);
 
-  const result = { totalProducts, readyCount, problemCount };
+  // L'avviso della dashboard nasce qui e non da una riga di conteggio sul
+  // database del merchant. Il motivo sta in `sold-without-cost.ts`: in quel
+  // database ci sono solo i prodotti idonei e solo fino al tetto del piano,
+  // quindi "manca la riga" non significa "manca il costo", e l'avviso finiva per
+  // annunciare prodotti che l'elenco non poteva mostrare. Il catalogo lo stiamo
+  // gia' leggendo per la readiness: chiedere al merchant che cosa ha venduto
+  // costa una riga di query in piu', non una seconda passata su Shopify.
+  const sold = await loadSoldVariantIds(session.shop);
+  const soldWithoutCost = countSoldProblemVariants(problemRows, sold.ids);
+
+  const result = { totalProducts, readyCount, problemCount, soldWithoutCost };
   await setReadinessCache(shop.id, result);
 
   // Aggiorna lo snapshot di oggi: i prodotti possono diventare idonei durante la

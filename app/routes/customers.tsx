@@ -12,10 +12,12 @@ import {
   Card,
   Icon,
   IndexTable,
+  InlineGrid,
   InlineStack,
   Link,
   Page,
   Text,
+  TextField,
   Tooltip,
 } from '@shopify/polaris';
 import { AlertCircleIcon, CheckCircleIcon } from '@shopify/polaris-icons';
@@ -28,6 +30,7 @@ import { BASE_CURRENCY } from '~/lib/billing/money';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { loadCustomersReport } from '~/lib/customers/customers.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
+import { matchesCustomerSearch } from '~/lib/customers/customer-search';
 import { formatMoney } from '~/lib/billing/money';
 import { useLocale, useT } from '~/lib/i18n/context';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
@@ -35,6 +38,7 @@ import { BirthdateMetafieldCard } from '~/components/Customers/BirthdateMetafiel
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   BIRTHDATE_METAFIELD_KEY,
+  birthdateFieldState,
   birthdateMetafieldOf,
   formatMetafieldKey,
   isDateMetafieldType,
@@ -155,6 +159,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? {
           /** Il campo da cui si legge oggi, vuoto se non ne e' stato scelto uno. */
           configured: configuredKey,
+          /**
+           * Nessuno, in uso, oppure scelto ma non presente sul negozio.
+           *
+           * Lo decide il server perche' e' l'unico ad avere in mano tutt'e due
+           * le meta' della domanda: la scelta salvata e l'elenco vero delle
+           * definizioni. L'elenco non letto vale `null` e non "vuoto" — non
+           * sapere non e' lo stesso che sapere di no, e su un dubbio non si
+           * smentisce una configurazione che il merchant ha fatto davvero.
+           */
+          state: birthdateFieldState(
+            configuredKey,
+            definitionsRead ? definitions.map((d) => d.key) : null,
+          ),
           /** La nostra definizione esiste gia' sul negozio? */
           ourDefinitionPresent: definitionsRead
             ? definitions.some((d) => d.key === formatMetafieldKey(BIRTHDATE_METAFIELD_KEY))
@@ -181,14 +198,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
  * Sceglie da quale campo del cliente leggere la data di nascita.
  *
  * Due strade, e finiscono allo stesso posto — due colonne sulla riga del
- * negozio: `create` fa nascere il nostro campo e lo mette in uso, `use` punta a
- * uno che il negozio ha gia'. La colonna sul database del merchant e' sempre
- * `date_of_birth`: qui si decide da dove prende il valore, non dove finisce.
+ * negozio: `create` accende sul negozio il campo che Shopify prevede per la
+ * data di nascita e lo mette in uso, `use` punta a uno che il negozio ha gia'.
+ * La colonna sul database del merchant e' sempre `date_of_birth`: qui si decide
+ * da dove prende il valore, non dove finisce.
  *
- * Dopo la creazione si richiede a Shopify se il campo c'e', con una domanda
- * mirata su namespace e chiave: e' l'unica cosa che autorizza a metterlo in
- * uso. Fidarsi dell'esito della scrittura vorrebbe dire dare per riuscito
- * anche quello che non lo e'.
+ * Dopo si richiede a Shopify se il campo c'e', con una domanda mirata su
+ * namespace e chiave: e' l'unica cosa che autorizza a metterlo in uso. Fidarsi
+ * dell'esito della scrittura vorrebbe dire dare per riuscito anche quello che
+ * non lo e'.
  */
 export async function action({ request }: ActionFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -232,7 +250,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   try {
     const client = await ShopifyAPIClient.forShop(session.shop);
-    await client.createCustomerBirthdateDefinition();
+    await client.enableCustomerBirthdateDefinition();
 
     if (!(await client.hasCustomerBirthdateDefinition())) {
       return json({ ok: false as const, error: 'failed' as const }, { status: 502 });
@@ -248,7 +266,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ ok: true as const, error: null });
   } catch (error) {
     console.error(
-      '[customers] creazione del campo data di nascita non riuscita:',
+      '[customers] attivazione del campo data di nascita non riuscita:',
       error instanceof Error ? error.message : 'errore sconosciuto',
     );
     return json({ ok: false as const, error: 'failed' as const }, { status: 500 });
@@ -263,13 +281,20 @@ export default function Customers() {
 
   // Il filtro sta in uno stato e non nell'indirizzo: non ricarica niente —
   // le righe sono gia' tutte qui — e passare dal server per nascondere delle
-  // righe che si hanno gia' sarebbe un viaggio per nulla.
+  // righe che si hanno gia' sarebbe un viaggio per nulla. Vale anche per la
+  // ricerca, che lavora sulle stesse righe.
   const [onlyIssues, setOnlyIssues] = useState(false);
+  const [query, setQuery] = useState('');
 
   const needsWork = (row: { coveredLines: number; totalLines: number }) =>
     row.coveredLines < row.totalLines;
-  const visibleRows = onlyIssues ? rows.filter(needsWork) : rows;
-  const hiddenByFilter = rows.length - visibleRows.length;
+  const filtered = onlyIssues ? rows.filter(needsWork) : rows;
+  const hiddenByFilter = rows.length - filtered.length;
+  const visibleRows = filtered.filter((row) => matchesCustomerSearch(row, query));
+  // Con una ricerca senza risultati la tabella resta vuota: senza dirlo
+  // sembrerebbe un negozio senza clienti, mentre e' solo la ricerca a non aver
+  // trovato nulla.
+  const noSearchResults = query.trim().length > 0 && visibleRows.length === 0;
 
   return (
     <Page
@@ -331,22 +356,47 @@ export default function Customers() {
             costo. Sono le uniche su cui c'e' qualcosa da fare, e in un elenco
             lungo si perdono fra quelle a posto. */}
         {unavailable === null && rows.length > 0 && (
-          <InlineStack gap="200" blockAlign="center" wrap>
-            <ButtonGroup variant="segmented">
-              <Button pressed={!onlyIssues} onClick={() => setOnlyIssues(false)}>
-                {t.customers.filterAll}
-              </Button>
-              <Button pressed={onlyIssues} onClick={() => setOnlyIssues(true)}>
-                {t.customers.filterIssues}
-              </Button>
-            </ButtonGroup>
+          /* Filtri a sinistra e ricerca a destra, mezza riga ciascuno: la
+             stessa forma dei prodotti non idonei, dove la ricerca finisce
+             all'estrema destra senza doverla dimensionare a mano.
+             alignItems="center" allinea i due lati sull'asse verticale,
+             altrimenti i pulsanti si appoggerebbero in cima al campo. */
+          <InlineGrid columns={2} gap="400" alignItems="center">
+            <InlineStack gap="200" blockAlign="center" wrap>
+              <ButtonGroup variant="segmented">
+                <Button pressed={!onlyIssues} onClick={() => setOnlyIssues(false)}>
+                  {t.customers.filterAll}
+                </Button>
+                <Button pressed={onlyIssues} onClick={() => setOnlyIssues(true)}>
+                  {t.customers.filterIssues}
+                </Button>
+              </ButtonGroup>
 
-            {onlyIssues && hiddenByFilter > 0 && (
-              <Text as="span" tone="subdued" variant="bodySm">
-                {t.customers.hiddenCount(hiddenByFilter)}
-              </Text>
-            )}
-          </InlineStack>
+              {onlyIssues && hiddenByFilter > 0 && (
+                <Text as="span" tone="subdued" variant="bodySm">
+                  {t.customers.hiddenCount(hiddenByFilter)}
+                </Text>
+              )}
+            </InlineStack>
+
+            {/* Tre quarti della colonna, allineata a destra: stessa misura e
+                stessa impostazione della ricerca nei prodotti, cosi' le due tab
+                non si somigliano soltanto — si corrispondono. */}
+            <InlineStack align="end">
+              <Box width="75%">
+                <TextField
+                  label={t.customers.search}
+                  labelHidden
+                  value={query}
+                  onChange={setQuery}
+                  autoComplete="off"
+                  placeholder={t.customers.searchPlaceholder}
+                  clearButton
+                  onClearButtonClick={() => setQuery('')}
+                />
+              </Box>
+            </InlineStack>
+          </InlineGrid>
         )}
 
         {unavailable === null && (
@@ -375,7 +425,9 @@ export default function Customers() {
               emptyState={
                 <Box padding="600">
                   <Text as="p" tone="subdued" alignment="center">
-                    {t.customers.empty}
+                    {noSearchResults
+                      ? t.customers.searchNoResults(query.trim())
+                      : t.customers.empty}
                   </Text>
                 </Box>
               }

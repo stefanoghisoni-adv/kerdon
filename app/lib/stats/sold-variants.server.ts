@@ -1,6 +1,7 @@
 import { prisma } from '~/db.server';
 import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { runQueryRows } from '~/lib/supabase-management.server';
+import { soldVariantsSQL } from './sold-without-cost';
 
 /**
  * Le varianti che qualcuno ha gia' comprato.
@@ -14,6 +15,10 @@ import { runQueryRows } from '~/lib/supabase-management.server';
  * Da qui il filtro "solo venduti" nella tab dei problemi: chi ci arriva da un
  * cliente con l'avviso vuole vedere i prodotti che riguardano lui, non il
  * catalogo intero.
+ *
+ * Questa e' l'UNICA cosa che si chiede al database del merchant: che cosa e'
+ * stato venduto. Se ci sia un costo oppure no lo dice Shopify — vedere
+ * `sold-without-cost.ts` per il perche'.
  */
 export interface SoldVariants {
   /** Le varianti gia' comprate. null = non si e' potuto sapere. */
@@ -50,37 +55,18 @@ export async function loadSoldVariantIds(
     return { ids: null, customerName: null };
   }
 
-  // L'id arriva dalla URL: si accetta solo un intero positivo, e finisce nella
-  // query come numero e non come testo. Un valore diverso vale come "nessun
-  // cliente" e la pagina mostra tutto.
-  const customerId =
-    opts.customerId != null && Number.isSafeInteger(opts.customerId) && opts.customerId > 0
-      ? opts.customerId
-      : null;
-
   try {
     const token = await getValidAccessToken(shop.id);
 
-    // Restringendo a un cliente si passa dagli ordini: sono le sue righe che
-    // interessano, non tutte quelle del negozio.
-    const sql = customerId
-      ? `SELECT DISTINCT l.shopify_variant_id,
-                MAX(o.customer_first_name) AS first_name,
-                MAX(o.customer_last_name)  AS last_name
-         FROM order_lines l
-         JOIN orders o ON o.shopify_order_id = l.shopify_order_id
-         WHERE l.shopify_variant_id IS NOT NULL
-           AND o.shopify_customer_id = ${customerId}
-         GROUP BY l.shopify_variant_id`
-      : `SELECT DISTINCT shopify_variant_id, NULL AS first_name, NULL AS last_name
-         FROM order_lines
-         WHERE shopify_variant_id IS NOT NULL`;
-
+    // La query non si scrive qui: e' la definizione di "prodotto incluso in
+    // ordini", ed e' condivisa con il conteggio dell'avviso. Due definizioni
+    // scritte in due posti sono due definizioni, ed e' esattamente cosi' che
+    // l'avviso e l'elenco erano arrivati a dire numeri diversi.
     const rows = await runQueryRows<{
       shopify_variant_id: string | number | null;
       first_name: string | null;
       last_name: string | null;
-    }>(token, ref, sql);
+    }>(token, ref, soldVariantsSQL(opts.customerId ?? null));
 
     const ids = new Set(
       rows
@@ -88,7 +74,7 @@ export async function loadSoldVariantIds(
         .filter((id) => Number.isFinite(id) && id > 0),
     );
 
-    const named = customerId ? rows.find((row) => row.first_name || row.last_name) : null;
+    const named = rows.find((row) => row.first_name || row.last_name) ?? null;
     const customerName = named
       ? [named.first_name, named.last_name].filter(Boolean).join(' ') || null
       : null;
@@ -102,61 +88,5 @@ export async function loadSoldVariantIds(
       error instanceof Error ? error.message : 'errore sconosciuto',
     );
     return { ids: null, customerName: null };
-  }
-}
-
-/**
- * Quanti prodotti venduti non hanno un costo.
- *
- * Sono quelli che stanno falsando il profitto adesso: compaiono in ordini non
- * annullati, e di loro non si sa quanto siano costati. Il profitto di quegli
- * ordini e' calcolato sulle sole righe che un costo ce l'hanno, quindi risulta
- * piu' alto del vero — e non c'e' niente a schermo che lo dica, se non lo si
- * dice qui.
- *
- * La domanda si fa al database del merchant e non a Shopify: una passata sul
- * catalogo intero, a ogni apertura della dashboard, costerebbe secondi. Questa
- * e' una riga di conteggio.
- *
- * `products` contiene solo i prodotti idonei, cioe' quelli con un costo: una
- * variante senza costo non ha nemmeno la riga. Per questo la join e' esterna e
- * il conto prende sia le righe assenti sia quelle con il costo vuoto.
- */
-export async function countSoldWithoutCost(shopDomain: string): Promise<number> {
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain },
-    select: {
-      id: true,
-      supabaseConfig: { select: { supabaseProjectRef: true, connectionVerifiedAt: true } },
-    },
-  });
-
-  const ref = shop?.supabaseConfig?.supabaseProjectRef;
-  if (!shop || !ref || !shop.supabaseConfig?.connectionVerifiedAt) return 0;
-
-  try {
-    const token = await getValidAccessToken(shop.id);
-    const rows = await runQueryRows<{ total: string | number | null }>(
-      token,
-      ref,
-      `SELECT COUNT(DISTINCT l.shopify_variant_id) AS total
-       FROM order_lines l
-       JOIN orders o ON o.shopify_order_id = l.shopify_order_id
-       LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
-       WHERE l.shopify_variant_id IS NOT NULL
-         AND o.cancelled_at IS NULL
-         AND p.cost_per_item IS NULL`,
-    );
-
-    const total = Number(rows[0]?.total ?? 0);
-    return Number.isFinite(total) && total > 0 ? total : 0;
-  } catch (error) {
-    // Zero e non un errore: l'avviso e' un di piu', e una dashboard che non si
-    // apre perche' non si e' potuto contare un avviso e' molto peggio.
-    console.warn(
-      '[dashboard] non ho potuto contare i prodotti venduti senza costo:',
-      error instanceof Error ? error.message : 'errore sconosciuto',
-    );
-    return 0;
   }
 }

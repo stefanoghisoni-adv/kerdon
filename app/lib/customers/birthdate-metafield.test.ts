@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   BIRTHDATE_METAFIELD,
+  BIRTHDATE_METAFIELD_ACCESS,
   BIRTHDATE_METAFIELD_KEY,
+  birthdateFieldState,
   birthdateMetafieldOf,
   formatMetafieldKey,
   isDateMetafieldType,
   parseMetafieldKey,
+  supportedCapabilities,
 } from './birthdate-metafield';
 
 describe('parseMetafieldKey', () => {
@@ -68,7 +71,7 @@ describe('parseMetafieldKey', () => {
 
 describe('formatMetafieldKey', () => {
   it('rimette insieme la forma che l admin mostra', () => {
-    expect(formatMetafieldKey(BIRTHDATE_METAFIELD_KEY)).toBe('custom.data_di_nascita');
+    expect(formatMetafieldKey(BIRTHDATE_METAFIELD_KEY)).toBe('facts.birth_date');
   });
 
   it('senza campo non inventa niente', () => {
@@ -118,11 +121,78 @@ describe('birthdateMetafieldOf', () => {
   });
 });
 
-describe('la definizione che crea l app', () => {
+describe('la definizione che l app abilita', () => {
   // Se uno dei tre punti che la usano battesse una chiave diversa, il campo
-  // resterebbe sempre vuoto senza che niente segnali un errore.
-  it('e quella che il merchant vede come custom.data_di_nascita', () => {
-    expect(formatMetafieldKey(BIRTHDATE_METAFIELD_KEY)).toBe('custom.data_di_nascita');
+  // resterebbe sempre vuoto senza che niente segnali un errore. E non e' una
+  // chiave qualsiasi: `facts.birth_date` e' quella che Shopify prevede, quindi
+  // quella che temi, segmenti e altre app sanno gia' leggere.
+  it('e quella standard di Shopify, facts.birth_date', () => {
+    expect(formatMetafieldKey(BIRTHDATE_METAFIELD_KEY)).toBe('facts.birth_date');
+  });
+
+  // Data e non data-e-ora: una persona nasce in un giorno, non a un'ora.
+  it('e di tipo data, non data e ora', () => {
     expect(BIRTHDATE_METAFIELD.type).toBe('date');
+  });
+
+  // `admin` non si manda: su una definizione standard il livello
+  // amministratore lo decide Shopify, e mandarlo fa rifiutare l'input.
+  it('chiede la vetrina in lettura e l account cliente in lettura e scrittura', () => {
+    expect(BIRTHDATE_METAFIELD_ACCESS).toEqual({
+      storefront: 'PUBLIC_READ',
+      customerAccount: 'READ_WRITE',
+    });
+    expect(BIRTHDATE_METAFIELD_ACCESS).not.toHaveProperty('admin');
+  });
+});
+
+describe('supportedCapabilities', () => {
+  // Il punto di tutta la funzione: una capability che la versione dell'API in
+  // uso non conosce non viene ignorata, fa fallire la mutation prima ancora di
+  // eseguirla. E' successo con analyticsQueryable sulla 2026-07.
+  it('lascia fuori quello che la versione dell API non conosce', () => {
+    expect(
+      supportedCapabilities({ analyticsQueryable: { enabled: true } }, new Set(['uniqueValues'])),
+    ).toBeUndefined();
+  });
+
+  it('tiene quello che c e', () => {
+    expect(
+      supportedCapabilities(
+        { analyticsQueryable: { enabled: true } },
+        new Set(['analyticsQueryable', 'uniqueValues']),
+      ),
+    ).toEqual({ analyticsQueryable: { enabled: true } });
+  });
+
+  // Non sapere non autorizza a tentare: senza l'elenco si manda il minimo, che
+  // e' l'unica cosa che non rompe la mutation.
+  it('senza elenco non manda niente', () => {
+    expect(supportedCapabilities({ analyticsQueryable: { enabled: true } }, null)).toBeUndefined();
+  });
+});
+
+describe('birthdateFieldState', () => {
+  it('niente di scelto: nessun campo in uso', () => {
+    expect(birthdateFieldState('', ['facts.birth_date'])).toBe('none');
+    expect(birthdateFieldState('   ', null)).toBe('none');
+  });
+
+  it('scelto e presente sul negozio: in uso', () => {
+    expect(birthdateFieldState('facts.birth_date', ['facts.birth_date'])).toBe('in_use');
+  });
+
+  // Il caso che faceva mentire la card: una chiave salvata che sul negozio non
+  // corrisponde a niente veniva annunciata come attiva, e il merchant credeva
+  // di raccogliere una data che non sarebbe mai arrivata.
+  it('scelto ma sul negozio non c e: lo dice', () => {
+    expect(birthdateFieldState('custom.data_di_nascita', ['facts.birth_date'])).toBe('missing');
+    expect(birthdateFieldState('custom.data_di_nascita', [])).toBe('missing');
+  });
+
+  // Non sapere non e' lo stesso che sapere di no: su un elenco che non si e'
+  // potuto leggere non si smentisce una scelta fatta davvero.
+  it('elenco non letto: non smentisce niente', () => {
+    expect(birthdateFieldState('custom.data_di_nascita', null)).toBe('in_use');
   });
 });

@@ -71,7 +71,13 @@ SELECT
   MAX(o.currency) AS currency,
   -- Il cliente e' anche fra quelli sincronizzati? Lo dice la sola presenza
   -- della sua riga: la tabella dei clienti contiene chi ha dato consenso.
-  BOOL_OR(c.shopify_customer_id IS NOT NULL) AS synced
+  BOOL_OR(c.shopify_customer_id IS NOT NULL) AS synced,
+  -- Email e telefono non finiscono in tabella, ma viaggiano con la riga: sono
+  -- i due modi in cui un cliente si ritrova quando del nome non si e' sicuri —
+  -- un cognome scritto a meta', un omonimo — e la ricerca lavora sulle righe
+  -- gia' caricate, quindi cio' che non arriva qui non si puo' cercare.
+  MAX(c.email_address) AS email,
+  MAX(c.phone_number) AS phone
 FROM orders o
 JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
 LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
