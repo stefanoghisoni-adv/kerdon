@@ -94,12 +94,16 @@ describe('Periodic sync check processor', () => {
 
     vi.mocked(prisma.shop.findUnique).mockResolvedValue(mockShop as any);
 
-    // Mock last sync job (periodic_check completed at specific time)
-    const lastSyncTime = new Date('2026-07-12T12:00:00Z');
+    // La corsa precedente ha un inizio e una fine distinti: e' proprio quella
+    // distanza a contenere le modifiche che il vecchio confine perdeva.
+    const lastRunStart = new Date('2026-07-12T12:00:00Z');
     vi.mocked(prisma.syncJob.findFirst).mockResolvedValue({
       id: 'last-sync-job',
-      completedAt: lastSyncTime,
+      startedAt: lastRunStart,
+      completedAt: new Date('2026-07-12T12:05:00Z'),
     } as any);
+    // Il confine e' l'inizio meno il margine per lo scarto fra gli orologi.
+    const lastSyncTime = new Date(lastRunStart.getTime() - 60_000);
 
     // Mock SyncJob create
     const mockSyncJob = { id: 'sync-job-1' };
@@ -197,6 +201,18 @@ describe('Periodic sync check processor', () => {
         status: 'running',
       },
     });
+
+    // Il difetto che questa correzione chiude, in una riga.
+    //
+    // La corsa precedente e' andata dalle 12:00 alle 12:05. Un prodotto
+    // modificato alle 12:02 — dopo che la sua pagina era gia' stata letta, ma
+    // prima della fine — aveva un `updated_at` anteriore alle 12:05: con il
+    // vecchio confine nessuna corsa successiva lo avrebbe mai piu' chiesto.
+    // Ripartendo dall'inizio, ci ricade dentro.
+    const modificaAMetaCorsa = new Date('2026-07-12T12:02:00Z');
+    expect(new Date(mockGetProducts.mock.calls[0][0].updatedAtMin).getTime()).toBeLessThan(
+      modificaAMetaCorsa.getTime(),
+    );
 
     // Verify getProducts was called with updatedAtMin (delta)
     expect(mockGetProducts).toHaveBeenCalledWith({
@@ -611,7 +627,8 @@ describe('Periodic sync check processor', () => {
       customersSyncEnabled: true,
     });
     (prisma.syncJob.findFirst as any).mockResolvedValue({
-      completedAt: new Date('2026-07-20T00:00:00Z'),
+      startedAt: new Date('2026-07-20T00:00:00Z'),
+      completedAt: new Date('2026-07-20T00:04:00Z'),
     });
     (prisma.syncJob.create as any).mockResolvedValue({ id: 'job-1' });
     (prisma.syncJob.update as any).mockResolvedValue({});
@@ -660,7 +677,10 @@ describe('Periodic sync check processor', () => {
 
     await processPeriodicSyncCheck('shop-1');
 
-    expect(getCustomers.mock.calls[0][0].updatedAtMin).toBe('2026-07-20T00:00:00.000Z');
+    // Si riparte dall'INIZIO della corsa precedente, meno il margine: quanto
+    // e' durata quella corsa e' esattamente la finestra in cui prima le
+    // modifiche sparivano.
+    expect(getCustomers.mock.calls[0][0].updatedAtMin).toBe('2026-07-19T23:59:00.000Z');
   });
 
   it('tabella clienti non disponibile → clienti saltati, prodotti comunque completati', async () => {

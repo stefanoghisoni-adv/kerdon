@@ -515,6 +515,16 @@ async function fetchExistingProductIds(
  * - Variant rows: onConflict: 'shopify_variant_id'
  * - Non-variant rows: onConflict: 'shopify_product_id'
  */
+/**
+ * Il margine che si toglie al confine incrementale.
+ *
+ * Non e' prudenza generica: `updated_at` lo scrive Shopify sui suoi server,
+ * l'inizio della corsa lo scriviamo noi sui nostri, e due macchine diverse non
+ * hanno mai esattamente la stessa ora. Senza margine, una modifica avvenuta a
+ * cavallo del confine cadrebbe dalla parte sbagliata e non verrebbe raccolta.
+ */
+const CLOCK_SKEW_MARGIN_MS = 60_000;
+
 export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
   const shop = await prisma.shop.findUnique({
     where: { id: shopId },
@@ -552,7 +562,27 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
     },
   });
 
-  const lastSyncTime = lastSyncJob?.completedAt || shop.supabaseConfig.updatedAt;
+  // Il confine e' l'INIZIO della corsa precedente, non la sua fine.
+  //
+  // Con la fine si perdevano dati, in silenzio. Una corsa che comincia alle
+  // 10:00 e finisce alle 10:03 legge la pagina di un prodotto alle 10:01; se
+  // quel prodotto viene modificato alle 10:02, il suo `updated_at` e' anteriore
+  // alle 10:03 — e la corsa dopo, che chiede "tutto cio' che e' cambiato dopo
+  // le 10:03", non lo vede. Non lo vedra' nessuna corsa successiva: quella
+  // modifica non arrivera' mai su Supabase, e niente lo segnala.
+  //
+  // Ripartendo dall'inizio si rileggono anche cose gia' sincronizzate — la
+  // sovrapposizione vale quanto e' durata la corsa — ma non costa niente:
+  // sono upsert, riscrivere la stessa riga con lo stesso contenuto e' un
+  // aggiornamento a vuoto. Rileggere di piu' e' il prezzo di non perdere.
+  const previousRunStart = lastSyncJob?.startedAt;
+  const lastSyncTime = previousRunStart
+    ? // Un minuto di margine perche' i due orologi non sono lo stesso: il
+      // `updated_at` lo scrive Shopify sulle sue macchine, `startedAt` lo
+      // scriviamo noi sulle nostre, e qualche secondo di scarto fra i due
+      // basterebbe a far ricadere una modifica appena sotto il confine.
+      new Date(previousRunStart.getTime() - CLOCK_SKEW_MARGIN_MS)
+    : shop.supabaseConfig.updatedAt;
 
   // Create sync job
   const syncJob = await prisma.syncJob.create({
