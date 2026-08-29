@@ -1,10 +1,8 @@
 import { prisma } from '~/db.server';
 import { decrypt } from '~/utils/crypto.server';
-import {
-  grantsDataAccess,
-  normalizeAuthorization,
-  type AuthorizationState,
-} from '~/utils/authorization.server';
+import { normalizeAuthorization, type AuthorizationState } from '~/utils/authorization.server';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
 import { hashReadProxyToken } from './token.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 
@@ -14,7 +12,8 @@ export interface ShopReadContext {
   // decide se le letture passano, e le due autorizzazioni sono indipendenti.
   // Per messaggi e diagnostica. NON usarlo come gate.
   trackingAuthorization: AuthorizationState;
-  // Unico gate valido per l'accesso ai dati: fail-closed sul valore grezzo.
+  // Unico gate valido per l'accesso ai dati: la risposta della policy alla
+  // capacita' `use_read_proxy`, fail-closed.
   canReadData: boolean;
   projectRef: string;
   serviceRoleKey: string;
@@ -99,7 +98,17 @@ async function loadReadContext(hash: string): Promise<ReadContextResult> {
       // Il tracciamento ha la sua autorizzazione: un negozio con l'app sospesa
       // puo' continuare a leggere i dati gia' sincronizzati.
       trackingAuthorization: normalizeAuthorization(shop.trackingAuthorization),
-      canReadData: grantsDataAccess(shop.trackingAuthorization),
+      // La decisione non si compone piu' qui.
+      //
+      // Guardare la sola colonna del tracciamento bastava a fermare chi era
+      // stato sospeso, ma non chi se n'era andato: l'app disinstallata non
+      // spegne quella colonna — spegne l'app — e il token di lettura, che nella
+      // vetrina resta incollato nel container del merchant, continuava a
+      // rispondere. Un negozio che aveva chiuso con noi seguitava a farsi
+      // servire i propri clienti da questa rotta, a tempo indeterminato.
+      // `use_read_proxy` tiene insieme le tre condizioni che contano qui, e le
+      // tiene nello stesso posto di tutte le altre.
+      canReadData: can(shopCapabilitiesWithPlan(shop, plan), 'use_read_proxy'),
       projectRef: config.supabaseProjectRef,
       serviceRoleKey,
       customersEnabled: plan?.customersSyncEnabled ?? false,

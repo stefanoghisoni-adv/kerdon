@@ -6,8 +6,8 @@ import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
 import { isCustomerOptedIn } from '~/lib/stats/customer-consent-stats';
 import type { ShopifyCustomer } from '~/types/shopify';
-import { findPlanByName } from '~/lib/billing/find-plan.server';
-import { syncIsActive } from '~/lib/sync/sync-active';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 
 export async function action({ request }: ActionFunctionArgs) {
   // Verify HMAC signature
@@ -46,16 +46,19 @@ export async function action({ request }: ActionFunctionArgs) {
       include: { supabaseConfig: true },
     });
 
-    if (!shop || !shop.supabaseConfig || !syncIsActive(shop.supabaseConfig)) {
+    if (!shop || !shop.supabaseConfig) {
       console.log(`Shop ${shopDomain} not configured for sync`);
       return json({ ok: true }, { status: 200 });
     }
 
-    // Customer sync is gated by plan entitlement.
-    const plan = await findPlanByName(shop.currentPlan);
-
-    if (!plan?.customersSyncEnabled) {
-      console.log(`Customer sync not enabled for plan ${shop.currentPlan}`);
+    // Il collegamento e il piano si guardavano gia', una condizione per volta;
+    // l'autorizzazione no, e nemmeno la disinstallazione. Erano proprio quelle
+    // due a mancare ovunque, ed erano le uniche che il merchant non poteva
+    // cambiare da se': un negozio sospeso continuava a farsi scrivere i clienti
+    // dentro, senza nessun gesto suo, perche' le notifiche arrivano da sole.
+    // Ora la domanda e' una: questo negozio puo' sincronizzare i clienti?
+    if (!can(await shopCapabilities(shop), 'sync_customers')) {
+      console.log(`Customer sync not enabled for shop ${shopDomain}`);
       return json({ ok: true }, { status: 200 });
     }
 

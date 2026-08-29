@@ -12,14 +12,22 @@ vi.mock('~/utils/crypto.server', () => ({ decrypt: (v: string) => v.replace(/^en
 
 import { resolveShopReadContext, clearReadContextCache } from './context.server';
 
+// `uninstalledAt` e `connectionVerifiedAt` non erano in questa riga finta
+// perche' finora nessuno li guardava: il gate leggeva la sola colonna del
+// tracciamento. Adesso la decisione passa dalla policy, che li pretende — ed e'
+// giusto che il negozio di prova debba dichiararsi installato e collegato,
+// invece di esserlo per omissione.
 const shopRow = (over: Record<string, unknown> = {}) => ({
   id: 's1',
+  uninstalledAt: null,
   authorization: 'ENABLED',
   trackingAuthorization: 'ENABLED',
+  scopes: 'read_products',
   currentPlan: 'free',
   supabaseConfig: {
     supabaseProjectRef: 'abcref',
     supabaseServiceRoleKey: 'enc(svc)',
+    connectionVerifiedAt: new Date('2026-01-01T00:00:00Z'),
   },
   ...over,
 });
@@ -99,6 +107,37 @@ describe('resolveShopReadContext', () => {
     );
     findPlanMock.mockResolvedValueOnce({ customersSyncEnabled: false });
     const r = await resolveShopReadContext('spx_track_off');
+    expect((r as { ctx: { canReadData: boolean } }).ctx.canReadData).toBe(false);
+  });
+
+  // Il buco che questa rotta aveva: la disinstallazione non tocca la colonna
+  // del tracciamento — spegne l'app — quindi il vecchio gate la lasciava
+  // passare. Il token resta incollato nel container della vetrina e continuava
+  // a rispondere a un negozio che se n'era andato.
+  it('app disinstallata → le letture non passano, comunque stia la colonna', async () => {
+    findUnique.mockResolvedValueOnce(
+      shopRow({ uninstalledAt: new Date('2026-03-01T00:00:00Z'), trackingAuthorization: 'ENABLED' }),
+    );
+    findPlanMock.mockResolvedValueOnce({ customersSyncEnabled: false });
+    const r = await resolveShopReadContext('spx_uninstalled');
+    expect((r as { ctx: { canReadData: boolean } }).ctx.canReadData).toBe(false);
+  });
+
+  // Chiave e ref ci sono ma il collegamento non e' mai stato verificato: la
+  // configurazione e' a meta', e con la service_role in mano non si inoltra una
+  // lettura verso un progetto che non sappiamo di saper leggere.
+  it('collegamento mai verificato → le letture non passano', async () => {
+    findUnique.mockResolvedValueOnce(
+      shopRow({
+        supabaseConfig: {
+          supabaseProjectRef: 'abcref',
+          supabaseServiceRoleKey: 'enc(svc)',
+          connectionVerifiedAt: null,
+        },
+      }),
+    );
+    findPlanMock.mockResolvedValueOnce({ customersSyncEnabled: false });
+    const r = await resolveShopReadContext('spx_unverified');
     expect((r as { ctx: { canReadData: boolean } }).ctx.canReadData).toBe(false);
   });
 

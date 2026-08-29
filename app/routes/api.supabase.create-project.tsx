@@ -15,13 +15,14 @@ import {
   SupabaseApiError,
 } from '~/lib/supabase-management.server';
 import { generateDbPassword } from '~/lib/password.server';
-import { isAuthorized } from '~/utils/authorization.server';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
   if (!shop) return json({ ok: false, error: 'Shop non trovato' }, { status: 404 });
-  if (!isAuthorized(shop.authorization)) {
+  if (!can(await shopCapabilities(shop), 'use_app')) {
     return json(
       {
         ok: false,

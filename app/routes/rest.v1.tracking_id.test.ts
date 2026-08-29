@@ -33,7 +33,9 @@ beforeEach(() => {
   recordUserSeen.mockClear();
   resolveShopReadContext.mockResolvedValue({
     kind: 'ok',
-    ctx: { shopId: 's1', projectRef: 'abcdef', serviceRoleKey: 'k' },
+    // `canReadData` e' la risposta della policy, e adesso questa rotta la
+    // guarda come le altre tre di /rest/v1/: prima era l'unica a non farlo.
+    ctx: { shopId: 's1', canReadData: true, projectRef: 'abcdef', serviceRoleKey: 'k' },
   });
 });
 
@@ -41,6 +43,24 @@ describe('/rest/v1/tracking_id', () => {
   it('senza token non conia niente', async () => {
     const res = await call();
     expect(res.status).toBe(401);
+  });
+
+  // Il buco che c'era: il token bastava. Un negozio con il tracciamento
+  // sospeso, o che aveva disinstallato l'app, continuava a farsi coniare
+  // identificativi — e siccome questa e' anche l'unica rotta di lettura che
+  // SCRIVE, la sua tabella dei visitatori cresceva mentre tutto il resto era
+  // fermo.
+  it('lettura non concessa: niente identificativo e niente riga', async () => {
+    resolveShopReadContext.mockResolvedValue({
+      kind: 'ok',
+      ctx: { shopId: 's1', canReadData: false, projectRef: 'abcdef', serviceRoleKey: 'k' },
+    });
+
+    const res = await call({ apikey: 'buono' });
+
+    expect(res.status).toBe(403);
+    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(res.headers.get('Set-Cookie')).toBeNull();
   });
 
   it('token non valido: nessun identificativo', async () => {

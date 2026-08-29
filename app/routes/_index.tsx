@@ -42,7 +42,9 @@ import { SupabaseAccountConnect } from '~/components/Dashboard/SupabaseAccountCo
 import { SupabaseProjectConnect } from '~/components/Dashboard/SupabaseProjectConnect';
 import { prisma } from '~/db.server';
 import { getOrCreateShop } from '~/utils/shop.server';
-import { normalizeAuthorization, isAuthorized } from '~/utils/authorization.server';
+import { normalizeAuthorization } from '~/utils/authorization.server';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 import { resolveSyncState } from '~/components/Dashboard/sync-state';
 import { latestBulkJob, lastSyncActivityAt } from '~/lib/sync/latest-jobs.server';
 import { enqueueManualSync, triggerSyncDrain } from '~/lib/queue/trigger.server';
@@ -427,7 +429,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Gate autorizzazione: nessuna azione se il negozio non è ENABLED (ban o
     // trial scaduto). Enforcement server-side: vale anche se l'utente riabilita
     // i pulsanti nell'HTML.
-    if (!isAuthorized(shop.authorization)) {
+    if (!can(await shopCapabilities(shop), 'use_app')) {
       return json(
         {
           error: (await dictionaryForShop(session.shop)).errors.suspended,

@@ -3,7 +3,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('~/lib/webhooks/verify.server', () => ({ verifyWebhook: () => true }));
 vi.mock('~/lib/supabase.server', () => ({ createSupabaseClient: vi.fn() }));
 vi.mock('~/db.server', () => ({
-  prisma: { shop: { findUnique: vi.fn() }, syncJob: { create: vi.fn() } },
+  prisma: {
+    shop: { findUnique: vi.fn() },
+    plan: { findFirst: vi.fn() },
+    syncJob: { create: vi.fn() },
+  },
 }));
 
 // Il riconoscimento del visitatore: qui interessa che il webhook gli passi la
@@ -39,14 +43,23 @@ function req(body: unknown) {
   });
 }
 
-/** Negozio collegato, verificato, con il permesso sugli ordini. */
+/** Negozio installato, autorizzato, collegato e con il permesso sugli ordini. */
 function mockShop(over: Record<string, unknown> = {}) {
   (prisma.shop.findUnique as any).mockResolvedValue({
     id: 'shop-1',
     shopDomain: 'test-shop.myshopify.com',
+    uninstalledAt: null,
+    authorization: 'ENABLED',
+    trackingAuthorization: 'ENABLED',
     scopes: 'read_products,read_orders,read_all_orders',
+    currentPlan: 'pro',
     supabaseConfig: { connectionVerifiedAt: new Date(), tableNameProducts: 'products' },
     ...over,
+  });
+  (prisma.plan.findFirst as any).mockResolvedValue({
+    planName: 'pro',
+    customersSyncEnabled: true,
+    productFeedsEnabled: true,
   });
   (prisma.syncJob.create as any).mockResolvedValue({});
 }
@@ -372,6 +385,70 @@ describe('webhook orders — quando non c e niente da fare', () => {
 
     expect(createSupabaseClient).not.toHaveBeenCalled();
     expect(lastTrace(logged)).toMatchObject({ status: 'skipped' });
+  });
+
+  /**
+   * Le due condizioni che qui mancavano.
+   *
+   * Il collegamento e il permesso sugli ordini si guardavano gia'. Non si
+   * guardava se il negozio fosse ancora autorizzato, ne' se avesse
+   * disinstallato — ed e' l'unica strada che non passa da nessuna schermata:
+   * l'ordine arriva perche' qualcuno ha comprato, non perche' il merchant abbia
+   * premuto qualcosa.
+   */
+  it("uso dell'app sospeso: l ordine non si scrive", async () => {
+    mockShop({ authorization: 'DISABLED' });
+    mockSupabase();
+
+    const res = await action({ request: req(orderPayload()) } as any);
+
+    expect(res.status).toBe(200);
+    expect(createSupabaseClient).not.toHaveBeenCalled();
+    expect(lastTrace(logged)).toMatchObject({ status: 'skipped' });
+  });
+
+  it('app disinstallata: l ordine non si scrive', async () => {
+    mockShop({ uninstalledAt: new Date('2026-05-01T00:00:00Z') });
+    mockSupabase();
+
+    await action({ request: req(orderPayload()) } as any);
+
+    expect(createSupabaseClient).not.toHaveBeenCalled();
+    expect(lastTrace(logged)).toMatchObject({ status: 'skipped' });
+  });
+
+  it('valore inatteso nella colonna: in dubbio non si scrive', async () => {
+    mockShop({ authorization: 'DISABLD' });
+    mockSupabase();
+
+    await action({ request: req(orderPayload()) } as any);
+
+    expect(createSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  // Il motivo del rifiuto non si butta: e' l'unica cosa che poi permette di
+  // capire perche' un ordine non si trova. Le due frasi storiche restano
+  // parola per parola, cosi' chi le riconosce in un registro non deve
+  // reimpararle.
+  it('il registro dice PERCHE l ordine e stato saltato', async () => {
+    mockShop({ scopes: 'read_products' });
+    mockSupabase();
+    await action({ request: req(orderPayload()) } as any);
+    expect(lastTrace(logged)).toMatchObject({
+      detail: 'permesso sugli ordini non concesso',
+    });
+
+    mockShop({ supabaseConfig: null });
+    await action({ request: req(orderPayload()) } as any);
+    expect(lastTrace(logged)).toMatchObject({
+      detail: 'nessun progetto collegato e verificato: non c e dove scrivere',
+    });
+
+    mockShop({ authorization: 'DISABLED' });
+    await action({ request: req(orderPayload()) } as any);
+    expect(lastTrace(logged)).toMatchObject({
+      detail: 'uso dell app sospeso: la sincronizzazione e ferma',
+    });
   });
 });
 

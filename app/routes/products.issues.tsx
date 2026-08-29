@@ -32,7 +32,8 @@ import {
 import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
-import { isAuthorized } from '~/utils/authorization.server';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import type { ShopifyProduct } from '~/types/shopify';
@@ -140,7 +141,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     rows,
     error,
     shopDomain: shop.shopDomain,
-    blocked: !isAuthorized(shop.authorization),
+    blocked: !can(await shopCapabilities(shop), 'use_app'),
     readyCount: error ? 0 : computeProductReadiness(allProducts).readyCount,
     planLimit: plan?.maxProducts ?? null,
     // Il filtro e' attivo solo se e' stato chiesto E se si e' potuto applicare:
@@ -239,7 +240,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!shop) {
     return json({ ok: false, error: 'Negozio non trovato.' }, { status: 404 });
   }
-  if (!isAuthorized(shop.authorization)) {
+  if (!can(await shopCapabilities(shop), 'use_app')) {
     return json(
       { ok: false, error: (await dictionaryForShop(session.shop)).errors.suspended },
       { status: 403 },

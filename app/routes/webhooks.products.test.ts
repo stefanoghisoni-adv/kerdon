@@ -15,7 +15,11 @@ vi.mock('~/lib/stats/inventory-cost.server', () => ({
   enrichVariantCosts: vi.fn(async (_c: unknown, p: unknown) => p),
 }));
 vi.mock('~/db.server', () => ({
-  prisma: { shop: { findUnique: vi.fn() }, syncJob: { create: vi.fn() } },
+  prisma: {
+    shop: { findUnique: vi.fn() },
+    plan: { findFirst: vi.fn() },
+    syncJob: { create: vi.fn() },
+  },
 }));
 
 import { action } from './webhooks.products.create';
@@ -36,13 +40,31 @@ function req(body: object) {
   });
 }
 
-/** Negozio collegato e pronto a scrivere. */
-function mockShop() {
+/**
+ * Negozio collegato e pronto a scrivere.
+ *
+ * `authorization` e `uninstalledAt` sono comparsi qui quando il webhook ha
+ * smesso di guardare il solo collegamento: prima un negozio sospeso passava, e
+ * questa riga finta non aveva modo di dirlo. Ora il negozio di prova deve
+ * dichiararsi in regola, e chi vuole provare il contrario lo scrive.
+ */
+function mockShop(over: Record<string, unknown> = {}) {
   (prisma.shop.findUnique as any).mockResolvedValue({
     id: 'shop-1',
     shopDomain: 'test-shop.myshopify.com',
     accessToken: 'enc',
+    uninstalledAt: null,
+    authorization: 'ENABLED',
+    trackingAuthorization: 'ENABLED',
+    scopes: 'read_products',
+    currentPlan: 'pro',
     supabaseConfig: { connectionVerifiedAt: new Date(), tableNameProducts: 'products' },
+    ...over,
+  });
+  (prisma.plan.findFirst as any).mockResolvedValue({
+    planName: 'pro',
+    customersSyncEnabled: true,
+    productFeedsEnabled: true,
   });
   (prisma.syncJob.create as any).mockResolvedValue({});
 }
@@ -222,5 +244,59 @@ describe('webhook products/create — il payload non e una fotografia', () => {
 
     expect(getProductById).not.toHaveBeenCalled();
     expect(res.status).toBe(200);
+  });
+});
+
+/**
+ * La porta di servizio dei prodotti.
+ *
+ * Le notifiche di Shopify arrivano da sole: il merchant non deve premere
+ * niente, e nessuna schermata dell'app sta in mezzo. Per questo qui il
+ * controllo pesa piu' che altrove — era l'unico punto in cui un negozio
+ * sospeso poteva continuare a farsi scrivere nel database senza fare nulla.
+ *
+ * Si acknowledgia sempre 200: non c'e' niente da riprovare, e insistere per due
+ * giorni finirebbe solo per far spegnere la sottoscrizione a Shopify.
+ */
+describe('webhook products/create — chi non ha diritto non scrive', () => {
+  const nonSiScrive = async () => {
+    const { upserted, deletes } = mockSupabase();
+    const getProductById = mockClient({ id: 42, variants_complete: true, variants: [] });
+
+    const res = await action({ request: req({ id: 42 }) } as any);
+
+    expect(res.status).toBe(200);
+    expect(upserted).toEqual([]);
+    expect(deletes).toEqual([]);
+    // Non si tocca nemmeno Shopify: rileggere il prodotto per poi buttarlo via
+    // sarebbe una chiamata pagata per niente.
+    expect(getProductById).not.toHaveBeenCalled();
+  };
+
+  it("uso dell'app sospeso (DISABLED): niente scritture", async () => {
+    mockShop({ authorization: 'DISABLED' });
+    await nonSiScrive();
+  });
+
+  it('trial finito (PENDING): niente scritture', async () => {
+    mockShop({ authorization: 'PENDING' });
+    await nonSiScrive();
+  });
+
+  it('app disinstallata: niente scritture', async () => {
+    // Le tabelle restano al merchant, ed e' giusto cosi'. Ma restare non vuol
+    // dire continuare ad aggiornarsi.
+    mockShop({ uninstalledAt: new Date('2026-05-01T00:00:00Z') });
+    await nonSiScrive();
+  });
+
+  it('valore inatteso nella colonna: in dubbio non si scrive', async () => {
+    mockShop({ authorization: 'DISABLD' });
+    await nonSiScrive();
+  });
+
+  it('progetto scollegato: niente scritture', async () => {
+    mockShop({ supabaseConfig: { connectionVerifiedAt: null, tableNameProducts: 'products' } });
+    await nonSiScrive();
   });
 });

@@ -71,6 +71,10 @@ import { transformProduct } from '../transformers/product.server';
 import { prisma } from '../../db.server';
 import { ensureCustomersTable } from '../supabase/ensure-customers-table.server';
 
+// I processor non ricompongono piu' le condizioni sul posto: chiedono alla
+// policy se quel negozio puo' sincronizzare. Da qui i due campi in piu' su ogni
+// negozio finto — installato e autorizzato — che prima si davano per scontati
+// perche' nessuno li guardava.
 describe('Periodic sync check processor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -81,6 +85,8 @@ describe('Periodic sync check processor', () => {
     const mockShop = {
       id: 'shop-1',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
@@ -255,6 +261,8 @@ describe('Periodic sync check processor', () => {
     const mockShop = {
       id: 'shop-2',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
@@ -302,6 +310,8 @@ describe('Periodic sync check processor', () => {
     const mockShop = {
       id: 'shop-3',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
@@ -346,6 +356,8 @@ describe('Periodic sync check processor', () => {
     const mockShop = {
       id: 'shop-4',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: {
         connectionVerifiedAt: null, // progetto non ancora verificato
@@ -369,6 +381,8 @@ describe('Periodic sync check processor', () => {
     const mockShop = {
       id: 'shop-6',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
@@ -464,6 +478,8 @@ describe('Periodic sync check processor', () => {
     const mockShop = {
       id: 'shop-5',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),

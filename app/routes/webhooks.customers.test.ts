@@ -36,9 +36,17 @@ function req(body: object) {
 describe('webhook customers/create — consenso', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // `authorization` e `uninstalledAt` servono da quando il webhook chiede la
+    // capacita' invece di ricomporre le condizioni sul posto: un negozio di
+    // prova deve dichiararsi installato e autorizzato, non esserlo per
+    // omissione.
     (prisma.shop.findUnique as any).mockResolvedValue({
       id: 'shop-1',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
+      trackingAuthorization: 'ENABLED',
+      scopes: 'read_products,read_customers',
       currentPlan: 'pro',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
@@ -140,5 +148,64 @@ describe('webhook customers/create — consenso', () => {
       }),
     } as any);
     expect(res2.status).toBe(200);
+  });
+});
+
+/**
+ * La stessa porta, per i clienti.
+ *
+ * Il piano lo si guardava gia'. L'autorizzazione e la disinstallazione no, ed
+ * erano proprio le due che il merchant non puo' cambiare da se': un negozio
+ * sospeso continuava a vedersi scrivere dentro un cliente a ogni ordine.
+ */
+describe('webhook customers/create — chi non ha diritto non scrive', () => {
+  function shopCon(over: Record<string, unknown>) {
+    (prisma.shop.findUnique as any).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
+      trackingAuthorization: 'ENABLED',
+      scopes: 'read_products,read_customers',
+      currentPlan: 'pro',
+      supabaseConfig: { connectionVerifiedAt: new Date(), tableNameCustomers: 'customers' },
+      ...over,
+    });
+  }
+
+  const nonSiScrive = async () => {
+    const from = vi.fn();
+    (createSupabaseClient as any).mockReturnValue({ from });
+
+    const res = await action({
+      request: req({ id: 7, email_marketing_consent: { state: 'subscribed' } }),
+    } as any);
+
+    expect(res.status).toBe(200);
+    expect(from).not.toHaveBeenCalled();
+  };
+
+  it("uso dell'app sospeso: nessun cliente scritto", async () => {
+    shopCon({ authorization: 'DISABLED' });
+    await nonSiScrive();
+  });
+
+  it('app disinstallata: nessun cliente scritto', async () => {
+    shopCon({ uninstalledAt: new Date('2026-05-01T00:00:00Z') });
+    await nonSiScrive();
+  });
+
+  it('piano senza clienti: nessun cliente scritto (come prima)', async () => {
+    (prisma.plan.findFirst as any).mockResolvedValue({
+      planName: 'free',
+      customersSyncEnabled: false,
+    });
+    shopCon({ currentPlan: 'free' });
+    await nonSiScrive();
+  });
+
+  it('progetto scollegato: nessun cliente scritto', async () => {
+    shopCon({ supabaseConfig: { connectionVerifiedAt: null, tableNameCustomers: 'customers' } });
+    await nonSiScrive();
   });
 });

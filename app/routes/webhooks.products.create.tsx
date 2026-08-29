@@ -8,7 +8,8 @@ import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import { enrichVariantCosts } from '~/lib/stats/inventory-cost.server';
 import { filterEligibleProductRows } from '~/lib/eligibility/product-eligibility';
 import type { ShopifyProduct } from '~/types/shopify';
-import { syncIsActive } from '~/lib/sync/sync-active';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 
 /**
  * Prodotto creato o aggiornato su Shopify.
@@ -74,7 +75,15 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ ok: true }, { status: 200 }); // Acknowledge anyway
     }
 
-    if (!syncIsActive(shop.supabaseConfig)) {
+    // Il negozio puo' ancora ricevere prodotti nel suo database?
+    //
+    // Qui si guardava solo se il progetto fosse collegato. Ma il collegamento
+    // sopravvive alla sospensione e alla disinstallazione — le tabelle restano
+    // dove sono, ed e' giusto cosi' — quindi un negozio bloccato continuava a
+    // farsi scrivere dentro a ogni modifica di prodotto. Bastava non passare
+    // dalla dashboard: le notifiche arrivano da sole, e nessuno le fermava.
+    // Ora la condizione e' una sola, la stessa della corsa periodica.
+    if (!can(await shopCapabilities(shop), 'sync_products')) {
       console.log(`Sync not active for shop ${shopDomain}`);
       return json({ ok: true }, { status: 200 });
     }

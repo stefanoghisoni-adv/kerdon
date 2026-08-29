@@ -10,7 +10,8 @@ import {
 import { withShopSyncLock } from '~/lib/queue/shop-lock.server';
 import { recordEligibilitySnapshotIfMissing } from '~/lib/stats/eligibility-snapshot.server';
 import { hasPlanChanged } from '~/components/Dashboard/plan-upgrade';
-import { isAuthorized } from '~/utils/authorization.server';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { SYNC_ACTIVE_CONFIG_FILTER } from '~/lib/sync/sync-active';
 import { pruneAccessLog } from '~/lib/read-proxy/access-log.server';
@@ -171,15 +172,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const plan = await findPlanByName(shop.currentPlan);
       if (!plan) continue;
 
+      // Le stesse capacita' che i processor useranno fra un istante, decise qui
+      // una volta sola. Chiederle prima serve a non svegliare un processor solo
+      // perche' rifiuti: la query di sopra tiene gia' fuori i disinstallati e
+      // gli scollegati, ma non i sospesi.
+      const caps = shopCapabilitiesWithPlan(shop, plan);
+
       // Il piano e' cambiato dopo l'ultima sync completa: allineamento automatico
       // subito, senza aspettare la cadenza del piano e senza che il merchant
       // debba avviare nulla a mano. E' la corsa completa, non il delta, perche'
       // c'e' da recuperare cio' che il piano precedente non copriva (prodotti
       // oltre il vecchio tetto e, se ora inclusa, l'intera tabella clienti).
       // Al termine il bulk riallinea lastSyncedPlan, quindi non si ripete.
-      // isAuthorized: senza questo controllo un negozio sospeso finirebbe qui a
-      // ogni giro solo per far lanciare il processor e riempire di errori il log.
-      if (isAuthorized(shop.authorization) && hasPlanChanged(shop.currentPlan, shop.lastSyncedPlan)) {
+      // La capacita' prima del recupero: senza questo controllo un negozio
+      // sospeso finirebbe qui a ogni giro solo per far lanciare il processor e
+      // riempire di errori il log.
+      if (can(caps, 'sync_products') && hasPlanChanged(shop.currentPlan, shop.lastSyncedPlan)) {
         // Stesso lucchetto del drain: questo giro passa su TUTTI i negozi, e
         // puo' incrociare una corsa avviata un istante prima dalla corsia
         // veloce di un gesto manuale.
@@ -206,7 +214,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // riprova alla prima occasione utile. Il nuovo tentativo e' distanziato di
       // almeno un'ora, cosi' un progetto che continua a rifiutare la creazione
       // non si tira dietro una sync completa a ogni giro del cron.
-      if (!due && plan.customersSyncEnabled && isAuthorized(shop.authorization)) {
+      if (!due && can(caps, 'sync_customers')) {
         const elapsed = Date.now() - (lastCheck?.completedAt?.getTime() ?? 0);
         if (elapsed >= CUSTOMERS_RETRY_MS) {
           const provisioned = await prisma.syncJob.findFirst({

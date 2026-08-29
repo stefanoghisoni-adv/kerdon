@@ -59,6 +59,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
+  // Il negozio puo' ancora leggere?
+  //
+  // Qui questo controllo non c'era, ed era l'unica rotta di /rest/v1/ a non
+  // averlo: le altre tre lo fanno tutte. Un token valido bastava, e un negozio
+  // con il tracciamento sospeso — o che aveva disinstallato l'app — continuava
+  // a farsi coniare identificativi. Peggio: questa rotta e' anche l'unica che
+  // SCRIVE nel database del merchant, una riga per ogni browser che passa,
+  // quindi la sospensione lasciava crescere la tabella dei visitatori proprio
+  // mentre tutto il resto era fermo.
+  //
+  // 403 come sulle altre: per un container server-side e' "nessun dato", e la
+  // vetrina prosegue senza che nessuno veda un errore.
+  if (!result.ctx.canReadData) {
+    return new Response(JSON.stringify({ error: 'forbidden' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   // Si riusa quello che il browser ha gia', se ce l'ha. Coniarne uno nuovo a
   // ogni pagina vorrebbe dire non riconoscere piu' nessuno, che e' l'opposto di
   // cio' per cui esiste.

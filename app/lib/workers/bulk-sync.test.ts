@@ -76,6 +76,10 @@ const emptyProductsSelect = () => ({
   in: async () => ({ data: [], error: null }),
 });
 
+// I processor non ricompongono piu' le condizioni sul posto: chiedono alla
+// policy se quel negozio puo' sincronizzare. Da qui i due campi in piu' su ogni
+// negozio finto — installato e autorizzato — che prima si davano per scontati
+// perche' nessuno li guardava.
 describe('Initial bulk sync processor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -86,6 +90,8 @@ describe('Initial bulk sync processor', () => {
     const mockShop = {
       id: 'shop-1',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
@@ -233,6 +239,8 @@ describe('Initial bulk sync processor', () => {
     const mockShop = {
       id: 'shop-2',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
@@ -297,6 +305,8 @@ describe('Initial bulk sync processor', () => {
     vi.mocked(prisma.shop.findUnique).mockResolvedValue({
       id: 'shop-3',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
@@ -326,6 +336,8 @@ describe('Initial bulk sync processor', () => {
     const mockShop = {
       id: 'shop-free',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       currentPlan: 'free',
       supabaseConfig: {
@@ -394,6 +406,8 @@ describe('Initial bulk sync processor', () => {
     const mockShop = {
       id: 'shop-3',
       shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
       accessToken: 'encrypted-token',
       supabaseConfig: null,
     };

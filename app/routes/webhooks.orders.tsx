@@ -8,8 +8,8 @@ import {
 } from '~/lib/customers/order-webhook-payload';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
-import { syncIsActive } from '~/lib/sync/sync-active';
-import { hasOrdersAccess } from '~/lib/sync/orders-access';
+import { denialOf, type DenialReason } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { externalIdFromNoteAttributes } from '~/lib/tracking/users';
 import { linkUserToCustomer } from '~/lib/tracking/users.server';
@@ -177,6 +177,25 @@ async function linkVisitorToCustomer(
   }
 }
 
+/**
+ * Perche' un ordine non e' stato scritto, detto in italiano.
+ *
+ * Il registro degli ordini lo legge chi deve capire cosa e' successo a un
+ * ordine che non si trova, quindi il motivo della policy non basta cosi' com'e':
+ * `plan_required` non dice niente a chi guarda. Le prime due frasi sono quelle
+ * che c'erano prima, parola per parola: chi ha imparato a riconoscerle in un
+ * registro non deve reimpararle.
+ */
+const ORDER_SKIP_DETAIL: Record<DenialReason, string> = {
+  not_connected: 'nessun progetto collegato e verificato: non c e dove scrivere',
+  scope_required: 'permesso sugli ordini non concesso',
+  unknown_shop: 'negozio non riconosciuto',
+  uninstalled: 'app disinstallata: la sincronizzazione e ferma',
+  not_authorized: 'uso dell app sospeso: la sincronizzazione e ferma',
+  tracking_suspended: 'tracciamento sospeso',
+  plan_required: 'funzione non compresa nel piano',
+};
+
 export async function action({ request }: ActionFunctionArgs) {
   const body = await request.text();
   const hmac = request.headers.get('X-Shopify-Hmac-Sha256');
@@ -242,24 +261,31 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     shopId = shop?.id ?? null;
 
-    if (!shop?.supabaseConfig || !syncIsActive(shop.supabaseConfig)) {
+    if (!shop?.supabaseConfig) {
       await saveOrderWebhookOutcome(shopId, {
         shopDomain,
         orderId,
         outcome: 'skipped',
-        detail: 'nessun progetto collegato e verificato: non c e dove scrivere',
+        detail: ORDER_SKIP_DETAIL.not_connected,
       });
       return json({ ok: true }, { status: 200 });
     }
 
-    // Il permesso sugli ordini si concede riaprendo l'app: finche' manca, le
-    // tabelle degli ordini non esistono nemmeno e scriverci fallirebbe.
-    if (!hasOrdersAccess(shop.scopes)) {
+    // Le due condizioni che si guardavano qui — il progetto collegato e il
+    // permesso sugli ordini — erano giuste ma incomplete: mancavano
+    // l'autorizzazione all'uso dell'app e la disinstallazione, e mancavano
+    // proprio qui, dove il merchant non deve fare niente perche' arrivi una
+    // notifica. Un negozio sospeso continuava a vedersi scrivere ogni ordine.
+    //
+    // Il motivo del rifiuto non si butta: e' quello che finisce nel registro, ed
+    // e' l'unica cosa che poi permette di capire perche' un ordine non c'e'.
+    const denial = denialOf(await shopCapabilities(shop), 'sync_orders');
+    if (denial) {
       await saveOrderWebhookOutcome(shopId, {
         shopDomain,
         orderId,
         outcome: 'skipped',
-        detail: 'permesso sugli ordini non concesso',
+        detail: ORDER_SKIP_DETAIL[denial],
       });
       return json({ ok: true }, { status: 200 });
     }

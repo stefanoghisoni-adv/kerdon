@@ -3,7 +3,8 @@ import { json } from '@remix-run/node';
 import { verifyWebhook } from '~/lib/webhooks/verify.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
-import { syncIsActive } from '~/lib/sync/sync-active';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 
 export async function action({ request }: ActionFunctionArgs) {
   const body = await request.text();
@@ -32,7 +33,22 @@ export async function action({ request }: ActionFunctionArgs) {
       include: { supabaseConfig: true },
     });
 
-    if (!shop?.supabaseConfig || !syncIsActive(shop.supabaseConfig)) {
+    if (!shop?.supabaseConfig) {
+      return json({ ok: true }, { status: 200 });
+    }
+
+    // Stessa condizione della scrittura, e non e' una svista.
+    //
+    // Verrebbe da lasciar passare le cancellazioni sempre — togliere una riga
+    // sembra sempre innocuo. Ma la copia del merchant si ferma tutta insieme:
+    // se le aggiunte sono bloccate e le rimozioni no, quel che resta non e' piu'
+    // una fotografia di niente, e' un catalogo che si svuota da solo. Un negozio
+    // sospeso deve ritrovare i suoi dati come li aveva lasciati.
+    //
+    // Cio' che la legge impone di cancellare passa da un'altra parte e non e'
+    // toccato da questo controllo: i webhook GDPR non chiedono niente alla
+    // policy, e cancellano anche a negozio sospeso o disinstallato.
+    if (!can(await shopCapabilities(shop), 'sync_customers')) {
       return json({ ok: true }, { status: 200 });
     }
 

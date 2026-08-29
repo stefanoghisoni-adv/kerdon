@@ -18,7 +18,7 @@ import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
-import { shopCanUseFeeds } from '~/lib/feeds/feed-access.server';
+import { feedsDenial } from '~/lib/feeds/feed-access.server';
 import { deleteFeed, listFeeds, PLATFORMS, type Platform } from '~/lib/feeds/feed.server';
 import { useNavLoading } from '~/components/Dashboard/nav-loading';
 import { MetaLogo } from '~/components/Catalogs/MetaLogo';
@@ -36,13 +36,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   const feeds = shop ? await listFeeds(shop.id) : [];
 
+  // Un solo interrogatorio della policy, due risposte diverse: se i comandi si
+  // possono usare, e se il motivo per cui non si possono e' quello che
+  // l'avviso racconta. Tenerle separate serve a non far leggere al merchant una
+  // spiegazione che non c'entra: l'avviso parla di piano, e finche' e' il piano
+  // a fermarlo va bene — ma un negozio senza database collegato viene fermato
+  // per un'altra ragione, e mandarlo a cambiare piano non lo aiuterebbe.
+  const denial = await feedsDenial(session.shop);
+
   return json({
     meta: feeds.find((feed) => feed.platform === 'meta') ?? null,
     google: feeds.find((feed) => feed.platform === 'google') ?? null,
     // I feed sono una funzione del piano. Le card restano visibili anche a chi
     // non li ha — servono a sapere cosa si otterrebbe — ma i comandi che
     // attivano no.
-    canUseFeeds: await shopCanUseFeeds(session.shop),
+    canUseFeeds: denial === null,
+    // L'avviso che invita a passare di piano: solo quando e' davvero il piano.
+    feedsNeedPlan: denial === 'plan_required',
   });
 }
 
@@ -68,7 +78,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Catalogs() {
-  const { meta, google, canUseFeeds } = useLoaderData<typeof loader>();
+  const { meta, google, canUseFeeds, feedsNeedPlan } = useLoaderData<typeof loader>();
   const t = useT();
   const navigate = useNavigate();
   const fetcher = useFetcher<{ ok: boolean }>();
@@ -135,7 +145,7 @@ export default function Catalogs() {
         {/* Dice perche' i pulsanti sono spenti, e da li' si passa di piano
             senza cambiare pagina: il modal e' lo stesso del tetto prodotti,
             perche' la domanda e' la stessa — cosa ottengo passando di piano. */}
-        {!canUseFeeds && <ProductOverflowBanner reason="feeds" />}
+        {feedsNeedPlan && <ProductOverflowBanner reason="feeds" />}
 
         <InlineGrid columns={{ xs: 1, sm: 2, md: 3, lg: 4 }} gap="300">
           <PlatformCard

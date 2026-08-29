@@ -11,6 +11,8 @@ import { toMetaItem, type MetaItem } from '~/lib/feeds/meta';
 import { GMC_FIELDS, toGmcItem } from '~/lib/feeds/gmc';
 import { loadMapping, variablesOf } from '~/lib/feeds/mapping.server';
 import { toCsv, toXml, type FeedItem } from '~/lib/feeds/serialize';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilitiesById } from '~/lib/authz/shop-capabilities.server';
 
 /**
  * Il catalogo, servito a chi ha l'indirizzo.
@@ -48,6 +50,22 @@ export async function loader({ params }: LoaderFunctionArgs) {
     select: { shopId: true, enabled: true, platform: true },
   });
   if (!feed || !feed.enabled) return notFound();
+
+  // Il negozio ha ancora diritto a questo feed?
+  //
+  // Prima non lo chiedeva nessuno, e la riga qui sopra era tutto il controllo
+  // che c'era. Un feed acceso restava acceso per sempre: chi scendeva a un
+  // piano senza feed continuava a farsi servire il catalogo, chi veniva sospeso
+  // pure, e un negozio che aveva disinstallato l'app seguitava a esporre i
+  // propri prodotti a chiunque avesse conservato l'indirizzo — mesi dopo, senza
+  // che nessuno da questa parte se ne accorgesse. Un token non scade da solo, e
+  // lo spegnimento del feed vive su un'altra riga che nessuno tocca quando il
+  // piano cambia.
+  //
+  // Il 404 e' lo stesso di un token sbagliato, di proposito: questa rotta non
+  // conferma niente a nessuno, e chi la chiama non e' il merchant — e' Meta, di
+  // notte. Al merchant lo stato del suo feed lo racconta la tab dei cataloghi.
+  if (!can(await shopCapabilitiesById(feed.shopId), 'use_feeds')) return notFound();
 
   const source = await loadFeedSource(feed.shopId);
   // Database scollegato: 404 come tutto il resto. Meta ritenta domani, e nel

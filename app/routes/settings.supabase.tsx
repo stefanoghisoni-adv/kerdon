@@ -21,7 +21,8 @@ import { AccountCard } from '~/components/Dashboard/AccountCard';
 import { DatabaseCard } from '~/components/Dashboard/DatabaseCard';
 import { firstPlanWithCustomersSync, firstPlanWithFeeds } from '~/components/Dashboard/account-format';
 import { samePlanName } from '~/lib/billing/plan-name';
-import { syncIsActive } from '~/lib/sync/sync-active';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
 import { loadSyncTiming } from '~/lib/sync/sync-timing.server';
 import { projectDashboardUrl } from '~/lib/supabase-management.server';
 import { SyncCard } from '~/components/Dashboard/SyncCard';
@@ -73,10 +74,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const connected = !!shop?.supabaseConfig?.connectionVerifiedAt;
   // La sincronizzazione e' automatica e sempre attiva: non c'e' niente da
-  // accendere. Restano le due condizioni che non dipendono dal merchant — il
+  // accendere. Restano le condizioni che non dipendono dal merchant — il
   // progetto collegato e il negozio autorizzato (a trial scaduto e' tutto
   // sospeso).
-  const syncRunning = syncIsActive(shop?.supabaseConfig) && shop?.authorization === 'ENABLED';
+  //
+  // Questa riga le rimetteva insieme a mano, con un confronto secco su
+  // `'ENABLED'`: la stessa frase di altri venti posti, scritta un'altra volta e
+  // libera di divergere alla prima modifica. Ora la risposta e' quella che i
+  // processor useranno davvero, quindi cio' che il merchant legge qui e cio' che
+  // succede non possono piu' raccontare due storie diverse.
+  const caps = shopCapabilitiesWithPlan(shop, plan);
+  const syncRunning = can(caps, 'sync_products');
   const customersIncluded = plan?.customersSyncEnabled ?? false;
   // I feed non dipendono dalla sincronizzazione in corso ma solo dal piano:
   // l'indirizzo risponde anche fra una corsa e l'altra, con i dati dell'ultima.

@@ -5,6 +5,9 @@ import { prisma } from '~/db.server';
 import { decrypt } from '~/utils/crypto.server';
 import { validateSupabaseUrl } from '~/utils/supabase-url.server';
 import { PRODUCTS_TABLE_SQL, CUSTOMERS_TABLE_SQL } from '~/lib/supabase-schema';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
+import { dictionaryForShop } from '~/lib/i18n/server';
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -17,6 +20,29 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (!shop?.supabaseConfig) {
     return json({ error: 'Supabase not configured' }, { status: 400 });
+  }
+
+  // Il controllo che qui non c'era, ed e' quello che pesa di piu'.
+  //
+  // Questa rotta non si limita a creare tabelle: in fondo scrive
+  // `connectionVerifiedAt`, cioe' proprio il campo da cui dipende tutto il
+  // resto per decidere che la sincronizzazione puo' partire. Un negozio sospeso
+  // che la chiamava — ed era autenticato, quindi non serviva niente di strano —
+  // si riaccendeva la sync da se', scavalcando la sospensione senza toccare
+  // nessuna delle rotte che invece la rispettavano.
+  //
+  // La rotta gemella `api.supabase.migrate` resta deliberatamente aperta e non
+  // e' una dimenticanza: quella riallinea tabelle che ci sono gia' e non tocca
+  // la verifica del collegamento — e' manutenzione del database del merchant,
+  // non riaccensione dell'app. La differenza e' scritta nel suo commento.
+  if (!can(await shopCapabilities(shop), 'use_app')) {
+    return json(
+      {
+        error: (await dictionaryForShop(shopDomain)).errors.suspended,
+        code: 'not_authorized',
+      },
+      { status: 403 },
+    );
   }
 
   // Defense in depth: revalidate the stored URL before sending the service key.

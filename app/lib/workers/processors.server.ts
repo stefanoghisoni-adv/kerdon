@@ -6,12 +6,10 @@ import { transformProduct } from '../transformers/product.server';
 import { transformCustomer } from '../transformers/customer.server';
 import { createSupabaseClient } from '../supabase.server';
 import { prisma } from '../../db.server';
-import { isAuthorized } from '../../utils/authorization.server';
 import { isProductLimitReached } from '../limits/product-limit';
 import { enrichVariantCosts } from '../stats/inventory-cost.server';
 import { filterEligibleProductRows } from '../eligibility/product-eligibility';
 import { sortByCreatedAtAsc } from '../sync/product-order';
-import { hasOrdersAccess } from '../sync/orders-access';
 import { orderToRows } from '../customers/order-rows';
 import { ensureOrdersTables } from '../supabase/ensure-orders-tables.server';
 import {
@@ -26,7 +24,8 @@ import { ensureCustomersTable } from '../supabase/ensure-customers-table.server'
 import { ensureProductsTable } from '../supabase/ensure-products-table.server';
 import { applyMerchantSchemaUpdate } from '../supabase/apply-schema-update.server';
 import { findPlanByName } from '../billing/find-plan.server';
-import { syncIsActive } from '~/lib/sync/sync-active';
+import { can, denialOf } from '~/lib/authz/capabilities';
+import { shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
 
 // Solo la parte del Job BullMQ che i processor usano davvero. Tipandola cosi'
 // il bulk sync puo' girare anche senza coda (allineamento automatico dal cron),
@@ -447,13 +446,14 @@ async function syncOrders(
  */
 async function syncOrdersIfEnabled(opts: {
   shopId: string;
-  scopes: string | null | undefined;
+  /** La risposta della policy, non gli scope grezzi: chi decide e' uno solo. */
+  ordersEnabled: boolean;
   config: Parameters<typeof ensureOrdersTables>[1];
   shopifyClient: ShopifyAPIClient;
   supabase: SupabaseClient;
   updatedAtMin?: string;
 }): Promise<OrderSyncResult> {
-  if (!hasOrdersAccess(opts.scopes)) return { total: 0, events: createEventBuffer() };
+  if (!opts.ordersEnabled) return { total: 0, events: createEventBuffer() };
 
   const tables = await ensureOrdersTables(opts.shopId, opts.config, opts.supabase);
   if (tables.status === 'unavailable') {
@@ -531,24 +531,32 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
     include: { supabaseConfig: true },
   });
 
-  if (!shop || !shop.supabaseConfig || !syncIsActive(shop.supabaseConfig)) {
+  if (!shop || !shop.supabaseConfig) {
     console.log(`Shop ${shopId} not configured for periodic sync`);
     return;
   }
-  // Gate autorizzazione (vale per la sync automatica): nessuna comunicazione se
-  // il negozio non è ENABLED (ban o trial scaduto).
-  if (!isAuthorized(shop.authorization)) {
+
+  // Piano del negozio: tetto prodotti (maxProducts, null = illimitato) e
+  // abilitazione sync clienti. Letto prima dei controlli perche' serve anche a
+  // loro, e leggerlo una volta sola evita di interrogare il listino due volte
+  // per ogni negozio a ogni giro del cron.
+  const plan = await findPlanByName(shop.currentPlan);
+  const maxProducts = plan?.maxProducts ?? null;
+
+  // Le condizioni che prima erano due — collegamento e autorizzazione — piu'
+  // quella che non c'era: la disinstallazione. Il giro del cron gia' filtrava i
+  // negozi disinstallati nella sua query, ma qui non ci si arriva solo da li':
+  // ci si arriva anche drenando la coda, dove di un job resta il solo shopId e
+  // nessun filtro. Un negozio che aveva disinstallato con un lavoro ancora in
+  // coda si vedeva sincronizzare dopo essersene andato.
+  const caps = shopCapabilitiesWithPlan(shop, plan);
+  if (!can(caps, 'sync_products')) {
     console.log(`Shop ${shopId} non autorizzato: sync automatica sospesa`);
     return;
   }
 
   const shopifyClient = await ShopifyAPIClient.forShop(shop.shopDomain);
   const supabase = createSupabaseClient(shop.supabaseConfig);
-
-  // Piano del negozio: tetto prodotti (maxProducts, null = illimitato) e
-  // abilitazione sync clienti. Riusato più sotto per la sync dei clienti.
-  const plan = await findPlanByName(shop.currentPlan);
-  const maxProducts = plan?.maxProducts ?? null;
 
   // Get last periodic sync timestamp
   const lastSyncJob = await prisma.syncJob.findFirst({
@@ -777,7 +785,7 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
     const customers = await syncCustomersIfEnabled({
       shopId: shop.id,
       config: shop.supabaseConfig,
-      customersSyncEnabled: plan?.customersSyncEnabled ?? false,
+      customersSyncEnabled: can(caps, 'sync_customers'),
       shopifyClient,
       supabase,
       updatedAtMin: lastSyncTime.toISOString(),
@@ -790,7 +798,7 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
     // su prodotti di ieri e ordini di oggi.
     const orders = await syncOrdersIfEnabled({
       shopId: shop.id,
-      scopes: shop.scopes,
+      ordersEnabled: can(caps, 'sync_orders'),
       config: shop.supabaseConfig,
       shopifyClient,
       supabase,
@@ -859,11 +867,26 @@ export async function processInitialBulkSync(
     include: { supabaseConfig: true },
   });
 
-  if (!shop || !shop.supabaseConfig || !syncIsActive(shop.supabaseConfig)) {
+  if (!shop || !shop.supabaseConfig) {
     throw new Error(`Shop ${shopId} not configured for sync`);
   }
-  // Gate autorizzazione (vale per manuale e automatico): blocca se non ENABLED.
-  if (!isAuthorized(shop.authorization)) {
+
+  // Piano del negozio: definisce il tetto di prodotti sincronizzabili
+  // (maxProducts) e se la sync dei clienti è inclusa. null = illimitato.
+  // Letto qui e non piu' sotto perche' la policy lo vuole sapere.
+  const plan = await findPlanByName(shop.currentPlan);
+  const maxProducts = plan?.maxProducts ?? null;
+
+  // Come nella corsa periodica, e per la stessa ragione: qui si arriva anche
+  // dal drain della coda, che di un negozio conosce solo l'id. I due messaggi
+  // restano distinti perche' distinte sono le cause, e chi legge un log deve
+  // poter capire se manca il database o manca il permesso.
+  const caps = shopCapabilitiesWithPlan(shop, plan);
+  const denial = denialOf(caps, 'sync_products');
+  if (denial === 'not_connected') {
+    throw new Error(`Shop ${shopId} not configured for sync`);
+  }
+  if (denial !== null) {
     throw new Error(`Shop ${shopId} non autorizzato all'uso dell'app`);
   }
 
@@ -878,11 +901,6 @@ export async function processInitialBulkSync(
       status: 'running',
     },
   });
-
-  // Piano del negozio: definisce il tetto di prodotti sincronizzabili
-  // (maxProducts) e se la sync dei clienti è inclusa. null = illimitato.
-  const plan = await findPlanByName(shop.currentPlan);
-  const maxProducts = plan?.maxProducts ?? null;
 
   let totalProducts = 0;
   let totalVariants = 0;
@@ -1058,7 +1076,7 @@ export async function processInitialBulkSync(
     const customers = await syncCustomersIfEnabled({
       shopId: shop.id,
       config: shop.supabaseConfig,
-      customersSyncEnabled: plan?.customersSyncEnabled ?? false,
+      customersSyncEnabled: can(caps, 'sync_customers'),
       shopifyClient,
       supabase,
     });
@@ -1067,7 +1085,7 @@ export async function processInitialBulkSync(
 
     const orders = await syncOrdersIfEnabled({
       shopId: shop.id,
-      scopes: shop.scopes,
+      ordersEnabled: can(caps, 'sync_orders'),
       config: shop.supabaseConfig,
       shopifyClient,
       supabase,

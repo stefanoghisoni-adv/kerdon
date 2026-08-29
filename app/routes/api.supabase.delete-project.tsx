@@ -2,7 +2,8 @@ import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
-import { isAuthorized } from '~/utils/authorization.server';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { deleteProject, listProjects } from '~/lib/supabase-management.server';
 import { dictionaryForShop } from '~/lib/i18n/server';
@@ -31,7 +32,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!shop) {
     return json({ ok: false, error: 'Negozio non trovato' }, { status: 404 });
   }
-  if (!isAuthorized(shop.authorization)) {
+  if (!can(await shopCapabilities(shop), 'use_app')) {
     return json(
       { ok: false, error: (await dictionaryForShop(session.shop)).errors.suspended },
       { status: 403 },

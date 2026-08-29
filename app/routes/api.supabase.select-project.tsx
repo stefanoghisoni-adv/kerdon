@@ -14,7 +14,8 @@ import {
 } from '~/lib/supabase-management.server';
 import { buildMerchantSchemaSQL } from '~/lib/supabase-schema';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
-import { isAuthorized } from '~/utils/authorization.server';
+import { can } from '~/lib/authz/capabilities';
+import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 import { issueReadProxyToken } from '~/lib/read-proxy/token.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import {
@@ -39,7 +40,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // la sincronizzazione clienti è inclusa.
   const plan = await findPlanByName(shop.currentPlan);
   const includeCustomers = plan?.customersSyncEnabled ?? false;
-  if (!isAuthorized(shop.authorization)) {
+  if (!can(await shopCapabilities(shop), 'use_app')) {
     return json(
       {
         ok: false,
