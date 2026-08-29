@@ -970,4 +970,33 @@ export const en: typeof it = {
     },
     notConnected: "Connect your database to see the catalogue.",
   },
+  /** The page where the merchant collects privacy requests. */
+  privacy: {
+    title: "Privacy requests",
+    subtitle: "Access and deletion requests received for this store",
+    intro:
+      "When someone asks for a copy of their data, we prepare it and you can download it here for thirty days. Deletion requests we carry out ourselves: the list shows you they are done.",
+    emptyTitle: "No requests yet",
+    emptyBody:
+      "Your customers' privacy requests will appear here as soon as they arrive, each with its outcome.",
+    resourceSingular: "request",
+    resourcePlural: "requests",
+    colRequest: "Request",
+    colReceived: "Received",
+    colStatus: "Status",
+    colAvailable: "Available until",
+    download: "Download",
+    topics: {
+      "customers/data_request": "Copy of the data",
+      "customers/redact": "Customer deletion",
+      "shop/redact": "Store deletion",
+    },
+    statuses: {
+      queued: "Waiting",
+      processing: "In progress",
+      completed: "Completed",
+      failed: "Will retry",
+      dead_letter: "Needs attention",
+    },
+  },
 };

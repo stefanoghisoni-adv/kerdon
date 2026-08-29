@@ -1158,6 +1158,35 @@ export const it = {
     },
     notConnected: "Collega il database per vedere il catalogo.",
   },
+  /** La pagina da cui il merchant ritira le richieste privacy. */
+  privacy: {
+    title: "Richieste privacy",
+    subtitle: "Le richieste di accesso e di cancellazione ricevute per questo negozio",
+    intro:
+      "Quando una persona chiede una copia dei suoi dati, la prepariamo e la trovi qui da scaricare per trenta giorni. Le richieste di cancellazione le eseguiamo da soli: in elenco vedi che sono state completate.",
+    emptyTitle: "Nessuna richiesta finora",
+    emptyBody:
+      "Le richieste privacy dei tuoi clienti compariranno qui appena arrivano, con l'esito di ognuna.",
+    resourceSingular: "richiesta",
+    resourcePlural: "richieste",
+    colRequest: "Richiesta",
+    colReceived: "Ricevuta il",
+    colStatus: "Stato",
+    colAvailable: "Disponibile fino al",
+    download: "Scarica",
+    topics: {
+      "customers/data_request": "Copia dei dati",
+      "customers/redact": "Cancellazione cliente",
+      "shop/redact": "Cancellazione negozio",
+    },
+    statuses: {
+      queued: "In attesa",
+      processing: "In corso",
+      completed: "Completata",
+      failed: "Da riprovare",
+      dead_letter: "Richiede attenzione",
+    },
+  },
   // Nessun `as const`: con i tipi letterali l'inglese non potrebbe scrivere
   // niente di diverso dall'italiano, che e' esattamente il suo mestiere.
 };

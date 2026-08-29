@@ -162,6 +162,7 @@ model Shop {
   trackingSetup            TrackingSetup?
   productFeeds             ProductFeed[]
   feedFieldMappings        FeedFieldMapping[]
+  complianceRequests       ComplianceRequest[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -348,34 +349,34 @@ model DismissedTrackingSource {
 }
 
 model BillingCharge {
-  id              String    @id @default(uuid())
-  shopId          String    @map("shop_id")
-  shopifyChargeId BigInt?   @unique @map("shopify_charge_id")
-  planType        String    @map("plan_type")
-  price           Decimal?  @db.Decimal(10, 2)
+  id                  String    @id @default(uuid())
+  shopId              String    @map("shop_id")
+  shopifyChargeId     BigInt?   @unique @map("shopify_charge_id")
+  planType            String    @map("plan_type")
+  price               Decimal?  @db.Decimal(10, 2)
   /// In che valuta e' quella cifra. Un importo senza valuta, sulla riga a cui
   /// si guarda quando un merchant chiede conto di un addebito, non risponde
   /// alla domanda. null = le righe scritte prima che gli addebiti portassero la
   /// valuta, che sono tutte in euro.
-  currency        String?
-  billingCycle    String?   @map("billing_cycle")
-  status          String
-  trialDays       Int       @default(7) @map("trial_days")
-  trialEndsAt     DateTime? @map("trial_ends_at")
-  confirmationUrl String?   @map("confirmation_url")
+  currency            String?
+  billingCycle        String?   @map("billing_cycle")
+  status              String
+  trialDays           Int       @default(7) @map("trial_days")
+  trialEndsAt         DateTime? @map("trial_ends_at")
+  confirmationUrl     String?   @map("confirmation_url")
   /// Il nonce con cui questo tentativo di sottoscrizione e' partito, lo stesso
   /// che viaggia firmato nella URL di ritorno. E' il legame fra la callback e
   /// il tentativo esatto che l'ha aperta: senza, al ritorno c'e' solo un
   /// charge_id, e "quale riga stiamo chiudendo" diventa una supposizione.
   /// Unico: un nonce appartiene a un tentativo solo, cosi' ritrovare la riga e'
   /// una lettura per chiave e non una ricerca con dei se.
-  callbackNonce   String?   @unique @map("callback_nonce")
+  callbackNonce       String?   @unique @map("callback_nonce")
   /// Quando quel nonce e' stato speso. Monouso: una seconda callback con lo
   /// stesso nonce trova la riga gia' consumata e non riapplica niente.
   callbackNonceUsedAt DateTime? @map("callback_nonce_used_at")
-  activatedAt     DateTime? @map("activated_at")
-  cancelledAt     DateTime? @map("cancelled_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
+  activatedAt         DateTime? @map("activated_at")
+  cancelledAt         DateTime? @map("cancelled_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -597,4 +598,82 @@ model FeedFieldMapping {
   @@unique([shopId, platform, field])
   @@index([shopId, platform])
   @@map("feed_field_mappings")
+}
+
+/// Una richiesta di conformita' arrivata da Shopify, presa in carico e non
+/// ancora chiusa.
+///
+/// Esiste perche' i tre webhook obbligatori NON sono una chiamata sincrona.
+/// Shopify tratta il 2xx come una ricevuta — "l'ho presa" — e taglia la
+/// richiesta a cinque secondi; i dati della persona vanno consegnati al
+/// titolare del negozio entro trenta giorni, per una via sua. Rispondere
+/// leggendo tre tabelle e restituendo l'esportazione nel corpo era quindi
+/// sbagliato due volte: nel canale e nei tempi.
+///
+/// Questa riga e' il punto durevole fra le due meta'. Il webhook la scrive e
+/// risponde; il resto avviene dopo, con i suoi tentativi e la sua traccia. Se
+/// la scrittura non riesce si risponde 5xx e Shopify ritenta: e' l'unico modo
+/// onesto di dire "non l'ho presa".
+model ComplianceRequest {
+  id            String  @id @default(uuid())
+  /// L'id che Shopify da' alla consegna (header X-Shopify-Webhook-Id). Unico:
+  /// e' con questo che una seconda consegna della stessa richiesta viene
+  /// riconosciuta come tale invece di produrre una seconda esportazione o una
+  /// seconda cancellazione in corsa con la prima.
+  webhookId     String  @unique @map("webhook_id")
+  /// L'id della pratica lato Shopify (`data_request.id`), dove il payload ce
+  /// l'ha. E' il secondo livello di deduplica, e serve nel caso che l'id della
+  /// consegna cambi: la pratica resta quella.
+  dataRequestId String? @map("data_request_id")
+  /// 'customers/data_request' | 'customers/redact' | 'shop/redact'.
+  topic         String
+  shopDomain    String  @map("shop_domain")
+  /// Risolto quando la richiesta viene lavorata, non quando arriva: la
+  /// ricevuta non deve dipendere da una lettura in piu'. Null anche dopo, se
+  /// il negozio non l'abbiamo mai avuto — o se shop/redact l'ha appena tolto.
+  shopId        String? @map("shop_id")
+  /// L'impronta della persona (vedi gdpr/audit.server): identifica la pratica
+  /// senza scrivere l'id in chiaro una seconda volta.
+  customerRef   String? @map("customer_ref")
+
+  /// Il payload firmato, tenuto solo finche' serve a lavorarlo: si azzera
+  /// quando la richiesta si chiude bene. Dentro c'e' l'id della persona, e una
+  /// coda di richieste GDPR gia' eseguite che se lo conserva e' il posto meno
+  /// adatto del mondo per tenerlo.
+  ///
+  /// Una richiesta finita in 'dead_letter' lo tiene, ed e' voluto: li' la
+  /// richiesta di una persona vera e' ferma e aspetta qualcuno che la porti a
+  /// termine a mano. Senza il payload quel qualcuno non saprebbe piu' di chi
+  /// si tratta, e il diritto non esercitato peserebbe piu' del dato conservato
+  /// qualche giorno in piu'.
+  payload Json?
+
+  /// 'queued' | 'processing' | 'completed' | 'failed' | 'dead_letter'.
+  /// 'failed' e' un fallimento da ritentare; 'dead_letter' e' uno a cui non si
+  /// riprova piu' da soli, e vuole qualcuno che lo guardi.
+  status      String    @default("queued")
+  attempts    Int       @default(0)
+  lastError   String?   @map("last_error")
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  /// L'esportazione pronta, per le sole richieste di accesso. Sta qui e non in
+  /// un file su un indirizzo pubblico: si consegna dall'app, al merchant gia'
+  /// autenticato, e scade da sola.
+  export          Json?
+  /// Quando l'esportazione smette di essere scaricabile e viene cancellata. Un
+  /// termine c'e' perche' questa e' una copia in piu' dei dati di una persona,
+  /// e una copia senza scadenza e' una copia per sempre.
+  exportExpiresAt DateTime? @map("export_expires_at")
+  /// Quando il merchant l'ha scaricata l'ultima volta. Serve a lui, per sapere
+  /// se l'ha gia' fatto, e a noi, per dimostrare che la consegna e' avvenuta.
+  downloadedAt    DateTime? @map("downloaded_at")
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: SetNull)
+
+  @@unique([shopDomain, dataRequestId])
+  @@index([status, receivedAt])
+  @@index([shopDomain, receivedAt(sort: Desc)])
+  @@map("compliance_requests")
 }

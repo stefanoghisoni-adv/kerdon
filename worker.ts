@@ -7,6 +7,7 @@ import {
   processManualSync,
   processRetryWebhook,
 } from './app/lib/workers/processors.server';
+import { processComplianceRequest } from './app/lib/gdpr/process-compliance.server';
 
 console.log('Starting sync worker...');
 
@@ -43,6 +44,14 @@ const worker = new Worker<SyncJobData>(
 
       case 'retry-failed-webhook':
         await processRetryWebhook(job.data);
+        break;
+
+      // Il job e' solo la sveglia: la fonte di verita' e' la riga su Postgres,
+      // ed e' lei a decidere se c'e' ancora qualcosa da fare. Un job perso
+      // diventa quindi un ritardo, che il giro del cron recupera, e non una
+      // richiesta GDPR mai eseguita.
+      case 'compliance-request':
+        await processComplianceRequest(job.data.requestId);
         break;
 
       default:

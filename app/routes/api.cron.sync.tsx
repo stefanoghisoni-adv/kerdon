@@ -17,6 +17,11 @@ import { SYNC_ACTIVE_CONFIG_FILTER } from '~/lib/sync/sync-active';
 import { pruneAccessLog } from '~/lib/read-proxy/access-log.server';
 import { pruneAnonymousUsers } from '~/lib/tracking/users.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
+import {
+  drainComplianceRequests,
+  processComplianceRequest,
+  pruneExpiredExports,
+} from '~/lib/gdpr/process-compliance.server';
 
 /**
  * Cron-triggered sync endpoint (replaces the long-running BullMQ worker on the
@@ -57,6 +62,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     snapshots: 0,
     accessLogPruned: 0,
     anonymousUsersPruned: 0,
+    complianceProcessed: 0,
+    complianceFailed: 0,
+    expiredExportsPruned: 0,
     errors: [] as string[],
   };
 
@@ -64,6 +72,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // e' una sola query, non dipende da nessun negozio, e messa qui gira anche
   // quando la parte di sync si interrompe a meta'.
   if (!onlyShopId) results.accessLogPruned = await pruneAccessLog();
+
+  // Le richieste di conformita' rimaste indietro, e le esportazioni scadute.
+  // Fuori dal ciclo dei negozi e prima di tutto il resto: qui sotto ci sono i
+  // termini di legge di una persona vera, e non devono dipendere da quanto e'
+  // lungo il giro delle sincronizzazioni ne' da come e' andato. Il drenaggio
+  // non guarda la coda: legge le righe, ed e' questo a rendere durevole la
+  // presa in carico anche quando Redis era giu' nel momento del webhook.
+  if (!onlyShopId) {
+    try {
+      const compliance = await drainComplianceRequests();
+      results.complianceProcessed = compliance.processed;
+      results.complianceFailed = compliance.failed;
+      results.expiredExportsPruned = await pruneExpiredExports();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Cron compliance drain error:', message);
+      results.errors.push(`compliance: ${message}`);
+    }
+  }
 
   // 1. Drain jobs enqueued from the UI (manual-sync, initial-bulk-sync, periodic-sync-check)
   const syncQueue = await getSyncQueue();
@@ -103,6 +130,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
         handled = await withShopSyncLock(job.data.shopId, () =>
           processPeriodicSyncCheck(job.data.shopId),
         );
+      } else if (job.data.type === 'compliance-request') {
+        // Senza lucchetto di negozio: il lucchetto se lo prende, dove serve,
+        // process-compliance stesso — e shop/redact non ha nemmeno un negozio
+        // a cui legarlo, visto che sta per toglierlo.
+        await processComplianceRequest(job.data.requestId);
+        handled = true;
       } else {
         // Unknown/deferred job type (e.g. retry-failed-webhook): skip, leave queued
         continue;

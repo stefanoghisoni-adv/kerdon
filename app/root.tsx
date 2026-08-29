@@ -249,6 +249,7 @@ export default function App() {
     customers: strings.customers.title,
     catalogs: strings.catalogs.title,
     logs: strings.common.logs,
+    privacy: strings.privacy.title,
     plan: strings.common.plan,
     settings: strings.common.settings,
   };
@@ -303,6 +304,12 @@ export default function App() {
                     Toglierla faceva sembrare persa una sezione che invece esiste
                     e ha una risposta da dare; ora la risposta e' dentro /plan. */}
                 <Link to="/plan">{menu.plan}</Link>
+                {/* Nel menu e non fuori come i log, e per una ragione che non
+                    e' di comodo: quando una persona chiede i suoi dati, il
+                    merchant ha trenta giorni per dargli una risposta, e una
+                    pagina raggiungibile solo da chi ne conosce l'indirizzo non
+                    e' una risposta che si possa dare. */}
+                <Link to="/privacy">{menu.privacy}</Link>
                 <Link to="/settings/supabase">{menu.settings}</Link>
               </>
             )}

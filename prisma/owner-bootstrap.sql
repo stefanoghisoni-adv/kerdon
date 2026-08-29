@@ -292,6 +292,32 @@ CREATE TABLE "customer_data_access_logs" (
     CONSTRAINT "customer_data_access_logs_pkey" PRIMARY KEY ("id")
 );
 
+-- La coda durevole delle richieste di conformita'. Il webhook di Shopify scrive
+-- qui e risponde subito: il 2xx e' una ricevuta, non una consegna, e la
+-- richiesta viene tagliata a cinque secondi. Il lavoro vero — l'esportazione o
+-- la cancellazione — avviene dopo, e la riga ne tiene tentativi ed esito.
+CREATE TABLE "compliance_requests" (
+    "id" TEXT NOT NULL,
+    "webhook_id" TEXT NOT NULL,
+    "data_request_id" TEXT,
+    "topic" TEXT NOT NULL,
+    "shop_domain" TEXT NOT NULL,
+    "shop_id" TEXT,
+    "customer_ref" TEXT,
+    "payload" JSONB,
+    "status" TEXT NOT NULL DEFAULT 'queued',
+    "attempts" INTEGER NOT NULL DEFAULT 0,
+    "last_error" TEXT,
+    "received_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "started_at" TIMESTAMP(3),
+    "completed_at" TIMESTAMP(3),
+    "export" JSONB,
+    "export_expires_at" TIMESTAMP(3),
+    "downloaded_at" TIMESTAMP(3),
+
+    CONSTRAINT "compliance_requests_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateTable
 CREATE TABLE "product_feeds" (
     "id" TEXT NOT NULL,
@@ -387,6 +413,20 @@ CREATE INDEX "customer_data_access_logs_shop_id_created_at_idx" ON "customer_dat
 -- CreateIndex
 CREATE INDEX "customer_data_access_logs_created_at_idx" ON "customer_data_access_logs"("created_at");
 
+-- La deduplica delle consegne ripetute: l'id della consegna e', in seconda
+-- battuta, la pratica lato Shopify. I NULL non si contano fra loro, quindi i
+-- topic senza `data_request.id` non danno fastidio.
+CREATE UNIQUE INDEX "compliance_requests_webhook_id_key" ON "compliance_requests"("webhook_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "compliance_requests_shop_domain_data_request_id_key" ON "compliance_requests"("shop_domain", "data_request_id");
+
+-- CreateIndex
+CREATE INDEX "compliance_requests_status_received_at_idx" ON "compliance_requests"("status", "received_at");
+
+-- CreateIndex
+CREATE INDEX "compliance_requests_shop_domain_received_at_idx" ON "compliance_requests"("shop_domain", "received_at" DESC);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "product_feeds_token_key" ON "product_feeds"("token");
 
@@ -443,6 +483,10 @@ ALTER TABLE "sync_job_events" ADD CONSTRAINT "sync_job_events_sync_job_id_fkey" 
 
 -- AddForeignKey
 ALTER TABLE "customer_data_access_logs" ADD CONSTRAINT "customer_data_access_logs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- SET NULL e non CASCADE: shop/redact cancella il negozio, e la riga che sta
+-- registrando quella stessa cancellazione non puo' sparire mentre la esegue.
+ALTER TABLE "compliance_requests" ADD CONSTRAINT "compliance_requests_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "product_feeds" ADD CONSTRAINT "product_feeds_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;

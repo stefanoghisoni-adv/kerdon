@@ -1,409 +1,235 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('~/lib/webhooks/verify.server', () => ({ verifyWebhook: vi.fn(() => true) }));
-vi.mock('~/lib/supabase.server', () => ({ createSupabaseClient: vi.fn() }));
-vi.mock('~/db.server', () => ({
-  prisma: {
-    shop: { findUnique: vi.fn(), deleteMany: vi.fn() },
-    session: { deleteMany: vi.fn() },
-    customerDataAccessLog: { deleteMany: vi.fn() },
-    syncJob: { create: vi.fn(), findMany: vi.fn(), update: vi.fn() },
-    syncJobEvent: { deleteMany: vi.fn() },
-  },
-}));
+vi.mock('~/lib/gdpr/compliance-queue.server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('~/lib/gdpr/compliance-queue.server')>();
+  return { ...actual, enqueueComplianceRequest: vi.fn() };
+});
 
 import { action as redactCustomer } from './webhooks.gdpr.customers-redact';
 import { action as dataRequest } from './webhooks.gdpr.data-request';
 import { action as redactShop } from './webhooks.gdpr.shop-redact';
 import { verifyWebhook } from '~/lib/webhooks/verify.server';
-import { createSupabaseClient } from '~/lib/supabase.server';
-import { prisma } from '~/db.server';
+import { enqueueComplianceRequest } from '~/lib/gdpr/compliance-queue.server';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/**
+ * Cosa prova questo file, e cosa non prova piu'.
+ *
+ * Le tre rotte non fanno piu' il lavoro: lo prendono in carico. Prima
+ * cancellavano, leggevano il database del merchant e costruivano l'esportazione
+ * dentro la richiesta HTTP, e su un negozio abbastanza grande superavano i
+ * cinque secondi che Shopify concede alla ricevuta — con l'effetto che Shopify
+ * contava una consegna fallita e ne mandava una seconda sopra un lavoro ancora
+ * in corso. Quel lavoro adesso vive in lib/gdpr/process-compliance, e le prove
+ * che lo riguardano stanno nel file di test di quel modulo.
+ *
+ * Qui resta il contratto della ricevuta, che e' piccolo e va difeso lo stesso:
+ * chi non e' Shopify non entra, un corpo rotto non diventa un ritentativo
+ * eterno, una richiesta che non si riesce a mettere in coda non deve sembrare
+ * accolta, e nel corpo della risposta non esce nessun dato personale.
+ */
+
 const SHOP = 'test-shop.myshopify.com';
 
-function req(body: string | object, hmac: string | null = 'sig') {
-  const headers: Record<string, string> = {};
-  if (hmac) headers['X-Shopify-Hmac-Sha256'] = hmac;
+function req(body: string | object, headers: Record<string, string> = {}) {
   return new Request('https://app/webhooks/gdpr', {
     method: 'POST',
-    headers,
+    headers: { 'X-Shopify-Hmac-Sha256': 'sig', ...headers },
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
 }
 
 const customerPayload = { shop_domain: SHOP, customer: { id: 4021 } };
 
-type Result = { data?: unknown; error?: unknown; count?: number };
-
-interface Recorded {
-  table: string;
-  op: 'delete' | 'update' | 'select';
-  values?: Record<string, unknown>;
+/** L'argomento con cui la rotta ha messo in coda la richiesta. */
+function enqueued(call = 0) {
+  return (enqueueComplianceRequest as any).mock.calls[call]?.[0];
 }
 
-const calls: Recorded[] = [];
-
-function fakeSupabase(replies: Record<string, Result>) {
-  const reply = (table: string): Result => replies[table] ?? { data: [], error: null, count: 0 };
-  return {
-    from: (table: string) => ({
-      delete: () => ({
-        eq: async () => {
-          calls.push({ table, op: 'delete' });
-          return reply(table);
-        },
-      }),
-      update: (values: Record<string, unknown>) => ({
-        eq: async () => {
-          calls.push({ table, op: 'update', values });
-          return reply(table);
-        },
-      }),
-      select: () => ({
-        eq: async () => {
-          calls.push({ table, op: 'select' });
-          return reply(table);
-        },
-        in: async () => {
-          calls.push({ table, op: 'select' });
-          return reply(table);
-        },
-      }),
-    }),
-  };
-}
-
-/** La riga di controllo scritta nel database, come l'ha vista Prisma. */
-function auditRow() {
-  const call = (prisma.syncJob.create as any).mock.calls[0];
-  return call?.[0].data as {
-    jobType: string;
-    status: string;
-    errors: { message?: string; gdpr: { steps: Array<{ table: string; outcome: string }> } };
-  };
-}
-
-function auditTables() {
-  return auditRow().errors.gdpr.steps.map((s) => s.table);
-}
-
-// `any`: la firma di spyOn su console cambia fra le versioni di vitest, e qui
-// serve solo poter leggere le chiamate e ripristinare l'originale.
-let logSpy: any;
 let errorSpy: any;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  calls.length = 0;
   (verifyWebhook as any).mockReturnValue(true);
-  (prisma.shop.findUnique as any).mockResolvedValue({
-    id: 'shop-1',
-    shopDomain: SHOP,
-    supabaseConfig: { tableNameCustomers: 'customers' },
-  });
-  (prisma.shop.deleteMany as any).mockResolvedValue({ count: 1 });
-  (prisma.session.deleteMany as any).mockResolvedValue({ count: 2 });
-  (prisma.customerDataAccessLog.deleteMany as any).mockResolvedValue({ count: 5 });
-  (prisma.syncJob.create as any).mockResolvedValue({});
-  (prisma.syncJob.findMany as any).mockResolvedValue([]);
-  (prisma.syncJobEvent.deleteMany as any).mockResolvedValue({ count: 0 });
-  (createSupabaseClient as any).mockReturnValue(
-    fakeSupabase({ customers: { error: null, count: 1 }, orders: { error: null, count: 2 } }),
-  );
-  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  (enqueueComplianceRequest as any).mockResolvedValue({ id: 'req-1', duplicate: false });
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
-  logSpy.mockRestore();
   errorSpy.mockRestore();
 });
 
-describe('customers/redact', () => {
-  it('firma non valida → 401, nessuna cancellazione', async () => {
-    (verifyWebhook as any).mockReturnValue(false);
+describe('la ricevuta, per tutti e tre i webhook', () => {
+  const routes = [
+    { name: 'customers/redact', action: redactCustomer, body: customerPayload },
+    { name: 'customers/data_request', action: dataRequest, body: customerPayload },
+    { name: 'shop/redact', action: redactShop, body: { shop_domain: SHOP } },
+  ];
 
-    const res = await redactCustomer({ request: req(customerPayload) } as never);
+  for (const route of routes) {
+    describe(route.name, () => {
+      it('firma non valida → 401, e niente viene preso in carico', async () => {
+        (verifyWebhook as any).mockReturnValue(false);
+        const res = await route.action({ request: req(route.body) } as any);
 
-    expect(res.status).toBe(401);
-    expect(createSupabaseClient).not.toHaveBeenCalled();
-    expect(prisma.syncJob.create).not.toHaveBeenCalled();
-  });
+        expect(res.status).toBe(401);
+        expect(enqueueComplianceRequest).not.toHaveBeenCalled();
+      });
 
-  it('corpo malformato → 400, non 500', async () => {
-    // Ritentare lo stesso corpo illeggibile darebbe lo stesso risultato per
-    // giorni: e' una richiesta rotta, non un guasto nostro.
-    const res = await redactCustomer({ request: req('{non e json') } as never);
+      it('senza header di firma → 401', async () => {
+        const res = await route.action({
+          request: new Request('https://app/webhooks/gdpr', {
+            method: 'POST',
+            body: JSON.stringify(route.body),
+          }),
+        } as any);
 
-    expect(res.status).toBe(400);
-    expect(createSupabaseClient).not.toHaveBeenCalled();
-  });
+        expect(res.status).toBe(401);
+        expect(enqueueComplianceRequest).not.toHaveBeenCalled();
+      });
 
-  it('payload senza id cliente → 400', async () => {
-    const res = await redactCustomer({ request: req({ shop_domain: SHOP }) } as never);
+      it('corpo malformato → 400, non 500', async () => {
+        // Un 500 farebbe ritentare a Shopify lo stesso corpo rotto per giorni,
+        // con lo stesso esito ogni volta.
+        const res = await route.action({ request: req('{ non json') } as any);
 
-    expect(res.status).toBe(400);
-  });
+        expect(res.status).toBe(400);
+        expect(enqueueComplianceRequest).not.toHaveBeenCalled();
+      });
 
-  it('cancella da ogni tabella che porta un riferimento alla persona', async () => {
-    const res = await redactCustomer({ request: req(customerPayload) } as never);
+      it('senza dominio del negozio → 400', async () => {
+        const res = await route.action({ request: req({ customer: { id: 4021 } }) } as any);
 
-    expect(res.status).toBe(200);
-    expect(auditTables()).toEqual([
-      'customers',
-      'orders',
-      'order_lines',
-      'sync_job_events',
-      'sync_jobs',
-      'customer_data_access_logs',
-    ]);
-    expect(auditRow().status).toBe('completed');
-  });
+        expect(res.status).toBe(400);
+        expect(enqueueComplianceRequest).not.toHaveBeenCalled();
+      });
 
-  it('gli ordini vengono anonimizzati, non persi', async () => {
-    await redactCustomer({ request: req(customerPayload) } as never);
+      it('presa in carico → 200', async () => {
+        const res = await route.action({ request: req(route.body) } as any);
 
-    const ordini = calls.filter((c) => c.table === 'orders');
-    expect(ordini).toEqual([
-      {
-        table: 'orders',
-        op: 'update',
-        values: {
-          shopify_customer_id: null,
-          customer_first_name: null,
-          customer_last_name: null,
-        },
-      },
-    ]);
-  });
+        expect(res.status).toBe(200);
+        expect(enqueued().topic).toBe(route.name);
+        expect(enqueued().shopDomain).toBe(SHOP);
+      });
 
-  it('pulisce anche il nostro database, non solo quello del merchant', async () => {
-    await redactCustomer({ request: req(customerPayload) } as never);
+      it('coda non disponibile → 500: la richiesta non e stata accolta e non deve sembrarlo', async () => {
+        // E l unico caso in cui il ritentativo di Shopify cambia qualcosa: la
+        // riga non esiste, quindi nessuno la lavorerebbe mai.
+        (enqueueComplianceRequest as any).mockRejectedValue(new Error('database irraggiungibile'));
+        const res = await route.action({ request: req(route.body) } as any);
 
-    expect(prisma.syncJobEvent.deleteMany).toHaveBeenCalledWith({
-      where: { entity: 'customer', shopifyId: 4021n, syncJob: { shopId: 'shop-1' } },
+        expect(res.status).toBe(500);
+      });
+
+      it('nel corpo della risposta non esce nessun dato personale', async () => {
+        const res = await route.action({ request: req(route.body) } as any);
+        const text = JSON.stringify(await res.json());
+
+        expect(text).not.toContain('4021');
+        expect(text).not.toContain(SHOP);
+        expect(text).not.toContain('@');
+      });
+
+      it('la ricevuta non legge il database del merchant', async () => {
+        // La prova indiretta che sta sotto i cinque secondi: l unica cosa che
+        // accade dentro la richiesta e la scrittura della riga.
+        const res = await route.action({ request: req(route.body) } as any);
+
+        expect(res.status).toBe(200);
+        expect(enqueueComplianceRequest).toHaveBeenCalledTimes(1);
+      });
+
+      it('una consegna ripetuta risponde 200 come la prima', async () => {
+        // Per Shopify sono la stessa richiesta, e lo sono davvero. Rispondere
+        // 500 alla ripetizione vorrebbe dire farsi ritentare all infinito un
+        // lavoro gia in corso.
+        (enqueueComplianceRequest as any).mockResolvedValue({ id: 'req-1', duplicate: true });
+        const res = await route.action({ request: req(route.body) } as any);
+
+        expect(res.status).toBe(200);
+      });
     });
-    expect(prisma.syncJob.findMany).toHaveBeenCalled();
-  });
+  }
+});
 
-  it('fallimento parziale → 500, e la traccia NON dice riuscito', async () => {
-    // La tabella clienti si svuota, gli ordini no: la persona resta scritta
-    // negli ordini. Chiudere con 200 vorrebbe dire dichiarare eseguita una
-    // cancellazione che non e' avvenuta.
-    (createSupabaseClient as any).mockReturnValue(
-      fakeSupabase({
-        customers: { error: null, count: 1 },
-        orders: { error: { code: '08006', message: 'connection failure' } },
-      }),
-    );
-
-    const res = await redactCustomer({ request: req(customerPayload) } as never);
-
-    expect(res.status).toBe(500);
-    const row = auditRow();
-    expect(row.status).toBe('failed');
-    expect(row.status).not.toBe('completed');
-    expect(row.errors.message).toContain('orders');
-    expect(row.errors.gdpr.steps.find((s) => s.table === 'orders')?.outcome).toBe('failed');
-  });
-
-  it('negozio senza progetto collegato → 200, e il nostro database si pulisce lo stesso', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({
-      id: 'shop-1',
-      shopDomain: SHOP,
-      supabaseConfig: null,
-    });
-
-    const res = await redactCustomer({ request: req(customerPayload) } as never);
-
-    expect(res.status).toBe(200);
-    expect(createSupabaseClient).not.toHaveBeenCalled();
-    expect(prisma.syncJobEvent.deleteMany).toHaveBeenCalled();
-    expect(auditRow().status).toBe('completed');
-  });
-
-  it('negozio mai registrato → 200 e traccia nel log', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue(null);
-
-    const res = await redactCustomer({ request: req(customerPayload) } as never);
-
-    expect(res.status).toBe(200);
-    expect(prisma.syncJob.create).not.toHaveBeenCalled();
-    expect(logSpy.mock.calls.flat().join(' ')).toContain('[gdpr]');
-  });
-
-  it('database irraggiungibile → 500', async () => {
-    (prisma.shop.findUnique as any).mockRejectedValue(new Error('database irraggiungibile'));
-
-    const res = await redactCustomer({ request: req(customerPayload) } as never);
-
-    expect(res.status).toBe(500);
-  });
-
-  it('la traccia non contiene dati della persona, solo la sua impronta', async () => {
+describe('id della consegna, per la deduplica', () => {
+  it("usa l header di Shopify quando c e", async () => {
     await redactCustomer({
-      request: req({ shop_domain: SHOP, customer: { id: 4021, email: 'chi@esempio.it' } }),
-    } as never);
+      request: req(customerPayload, { 'X-Shopify-Webhook-Id': 'consegna-abc' }),
+    } as any);
 
-    const serialized = JSON.stringify(auditRow());
-    expect(serialized).not.toContain('chi@esempio.it');
-    expect(serialized).not.toContain('4021');
-    expect(serialized).toContain('customer_ref');
+    expect(enqueued().webhookId).toBe('consegna-abc');
+  });
+
+  it("senza header, due consegne identiche si riconoscono lo stesso", async () => {
+    // Un ritentativo che perde l header non deve diventare una seconda pratica.
+    await redactCustomer({ request: req(customerPayload) } as any);
+    await redactCustomer({ request: req(customerPayload) } as any);
+
+    expect(enqueued(0).webhookId).toBe(enqueued(1).webhookId);
+  });
+
+  it('due topic diversi sullo stesso corpo non sono la stessa richiesta', async () => {
+    await redactCustomer({ request: req(customerPayload) } as any);
+    await dataRequest({ request: req(customerPayload) } as any);
+
+    expect(enqueued(0).webhookId).not.toBe(enqueued(1).webhookId);
+  });
+
+  it('due negozi diversi non sono la stessa richiesta', async () => {
+    await redactCustomer({ request: req(customerPayload) } as any);
+    await redactCustomer({
+      request: req({ ...customerPayload, shop_domain: 'altro.myshopify.com' }),
+    } as any);
+
+    expect(enqueued(0).webhookId).not.toBe(enqueued(1).webhookId);
   });
 });
 
-describe('customers/data_request', () => {
-  it('restituisce i dati della persona da tutte le tabelle che la riguardano', async () => {
-    (createSupabaseClient as any).mockReturnValue(
-      fakeSupabase({
-        customers: {
-          data: [{ shopify_customer_id: 4021, email_address: 'chi@esempio.it' }],
-          error: null,
-        },
-        orders: { data: [{ shopify_order_id: 900, total_price: '12.00' }], error: null },
-        order_lines: {
-          data: [{ shopify_line_id: 1, shopify_order_id: 900, title: 'Tazza' }],
-          error: null,
-        },
-      }),
-    );
+describe('cosa la rotta mette nella riga', () => {
+  it("l impronta della persona, non il suo id in chiaro", async () => {
+    await redactCustomer({ request: req(customerPayload) } as any);
 
-    const res = await dataRequest({ request: req(customerPayload) } as never);
-    const body = (await res.json()) as any;
-
-    expect(res.status).toBe(200);
-    expect(body.data.customer.email_address).toBe('chi@esempio.it');
-    expect(body.data.orders).toHaveLength(1);
-    expect(body.data.order_lines).toEqual([
-      { shopify_line_id: 1, shopify_order_id: 900, title: 'Tazza' },
-    ]);
-    expect(auditRow().status).toBe('completed');
+    expect(enqueued().customerRef).toBeTruthy();
+    expect(enqueued().customerRef).not.toContain('4021');
   });
 
-  it('persona mai sincronizzata → 200 con esportazione vuota', async () => {
-    // Con .single() questo caso rispondeva 500 e Shopify ritentava per giorni
-    // una richiesta a cui la risposta giusta era "non teniamo nulla".
-    (createSupabaseClient as any).mockReturnValue(
-      fakeSupabase({ customers: { data: [], error: null }, orders: { data: [], error: null } }),
-    );
+  it("l id della pratica lato Shopify quando il payload ce l ha", async () => {
+    await dataRequest({
+      request: req({ ...customerPayload, data_request: { id: 987 } }),
+    } as any);
 
-    const res = await dataRequest({ request: req(customerPayload) } as never);
-    const body = (await res.json()) as any;
-
-    expect(res.status).toBe(200);
-    expect(body.data).toEqual({ customer: null, orders: [], order_lines: [] });
+    expect(enqueued().dataRequestId).toBe('987');
   });
 
-  it('negozio non configurato → 200, nessuna lettura tentata', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({ id: 'shop-1', supabaseConfig: null });
+  it('nessun id di pratica quando il payload non lo porta', async () => {
+    await dataRequest({ request: req(customerPayload) } as any);
 
-    const res = await dataRequest({ request: req(customerPayload) } as never);
-
-    expect(res.status).toBe(200);
-    expect(createSupabaseClient).not.toHaveBeenCalled();
-    expect(auditRow().status).toBe('completed');
-  });
-
-  it('raccolta incompleta → 500, traccia fallita', async () => {
-    (createSupabaseClient as any).mockReturnValue(
-      fakeSupabase({
-        customers: { data: [{ shopify_customer_id: 4021 }], error: null },
-        orders: { error: { code: '57014', message: 'statement timeout' } },
-      }),
-    );
-
-    const res = await dataRequest({ request: req(customerPayload) } as never);
-
-    expect(res.status).toBe(500);
-    expect(auditRow().status).toBe('failed');
-  });
-
-  it('la traccia registra i conteggi, mai i dati letti', async () => {
-    (createSupabaseClient as any).mockReturnValue(
-      fakeSupabase({
-        customers: { data: [{ shopify_customer_id: 4021, email_address: 'chi@esempio.it' }], error: null },
-        orders: { data: [], error: null },
-      }),
-    );
-
-    await dataRequest({ request: req(customerPayload) } as never);
-
-    expect(JSON.stringify(auditRow())).not.toContain('chi@esempio.it');
-  });
-
-  it('firma non valida → 401; corpo malformato → 400', async () => {
-    (verifyWebhook as any).mockReturnValue(false);
-    expect((await dataRequest({ request: req(customerPayload) } as never)).status).toBe(401);
-
-    (verifyWebhook as any).mockReturnValue(true);
-    expect((await dataRequest({ request: req('{rotto') } as never)).status).toBe(400);
+    expect(enqueued().dataRequestId).toBeNull();
   });
 });
 
-describe('shop/redact', () => {
-  const shopPayload = { shop_domain: SHOP };
+describe('customers/redact e data_request vogliono una persona', () => {
+  it('customers/redact senza id cliente → 400', async () => {
+    const res = await redactCustomer({ request: req({ shop_domain: SHOP }) } as any);
 
-  it('toglie il negozio, le sessioni e il registro degli accessi', async () => {
-    const res = await redactShop({ request: req(shopPayload) } as never);
+    expect(res.status).toBe(400);
+    expect(enqueueComplianceRequest).not.toHaveBeenCalled();
+  });
+
+  it('data_request senza id cliente → 400', async () => {
+    const res = await dataRequest({ request: req({ shop_domain: SHOP }) } as any);
+
+    expect(res.status).toBe(400);
+    expect(enqueueComplianceRequest).not.toHaveBeenCalled();
+  });
+
+  it('shop/redact invece non lo vuole: li la persona e il negozio', async () => {
+    const res = await redactShop({ request: req({ shop_domain: SHOP }) } as any);
 
     expect(res.status).toBe(200);
-    expect(prisma.customerDataAccessLog.deleteMany).toHaveBeenCalledWith({
-      where: { shopId: 'shop-1' },
-    });
-    // Le sessioni non sono in cascata: si legano al dominio, e dentro hanno
-    // token e dati di chi ha installato l'app.
-    expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { shop: SHOP } });
-    expect(prisma.shop.deleteMany).toHaveBeenCalledWith({ where: { shopDomain: SHOP } });
-  });
-
-  it('la traccia finisce nel log: nel database non ci sarebbe piu nulla a cui legarla', async () => {
-    await redactShop({ request: req(shopPayload) } as never);
-
-    const line = logSpy.mock.calls.flat().join(' ');
-    expect(line).toContain('[gdpr]');
-    expect(line).toContain('gdpr_shop_redact');
-    expect(line).toContain('sessions');
-    expect(prisma.syncJob.create).not.toHaveBeenCalled();
-  });
-
-  it('negozio mai registrato → 200 lo stesso', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue(null);
-    (prisma.shop.deleteMany as any).mockResolvedValue({ count: 0 });
-
-    const res = await redactShop({ request: req(shopPayload) } as never);
-
-    expect(res.status).toBe(200);
-  });
-
-  it('cancellazione parziale → 500 e traccia fallita, non riuscita', async () => {
-    // Le sessioni restano: dentro ci sono un access token e i dati di una
-    // persona. Rispondere 200 vorrebbe dire tenerseli per sempre.
-    (prisma.session.deleteMany as any).mockRejectedValue(new Error('database irraggiungibile'));
-
-    const res = await redactShop({ request: req(shopPayload) } as never);
-
-    expect(res.status).toBe(500);
-    const row = auditRow();
-    expect(row.jobType).toBe('gdpr_shop_redact');
-    expect(row.status).toBe('failed');
-    expect(row.errors.message).toContain('sessions');
-  });
-
-  it('senza dominio del negozio → 400; corpo malformato → 400', async () => {
-    expect((await redactShop({ request: req({}) } as never)).status).toBe(400);
-    expect((await redactShop({ request: req('{rotto') } as never)).status).toBe(400);
-    expect(prisma.shop.deleteMany).not.toHaveBeenCalled();
-  });
-
-  it('firma non valida → 401, niente viene cancellato', async () => {
-    (verifyWebhook as any).mockReturnValue(false);
-
-    const res = await redactShop({ request: req(shopPayload) } as never);
-
-    expect(res.status).toBe(401);
-    expect(prisma.shop.deleteMany).not.toHaveBeenCalled();
-    expect(prisma.session.deleteMany).not.toHaveBeenCalled();
+    expect(enqueued().customerRef).toBeNull();
   });
 });

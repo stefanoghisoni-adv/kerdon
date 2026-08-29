@@ -19,6 +19,15 @@
 //                   shopify_order_id, e dentro hanno prodotto, quantita',
 //                   prezzo. Anonimizzato l'ordine, la riga non e' piu'
 //                   riconducibile a nessuno.
+//     users         shopify_customer_id + l'identificativo del browser, il
+//                   browser, il tipo di dispositivo, la prima e l'ultima
+//                   visita, e `merged_into` che lega fra loro i dispositivi
+//                   della stessa persona. Non c'e' dentro un nome, e per un
+//                   pezzo e' bastato quello a lasciarla fuori da questo
+//                   elenco: era sbagliato. Una riga qui dice quali
+//                   dispositivi usa una persona identificata e quando li ha
+//                   usati — e lo dice di sua iniziativa, perche' e' l'unico
+//                   dato di questa app che Shopify non ci ha dato lei.
 //
 //   nel nostro database
 //     sync_job_events   righe storiche con entity='customer' e l'id Shopify
@@ -49,52 +58,43 @@
 //
 // Il risultato e' quello che il GDPR chiede davvero: nessun dato che riporti
 // alla persona, e nessuna contabilita' distrutta per ottenerlo.
+//
+// LA SCELTA SUI BROWSER: si cancellano, e con loro i legami che li univano.
+//
+// E' la decisione opposta a quella sugli ordini, e per la ragione opposta.
+// Dietro un ordine c'e' un obbligo di conservazione — e' una scrittura
+// contabile — mentre dietro `users` non c'e' niente del genere: quella tabella
+// esiste per riconoscere chi torna sul negozio, cioe' per marketing, che e'
+// esattamente il trattamento che una richiesta di cancellazione fa cessare.
+// Non c'e' nessun art. 17(3) da invocare, quindi le righe se ne vanno.
+//
+// La via di mezzo — tenere la riga e azzerare `shopify_customer_id` — e' stata
+// scartata apposta, e va detto perche' sembrava ragionevole: l'identificativo
+// del browser e' una stringa casuale, quindi "pseudonimo, quindi non
+// personale". Non regge. Quella stringa vive ancora dentro il browser di quella
+// persona: alla prima visita successiva la riga tornerebbe raggiungibile
+// partendo da lei, con la data della prima comparsa e tutta la sua storia
+// dentro. Un identificativo che il titolare puo' ricollegare a un individuo e'
+// dato personale (art. 4(1) e 4(5)); conservarlo per via del suo aspetto
+// casuale sarebbe una cancellazione solo all'apparenza. E vale a maggior
+// ragione per `shopify_customer_id`, che non e' pseudonimo per niente.
+//
+// Il come — l'ordine dei passi, il grafo di `merged_into`, il tetto ai salti —
+// sta in lib/gdpr/identity-graph.server.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
+import type { GdprStep } from './steps';
+import { toStep } from './steps';
+import { collectLinkedBrowsers, eraseBrowsersOfCustomer } from './identity-graph.server';
 
-/**
- * Cos'e' successo a una tabella. Una richiesta GDPR e' fatta di piu' passi su
- * database diversi, e l'unica risposta onesta e' l'elenco di come e' andato
- * ognuno: e' quello che finisce nella traccia di controllo, ed e' quello che
- * decide se rispondere "fatto" oppure no.
- */
-export interface GdprStep {
-  /** Nome della tabella nel database, come si chiama davvero. */
-  table: string;
-  /**
-   * 'deleted'    righe cancellate
-   * 'anonymized' righe rimaste, riferimento alla persona rimosso
-   * 'read'       righe lette per comporre l'esportazione
-   * 'skipped'    niente da fare qui, e il perche' sta in `detail`
-   * 'failed'     non riuscito: la richiesta NON e' completa
-   */
-  outcome: 'deleted' | 'anonymized' | 'read' | 'skipped' | 'failed';
-  /** Quante righe sono state toccate, o lette. */
-  rows: number;
-  /** Il perche', quando l'esito da solo non basta a capirlo. */
-  detail?: string;
-}
-
-/**
- * Basta un passo fallito perche' la richiesta sia fallita.
- *
- * E' la regola che impedisce a una cancellazione parziale di passare per
- * riuscita: se la tabella clienti si e' svuotata ma gli ordini portano ancora
- * il nome della persona, quello che e' successo non e' un erasure.
- */
-export function stepsFailed(steps: GdprStep[]): boolean {
-  return steps.some((step) => step.outcome === 'failed');
-}
-
-/** Riassunto leggibile dei soli passi andati male. */
-export function failureMessage(steps: GdprStep[]): string {
-  return steps
-    .filter((step) => step.outcome === 'failed')
-    .map((step) => `${step.table}: ${step.detail ?? 'errore sconosciuto'}`)
-    .join('; ');
-}
+// Il vocabolario dei passi vive in `steps.ts` — ci arriva anche il grafo delle
+// identita', e tenerlo qui avrebbe chiuso un cerchio fra i due moduli. Si
+// riesporta perche' chi importa da qui lo ha sempre fatto, e non c'e' ragione
+// di far cambiare gli import a mezzo repository per una divisione interna.
+export type { GdprStep, QueryError } from './steps';
+export { stepsFailed, failureMessage } from './steps';
 
 // I nomi che la DDL crea per ordini e righe. Non sono configurabili come lo e'
 // la tabella clienti: chi scrive gli ordini (webhook e sync) li usa cablati, e
@@ -109,57 +109,6 @@ const ANONYMOUS_ORDER = {
   customer_first_name: null,
   customer_last_name: null,
 };
-
-interface QueryError {
-  message?: string;
-  code?: string;
-}
-
-/**
- * La tabella non c'e'.
- *
- * Succede per davvero e non e' un guasto: gli ordini esistono solo se il
- * negozio ci ha dato il permesso di leggerli, i clienti solo se il piano li
- * include. Una tabella che non e' mai stata creata non contiene dati della
- * persona, quindi non c'e' niente da cancellare e la richiesta non deve
- * fallire per questo. Ogni altro errore, invece, e' un fallimento vero.
- */
-function isTableMissing(error: QueryError | null | undefined): boolean {
-  if (!error) return false;
-  const code = error.code ?? '';
-  const message = error.message ?? '';
-  // 42P01 e' l'"undefined_table" di Postgres; PGRST205 e' il modo in cui l'API
-  // REST dice che la tabella non e' nella sua copia dello schema.
-  return (
-    code === '42P01' ||
-    code === 'PGRST205' ||
-    /does not exist|could not find the table/i.test(message)
-  );
-}
-
-function toStep(
-  table: string,
-  done: GdprStep['outcome'],
-  result: { error?: QueryError | null; count?: number | null },
-): GdprStep {
-  if (result.error) {
-    if (isTableMissing(result.error)) {
-      return {
-        table,
-        outcome: 'skipped',
-        rows: 0,
-        detail: 'tabella non presente in questo progetto',
-      };
-    }
-    return {
-      table,
-      outcome: 'failed',
-      rows: 0,
-      detail: result.error.message ?? result.error.code ?? 'errore sconosciuto',
-    };
-  }
-  return { table, outcome: done, rows: result.count ?? 0 };
-}
 
 /**
  * Toglie la persona dal database del merchant.
@@ -206,6 +155,11 @@ export async function eraseCustomerFromMerchant(
       'e l ordine e appena stato anonimizzato',
   });
 
+  // Il grafo dei browser per ultimo. L'ordine non e' indifferente: finche' la
+  // riga in `customers` esiste, `identify` puo' riscrivere un legame appena
+  // sciolto — cancellata quella, non c'e' piu' niente a cui riattaccarsi.
+  steps.push(...(await eraseBrowsersOfCustomer(supabase, customerId)));
+
   return steps;
 }
 
@@ -214,6 +168,18 @@ export interface CustomerDataPackage {
   customer: Record<string, unknown> | null;
   orders: Record<string, unknown>[];
   order_lines: Record<string, unknown>[];
+  /**
+   * I browser da cui quella persona e' passata, il canonico e gli altri: e'
+   * l'unica parte dell'esportazione che Shopify non ha gia'. Escono anche i
+   * legami `merged_into`, perche' dire "questi tre dispositivi sono la stessa
+   * persona" e' esattamente cio' che di lei abbiamo dedotto.
+   */
+  browsers: Record<string, unknown>[];
+}
+
+/** Un'esportazione vuota, la risposta giusta quando non teniamo nulla. */
+export function emptyCustomerDataPackage(): CustomerDataPackage {
+  return { customer: null, orders: [], order_lines: [], browsers: [] };
 }
 
 /**
@@ -233,7 +199,7 @@ export async function collectCustomerData(
   customerId: string,
 ): Promise<{ data: CustomerDataPackage; steps: GdprStep[] }> {
   const steps: GdprStep[] = [];
-  const pack: CustomerDataPackage = { customer: null, orders: [], order_lines: [] };
+  const pack: CustomerDataPackage = emptyCustomerDataPackage();
 
   const customers = await supabase
     .from(customersTable)
@@ -277,6 +243,12 @@ export async function collectCustomerData(
       toStep(ORDER_LINES_TABLE, 'read', { error: lines.error, count: pack.order_lines.length }),
     );
   }
+
+  // I browser: si arriva alle righe indirette seguendo `merged_into`, quindi
+  // non basta la lettura per `shopify_customer_id` che si farebbe d'istinto.
+  const browsers = await collectLinkedBrowsers(supabase, customerId);
+  pack.browsers = browsers.rows;
+  steps.push(browsers.step);
 
   return { data: pack, steps };
 }

@@ -43,4 +43,10 @@ export type SyncJobData =
   | { type: 'periodic-sync-check'; shopId: string }
   | { type: 'initial-bulk-sync'; shopId: string }
   | { type: 'manual-sync'; shopId: string }
-  | { type: 'retry-failed-webhook'; syncJobId: string; webhookPayload: any; attempt: number };
+  | { type: 'retry-failed-webhook'; syncJobId: string; webhookPayload: any; attempt: number }
+  // Una richiesta di conformita' presa in carico. Porta solo l'id della riga su
+  // Postgres, mai il payload: quel corpo contiene l'id di una persona, e la
+  // coda su Redis non e' il posto dove tenerlo. Chi lavora il job va a
+  // rileggerselo, e cosi' vede sempre lo stato vero della richiesta invece di
+  // una fotografia scattata al momento dell'accodamento.
+  | { type: 'compliance-request'; requestId: string };

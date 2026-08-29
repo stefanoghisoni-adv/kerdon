@@ -83,7 +83,11 @@ describe('cancellazione nel database del merchant', () => {
       '4021',
     );
 
-    expect(steps.map((s) => s.table)).toEqual(['customers', 'orders', 'order_lines']);
+    // `users` sta in fondo e non e' un dettaglio: e' la tabella dei browser da
+    // cui la persona e' stata riconosciuta, e finche' non compariva qui una
+    // cancellazione dichiarata completa lasciava indietro righe che puntavano
+    // ancora al suo id Shopify.
+    expect(steps.map((s) => s.table)).toEqual(['customers', 'orders', 'order_lines', 'users']);
     expect(stepsFailed(steps)).toBe(false);
   });
 
@@ -224,7 +228,7 @@ describe('raccolta dei dati per la richiesta di accesso', () => {
       '4021',
     );
 
-    expect(data).toEqual({ customer: null, orders: [], order_lines: [] });
+    expect(data).toEqual({ customer: null, orders: [], order_lines: [], browsers: [] });
     expect(stepsFailed(steps)).toBe(false);
     expect(step(steps, 'order_lines')).toMatchObject({ outcome: 'skipped' });
   });
