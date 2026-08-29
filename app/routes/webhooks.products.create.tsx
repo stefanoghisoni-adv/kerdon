@@ -45,7 +45,17 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     // Del payload serve solo l'id: le varianti che porta con se' non sono un
     // elenco su cui si possa decidere cosa cancellare.
-    const payload = JSON.parse(body) as { id?: number | string };
+    let payload: { id?: number | string };
+    try {
+      payload = JSON.parse(body) as { id?: number | string };
+    } catch {
+      // Un corpo illeggibile e' un guasto DEFINITIVO, non passeggero: lo stesso
+      // JSON malformato non diventera' valido riprovandolo. Rispondere 500
+      // qui farebbe insistere Shopify per due giorni e poi spegnere la
+      // sottoscrizione, per un evento che comunque non si potrebbe usare.
+      // Quindi 200, ed e' l'unica eccezione alla regola qui sotto.
+      return json({ ok: true }, { status: 200 });
+    }
     const productId = Number(payload?.id);
 
     if (!Number.isFinite(productId) || productId <= 0) {
@@ -220,6 +230,23 @@ export async function action({ request }: ActionFunctionArgs) {
       // Silent fail on logging
     }
 
-    return json({ ok: true }, { status: 200 });
+    // 500, non 200: un guasto nostro non deve costare l'evento.
+    //
+    // Qui si arriva per cio' che non sappiamo gestire — Supabase irraggiungibile,
+    // il database dell'app che non risponde, una chiave non decifrabile. Sono
+    // quasi sempre guasti passeggeri, e rispondendo 200 dicevamo a Shopify
+    // "ricevuto, tutto a posto": nessun nuovo tentativo, e quell'ordine o quel
+    // cliente non tornava mai piu'.
+    //
+    // Il timore che aveva portato al 200 e' vero ma va misurato: Shopify
+    // riprova con attese crescenti per circa quarantott'ore, e disattiva la
+    // sottoscrizione solo se in tutto quel tempo non riceve MAI una risposta
+    // buona. Due giorni sono tanti per accorgersi di un guasto — e adesso ogni
+    // fallimento lascia una traccia, quindi accorgersene e' possibile.
+    //
+    // I casi in cui davvero non c'e' niente da fare — payload senza id, negozio
+    // sconosciuto o non collegato, permessi mancanti — rispondono 200 piu'
+    // sopra, e non passano di qui: quelli riprovarli non servirebbe a niente.
+    return json({ error: 'processing_failed' }, { status: 500 });
   }
 }

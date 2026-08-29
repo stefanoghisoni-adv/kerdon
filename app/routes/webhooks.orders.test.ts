@@ -329,13 +329,15 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
     expect(lastTrace(errored)).toMatchObject({ status: 'failed', order: null });
   });
 
-  it('database dell app irraggiungibile: si risponde 200 e lo si scrive nel log', async () => {
+  it('database dell app irraggiungibile: si risponde 500, cosi Shopify riprova', async () => {
     (prisma.shop.findUnique as any).mockRejectedValue(new Error('connection refused'));
     mockSupabase();
 
     const res = await action({ request: req(orderPayload()) } as any);
 
-    expect(res.status).toBe(200);
+    // Un guasto passeggero deve costare un nuovo tentativo, non l'evento:
+    // con il 200 Shopify considerava consegnato e quell'ordine spariva.
+    expect(res.status).toBe(500);
     expect(lastTrace(errored)).toMatchObject({ status: 'failed', detail: 'connection refused' });
   });
 });
