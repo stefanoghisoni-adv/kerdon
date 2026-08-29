@@ -7,6 +7,7 @@ import {
   processInitialBulkSync,
   processManualSync,
 } from '~/lib/workers/processors.server';
+import { withShopSyncLock } from '~/lib/queue/shop-lock.server';
 import { recordEligibilitySnapshotIfMissing } from '~/lib/stats/eligibility-snapshot.server';
 import { hasPlanChanged } from '~/components/Dashboard/plan-upgrade';
 import { isAuthorized } from '~/utils/authorization.server';
@@ -48,6 +49,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const results = {
     drained: 0,
+    /** Job lasciati in coda perche' quel negozio era gia' in lavorazione. */
+    skippedLocked: 0,
     periodicChecks: 0,
     planCatchUps: 0,
     snapshots: 0,
@@ -72,14 +75,39 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   for (const job of pendingJobs) {
     try {
+      // Un negozio per volta. Questo non e' un Worker di BullMQ — legge i job in
+      // attesa e chiama i processor direttamente, senza prendere possesso di
+      // niente — quindi due invocazioni possono trovarsi davanti lo stesso
+      // lavoro. Da quando un gesto manuale innesca un drain immediato, e' un
+      // caso concreto e non piu' teorico.
+      //
+      // Il danno non sarebbe un doppione innocuo: la corsa completa finisce
+      // spazzando le righe con `synced_at` anteriore al proprio inizio, e due
+      // corse sovrapposte hanno due inizi diversi — la piu' vecchia porta via
+      // quello che la piu' recente ha appena scritto.
+      //
+      // Se il lucchetto e' occupato il job NON si rimuove: ci sta gia'
+      // lavorando qualcun altro, e toglierlo di mezzo qui vorrebbe dire
+      // cancellare il lavoro di un altro dalla coda.
+      let handled = true;
       if (job.data.type === 'manual-sync') {
-        await processManualSync(job.data.shopId, job);
+        handled = await withShopSyncLock(job.data.shopId, () =>
+          processManualSync(job.data.shopId, job),
+        );
       } else if (job.data.type === 'initial-bulk-sync') {
-        await processInitialBulkSync(job.data.shopId, job);
+        handled = await withShopSyncLock(job.data.shopId, () =>
+          processInitialBulkSync(job.data.shopId, job),
+        );
       } else if (job.data.type === 'periodic-sync-check') {
-        await processPeriodicSyncCheck(job.data.shopId);
+        handled = await withShopSyncLock(job.data.shopId, () =>
+          processPeriodicSyncCheck(job.data.shopId),
+        );
       } else {
         // Unknown/deferred job type (e.g. retry-failed-webhook): skip, leave queued
+        continue;
+      }
+      if (!handled) {
+        results.skippedLocked++;
         continue;
       }
       await job.remove();
@@ -152,8 +180,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // isAuthorized: senza questo controllo un negozio sospeso finirebbe qui a
       // ogni giro solo per far lanciare il processor e riempire di errori il log.
       if (isAuthorized(shop.authorization) && hasPlanChanged(shop.currentPlan, shop.lastSyncedPlan)) {
-        await processInitialBulkSync(shop.id);
-        results.planCatchUps++;
+        // Stesso lucchetto del drain: questo giro passa su TUTTI i negozi, e
+        // puo' incrociare una corsa avviata un istante prima dalla corsia
+        // veloce di un gesto manuale.
+        if (await withShopSyncLock(shop.id, () => processInitialBulkSync(shop.id))) {
+          results.planCatchUps++;
+        } else {
+          results.skippedLocked++;
+        }
         continue;
       }
 
@@ -190,8 +224,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
 
       if (due) {
-        await processPeriodicSyncCheck(shop.id);
-        results.periodicChecks++;
+        if (await withShopSyncLock(shop.id, () => processPeriodicSyncCheck(shop.id))) {
+          results.periodicChecks++;
+        } else {
+          results.skippedLocked++;
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
