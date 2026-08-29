@@ -138,25 +138,57 @@
 
    Il piede staccato e' la differenza che si nota di piu': prima Annulla e
    Applica galleggiavano sotto il calendario e si confondevano con i giorni. */
+/* La tendina del periodo.
+
+   Le tre misure di fuori sono date: 700px in tutto, 170 la colonna dei periodi,
+   il resto al corpo. Non si sommano dal contenuto — si impongono, e il compito
+   di quello che c'e' dentro e' starci. Il conto che deve tornare e' questo:
+
+     corpo               530  (700 - 170, dalla griglia)
+     - padding corpo     -24  (2 x --p-space-300)
+     = calendario        506
+
+     due mesi da 7 caselle da 34px   476
+     + due mezzi stacchi ai lati del divisore   24
+     + il divisore                               1
+     = servono                                 501   → 5px di respiro
+
+   `min()` e non `700px` secco: sotto i 732px di viewport disponibile la tendina
+   si stringe invece di sfondare, e il ripiego a colonna sola piu' in basso
+   raccoglie quello che a quel punto non ci sta piu' affiancato.
+
+   `box-sizing: border-box` esplicito anche se Polaris lo mette su tutto: qui i
+   700px sono un budget, e un bordo che si aggiunge invece di rientrarci lo
+   sfonderebbe di un pixel per lato. */
 .range-picker {
-  display: flex;
-  align-items: stretch;
-  width: 700px;
-  max-width: 90vw;
+  --range-picker-day: 2.125rem;
+  --range-picker-month: calc(var(--range-picker-day) * 7);
+  --range-picker-sidebar: 10.625rem;
+  /* Mezzo stacco: ce n'e' uno per lato del divisore fra i due mesi. */
+  --range-picker-gutter: var(--p-space-300);
+
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: var(--range-picker-sidebar) minmax(0, 1fr);
+  inline-size: min(700px, calc(100vw - 32px));
+  max-inline-size: 100%;
 }
 
 .range-picker__sidebar {
-  flex: 0 0 auto;
-  width: 180px;
+  min-inline-size: 0;
   padding: var(--p-space-200);
   border-inline-end: var(--p-border-width-025) solid var(--p-color-border);
-  /* Gli undici periodi ci stanno tutti: una colonna che scorre nasconde
-     proprio le voci in cima, che sono le piu' usate. */
+  /* La colonna non scorre mai. Mostra un pannello solo per volta — l'elenco
+     principale, oppure le voci di un gruppo — e il piu' lungo dei due sta
+     comodo: una colonna che scorre nasconderebbe proprio le voci in cima, che
+     sono le piu' usate. */
   overflow: visible;
 }
 
 /* Righe piu' compatte della misura nativa di Polaris, che e' pensata per un
-   menu con poche voci. */
+   menu con poche voci. `min-height: auto` serve anche a "Black Friday Cyber
+   Monday", che su 170px va a capo: con l'altezza fissa la seconda riga
+   sarebbe uscita dal fondo della voce. */
 .range-picker__sidebar .Polaris-ActionList__Item {
   min-height: auto;
   padding-block: 0.375rem;
@@ -165,40 +197,47 @@
 .range-picker__main {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .range-picker__body {
+  min-inline-size: 0;
   padding: var(--p-space-300);
 }
 
-/* I due campi e la freccia su una riga sola: la freccia non si stringe, i
-   campi si dividono quello che resta in parti uguali. */
+/* I due campi e la freccia: una griglia di tre celle, non tre elementi che si
+   contendono lo spazio. I campi valgono `1fr` a testa e quindi escono larghi
+   uguali per costruzione; la freccia sta in mezzo e non si stringe.
+
+   `minmax(0, 1fr)` e non `1fr`: la misura minima automatica di una cella e' il
+   suo contenuto, e un campo di testo non scende sotto la sua larghezza
+   naturale. Senza il minimo a zero i due campi si rifiutavano di stringersi e
+   la riga sfondava il corpo. */
 .range-picker__fields {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--p-space-200);
   padding-block-end: var(--p-space-300);
 }
 
-.range-picker__fields > *:not(.range-picker__arrow) {
-  flex: 1 1 0;
-  min-width: 0;
+.range-picker__fields > * {
+  min-inline-size: 0;
 }
 
 .range-picker__arrow {
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
 }
 
-/* Il piede resta in fondo anche quando il calendario e' piu' corto del solito
-   — un mese con cinque righe invece di sei. */
-.range-picker__footer {
-  margin-block-start: auto;
-}
+/* Il piede segue l'ultima riga del calendario e basta.
 
+   Prima qui c'era `margin-block-start: auto`, che lo spingeva in fondo alla
+   colonna: quando l'elenco dei periodi era piu' alto del calendario — e lo era
+   sempre — fra i giorni e i due pulsanti si apriva una fascia vuota alta
+   decine di pixel, che si leggeva come qualcosa che non aveva finito di
+   caricare. Lo stacco che resta e' quello del padding: dodici pixel sotto il
+   calendario, la riga, dodici sopra i pulsanti. */
 .range-picker__actions {
   display: flex;
   justify-content: flex-end;
@@ -208,27 +247,81 @@
 
 /* Il calendario del periodo.
 
-   Due misure da imporre a Polaris, che da solo non le ha.
+   Il DatePicker disegna ogni mese come una tabella che si allarga fino a
+   riempire il contenitore. Dentro una tendina senza larghezza propria quel
+   contenitore e' lo schermo, e il calendario si stirava per tutta la pagina.
+   Qui ogni mese e' largo esattamente le sue sette caselle: un numero, non un
+   risultato.
 
-   La prima: il DatePicker disegna ogni mese come una tabella che si allarga
-   fino a riempire il contenitore. Dentro una tendina senza larghezza propria
-   quel contenitore e' lo schermo, e il calendario si stirava per tutta la
-   pagina. Qui la tabella torna a essere larga quanto i suoi giorni.
+   Le caselle vanno rimpicciolite comunque — Polaris le dimensiona per un
+   modulo da compilare, larghe e con testo da corpo del testo, e due mesi cosi'
+   piu' una colonna di periodi in una tendina da 700px non ci stanno.
 
-   La seconda: le celle sono dimensionate per un modulo da compilare — larghe,
-   con testo da corpo del testo. Dentro una tendina che deve contenere due mesi
-   e una colonna di periodi non ci stanno. */
-.range-picker__calendar .Polaris-DatePicker__Month {
-  width: auto;
-  table-layout: auto;
+   Nota sulle classi `Polaris-DatePicker__*`: sono interne, e appoggiarcisi non
+   e' una scelta ma la conseguenza di restare sul DatePicker React. Il
+   calendario non espone alcun appiglio pubblico per la larghezza di una cella
+   ne' per lo spazio fra due mesi, e quello che segue e' il minimo indispensabile
+   per farlo stare nei 700px. Nessuna di queste regole tocca i colori, la forma
+   della selezione o l'anello del fuoco, che restano di Polaris. */
+.range-picker__calendar {
+  min-inline-size: 0;
 }
 
-.range-picker__calendar .Polaris-DatePicker__Day,
-.range-picker__calendar .Polaris-DatePicker__EmptyDay,
+.range-picker__calendar .Polaris-DatePicker__Month {
+  inline-size: var(--range-picker-month);
+  table-layout: fixed;
+  /* Il mese sta al centro della sua meta': i due calendari risultano
+     equidistanti dal divisore invece che appoggiati a sinistra. */
+  margin-inline: auto;
+}
+
+/* Le due meta' del calendario, e la riga che le separa.
+
+   Polaris affianca i due mesi con margini negativi sul contenitore e margini
+   positivi sui figli — un modo di fare le gronde che qui non serve e che
+   rendeva impossibile mettere qualcosa in mezzo. Azzerati entrambi, i due
+   contenitori diventano due meta' vere (`1 1 0`), e il divisore e' il bordo
+   sinistro del secondo: cade esattamente a meta' del calendario e non puo'
+   passare sopra un testo o una casella, perche' e' il confine fra due
+   elementi e non una riga disegnata addosso a loro.
+
+   `min-inline-size` e' la soglia sotto cui i due mesi smettono di starci
+   affiancati. Sotto quella, il `flex-wrap` che Polaris ha gia' li manda uno
+   sotto l'altro: e' il ripiego stretto, e arriva da solo. */
+.range-picker__calendar .Polaris-DatePicker__MonthLayout {
+  margin-block-start: 0;
+  margin-inline-start: 0;
+}
+
+.range-picker__calendar .Polaris-DatePicker__MonthContainer {
+  flex: 1 1 0;
+  min-inline-size: calc(var(--range-picker-month) + var(--range-picker-gutter));
+  max-inline-size: none;
+  margin-block-start: 0;
+  margin-inline-start: 0;
+}
+
+.range-picker__calendar
+  .Polaris-DatePicker__MonthContainer
+  + .Polaris-DatePicker__MonthContainer {
+  border-inline-start: var(--p-border-width-025) solid var(--p-color-border);
+}
+
+/* Le sette colonne, misurate sulla cella e non su quello che ci sta dentro.
+
+   La larghezza di una tabella la decidono le sue colonne: un bottone da 34px
+   dentro una colonna che si dimensiona da sola ci arriva solo di rimbalzo, e
+   basta una riga senza bottoni per far saltare il conto. Le celle vuote a
+   inizio e a fine mese sono proprio quelle: `<td>` senza niente dentro.
+
+   La classe delle celle vuote e' `EmptyDayCell`. Prima qui c'era scritto
+   `EmptyDay`, che non esiste: la regola non colpiva niente. */
+.range-picker__calendar .Polaris-DatePicker__DayCell,
+.range-picker__calendar .Polaris-DatePicker__EmptyDayCell,
 .range-picker__calendar .Polaris-DatePicker__Weekday {
   font-size: 0.8125rem;
-  width: 2.25rem;
-  min-width: 2.25rem;
+  inline-size: var(--range-picker-day);
+  min-inline-size: var(--range-picker-day);
   padding: 0;
 }
 
@@ -245,11 +338,10 @@
    `tabular-nums` e' l'altra meta' della differenza: senza, "1" e' piu' stretto
    di "8" e i numeri ballano da una riga all'altra. Con le cifre a larghezza
    fissa la griglia si legge per colonne, come nel selettore dell'analytics. */
-.range-picker__calendar .Polaris-DatePicker__Day,
-.range-picker__calendar .Polaris-DatePicker__EmptyDay {
-  width: 2.25rem;
-  height: 2.25rem;
-  min-width: 2.25rem;
+.range-picker__calendar .Polaris-DatePicker__Day {
+  inline-size: var(--range-picker-day);
+  block-size: var(--range-picker-day);
+  min-inline-size: var(--range-picker-day);
   padding: 0;
   margin-inline: auto;
   display: flex;
@@ -263,12 +355,55 @@
 /* L'intestazione dei giorni della settimana resta bassa: non e' una casella da
    premere, e alta quanto le altre allontanerebbe il primo numero dal titolo. */
 .range-picker__calendar .Polaris-DatePicker__Weekday {
-  height: auto;
+  block-size: auto;
   padding-block: 0.375rem;
 }
 
 .range-picker__calendar .Polaris-DatePicker__Title {
   font-size: 0.875rem;
+}
+
+/* Il ripiego stretto.
+
+   La soglia e' il punto in cui i 700px piu' i margini della tendina smettono di
+   entrare nella finestra. Sotto, la colonna dei periodi non puo' piu' stare a
+   fianco: 170px tolti a uno schermo da 320 lascerebbero al calendario meno di
+   un mese, e l'unico modo di tenerli affiancati sarebbe far scorrere la tendina
+   di lato — che e' esattamente la cosa da non fare.
+
+   Quindi i periodi passano sopra, il calendario sotto, e i due mesi si
+   impilano da soli appena la loro soglia non e' piu' rispettata. I due campi
+   vanno su due righe; la freccia sparisce, perche' fra un campo e quello sotto
+   una freccia che punta a destra indicherebbe la direzione sbagliata — ed
+   essendo un disegno gia' invisibile a chi ascolta, non porta via niente. */
+@media (max-width: 731px) {
+  .range-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .range-picker__sidebar {
+    border-inline-end: none;
+    border-block-end: var(--p-border-width-025) solid var(--p-color-border);
+  }
+
+  .range-picker__fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .range-picker__arrow {
+    display: none;
+  }
+
+  /* Impilati, il confine fra i due mesi e' orizzontale: il bordo laterale
+     resterebbe appeso a sinistra del secondo mese senza separare piu' niente. */
+  .range-picker__calendar
+    .Polaris-DatePicker__MonthContainer
+    + .Polaris-DatePicker__MonthContainer {
+    border-inline-start: none;
+    border-block-start: var(--p-border-width-025) solid var(--p-color-border);
+    padding-block-start: var(--range-picker-gutter);
+    margin-block-start: var(--range-picker-gutter);
+  }
 }
 
 /* La tendina che sceglie il dato di un campo di Google.

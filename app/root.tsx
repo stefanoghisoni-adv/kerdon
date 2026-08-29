@@ -35,6 +35,7 @@ import {
   wantedLocale,
 } from './lib/i18n/preferences';
 import { I18nProvider, dictionaryFor } from './lib/i18n/context';
+import { polarisTranslations } from './lib/i18n/polaris';
 import { isSetupComplete } from './lib/setup/setup-state.server';
 import { completeCurrenciesCached } from './lib/billing/shop-pricing.server';
 import { resolveShopCurrency } from './lib/billing/currency';
@@ -254,7 +255,15 @@ export default function App() {
 
   return (
       <I18nProvider locale={locale}>
-        <AppProvider isEmbeddedApp apiKey={apiKey} theme="light">
+        {/* `i18n`: i nomi dei mesi, i giorni della settimana e le etichette
+            che Polaris scrive da solo. Senza, restano in inglese anche quando
+            tutto il resto della pagina e' in italiano. */}
+        <AppProvider
+          isEmbeddedApp
+          apiKey={apiKey}
+          theme="light"
+          i18n={polarisTranslations(locale)}
+        >
           {/* `key`: il menu dell'admin non e' React, e' l'elemento
               <ui-nav-menu> che App Bridge legge quando compare. Cambiando i
               link dentro un elemento gia' in pagina l'admin non se ne accorge —
@@ -319,7 +328,8 @@ export function ErrorBoundary() {
   // provider — Remix rende questa al posto dell'app — quindi il dizionario si
   // prende dalla lingua che il loader di root aveva gia' risolto, e se e'
   // saltato anche quello resta la lingua di riserva.
-  const strings = dictionaryFor(rootData?.locale ?? FALLBACK_LOCALE);
+  const locale = rootData?.locale ?? FALLBACK_LOCALE;
+  const strings = dictionaryFor(locale);
 
   let title = strings.errorPage.title;
   let detail = strings.errorPage.unknown;
@@ -344,7 +354,12 @@ export function ErrorBoundary() {
   }
 
   return (
-        <AppProvider isEmbeddedApp apiKey={apiKey} theme="light">
+        <AppProvider
+          isEmbeddedApp
+          apiKey={apiKey}
+          theme="light"
+          i18n={polarisTranslations(locale)}
+        >
           <NavMenu>
             {/* rel="home" e' la radice dell'app: l'admin la usa per il nome
                 dell'app in cima al menu e non la elenca come voce. Serve quindi

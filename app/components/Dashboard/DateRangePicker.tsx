@@ -8,20 +8,37 @@ import {
   Popover,
   TextField,
 } from '@shopify/polaris';
-import { CalendarIcon, ArrowRightIcon, ArrowsInHorizontalIcon } from '@shopify/polaris-icons';
+import {
+  CalendarIcon,
+  ArrowRightIcon,
+  ArrowsInHorizontalIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from '@shopify/polaris-icons';
 import {
   comparisonRange,
+  dayPlaceholder,
+  formatDayNumeric,
   formatRange,
   fromIso,
-  iso,
-  matchPreset,
+  fromLocalDate,
+  groupOfLeaf,
+  HEAD_LEAVES,
+  leafKey,
+  leafRange,
+  matchLeaf,
   orderRange,
-  presetRange,
+  parseDay,
+  presetGroups,
+  toLocalDate,
   type ComparisonId,
   type DateRange,
-  type PresetId,
+  type GroupId,
+  type PresetLeaf,
 } from '~/lib/dates/ranges';
 import { useLocale, useT } from '~/lib/i18n/context';
+import type { Dictionary } from '~/lib/i18n/context';
+import { draftVerdict } from './date-range-state';
 
 export interface DateRangePickerProps {
   value: DateRange;
@@ -29,13 +46,25 @@ export interface DateRangePickerProps {
   disabled?: boolean;
 }
 
-/** I periodi offerti, nell'ordine e nei gruppi in cui si leggono. */
-const PRESET_GROUPS: PresetId[][] = [
-  ['today', 'yesterday'],
-  ['last7', 'last30', 'last90'],
-  ['monthToDate', 'quarterToDate', 'yearToDate'],
-  ['lastMonth', 'lastQuarter', 'lastYear'],
-];
+/**
+ * Il nome di una voce, quale che sia la sua forma.
+ *
+ * I periodi senza anno hanno un nome scritto nel dizionario; trimestri e Black
+ * Friday no, perche' sono una famiglia infinita e l'anno va composto ogni volta.
+ */
+export function leafLabel(leaf: PresetLeaf, t: Dictionary): string {
+  switch (leaf.kind) {
+    case 'preset':
+      return t.dates.presets[leaf.preset];
+    case 'quarter':
+      return t.dates.quarter(leaf.quarter, leaf.year);
+    case 'bfcm':
+      return t.dates.bfcm(leaf.year);
+  }
+}
+
+/** L'identificativo del campo d'inizio: serve a portarci il fuoco. */
+const START_FIELD_ID = 'range-picker-start';
 
 /**
  * La scelta del periodo.
@@ -45,47 +74,121 @@ const PRESET_GROUPS: PresetId[][] = [
  * e stanno insieme perche' chi apre non sa ancora quale dei due gli serve:
  * apre per "il mese scorso" e si accorge che gli servono i primi dieci giorni.
  *
- * Niente si applica finche' non si preme Applica. Un calendario che ricarica i
- * numeri al primo clic li ricarica sempre due volte — con la data d'inizio da
- * sola non si e' ancora chiesto niente.
+ * I periodi stanno su due livelli, e il secondo SOSTITUISCE il primo invece di
+ * aprirsi sotto. E' la differenza che tiene ferma l'altezza: un elenco che si
+ * allunga aprendo un gruppo spinge il piede piu' in basso del calendario, e
+ * lascia a fianco una fascia vuota alta quanto il gruppo. Cosi' invece la
+ * colonna mostra sempre un pannello solo, e "Indietro" riporta all'elenco.
+ *
+ * Niente si applica finche' non si preme Applica, e Applica e' spento finche'
+ * non c'e' qualcosa da applicare.
  */
 export function DateRangePicker({ value, onChange, disabled }: DateRangePickerProps) {
   const t = useT();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
 
-  // Bozza: quello che si sta scegliendo, finche' non si conferma.
+  // Due stati distinti e non uno: `value` e' cio' che il filtro di fuori sta
+  // gia' usando, `draft` e' cio' che si sta scegliendo. Il primo lo cambia solo
+  // apply(), e da nessun'altra parte.
   const [draft, setDraft] = useState<DateRange>(value);
   const [{ month, year }, setVisible] = useState(() => monthsEndingAt(value.to, localToday()));
+  // Quale pannello si sta guardando: null e' l'elenco principale.
+  const [panel, setPanel] = useState<GroupId | null>(null);
 
-  // Riaprendo si riparte da quello che c'e' adesso, non da dove si era rimasti:
-  // la tendina chiusa senza applicare non deve lasciare tracce.
-  useEffect(() => {
-    if (!open) return;
+  const groups = useMemo(() => presetGroups(), []);
+  const selectedKey = useMemo(() => {
+    const leaf = matchLeaf(draft);
+    return leaf ? leafKey(leaf) : null;
+  }, [draft]);
+  // Nessuna voce descrive la bozza: e' un intervallo personalizzato. Non e' una
+  // voce come le altre, e' l'assenza di tutte.
+  const isCustom = selectedKey === null;
+
+  const verdict = draftVerdict(draft, value, fromLocalDate(localToday()));
+
+  /**
+   * Aprire azzera la bozza su cio' che e' applicato adesso.
+   *
+   * Si fa qui e non in un effetto legato a [open, value]: quell'effetto
+   * riscriveva la bozza anche quando `value` cambiava a tendina APERTA, cioe'
+   * cancellava una scelta in corso per un aggiornamento arrivato da fuori.
+   * Legato al solo gesto di apertura la strada non esiste piu'.
+   */
+  const openPicker = useCallback(() => {
     setDraft(value);
     setVisible(monthsEndingAt(value.to, localToday()));
-  }, [open, value]);
+    const leaf = matchLeaf(value);
+    setPanel(leaf ? groupOfLeaf(leaf) : null);
+    setOpen(true);
+  }, [value]);
 
-  const selectedPreset = useMemo(() => matchPreset(draft), [draft]);
+  /** Annulla, Esc e il clic fuori sono la stessa cosa: la bozza si butta via. */
+  const cancel = useCallback(() => {
+    setDraft(value);
+    setPanel(null);
+    setOpen(false);
+  }, [value]);
 
-  const choosePreset = useCallback((preset: PresetId) => {
-    const range = presetRange(preset);
+  const chooseLeaf = useCallback((leaf: PresetLeaf) => {
+    const range = leafRange(leaf);
     if (!range) return;
     setDraft(range);
     setVisible(monthsEndingAt(range.to, localToday()));
   }, []);
 
+  const placeholder = dayPlaceholder(locale, t.dates.dayParts);
+
   const apply = () => {
+    // La guardia c'e' anche se il pulsante e' spento: spento e' una cosa che si
+    // vede, non una che impedisce di arrivarci.
+    if (!verdict.canApply) return;
     onChange(draft);
     setOpen(false);
   };
 
+  /** Una voce che sceglie un periodo, con il suo stato detto anche a voce. */
+  const leafItem = (leaf: PresetLeaf) => {
+    const label = leafLabel(leaf, t);
+    const active = selectedKey === leafKey(leaf);
+    return {
+      content: label,
+      active,
+      // Lo sfondo e il grassetto dicono "scelto" a chi guarda. ActionList non
+      // espone aria-pressed, quindi a chi ascolta lo si dice con una parola.
+      accessibilityLabel: active ? t.dates.selectedLabel(label) : undefined,
+      onAction: () => chooseLeaf(leaf),
+    };
+  };
+
+  /** Un capofila: apre il suo pannello, non sceglie niente. */
+  const parentItem = (group: (typeof groups)[number]) => {
+    const label = t.dates.groups[group.id];
+    const holdsSelection = group.leaves.some((leaf) => leafKey(leaf) === selectedKey);
+    return {
+      content: label,
+      suffix: <Icon source={ChevronRightIcon} />,
+      // Il capofila resta evidenziato quando la voce scelta e' una delle sue:
+      // il pannello e' chiuso, e senza questo la selezione sparirebbe dalla
+      // vista e la tendina sembrerebbe senza scelta.
+      active: holdsSelection,
+      accessibilityLabel: holdsSelection ? t.dates.selectedLabel(label) : undefined,
+      onAction: () => setPanel(group.id),
+    };
+  };
+
+  const openGroup = panel ? groups.find((group) => group.id === panel) : undefined;
+
   return (
     <Popover
       active={open}
-      onClose={() => setOpen(false)}
+      onClose={cancel}
       preferredAlignment="left"
       preferredPosition="below"
+      // Quello che si apre e' un riquadro con dentro dei comandi e un piede,
+      // non un elenco: chi naviga con lo screen reader deve sentirlo annunciare
+      // come tale prima di entrarci.
+      ariaHaspopup="dialog"
       // Senza, Polaris tiene la tendina alla larghezza dell'attivatore e
       // ritaglia il resto: due mesi affiancati e una colonna di periodi non ci
       // stanno in un pulsante.
@@ -96,7 +199,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
           icon={CalendarIcon}
           disclosure
           disabled={disabled}
-          onClick={() => setOpen((current) => !current)}
+          onClick={() => (open ? cancel() : openPicker())}
         >
           {formatRange(value, locale)}
         </Button>
@@ -109,37 +212,86 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
           si confondevano con i giorni. */}
       <div className="range-picker">
         <div className="range-picker__sidebar">
-          {PRESET_GROUPS.map((group, index) => (
-            <div key={index}>
-              {index > 0 && <Divider />}
+          {openGroup ? (
+            /* Il pannello di un gruppo: il comando per tornare, poi le sue
+               voci. Non c'e' altro — chi e' entrato in "Trimestri" sta
+               scegliendo un trimestre. */
+            <>
               <ActionList
                 actionRole="menuitem"
-                items={group.map((preset) => ({
-                  content: t.dates.presets[preset],
-                  active: selectedPreset === preset,
-                  onAction: () => choosePreset(preset),
-                }))}
+                items={[
+                  {
+                    content: t.dates.back,
+                    prefix: <Icon source={ChevronLeftIcon} />,
+                    onAction: () => setPanel(null),
+                  },
+                ]}
               />
-            </div>
-          ))}
+              <Divider />
+              <ActionList actionRole="menuitem" items={openGroup.leaves.map(leafItem)} />
+            </>
+          ) : (
+            <>
+              {/* Oggi e Ieri senza capofila sopra: sono le due che si scelgono
+                  di gran lunga piu' spesso, e metterle dentro un gruppo da
+                  aprire costerebbe un clic proprio dove non deve costarne. */}
+              <ActionList actionRole="menuitem" items={HEAD_LEAVES.map(leafItem)} />
+              <Divider />
+              <ActionList
+                actionRole="menuitem"
+                items={groups.slice(0, 2).map(parentItem)}
+              />
+              <Divider />
+              <ActionList actionRole="menuitem" items={groups.slice(2).map(parentItem)} />
+              <Divider />
+              {/* Intervallo personalizzato non calcola niente: e' il nome di
+                  dove ci si trova quando nessun'altra voce descrive le due
+                  date. Premerlo porta il fuoco sul primo campo, che e' la cosa
+                  che si voleva fare venendo qui. */}
+              <ActionList
+                actionRole="menuitem"
+                items={[
+                  {
+                    content: t.dates.presets.custom,
+                    active: isCustom,
+                    accessibilityLabel: isCustom
+                      ? t.dates.selectedLabel(t.dates.presets.custom)
+                      : undefined,
+                    onAction: () => document.getElementById(START_FIELD_ID)?.focus(),
+                  },
+                ]}
+              />
+            </>
+          )}
         </div>
 
         <div className="range-picker__main">
           <div className="range-picker__body">
             {/* Le due date anche scritte: chi le conosce gia' le batte a
-                macchina piu' in fretta di quanto sfogli i mesi. */}
+                macchina piu' in fretta di quanto sfogli i mesi.
+
+                Tre celle sulla griglia, non quattro: il periodo si sceglie a
+                giorni interi e un'ora non c'e' — ne' un posto vuoto dove
+                metterla, che a schermo si leggerebbe come un campo mancante. */}
             <div className="range-picker__fields">
               <DateField
+                id={START_FIELD_ID}
+                label={t.dates.start}
                 value={draft.from}
+                placeholder={placeholder}
                 onCommit={(next) => setDraft(orderRange(notInTheFuture(next), draft.to))}
               />
               {/* Una freccia, non un pulsante spento: indica il verso e basta,
-                  e un pulsante disabilitato invita a premerlo. */}
+                  e un pulsante disabilitato invita a premerlo. Icon senza
+                  accessibilityLabel esce gia' aria-hidden: e' un disegno, e
+                  ripetuto a voce fra i due campi sarebbe solo rumore. */}
               <span className="range-picker__arrow">
                 <Icon source={ArrowRightIcon} tone="subdued" />
               </span>
               <DateField
+                label={t.dates.end}
                 value={draft.to}
+                placeholder={placeholder}
                 onCommit={(next) => setDraft(orderRange(draft.from, notInTheFuture(next)))}
               />
             </div>
@@ -159,12 +311,12 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
                 // che sembrano un guasto. Spegnerlo nel calendario e' meglio
                 // che spiegarlo dopo con un messaggio d'errore.
                 disableDatesAfter={localToday()}
-                selected={{ start: fromIso(draft.from), end: fromIso(draft.to) }}
+                selected={{ start: toLocalDate(draft.from), end: toLocalDate(draft.to) }}
                 onMonthChange={(nextMonth, nextYear) =>
                   setVisible({ month: nextMonth, year: nextYear })
                 }
                 onChange={({ start, end }) =>
-                  setDraft(orderRange(iso(toUtc(start)), iso(toUtc(end))))
+                  setDraft(orderRange(fromLocalDate(start), fromLocalDate(end)))
                 }
               />
             </div>
@@ -173,8 +325,11 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
           <div className="range-picker__footer">
             <Divider />
             <div className="range-picker__actions">
-              <Button onClick={() => setOpen(false)}>{t.common.cancel}</Button>
-              <Button variant="primary" onClick={apply}>
+              <Button onClick={cancel}>{t.common.cancel}</Button>
+              {/* Spento finche' la bozza non dice qualcosa di nuovo e di
+                  valido. Riaprire e richiudere senza toccare niente non deve
+                  offrire un comando che non farebbe nulla. */}
+              <Button variant="primary" disabled={!verdict.canApply} onClick={apply}>
                 {t.dates.apply}
               </Button>
             </div>
@@ -186,13 +341,6 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
 }
 
 /**
- * Oggi, come data civile locale.
- *
- * Il calendario di Polaris ragiona in date locali, quindi il confine del futuro
- * va espresso nella stessa lingua: presa in UTC, a est di Greenwich la sera
- * "domani" sarebbe gia' scattato e l'ultimo giorno buono risulterebbe spento.
- */
-/**
  * Una data scritta a mano non puo' superare oggi.
  *
  * Il calendario il futuro non lo lascia nemmeno premere, ma i due campi si
@@ -201,10 +349,17 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
  * `YYYY-MM-DD` e' un confronto fra date, in quel formato.
  */
 function notInTheFuture(value: string): string {
-  const today = iso(toUtc(localToday()));
+  const today = fromLocalDate(localToday());
   return value > today ? today : value;
 }
 
+/**
+ * Oggi, come data civile locale.
+ *
+ * Il calendario di Polaris ragiona in date locali, quindi il confine del futuro
+ * va espresso nella stessa lingua: presa in UTC, a est di Greenwich la sera
+ * "domani" sarebbe gia' scattato e l'ultimo giorno buono risulterebbe spento.
+ */
 function localToday(): Date {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -232,34 +387,48 @@ export function monthsEndingAt(endIso: string, today: Date): { month: number; ye
 }
 
 /**
- * Il calendario di Polaris ragiona in date locali, il resto dell'app in UTC.
- *
- * Senza questa conversione, chi vive a est di Greenwich sceglie il 25 e ottiene
- * il 24: la Date locale a mezzanotte, letta in UTC, e' il giorno prima.
- */
-function toUtc(date: Date): Date {
-  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-}
-
-/**
  * Una data scritta a mano.
  *
+ * A schermo e in lettura si usa la forma della lingua — 25/08/2026 per un
+ * italiano — non `AAAA-MM-GG`: quella e' la forma in cui l'app conserva le
+ * date, non quella in cui il merchant le scrive e le riconosce. In scrittura si
+ * accettano entrambe, piu' qualunque separatore (vedi parseDay): chi copia una
+ * data da altrove non deve riformattarla.
+ *
  * Si applica quando si esce dal campo o si preme Invio, non a ogni lettera:
- * mentre si scrive "2026-08" la data e' incompleta, e reagire a ogni battuta
+ * mentre si scrive "25/08" la data e' incompleta, e reagire a ogni battuta
  * farebbe saltare il calendario a mesi che nessuno ha chiesto.
  */
-function DateField({ value, onCommit }: { value: string; onCommit: (value: string) => void }) {
-  const t = useT();
-  const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
+function DateField({
+  id,
+  label,
+  value,
+  placeholder,
+  onCommit,
+}: {
+  id?: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  onCommit: (value: string) => void;
+}) {
+  const locale = useLocale();
+  const [text, setText] = useState(() => formatDayNumeric(value, locale));
+  useEffect(() => setText(formatDayNumeric(value, locale)), [value, locale]);
 
   const commit = () => {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(text) && !Number.isNaN(fromIso(text).getTime())) {
-      onCommit(text);
+    const parsed = parseDay(text, locale);
+    if (parsed) {
+      onCommit(parsed);
+      // Se la data e' la stessa di prima l'effetto non riscatta, e quello che
+      // resta a schermo e' la scrittura battuta — "8/1/26" invece di
+      // "08/01/2026". Si normalizza qui, che e' l'unico punto che sa di aver
+      // appena letto qualcosa.
+      setText(formatDayNumeric(parsed, locale));
     } else {
       // Non e' una data: si torna a quella buona invece di lasciare a schermo
       // qualcosa che non verrebbe applicato.
-      setText(value);
+      setText(formatDayNumeric(value, locale));
     }
   };
 
@@ -272,14 +441,15 @@ function DateField({ value, onCommit }: { value: string; onCommit: (value: strin
       }}
     >
       <TextField
-        label=""
+        id={id}
+        label={label}
         labelHidden
         value={text}
         onChange={setText}
         onBlur={commit}
         // Il formato atteso scritto nel campo: senza, chi lo trova vuoto non sa
         // se si scrive 03/04 o 04/03, e lo scopre solo sbagliando.
-        placeholder={t.dates.placeholder}
+        placeholder={placeholder}
         autoComplete="off"
         inputMode="numeric"
       />

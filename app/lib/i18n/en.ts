@@ -759,6 +759,13 @@ export const en: typeof it = {
         "The field in use isn't a date field: only clearly written dates will sync, the rest stay empty.",
       failed: "The choice could not be saved. Try again shortly.",
     },
+    retention: {
+      title: "Visitor memory",
+      description:
+        "People who browse without buying are still recognised when they come back, so the day they order you know where they first came from \u2014 even months later, even from another device. The longer you keep them, the further back you can trace; the shorter, the less room they take up in your database.",
+      label: "Keep for",
+      option: (days: number) => `${days} days`,
+    },
   },
 
   advancedSetup: {
@@ -791,7 +798,19 @@ export const en: typeof it = {
   },
   dates: {
     apply: "Apply",
-    placeholder: "YYYY-MM-DD",
+    start: "Start date",
+    end: "End date",
+    dayParts: { day: "DD", month: "MM", year: "YYYY" },
+    groups: {
+      last: "Last",
+      periodToDate: "Period to date",
+      bfcm: "Black Friday Cyber Monday",
+      quarters: "Quarters",
+    },
+    back: "Back",
+    selectedLabel: (name: string) => `${name}, selected`,
+    quarter: (quarter: number, year: number) => `Q${quarter} ${year}`,
+    bfcm: (year: number) => `BFCM ${year}`,
     presets: {
       today: "Today",
       yesterday: "Yesterday",

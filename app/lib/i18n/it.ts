@@ -903,6 +903,22 @@ export const it = {
       failed:
         "Non \u00e8 stato possibile salvare la scelta. Riprova fra poco.",
     },
+    /**
+     * Per quanto si tiene memoria di chi ha visitato il negozio senza ancora
+     * comprare.
+     *
+     * Il testo dice il beneficio e il costo, che sono le due sole cose su cui
+     * si possa decidere: piu' a lungo si conserva, piu' lontano si riesce a
+     * risalire quando quella persona compra; meno a lungo, meno spazio occupa.
+     * Come lo si faccia non riguarda chi sceglie.
+     */
+    retention: {
+      title: "Memoria dei visitatori",
+      description:
+        "Chi visita il negozio senza comprare viene riconosciuto anche quando torna, cos\u00ec il giorno in cui acquista sai da dove era arrivato la prima volta \u2014 anche se sono passati mesi e anche se cambia dispositivo. Pi\u00f9 a lungo li conservi, pi\u00f9 indietro riesci a risalire; meno a lungo, meno spazio occupano nel tuo database.",
+      label: "Conserva per",
+      option: (days: number) => `${days} giorni`,
+    },
   },
 
   // La proposta di configurazione avanzata, in dashboard.
@@ -942,7 +958,38 @@ export const it = {
   },
   dates: {
     apply: "Applica",
-    placeholder: "AAAA-MM-GG",
+    /** Le etichette dei due campi: nascoste a schermo, lette da chi non vede. */
+    start: "Data di inizio",
+    end: "Data di fine",
+    /**
+     * Le tre lettere del segnaposto del campo data.
+     * L'ordine e i separatori non stanno qui: li mette la lingua stessa (vedi
+     * dayPlaceholder), cosi' il segnaposto non puo' annunciare una forma
+     * diversa da quella che il campo poi accetta.
+     */
+    dayParts: { day: "GG", month: "MM", year: "AAAA" },
+    /** I capofila del menu dei periodi: aprono, non scelgono. */
+    groups: {
+      last: "Ultimi",
+      periodToDate: "Da inizio periodo",
+      bfcm: "Black Friday Cyber Monday",
+      quarters: "Trimestri",
+    },
+    /** Il comando che riporta all'elenco principale dei periodi. */
+    back: "Indietro",
+    /**
+     * Lo stato "scelto" detto a voce.
+     * A schermo lo dicono lo sfondo e il grassetto; per chi non vede serve una
+     * parola, perche' ActionList di Polaris non espone aria-pressed.
+     */
+    selectedLabel: (name: string) => `${name}, selezionato`,
+    /**
+     * L'anno accanto al trimestre non e' ridondante: a gennaio il menu offre
+     * tre trimestri dell'anno prima e uno di questo, e senza l'anno "T4" non
+     * direbbe quale.
+     */
+    quarter: (quarter: number, year: number) => `T${quarter} ${year}`,
+    bfcm: (year: number) => `BFCM ${year}`,
     presets: {
       today: "Oggi",
       yesterday: "Ieri",
