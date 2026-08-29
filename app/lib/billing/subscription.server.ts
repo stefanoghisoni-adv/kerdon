@@ -41,6 +41,21 @@ export interface AppSubscriptionSummary {
   currentPeriodEnd: string | null;
   /** Importo mensile in EUR. Null se Shopify non restituisce il pricing. */
   priceAmount: number | null;
+  /**
+   * In che valuta e' quell'importo, come la dichiara Shopify. Null se il
+   * pricing non arriva.
+   *
+   * Si legge perche' la callback ha qualcosa da confrontarci: la valuta con cui
+   * il tentativo era partito. Un abbonamento che torna in una valuta diversa da
+   * quella mostrata al merchant e' una cosa da sapere, non da scoprire da una
+   * fattura.
+   */
+  currency: string | null;
+  /**
+   * Ogni quanto si paga, tradotto nei termini dell'app. Null se il pricing non
+   * arriva o l'intervallo non e' uno dei due che usiamo.
+   */
+  interval: 'monthly' | 'yearly' | null;
 }
 
 export interface CreateSubscriptionOptions {
@@ -191,7 +206,8 @@ interface RawSubscription {
   lineItems?: {
     plan?: {
       pricingDetails?: {
-        price?: { amount?: string | number | null } | null;
+        price?: { amount?: string | number | null; currencyCode?: string | null } | null;
+        interval?: string | null;
       } | null;
     } | null;
   }[] | null;
@@ -249,8 +265,16 @@ export function parseGidId(gid: string): bigint {
   return BigInt(match[1]);
 }
 
+/** L'intervallo di Shopify nei termini dell'app. Null su valori inattesi. */
+function toInterval(raw: string | null | undefined): 'monthly' | 'yearly' | null {
+  if (raw === 'ANNUAL') return 'yearly';
+  if (raw === 'EVERY_30_DAYS') return 'monthly';
+  return null;
+}
+
 function toSummary(raw: RawSubscription): AppSubscriptionSummary {
-  const amount = raw.lineItems?.[0]?.plan?.pricingDetails?.price?.amount;
+  const pricing = raw.lineItems?.[0]?.plan?.pricingDetails;
+  const amount = pricing?.price?.amount;
   const parsed = amount == null ? Number.NaN : Number(amount);
   return {
     gid: raw.id,
@@ -260,6 +284,8 @@ function toSummary(raw: RawSubscription): AppSubscriptionSummary {
     trialDays: raw.trialDays ?? 0,
     currentPeriodEnd: raw.currentPeriodEnd ?? null,
     priceAmount: Number.isFinite(parsed) ? parsed : null,
+    currency: pricing?.price?.currencyCode ?? null,
+    interval: toInterval(pricing?.interval),
   };
 }
 

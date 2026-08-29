@@ -38,6 +38,19 @@ vi.mock('~/db.server', () => ({
       create: (...a: unknown[]) => createCharge(...a),
       updateMany: (...a: unknown[]) => updateManyCharges(...a),
     },
+    // La rotta scrive dentro una transazione, quindi non usa piu' il client
+    // principale ma quello che le viene passato. Qui il finto `$transaction`
+    // gli consegna lo stesso oggetto: cosi' gli spy vedono le scritture
+    // ovunque avvengano, e il test verifica cosa e' stato scritto senza dover
+    // sapere per quale strada.
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        shop: { update: (...a: unknown[]) => updateShop(...a) },
+        billingCharge: {
+          create: (...a: unknown[]) => createCharge(...a),
+          updateMany: (...a: unknown[]) => updateManyCharges(...a),
+        },
+      }),
   },
 }));
 vi.mock('~/lib/billing/subscription.server', () => ({
@@ -75,6 +88,11 @@ describe('/billing/subscribe', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.SHOPIFY_APP_URL = 'https://app.example.com';
+    // Serve a firmare lo stato che lega il tentativo alla sua callback. In
+    // produzione c'e' sempre — la verifica HMAC dei webhook non funzionerebbe
+    // senza — e il codice giustamente si rifiuta di firmare con un segreto che
+    // non c'e' invece di ripiegare su uno debole.
+    process.env.SHOPIFY_API_SECRET = 'segreto-di-prova';
     delete process.env.SHOPIFY_BILLING_TEST;
     findUniqueShop.mockResolvedValue({ ...SHOP });
     isDevelopmentStore.mockResolvedValue(false);

@@ -363,6 +363,16 @@ model BillingCharge {
   trialDays       Int       @default(7) @map("trial_days")
   trialEndsAt     DateTime? @map("trial_ends_at")
   confirmationUrl String?   @map("confirmation_url")
+  /// Il nonce con cui questo tentativo di sottoscrizione e' partito, lo stesso
+  /// che viaggia firmato nella URL di ritorno. E' il legame fra la callback e
+  /// il tentativo esatto che l'ha aperta: senza, al ritorno c'e' solo un
+  /// charge_id, e "quale riga stiamo chiudendo" diventa una supposizione.
+  /// Unico: un nonce appartiene a un tentativo solo, cosi' ritrovare la riga e'
+  /// una lettura per chiave e non una ricerca con dei se.
+  callbackNonce   String?   @unique @map("callback_nonce")
+  /// Quando quel nonce e' stato speso. Monouso: una seconda callback con lo
+  /// stesso nonce trova la riga gia' consumata e non riapplica niente.
+  callbackNonceUsedAt DateTime? @map("callback_nonce_used_at")
   activatedAt     DateTime? @map("activated_at")
   cancelledAt     DateTime? @map("cancelled_at")
   createdAt       DateTime  @default(now()) @map("created_at")

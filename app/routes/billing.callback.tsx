@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { redirect } from '@remix-run/node';
+import type { BillingCharge, Shop } from '@prisma/client';
 import { unauthenticated } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import {
@@ -7,11 +8,17 @@ import {
   getActiveSubscriptions,
   getSubscription,
   parseGidId,
+  type AppSubscriptionSummary,
   type BillingAdmin,
 } from '~/lib/billing/subscription.server';
 import { appSubscriptionGid, applyPlanToShop } from '~/lib/billing/apply-plan.server';
 import { adminAppUrl, embeddedContextParams } from '~/lib/billing/embedded-return.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { samePlanName } from '~/lib/billing/plan-name';
+import {
+  verifyBillingState,
+  type BillingAttemptState,
+} from '~/lib/billing/callback-state.server';
 
 // Ritorno da Shopify dopo che il merchant ha approvato (o rifiutato) l'addebito.
 //
@@ -19,6 +26,27 @@ import { findPlanByName } from '~/lib/billing/find-plan.server';
 // basterebbe indovinarne uno per regalarsi un piano a pagamento. L'unica fonte
 // che accettiamo e' Shopify, riletta qui sotto, e il piano si attiva solo se
 // l'abbonamento risulta davvero ACTIVE.
+//
+// Accanto a quella verifica ce ne sono altre due, che rispondono a domande
+// diverse.
+//
+// La prima e' "quale tentativo sta chiudendo questa callback". La risposta e' il
+// nonce firmato che `billing/subscribe` ha messo nella URL di ritorno e
+// riscritto sulla riga dell'addebito: la riga si ritrova per id, il nonce dice
+// che i due capi sono lo stesso gesto, e piano, cifra, valuta e cadenza si
+// confrontano fra quello che avevamo chiesto e quello che Shopify dichiara.
+//
+// La seconda e' "questa callback e' gia' passata di qui". Il merchant ricarica
+// la pagina, Shopify rimanda, una scheda resta aperta: la stessa conferma puo'
+// arrivare piu' volte, e non deve applicare due volte lo stesso piano ne'
+// rifar partire da capo un periodo di prova. Il tentativo si spende una volta
+// sola, dentro la transazione, e le callback successive trovano la riga gia'
+// consumata e si limitano a rispondere "e' andata".
+//
+// Nessuna di queste due, pero', ha diritto di veto. Se i conti non tornano ma
+// Shopify conferma l'abbonamento attivo, l'anomalia si registra e il piano si
+// applica lo stesso: negare un piano pagato e' un danno certo, accettarne uno
+// con un parametro strano che Shopify conferma non lo e'.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -109,6 +137,114 @@ async function cancelPreviousSubscriptions(
       e instanceof Error ? e.message : 'errore sconosciuto',
     );
   }
+}
+
+/** Due importi uguali a meno dei centesimi: sono Decimal da due lati diversi. */
+function sameAmount(a: number | null | undefined, b: number | null | undefined): boolean {
+  if (a == null || b == null) return false;
+  return Math.abs(a - b) < 0.005;
+}
+
+/** Due valute uguali a meno di maiuscole e spazi. */
+function sameCurrency(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = (a ?? '').trim().toUpperCase();
+  if (!left) return false;
+  return left === (b ?? '').trim().toUpperCase();
+}
+
+/**
+ * Tutto quello che, in questa callback, non torna con il tentativo che
+ * dovrebbe averla aperta.
+ *
+ * Restituisce una lista di frasi, non un verdetto: chi chiama le scrive nei log
+ * e prosegue. Sono i dati su cui si guarda quando un merchant chiede conto di
+ * un addebito, e una riga di log che dice "il piano confermato non e' quello
+ * richiesto" vale piu' di un rifiuto che non spiega niente a nessuno.
+ */
+function attemptMismatches(args: {
+  stateRaw: string | null;
+  state: BillingAttemptState | null;
+  attempt: BillingCharge | null;
+  subscription: AppSubscriptionSummary;
+  planName: string;
+  shopDomain: string;
+  chargeId: string;
+}): string[] {
+  const { stateRaw, state, attempt, subscription, planName, shopDomain } = args;
+  const out: string[] = [];
+
+  // Lo state manca del tutto sugli addebiti aperti prima che esistesse, e su
+  // quelli approvati da un link vecchio rimasto in giro. Va detto, non punito.
+  if (!stateRaw) out.push('nessuno state firmato nella URL di ritorno');
+  else if (!state) out.push('state presente ma non verificabile (firma non nostra o scaduta)');
+
+  if (state && state.shopDomain !== shopDomain) {
+    out.push(`lo state e' di ${state.shopDomain}, la callback di ${shopDomain}`);
+  }
+  if (state && !samePlanName(state.planName, planName)) {
+    out.push(`piano richiesto "${state.planName}", piano confermato "${planName}"`);
+  }
+  if (state && !sameCurrency(state.currency, subscription.currency)) {
+    out.push(`valuta richiesta ${state.currency}, valuta confermata ${subscription.currency}`);
+  }
+  if (state && subscription.interval && state.interval !== subscription.interval) {
+    out.push(`cadenza richiesta ${state.interval}, cadenza confermata ${subscription.interval}`);
+  }
+  // Il confronto e' sul prezzo di LISTINO: lo sconto riservato viaggia a parte
+  // e Shopify rilegge il listino, mentre sulla riga dell'addebito e' scritta la
+  // cifra che il merchant paga davvero. Confrontare quelle due farebbe suonare
+  // l'allarme a ogni negozio con un prezzo concordato.
+  if (state && !sameAmount(state.listPrice, subscription.priceAmount)) {
+    out.push(
+      `importo di listino richiesto ${state.listPrice}, importo confermato ${subscription.priceAmount}`,
+    );
+  }
+
+  if (!attempt) {
+    out.push('nessuna riga di tentativo per questo addebito');
+    return out;
+  }
+  if (state && attempt.callbackNonce !== state.nonce) {
+    out.push('il nonce dello state non e\' quello del tentativo');
+  }
+  if (attempt.status !== 'pending') {
+    out.push(`il tentativo non e' piu' in attesa (stato "${attempt.status}")`);
+  }
+  if (attempt.callbackNonceUsedAt) {
+    out.push('il nonce del tentativo era gia\' stato speso');
+  }
+  if (!samePlanName(attempt.planType, planName)) {
+    out.push(`il tentativo era per "${attempt.planType}", confermato "${planName}"`);
+  }
+  if (attempt.currency && !sameCurrency(attempt.currency, subscription.currency)) {
+    out.push(`il tentativo era in ${attempt.currency}, confermato in ${subscription.currency}`);
+  }
+  if (
+    attempt.billingCycle &&
+    subscription.interval &&
+    attempt.billingCycle !== subscription.interval
+  ) {
+    out.push(
+      `il tentativo era ${attempt.billingCycle}, confermato ${subscription.interval}`,
+    );
+  }
+
+  return out;
+}
+
+/**
+ * Il negozio e' gia' su questo addebito e su questo piano.
+ *
+ * Serve per le callback che tornano quando non c'e' nessuna riga di tentativo
+ * da spendere: senza un tentativo, l'unica traccia del fatto che il piano sia
+ * gia' stato applicato e' il negozio stesso.
+ */
+function alreadyOnThisCharge(
+  shop: Pick<Shop, 'activeChargeId' | 'currentPlan'>,
+  chargeId: string,
+  planName: string,
+): boolean {
+  return shop.activeChargeId === chargeId && samePlanName(shop.currentPlan, planName);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

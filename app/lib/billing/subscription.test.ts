@@ -258,6 +258,12 @@ describe('getActiveSubscriptions', () => {
         trialDays: 7,
         currentPeriodEnd: '2026-08-31T10:00:00Z',
         priceAmount: 29,
+        // Valuta e intervallo si rileggono da Shopify perche' la callback deve
+        // poterli confrontare con quello che il tentativo aveva promesso: senza,
+        // un piano mensile potrebbe tornare come annuale e nessuno se ne
+        // accorgerebbe.
+        currency: 'EUR',
+        interval: 'monthly',
       },
     ]);
   });

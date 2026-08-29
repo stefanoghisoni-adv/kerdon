@@ -12,6 +12,7 @@ import {
 import { appSubscriptionGid, applyPlanToShop } from '~/lib/billing/apply-plan.server';
 import { embeddedContextParams } from '~/lib/billing/embedded-return.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { newBillingNonce, signBillingState } from '~/lib/billing/callback-state.server';
 import { forcedTestCharge } from '~/lib/billing/test-charge';
 import {
   effectivePrice,
@@ -183,16 +184,26 @@ export async function action({ request }: ActionFunctionArgs) {
       const activeChargeId = numericChargeId(shop.activeChargeId);
       if (activeChargeId) {
         await cancelAppSubscription(admin, appSubscriptionGid(activeChargeId));
-        await prisma.billingCharge.updateMany({
-          where: { shopId: shop.id, shopifyChargeId: BigInt(activeChargeId) },
-          data: { status: 'cancelled', cancelledAt: new Date() },
-        });
       }
-      await applyPlanToShop({
-        shopId: shop.id,
-        planName: plan.planName,
-        chargeId: null,
-        trialDays: null,
+      // Chiusura dell'addebito e passaggio di piano insieme: sono due facce di
+      // un gesto solo, e la meta' che riuscisse da sola lascerebbe il negozio
+      // sul piano gratuito con un addebito ancora segnato attivo (o viceversa).
+      // La cancellazione su Shopify resta fuori: e' l'unica cosa che qui non si
+      // puo' disfare.
+      await prisma.$transaction(async (tx) => {
+        if (activeChargeId) {
+          await tx.billingCharge.updateMany({
+            where: { shopId: shop.id, shopifyChargeId: BigInt(activeChargeId) },
+            data: { status: 'cancelled', cancelledAt: new Date() },
+          });
+        }
+        await applyPlanToShop({
+          shopId: shop.id,
+          planName: plan.planName,
+          chargeId: null,
+          trialDays: null,
+          tx,
+        });
       });
       return json<SubscribeResponse>({ ok: true });
     }
@@ -220,6 +231,31 @@ export async function action({ request }: ActionFunctionArgs) {
     if (String(form.get('returnTo') ?? '') === 'dashboard') {
       params.set('return_to', 'dashboard');
     }
+
+    // Il segno che permette alla callback di riconoscere QUESTO tentativo.
+    //
+    // Shopify riporta il merchant sulla URL che gli diamo, con in coda solo un
+    // `charge_id`: tutto il resto — che negozio, che piano, a che cifra — al
+    // ritorno o e' scritto qui dentro o e' una supposizione. Il nonce si
+    // riscrive sulla riga dell'addebito qualche riga piu' sotto, ed e' quello a
+    // legare i due lati; la firma impedisce di cambiare per strada il negozio o
+    // il piano, e il fatto che sia monouso rende innocua la stessa callback
+    // ripetuta.
+    const nonce = newBillingNonce();
+    params.set(
+      'state',
+      signBillingState({
+        nonce,
+        shopDomain: shop.shopDomain,
+        planName: plan.planName,
+        // Il listino, non la cifra scontata: e' l'unica delle due che Shopify
+        // rilegge, quindi l'unica che al ritorno si possa confrontare.
+        listPrice: effective.listPrice,
+        currency: pricing.currency,
+        interval,
+      }),
+    );
+
     const returnUrl = new URL(
       `/billing/callback?${params.toString()}`,
       process.env.SHOPIFY_APP_URL || requestUrl.origin,
@@ -259,6 +295,10 @@ export async function action({ request }: ActionFunctionArgs) {
         status: 'pending',
         trialDays: plan.trialDays ?? 0,
         confirmationUrl: created.confirmationUrl,
+        // L'altro capo del legame: la callback arriva con il nonce firmato e
+        // ritrova da qui la riga esatta che sta chiudendo, invece di cercare
+        // "quella che sembra giusta".
+        callbackNonce: nonce,
       },
     });
 

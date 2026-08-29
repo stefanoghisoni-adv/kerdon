@@ -7,19 +7,19 @@
   "scripts": {
     "dev": "shopify app dev",
     "build": "prisma generate && remix vite:build",
-    "postinstall": "prisma generate",
     "start": "remix-serve ./build/server/index.js",
     "typecheck": "tsc",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "worker": "tsx watch worker.ts"
+    "worker": "tsx watch worker.ts",
+    "worker:build": "tsc --project tsconfig.worker.json"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
