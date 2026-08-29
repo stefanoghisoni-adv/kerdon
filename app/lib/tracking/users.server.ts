@@ -141,6 +141,79 @@ export async function recordUserSeen(
   return 'written';
 }
 
+/**
+ * LA POLITICA DI CANCELLAZIONE ALLA REVOCA, scritta qui una volta per tutte.
+ *
+ * Quando un visitatore toglie il permesso, smettere di scrivere non basta:
+ * quello che era stato raccolto finche' il permesso c'era resta li', e resta
+ * legato a lui. Questa funzione e' cosa succede in quel momento, e sono tre
+ * gesti in quest'ordine:
+ *
+ *  1. SI SLEGA IL CLIENTE. `customers.external_id` e' la comodita' che permette
+ *     ai tag di risalire dal cliente al browser da cui sta navigando: e'
+ *     esattamente il collegamento che la revoca vieta, ed e' il primo a
+ *     sparire. La riga del cliente NON si tocca — quella vive di consenso al
+ *     marketing e di obblighi sugli ordini, che sono altre due cose con altre
+ *     due basi.
+ *
+ *  2. SI TOLGONO I RIMANDI. Gli altri browser della stessa persona possono
+ *     puntare a questo con `merged_into`. Cancellare la riga lasciandoli
+ *     puntare al vuoto significherebbe tenerne in giro il nome: si azzerano, e
+ *     restano righe valide per conto loro.
+ *
+ *  3. SI CANCELLA LA RIGA. Non si anonimizza e non si marca: l'identificativo
+ *     E' il dato: una riga "anonimizzata" che conserva la chiave non e'
+ *     anonima, e' la stessa riga con un'etichetta sopra.
+ *
+ * COSA NON SI CANCELLA, e non e' una scappatoia: gli ordini e le anagrafiche.
+ * Sono dati che il merchant tiene per obblighi contabili e che non nascono da
+ * questo permesso — non li abbiamo raccolti noi in vetrina. La revoca toglie il
+ * riconoscimento del browser, non riscrive la contabilita' del negozio.
+ *
+ * Best effort come tutto il resto del file, ma con una differenza: qui un
+ * fallimento si vede nel log come `failed`, perche' una cancellazione che non
+ * riesce e' l'unica cosa in questo file che non si ripara da sola alla visita
+ * successiva.
+ *
+ * E' anche la funzione da riusare se serve la stessa cancellazione altrove —
+ * una richiesta di cancellazione GDPR fa esattamente questo, per lo stesso
+ * identificativo.
+ */
+export async function forgetVisitor(
+  supabase: SupabaseClient,
+  externalId: string,
+): Promise<'forgotten' | 'failed'> {
+  let ok = true;
+
+  const unlink = await supabase
+    .from('customers')
+    .update({ external_id: null })
+    .eq('external_id', externalId);
+  if (unlink.error && !isMissingTable(unlink.error)) {
+    console.warn(`[users] cliente non slegato: ${unlink.error.message ?? 'errore sconosciuto'}`);
+    ok = false;
+  }
+
+  const pointers = await supabase
+    .from(USERS_TABLE)
+    .update({ merged_into: null })
+    .eq('merged_into', externalId);
+  if (pointers.error && !isMissingTable(pointers.error)) {
+    console.warn(`[users] rimandi non azzerati: ${pointers.error.message ?? 'errore sconosciuto'}`);
+    ok = false;
+  }
+
+  const removed = await supabase.from(USERS_TABLE).delete().eq('external_id', externalId);
+  if (removed.error && !isMissingTable(removed.error)) {
+    console.warn(
+      `[users] browser non dimenticato: ${removed.error.message ?? 'errore sconosciuto'}`,
+    );
+    ok = false;
+  }
+
+  return ok ? 'forgotten' : 'failed';
+}
+
 export interface LinkResult {
   outcome: 'linked' | 'failed';
   /** L'identificativo canonico della persona dopo il legame. */
@@ -314,6 +387,8 @@ export type IdentifyOutcome =
   | 'no_match'
   /** Non e' arrivato niente di cercabile. */
   | 'no_identifier'
+  /** Il visitatore non ha permesso il trattamento: non si e' scritto niente. */
+  | 'no_consent'
   /** La ricerca non e' andata a buon fine. */
   | 'failed';
 

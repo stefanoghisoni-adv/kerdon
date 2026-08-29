@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { VisitorConsent } from '~/lib/tracking/consent';
 
 const resolveShopReadContext = vi.fn();
 const forwardRead = vi.fn();
+
 vi.mock('~/lib/read-proxy/context.server', () => ({
   resolveShopReadContext: (...a: unknown[]) => resolveShopReadContext(...a),
 }));
@@ -30,6 +32,20 @@ vi.mock('~/lib/read-proxy/access-log.server', () => ({
 }));
 
 import { loader } from './rest.v1.$table';
+import * as consentModule from '~/lib/tracking/consent';
+import * as usersModule from '~/lib/tracking/users.server';
+
+// Spy sulle funzioni che vogliamo mockare.
+const evaluateVisitorConsentMock = vi.spyOn(consentModule, 'evaluateVisitorConsent');
+const forgetVisitorMock = vi.spyOn(usersModule, 'forgetVisitor');
+
+/** Il consenso completo: analytics e marketing concessi. */
+const consentGranted = (): VisitorConsent => ({
+  analytics: 'granted',
+  marketing: 'granted',
+  preferences: 'unknown',
+  saleOfData: 'unknown',
+});
 
 const call = (headers: Record<string, string>, table = 'products', url = 'https://app/rest/v1/products?sku=eq.X') =>
   loader({ request: new Request(url, { headers }), params: { table }, context: {} } as any);
@@ -52,6 +68,15 @@ describe('proxy loader', () => {
     resolveShopReadContext.mockReset();
     forwardRead.mockReset();
     logCustomerDataAccess.mockClear();
+    evaluateVisitorConsentMock.mockReset();
+    forgetVisitorMock.mockClear();
+    // Di default: consenso completo.
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: consentGranted(),
+      source: 'query',
+      allowed: true,
+      withdrawn: false,
+    });
   });
 
   it('token mancante → 401', async () => {
@@ -325,11 +350,19 @@ describe('registro degli accessi ai dati personali', () => {
   });
 });
 
-describe('identificativo esterno (external ID)', () => {
+describe('identificativo esterno (external ID) — con consenso', () => {
   beforeEach(() => {
     resolveShopReadContext.mockReset();
     forwardRead.mockReset();
     logCustomerDataAccess.mockClear();
+    evaluateVisitorConsentMock.mockReset();
+    // Consenso concesso per questi test.
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: consentGranted(),
+      source: 'query',
+      allowed: true,
+      withdrawn: false,
+    });
   });
 
   it('senza cookie esistente → header presente con identificativo nuovo', async () => {
@@ -370,16 +403,6 @@ describe('identificativo esterno (external ID)', () => {
     expect(setCookieHeader).toContain(`corew_eid=${headerValue}`);
   });
 
-  it('richiesta rifiutata → identificativo emesso comunque', async () => {
-    // Token mancante → 401, ma l'identificativo viene comunque emesso
-    const res = await call({});
-
-    expect(res.status).toBe(401);
-    const headerValue = res.headers.get('X-CoreW-External-Id');
-    expect(headerValue).toBeTruthy();
-    expect(headerValue).toMatch(/^corew_\d+_[A-Za-z0-9]{32}$/);
-  });
-
   it('header esposto via Access-Control-Expose-Headers per letture cross-origin', async () => {
     resolveShopReadContext.mockResolvedValueOnce(okCtx());
     forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
@@ -387,6 +410,119 @@ describe('identificativo esterno (external ID)', () => {
     const res = await call({ authorization: 'Bearer spx_x' });
 
     const exposeHeaders = res.headers.get('Access-Control-Expose-Headers');
-    expect(exposeHeaders).toBe('X-CoreW-External-Id');
+    expect(exposeHeaders).toContain('X-CoreW-External-Id');
+    expect(exposeHeaders).toContain('X-CoreW-Sale-Of-Data');
+  });
+});
+
+describe('identificativo esterno — consenso del visitatore', () => {
+  beforeEach(() => {
+    resolveShopReadContext.mockReset();
+    forwardRead.mockReset();
+    logCustomerDataAccess.mockClear();
+    evaluateVisitorConsentMock.mockReset();
+    forgetVisitorMock.mockClear();
+    // Default: segnale assente (i test lo cambiano dove serve).
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'none',
+      allowed: false,
+      withdrawn: false,
+    });
+  });
+
+  it('senza consenso: nessun header identificativo, nessun cookie', async () => {
+    // Il difetto che c'era: l'identificativo si emetteva comunque. Ora no.
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'none',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ authorization: 'Bearer spx_x' });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
+    expect(res.headers.get('Set-Cookie')).toBeNull();
+  });
+
+  it('richiesta rifiutata per token mancante: nessun identificativo', async () => {
+    // Prima c'era: "richiesta rifiutata → identificativo emesso comunque".
+    // Era il contratto vecchio, e descriveva esattamente il difetto.
+    const res = await call({});
+
+    expect(res.status).toBe(401);
+    // L'identificativo non viene emesso se la richiesta non passa i controlli
+    // di token e autorizzazione: il consenso è l'ultimo cancello, non l'unico.
+    expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
+    // evaluateVisitorConsent viene chiamato comunque per impostare l'header
+    // X-CoreW-Sale-Of-Data, ma l'identificativo non viene emesso.
+  });
+
+  it('consenso parziale (solo analytics): nessun identificativo', async () => {
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: { analytics: 'granted', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ authorization: 'Bearer spx_x' });
+
+    expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
+  });
+
+  it('consenso parziale (solo marketing): nessun identificativo', async () => {
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ authorization: 'Bearer spx_x' });
+
+    expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
+  });
+
+  it('revoca esplicita: cookie scaduto e riga cancellata', async () => {
+    const existingId = 'corew_1234567890_abcdefghijklmnopqrstuvwxyz123456';
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: { analytics: 'denied', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+
+    const res = await call({ authorization: 'Bearer spx_x', cookie: `corew_eid=${existingId}` });
+
+    expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
+    expect(res.headers.get('Set-Cookie')).toContain('corew_eid=');
+    expect(res.headers.get('Set-Cookie')).toContain('Max-Age=0');
+    expect(forgetVisitorMock).toHaveBeenCalledWith(expect.anything(), existingId);
+  });
+
+  it('saleOfData viene sempre dichiarato, consenso o no', async () => {
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'unknown', preferences: 'unknown', saleOfData: 'denied' },
+      source: 'query',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ authorization: 'Bearer spx_x' });
+
+    expect(res.headers.get('X-CoreW-Sale-Of-Data')).toBe('denied');
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { VisitorConsent } from '~/lib/tracking/consent';
 
 const resolveShopReadContext = vi.fn();
 vi.mock('~/lib/read-proxy/context.server', () => ({ resolveShopReadContext }));
@@ -17,15 +18,37 @@ vi.mock('~/lib/read-proxy/token.server', () => ({
 const recordUserSeen = vi.fn(
   async (_supabase: unknown, _visitor: Record<string, unknown>) => 'written' as const,
 );
+const forgetVisitor = vi.fn(async () => 'forgotten' as const);
 vi.mock('~/lib/tracking/users.server', () => ({
   recordUserSeen,
+  forgetVisitor,
   supabaseFromReadContext: () => ({}) as never,
 }));
 vi.mock('~/lib/supabase/ensure-users-table.server', () => ({
   provisionUsersTable: vi.fn(async () => true),
 }));
 
+// Il consenso del visitatore.
+const evaluateVisitorConsent = vi.fn();
+vi.mock('~/lib/tracking/consent', async () => {
+  const actual = await vi.importActual<typeof import('~/lib/tracking/consent')>(
+    '~/lib/tracking/consent',
+  );
+  return {
+    ...actual,
+    evaluateVisitorConsent: (...args: unknown[]) => evaluateVisitorConsent(...args),
+  };
+});
+
 const { action, loader } = await import('./rest.v1.users');
+
+/** Il consenso completo: analytics e marketing concessi. */
+const consentGranted = (): VisitorConsent => ({
+  analytics: 'granted',
+  marketing: 'granted',
+  preferences: 'unknown',
+  saleOfData: 'unknown',
+});
 
 const VISITATORE = 'corew_1700000000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
@@ -51,6 +74,13 @@ beforeEach(() => {
   resolveShopReadContext.mockResolvedValue({
     kind: 'ok',
     ctx: { shopId: 's1', canReadData: true, projectRef: 'abcdef', serviceRoleKey: 'k' },
+  });
+  // Di default: consenso completo.
+  evaluateVisitorConsent.mockReturnValue({
+    consent: consentGranted(),
+    source: 'query',
+    allowed: true,
+    withdrawn: false,
   });
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
 });
@@ -162,5 +192,91 @@ describe('/rest/v1/users — cosa non entra', () => {
     const res = await write('{non json');
     expect(res.status).toBe(400);
     expect(recordUserSeen).not.toHaveBeenCalled();
+  });
+});
+
+describe('/rest/v1/users — consenso del visitatore', () => {
+  it('senza consenso: nessuna riga scritta', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'none',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await write({ external_id: VISITATORE, browser: 'Safari' });
+
+    expect(res.status).toBe(200);
+    expect(recordUserSeen).not.toHaveBeenCalled();
+  });
+
+  it('consenso parziale (solo analytics): non basta', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'granted', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await write({ external_id: VISITATORE });
+
+    expect(recordUserSeen).not.toHaveBeenCalled();
+  });
+
+  it('consenso parziale (solo marketing): non basta', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await write({ external_id: VISITATORE });
+
+    expect(recordUserSeen).not.toHaveBeenCalled();
+  });
+
+  it('entrambe concesse: riga scritta', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: consentGranted(),
+      source: 'query',
+      allowed: true,
+      withdrawn: false,
+    });
+
+    const res = await write({ external_id: VISITATORE, browser: 'Safari' });
+
+    expect(res.status).toBe(200);
+    expect(recordUserSeen).toHaveBeenCalledTimes(1);
+  });
+
+  it('revoca esplicita: riga cancellata, nessuna scrittura', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'denied', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+
+    const res = await write({ external_id: VISITATORE });
+
+    expect(res.status).toBe(200);
+    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(forgetVisitor).toHaveBeenCalledWith(expect.anything(), VISITATORE);
+  });
+
+  it('il consenso arriva dal corpo, non solo dalla query', async () => {
+    // evaluateVisitorConsent riceve il corpo come secondo parametro, e lo
+    // cerca nei campi 'consent', 'analytics', 'marketing' etc.
+    const res = await write({
+      external_id: VISITATORE,
+      browser: 'Safari',
+      // Questi campi vengono passati a evaluateVisitorConsent.
+    });
+
+    expect(evaluateVisitorConsent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ external_id: VISITATORE }),
+    );
   });
 });

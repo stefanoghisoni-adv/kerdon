@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import {
   EXTERNAL_ID_HEADER,
+  expiredExternalIdCookie,
   externalIdCookie,
   newExternalId,
   readExternalId,
@@ -10,7 +11,16 @@ import {
   resolveShopReadContext,
   type ShopReadContext,
 } from '~/lib/read-proxy/context.server';
-import { recordUserSeen, supabaseFromReadContext } from '~/lib/tracking/users.server';
+import {
+  evaluateVisitorConsent,
+  SALE_OF_DATA_HEADER,
+  type ConsentDecision,
+} from '~/lib/tracking/consent';
+import {
+  forgetVisitor,
+  recordUserSeen,
+  supabaseFromReadContext,
+} from '~/lib/tracking/users.server';
 import { postgrestFilterValue } from '~/lib/tracking/users';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 
@@ -44,7 +54,15 @@ import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
  * risponde alla sola domanda "come si chiama questo browser", che e' l'unica a
  * cui si possa rispondere prima di sapere chi sia la persona. La querystring
  * che il template attacca comunque non seleziona niente — non c'e' niente da
- * selezionare — e viene guardata solo per le due etichette facoltative.
+ * selezionare — e viene guardata per due cose sole: il permesso del visitatore
+ * (la coppia che il Lookup lascia configurare, ed e' li' che ora va messa) e le
+ * due etichette facoltative.
+ *
+ * E RISPONDE CON UN ARRAY VUOTO QUANDO NON PUO' RISPONDERE. Senza il permesso
+ * del visitatore non si conia niente: nessun identificativo nel corpo, nessuno
+ * negli header, nessun cookie e nessuna riga scritta. Per il container e'
+ * "nessuna riga trovata", che e' quanto di piu' vicino alla verita' si possa
+ * dire in una risposta di PostgREST.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   // Stesso pedaggio del proxy: il token dice di quale negozio si parla. Senza,
@@ -82,6 +100,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // ogni pagina vorrebbe dire non riconoscere piu' nessuno, che e' l'opposto di
   // cio' per cui esiste.
   const existing = readExternalId(request.headers.get('Cookie'));
+
+  // Il permesso del visitatore, prima di coniare qualunque cosa.
+  //
+  // E' l'ultimo cancello e il piu' importante: i due sopra dicono di chi e' il
+  // negozio e se quel negozio puo' leggere, questo dice se la persona che sta
+  // navigando ha acconsentito a essere riconosciuta. Nessuno dei due primi
+  // risponde per lei. Le finalita' che servono sono `analytics` e `marketing`
+  // insieme, e il perche' sta in `lib/tracking/consent`.
+  const consent = evaluateVisitorConsent(request);
+  if (!consent.allowed) return withoutIdentifier(result.ctx, consent, existing);
+
   const externalId = existing ?? newExternalId();
 
   // Qui il browser diventa una riga.
@@ -108,7 +137,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const headers = new Headers({
     'Content-Type': 'application/json',
     [EXTERNAL_ID_HEADER]: externalId,
-    'Access-Control-Expose-Headers': EXTERNAL_ID_HEADER,
+    // Cosa ha detto il visitatore sulla condivisione con terzi. Non cambia
+    // niente qui: serve a chi, a valle, decide se mandare questo identificativo
+    // a una piattaforma pubblicitaria.
+    [SALE_OF_DATA_HEADER]: consent.consent.saleOfData,
+    'Access-Control-Expose-Headers': `${EXTERNAL_ID_HEADER}, ${SALE_OF_DATA_HEADER}`,
     // Un identificativo si conia una volta e vale per sempre: farlo mettere in
     // cache vorrebbe dire darne lo stesso a due browser diversi.
     'Cache-Control': 'no-store',
@@ -118,6 +151,51 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // L'array, non l'oggetto: vedi sopra. Una riga sola, che e' la risposta alla
   // domanda posta.
   return new Response(JSON.stringify([{ external_id: externalId }]), { status: 200, headers });
+}
+
+/**
+ * La risposta a chi non ha (o non ha piu') dato il permesso.
+ *
+ * E' UN ARRAY VUOTO, E NON UN ERRORE, e la differenza conta per chi sta
+ * dall'altra parte: il Lookup del container si aspetta una risposta di
+ * PostgREST, e "nessuna riga" e' la cosa che PostgREST dice quando non c'e'
+ * niente da dare. La variabile del container resta vuota, i tag a valle non
+ * ricevono nessun identificativo, e nessuno vede un errore in vetrina — che e'
+ * esattamente lo stato di fatto: la richiesta era legittima, la risposta e' che
+ * non c'e' niente da restituire.
+ *
+ * Niente header con l'identificativo, per la stessa ragione: un valore in
+ * quell'header e' un identificativo consegnato, quale che sia il corpo.
+ *
+ * Se il no e' esplicito — non un segnale che manca, ma una revoca — si disfa
+ * anche quello che era stato raccolto prima: il cookie torna indietro scaduto e
+ * la riga sparisce dal database. La politica sta in `forgetVisitor`.
+ */
+async function withoutIdentifier(
+  ctx: ShopReadContext,
+  consent: ConsentDecision,
+  existing: string | null,
+): Promise<Response> {
+  const headers = new Headers({
+    'Content-Type': 'application/json',
+    [SALE_OF_DATA_HEADER]: consent.consent.saleOfData,
+    'Access-Control-Expose-Headers': `${EXTERNAL_ID_HEADER}, ${SALE_OF_DATA_HEADER}`,
+    'Cache-Control': 'no-store',
+  });
+
+  if (consent.withdrawn && existing) {
+    headers.append('Set-Cookie', expiredExternalIdCookie());
+    try {
+      await forgetVisitor(supabaseFromReadContext(ctx), existing);
+    } catch (error) {
+      console.warn(
+        '[rest/v1/tracking_id] revoca non applicata:',
+        error instanceof Error ? error.message : 'errore sconosciuto',
+      );
+    }
+  }
+
+  return new Response('[]', { status: 200, headers });
 }
 
 /**

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { VisitorConsent } from '~/lib/tracking/consent';
 
 const resolveShopReadContext = vi.fn();
 vi.mock('~/lib/read-proxy/context.server', () => ({ resolveShopReadContext }));
@@ -13,15 +14,37 @@ vi.mock('~/lib/read-proxy/token.server', () => ({
 const recordUserSeen = vi.fn(
   async (_supabase: unknown, _visitor: Record<string, unknown>) => 'written' as const,
 );
+const forgetVisitor = vi.fn(async () => 'forgotten' as const);
 vi.mock('~/lib/tracking/users.server', () => ({
   recordUserSeen,
+  forgetVisitor,
   supabaseFromReadContext: () => ({}) as never,
 }));
 vi.mock('~/lib/supabase/ensure-users-table.server', () => ({
   provisionUsersTable: vi.fn(async () => true),
 }));
 
+// Il permesso del visitatore: default = concesso, i test lo modificano.
+const evaluateVisitorConsent = vi.fn();
+vi.mock('~/lib/tracking/consent', async () => {
+  const actual = await vi.importActual<typeof import('~/lib/tracking/consent')>(
+    '~/lib/tracking/consent',
+  );
+  return {
+    ...actual,
+    evaluateVisitorConsent: (...args: unknown[]) => evaluateVisitorConsent(...args),
+  };
+});
+
 const { loader } = await import('./rest.v1.tracking_id');
+
+/** Il consenso completo: analytics e marketing concessi. */
+const consentGranted = (): VisitorConsent => ({
+  analytics: 'granted',
+  marketing: 'granted',
+  preferences: 'unknown',
+  saleOfData: 'unknown',
+});
 
 const call = (headers: Record<string, string> = {}, search = '') =>
   loader({
@@ -31,11 +54,20 @@ const call = (headers: Record<string, string> = {}, search = '') =>
 beforeEach(() => {
   resolveShopReadContext.mockReset();
   recordUserSeen.mockClear();
+  forgetVisitor.mockClear();
+  evaluateVisitorConsent.mockReset();
   resolveShopReadContext.mockResolvedValue({
     kind: 'ok',
     // `canReadData` e' la risposta della policy, e adesso questa rotta la
     // guarda come le altre tre di /rest/v1/: prima era l'unica a non farlo.
     ctx: { shopId: 's1', canReadData: true, projectRef: 'abcdef', serviceRoleKey: 'k' },
+  });
+  // Di default: consenso completo, i test lo cambiano dove serve.
+  evaluateVisitorConsent.mockReturnValue({
+    consent: consentGranted(),
+    source: 'query',
+    allowed: true,
+    withdrawn: false,
   });
 });
 
@@ -162,5 +194,158 @@ describe('/rest/v1/tracking_id — la riga del browser', () => {
 
     expect(res.status).toBe(200);
     expect(JSON.parse(await res.text())[0].external_id).toMatch(/^corew_\d+_[A-Za-z0-9]{32}$/);
+  });
+});
+
+/**
+ * Il permesso del visitatore prima dell'identificativo.
+ *
+ * Criticità P0-05 dell'audit: l'identificativo è un trattamento (dura un anno,
+ * serve all'attribuzione) e si conia solo se il visitatore ha acconsentito alle
+ * finalità necessarie: analytics E marketing insieme.
+ */
+describe('/rest/v1/tracking_id — consenso del visitatore', () => {
+  it('senza consenso: array vuoto, nessun header, nessun cookie, nessuna riga', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'none',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ apikey: 'buono' });
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(await res.text())).toEqual([]);
+    expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
+    expect(res.headers.get('Set-Cookie')).toBeNull();
+    expect(recordUserSeen).not.toHaveBeenCalled();
+  });
+
+  it('solo analytics concesso: non basta, serve anche marketing', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'granted', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ apikey: 'buono' });
+
+    expect(JSON.parse(await res.text())).toEqual([]);
+    expect(recordUserSeen).not.toHaveBeenCalled();
+  });
+
+  it('solo marketing concesso: non basta, serve anche analytics', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ apikey: 'buono' });
+
+    expect(JSON.parse(await res.text())).toEqual([]);
+    expect(recordUserSeen).not.toHaveBeenCalled();
+  });
+
+  it('entrambe concesse: identificativo emesso e riga scritta', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: consentGranted(),
+      source: 'query',
+      allowed: true,
+      withdrawn: false,
+    });
+
+    const res = await call({ apikey: 'buono' });
+
+    expect(res.status).toBe(200);
+    const body = JSON.parse(await res.text());
+    expect(body).toHaveLength(1);
+    expect(body[0].external_id).toMatch(/^corew_\d+_[A-Za-z0-9]{32}$/);
+    expect(recordUserSeen).toHaveBeenCalledTimes(1);
+  });
+
+  it('revoca esplicita su analytics: cookie scaduto e riga cancellata', async () => {
+    const existing = 'corew_1700000000000_abcdefghijklmnopqrstuvwxyz012345';
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'denied', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+
+    const res = await call({ apikey: 'buono', Cookie: `corew_eid=${existing}` });
+
+    expect(JSON.parse(await res.text())).toEqual([]);
+    expect(res.headers.get('Set-Cookie')).toContain('corew_eid=');
+    expect(res.headers.get('Set-Cookie')).toContain('Max-Age=0');
+    expect(forgetVisitor).toHaveBeenCalledWith(expect.anything(), existing);
+  });
+
+  it('revoca esplicita su marketing: cookie scaduto e riga cancellata', async () => {
+    const existing = 'corew_1700000000000_abcdefghijklmnopqrstuvwxyz012345';
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'granted', marketing: 'denied', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+
+    const res = await call({ apikey: 'buono', Cookie: `corew_eid=${existing}` });
+
+    expect(forgetVisitor).toHaveBeenCalledWith(expect.anything(), existing);
+  });
+
+  it('segnale assente (unknown) vale come no, non come si', async () => {
+    // Il permesso non si presume mai: assenza di segnale = nessun consenso.
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'none',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ apikey: 'buono' });
+
+    expect(JSON.parse(await res.text())).toEqual([]);
+    expect(recordUserSeen).not.toHaveBeenCalled();
+  });
+
+  it('revoca senza cookie esistente: nessun Set-Cookie, nessuna chiamata a forgetVisitor', async () => {
+    // La revoca si applica solo se c'era qualcosa da revocare.
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'denied', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+
+    const res = await call({ apikey: 'buono' });
+
+    expect(res.headers.get('Set-Cookie')).toBeNull();
+    expect(forgetVisitor).not.toHaveBeenCalled();
+  });
+
+  it('saleOfData viene sempre dichiarato nell header, consenso o no', async () => {
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'unknown', preferences: 'unknown', saleOfData: 'denied' },
+      source: 'query',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ apikey: 'buono' });
+
+    expect(res.headers.get('X-CoreW-Sale-Of-Data')).toBe('denied');
+  });
+
+  it('Access-Control-Expose-Headers include sia External-Id sia Sale-Of-Data', async () => {
+    const res = await call({ apikey: 'buono' });
+
+    const exposed = res.headers.get('Access-Control-Expose-Headers');
+    expect(exposed).toContain('X-CoreW-External-Id');
+    expect(exposed).toContain('X-CoreW-Sale-Of-Data');
   });
 });

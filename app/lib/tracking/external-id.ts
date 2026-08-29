@@ -105,6 +105,33 @@ export function externalIdCookie(value: string): string {
   ].join('; ');
 }
 
+/**
+ * Il cookie che cancella il cookie.
+ *
+ * Alla revoca il permesso di tenere quell'identificativo nel browser finisce, e
+ * il modo di toglierlo e' rimandarlo scaduto: stesso nome, stesso `Path`, stessi
+ * attributi — un browser che non li ritrova identici non riconosce il cookie da
+ * sostituire e si tiene quello vecchio.
+ *
+ * DOVE FUNZIONA E DOVE NO, e va detto perche' non e' una promessa che possiamo
+ * mantenere sempre. Se la chiamata la fa il browser, funziona. Se la fa un
+ * container server-side, il `Set-Cookie` lo consuma lui e al browser non arriva
+ * mai: li' l'identificativo sta in un cookie first-party sul dominio del
+ * negozio, che non e' nostro e che noi non possiamo toccare. In quel caso a
+ * toglierlo e' il ponte in vetrina, che sta dalla parte giusta del confine.
+ * Quello che possiamo garantire da qui, in tutti e due i casi, e' che non se ne
+ * conii un altro e che quello che c'era sparisca dal database.
+ */
+export function expiredExternalIdCookie(): string {
+  return [
+    `${EXTERNAL_ID_COOKIE}=`,
+    'Path=/',
+    'Max-Age=0',
+    'SameSite=None',
+    'Secure',
+  ].join('; ');
+}
+
 /** Legge l'identificativo da un'intestazione Cookie, se ce n'e' uno valido. */
 export function readExternalId(cookieHeader: string | null | undefined): string | null {
   if (!cookieHeader) return null;

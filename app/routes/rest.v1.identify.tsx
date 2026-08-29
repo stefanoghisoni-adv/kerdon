@@ -1,10 +1,12 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { isExternalId } from '~/lib/tracking/external-id';
 import {
+  forgetVisitor,
   identifyVisitor,
   supabaseFromReadContext,
   type IdentifyOutcome,
 } from '~/lib/tracking/users.server';
+import { evaluateVisitorConsent } from '~/lib/tracking/consent';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
 import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
@@ -78,6 +80,26 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!isExternalId(externalId)) return json({ error: 'bad_request' }, 400);
 
   const supabase = supabaseFromReadContext(ctx);
+
+  // TERZA CAUTELA, e viene prima delle altre due nell'ordine dei fatti: il
+  // permesso del visitatore.
+  //
+  // Qui non si conia niente — l'identificativo arriva gia' fatto — ma si scrive,
+  // e si scrive la cosa piu' pesante di tutte: il legame fra un browser e una
+  // persona con nome e cognome. Un identificativo che il container ha in mano da
+  // prima non e' un permesso: lo si prende per buono solo se il permesso arriva
+  // adesso, insieme alla richiesta.
+  //
+  // Se il no e' esplicito si cancella quello che c'era, invece di limitarsi a
+  // non aggiungere: chi revoca mentre lascia la sua email sta chiedendo proprio
+  // che i due non restino legati.
+  const consent = evaluateVisitorConsent(request, body as Record<string, unknown>);
+  if (!consent.allowed) {
+    if (consent.withdrawn) await forgetVisitor(supabase, externalId);
+    logIdentify(ctx.shopId, 'no_consent');
+    return json({ ok: true, outcome: 'no_consent' }, 200);
+  }
+
   const outcome = await identifyVisitor(
     supabase,
     {

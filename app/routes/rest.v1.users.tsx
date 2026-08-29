@@ -1,6 +1,11 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { isExternalId } from '~/lib/tracking/external-id';
-import { recordUserSeen, supabaseFromReadContext } from '~/lib/tracking/users.server';
+import {
+  forgetVisitor,
+  recordUserSeen,
+  supabaseFromReadContext,
+} from '~/lib/tracking/users.server';
+import { evaluateVisitorConsent } from '~/lib/tracking/consent';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
 import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
@@ -62,6 +67,27 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!isExternalId(externalId)) return json({ error: 'bad_request' }, 400);
 
   const supabase = supabaseFromReadContext(ctx);
+
+  // Il permesso del visitatore, prima di scrivere la sua riga.
+  //
+  // Questa e' la strada per cui la riga nasce piu' ricca — l'oggetto intero
+  // invece della coppia in querystring — ma resta la stessa riga, con lo stesso
+  // identificativo dentro: se il permesso non c'e', non c'e' nemmeno qui. Un
+  // container che manda l'identificativo non sta dichiarando niente per conto
+  // del visitatore, e non e' su di lui che ci si basa.
+  const consent = evaluateVisitorConsent(request, body);
+  if (!consent.allowed) {
+    if (consent.withdrawn) await forgetVisitor(supabase, externalId);
+    console.log(
+      `[rest/v1/users] ${JSON.stringify({
+        shop: ctx.shopId,
+        outcome: 'no_consent',
+        at: new Date().toISOString(),
+      })}`,
+    );
+    return json({ ok: true }, 200);
+  }
+
   const outcome = await recordUserSeen(
     supabase,
     {
