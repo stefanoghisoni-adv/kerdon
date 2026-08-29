@@ -27,6 +27,21 @@ vi.mock('~/db.server', () => ({
     },
     plan: { findFirst: (...a: unknown[]) => findPlanMock(...a) },
     billingCharge: { updateMany: (...a: unknown[]) => updateManyCharges(...a) },
+    // Le scritture della callback vivono in una transazione: il finto
+    // `$transaction` consegna un client che punta agli stessi spy, cosi' le
+    // verifiche vedono cosa e' stato scritto senza dover sapere per quale
+    // strada ci e' arrivato.
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        shop: {
+          // `applyPlanToShop` rilegge il negozio dentro la transazione prima di
+          // scriverlo: senza questa, la transazione lanciava e la callback
+          // finiva nel catch, rispondendo 'ko' a un pagamento andato a buon fine.
+          findUnique: (...a: unknown[]) => findUniqueShop(...a),
+          update: (...a: unknown[]) => updateShop(...a),
+        },
+        billingCharge: { updateMany: (...a: unknown[]) => updateManyCharges(...a) },
+      }),
   },
 }));
 vi.mock('~/lib/billing/subscription.server', async () => {

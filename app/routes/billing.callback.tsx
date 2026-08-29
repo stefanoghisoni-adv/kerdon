@@ -324,23 +324,47 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // listino puo' essere cambiato fra la richiesta e la conferma.
     const trialDays = subscription.trialDays ?? 0;
 
-    await prisma.billingCharge.updateMany({
-      where: { shopId: shop.id, shopifyChargeId: BigInt(chargeIdRaw) },
-      data: {
-        status: 'active',
-        activatedAt: now,
-        trialDays,
-        trialEndsAt: trialDays > 0 ? new Date(now.getTime() + trialDays * DAY_MS) : null,
-      },
-    });
+    // Le tre scritture insieme, o nessuna.
+    //
+    // Sono un gesto solo — l'addebito diventa attivo, il negozio passa al piano
+    // nuovo, e il quarto passo della configurazione risulta fatto — e una meta'
+    // che riuscisse da sola lascerebbe il merchant in uno stato che non
+    // corrisponde a niente: pagato ma sul piano vecchio, oppure sul piano nuovo
+    // con l'addebito ancora segnato in attesa. Da fuori sarebbe indistinguibile
+    // da un pagamento non andato a buon fine, e nessuno saprebbe da che parte
+    // rimetterlo a posto.
+    //
+    // La cancellazione dei vecchi abbonamenti resta fuori, piu' sotto: e' una
+    // chiamata a Shopify, e cio' che si e' gia' fatto sui loro server una
+    // transazione nostra non lo disfa.
+    await prisma.$transaction(async (tx) => {
+      await tx.billingCharge.updateMany({
+        where: { shopId: shop.id, shopifyChargeId: BigInt(chargeIdRaw) },
+        data: {
+          status: 'active',
+          activatedAt: now,
+          trialDays,
+          trialEndsAt: trialDays > 0 ? new Date(now.getTime() + trialDays * DAY_MS) : null,
+          // Il nonce si spende QUI, dentro la transazione.
+          //
+          // Fuori non servirebbe: se le scritture fallissero dopo averlo
+          // marcato speso, la stessa callback ripetuta — quella che Shopify
+          // rimanda, o che il merchant provoca ricaricando — verrebbe rifiutata
+          // proprio quando sarebbe l'occasione buona per rimediare. Segnandolo
+          // insieme al resto, o e' andato tutto o non e' andato niente, e
+          // riprovare resta possibile.
+          callbackNonceUsedAt: now,
+        },
+      });
 
-    await applyPlanToShop({
-      shopId: shop.id,
-      planName: plan.planName,
-      chargeId: chargeIdRaw,
-      trialDays,
-      now,
-    });
+      await applyPlanToShop({
+        shopId: shop.id,
+        planName: plan.planName,
+        chargeId: chargeIdRaw,
+        trialDays,
+        now,
+        tx,
+      });
 
     // Approvare un piano a pagamento E' confermare il piano: e' il quarto passo
     // della configurazione, fatto nel modo piu' esplicito che esista — pagando.
@@ -351,9 +375,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // fatta una tornava su una configurazione che non si chiudeva piu'. E un
     // segno che dipende dal fatto che il browser resti aperto sul percorso
     // giusto non e' un segno, e' una speranza.
-    await prisma.shop.update({
-      where: { id: shop.id },
-      data: { planConfirmedAt: now },
+      await tx.shop.update({
+        where: { id: shop.id },
+        data: { planConfirmedAt: now },
+      });
     });
 
     await cancelPreviousSubscriptions(admin, shop.id, gid);
