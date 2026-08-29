@@ -1,0 +1,20 @@
+# Il node_modules della macchina di sviluppo e' compilato per macOS: copiarlo
+# dentro un'immagine Alpine sovrascrive i binari Linux appena installati da
+# `npm ci`, e il motore di Prisma smette di partire. Questa riga da sola e' la
+# differenza fra un'immagine che funziona e una che si costruisce e muore.
+node_modules
+dist
+build
+.git
+.gitignore
+.env
+.env.*
+.cache
+coverage
+*.log
+.DS_Store
+.vercel
+.shopify
+prisma/dev.db*
+test-results
+playwright-report

@@ -12,6 +12,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # Un indirizzo di database finto ma sintatticamente valido.
+    #
+    # `prisma generate` non si collega a niente — legge lo schema e scrive il
+    # client — ma `prisma.config.ts` pretende comunque che la variabile ci sia,
+    # e senza fallisce prima di cominciare. Da li' la CI era rossa su ogni
+    # commit, e una CI sempre rossa non e' un cancello: e' un allarme che si
+    # impara a ignorare.
+    #
+    # Sta QUI e non nel codice di proposito: un ripiego silenzioso dentro
+    # l'applicazione un giorno punterebbe le migrazioni al database sbagliato,
+    # e sarebbe un guaio molto peggiore di una CI che si lamenta.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_non_esiste?schema=public
+
     steps:
       - uses: actions/checkout@v4
 

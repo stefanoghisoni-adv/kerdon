@@ -13,7 +13,18 @@ if (process.env.NODE_ENV === 'production') {
     global.__db__ = new PrismaClient();
   }
   prisma = global.__db__;
-  prisma.$connect();
 }
+
+// Niente `$connect()` all'importazione.
+//
+// Prima c'era, senza `await` e senza `catch`: una promise lasciata in volo che,
+// se il database non risponde, diventa un rifiuto non gestito. Nei test —
+// dove un database non c'e' affatto — le asserzioni passavano tutte e poi il
+// processo usciva con codice 1 comunque, per quel rifiuto. Un cancello di
+// rilascio che dice rosso quando il codice e' verde e' peggio di nessun
+// cancello: si impara a ignorarlo.
+//
+// Non serviva nemmeno: Prisma si collega da solo alla prima interrogazione, e
+// lo fa aspettandola come si deve.
 
 export { prisma };

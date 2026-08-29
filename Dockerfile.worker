@@ -10,21 +10,23 @@ COPY package*.json ./
 COPY prisma/schema.prisma ./prisma/
 
 # Installa tutte le dipendenze (non --production: servono anche le devDependencies
-# per compilare TypeScript). Il flag --legacy-peer-deps e' necessario per i
-# conflitti di peer dependency noti del progetto.
+# per costruire il fascio del worker). Il flag --legacy-peer-deps e' necessario
+# per i conflitti di peer dependency noti del progetto.
 RUN npm ci --legacy-peer-deps
 
-# Genera il client Prisma: va dopo npm ci perche' serve @prisma/client installato,
-# e prima della copia del codice cosi' il layer si riutilizza se solo il codice
-# cambia ma lo schema no.
+# Genera il client Prisma. Non serve un DATABASE_URL: `generate` legge lo schema
+# e scrive dei file, non si collega a niente.
 RUN npx prisma generate
 
-# Copia tutto il resto del codice sorgente.
+# Copia il resto del codice sorgente. Cosa resta fuori lo decide .dockerignore,
+# e la riga che conta li' e' `node_modules`: senza, il node_modules di macOS
+# della macchina di sviluppo verrebbe copiato sopra quello Linux appena
+# installato, e il motore di Prisma non partirebbe piu'.
 COPY . .
 
-# Compila il worker TypeScript in JavaScript. Il build produce ./dist/worker.js
-# che e' il file che il container di produzione eseguira'. Se il worker importa
-# moduli dall'app, questi vengono compilati insieme.
+# Impacchetta il worker in un solo file JavaScript (dist/worker.js) insieme ai
+# moduli dell'app che usa. Restano fuori i pacchetti con dipendenze native, che
+# nello stage di produzione ci sono gia'.
 RUN npm run worker:build
 
 # Stage 2: Production
@@ -33,24 +35,23 @@ FROM node:22-alpine
 WORKDIR /app
 
 # Copia i file di package e lo schema Prisma per installare solo le dipendenze
-# di produzione e rigenerare il client Prisma.
+# di produzione.
 COPY package*.json ./
 COPY prisma/schema.prisma ./prisma/
 
-# Installa solo le dipendenze di produzione: il worker compilato non ha bisogno
-# di TypeScript o altri devDependencies. Il flag --legacy-peer-deps resta
-# necessario anche qui.
+# Installa solo le dipendenze di produzione: il worker impacchettato non ha
+# bisogno delle devDependencies. Il flag --legacy-peer-deps resta necessario.
 RUN npm ci --production --legacy-peer-deps
 
-# Rigenera il client Prisma nello stage di produzione: il client generato nello
-# stage di build non si puo' copiare perche' contiene percorsi assoluti che
-# puntano alla directory di build.
-RUN npx prisma generate
+# Il client Prisma generato arriva dallo stage di build invece di essere
+# rigenerato qui. Rigenerarlo era il modo lento di ottenere lo stesso file: i
+# percorsi assoluti che il client si porta dentro puntano a /app, che e' la
+# WORKDIR di entrambi gli stage, quindi copiarlo va bene.
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
-# Copia il worker compilato (JavaScript) dallo stage di build. Non servono i
-# sorgenti TypeScript: il container esegue il .js gia' compilato.
+# Copia il worker impacchettato dallo stage di build.
 COPY --from=builder /app/dist ./dist
 
-# Il worker compilato e' un modulo ES (type: "module" in package.json), quindi
-# Node lo esegue direttamente senza bisogno di tsx o altri loader.
+# Il worker impacchettato e' un modulo ES (type: "module" in package.json),
+# quindi Node lo esegue direttamente senza tsx o altri loader.
 CMD ["node", "dist/worker.js"]
