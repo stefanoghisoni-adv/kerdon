@@ -32,7 +32,7 @@ Il worker long-running (`worker.ts`) resta solo per lo sviluppo locale.
 
 ```bash
 cp .env.example .env    # compila le variabili
-npm install --legacy-peer-deps
+npm install
 npx prisma generate
 # Schema, piani e RLS in un colpo solo: incolla prisma/owner-bootstrap.sql
 # nell'SQL Editor del progetto Supabase. Non usare `prisma db push` da solo —

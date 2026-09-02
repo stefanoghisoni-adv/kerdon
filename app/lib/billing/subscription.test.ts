@@ -303,7 +303,9 @@ describe('getSubscription', () => {
 });
 
 describe('cancelAppSubscription', () => {
-  let warn: MockInstance<Parameters<typeof console.warn>, ReturnType<typeof console.warn>>;
+  // In vitest 3 `MockInstance` prende la firma intera, non piu' argomenti e
+  // ritorno separati.
+  let warn: MockInstance<typeof console.warn>;
 
   beforeEach(() => {
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
