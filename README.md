@@ -125,6 +125,25 @@ Non c'e' una migration iniziale nel repo (la piu' vecchia e' una ALTER), quindi
 - Supabase Free: il progetto si sospende dopo ~7 giorni di inattività
 - Upstash Free: ~10k comandi/giorno
 
+## Manutenzione versione API Shopify
+
+**Revisione trimestrale richiesta.** Shopify mantiene le ultime 4 versioni trimestrali
+(~12 mesi). Quando una versione viene ritirata, Shopify fa fall-forward silenzioso alla
+versione stabile più vecchia ancora supportata, e l'app può girare su una versione diversa
+da quella per cui è scritta.
+
+**Procedura:**
+
+1. Ogni trimestre (gen/apr/lug/ott), verifica le [Shopify API release notes](https://shopify.dev/docs/api/usage/versioning)
+2. Aggiorna `SHOPIFY_API_VERSION` in:
+   - `.env.example`
+   - `shopify.app.toml` (campo `api_version`)
+   - `app/shopify.server.ts` (costante `ApiVersion.*`)
+   - `app/lib/shopify-api.server.ts` (default nel costruttore)
+   - README.md (sezione environment variables)
+3. Testa con `npm run dev` e `npm test`
+4. Monitoraggio: i log segnalano se la versione ricevuta (`X-Shopify-API-Version`) differisce da quella richiesta
+
 ## Stato
 
 - ✅ OAuth (token exchange), sync prodotti+varianti e clienti, cron a costo zero

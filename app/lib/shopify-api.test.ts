@@ -8,9 +8,16 @@ global.fetch = vi.fn();
 vi.mock('~/shopify.server', () => ({ unauthenticated: { admin: vi.fn() } }));
 
 /** Risposta GraphQL riuscita. */
-function ok(data: unknown, throttle?: { maximumAvailable: number; currentlyAvailable: number }) {
+function ok(
+  data: unknown,
+  throttle?: { maximumAvailable: number; currentlyAvailable: number },
+  apiVersion: string = '2026-07',
+) {
   return {
     ok: true,
+    // Shopify dichiara sempre in risposta la versione che ha davvero servito:
+    // il client la confronta con quella richiesta, quindi il finto deve averla.
+    headers: new Headers({ 'X-Shopify-API-Version': apiVersion }),
     json: async () => ({ data, extensions: throttle ? { cost: { throttleStatus: throttle } } : undefined }),
   };
 }
@@ -424,6 +431,34 @@ describe('Shopify API Client (GraphQL)', () => {
     await client().getProductsCount();
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Approaching rate limit'));
+    warn.mockRestore();
+  });
+
+  // Quando una versione API viene ritirata Shopify non rifiuta la richiesta:
+  // la serve con la piu' vecchia ancora supportata, e lo dice solo nell'header.
+  // Senza questo controllo l'app girerebbe per mesi su una versione diversa da
+  // quella per cui e' scritta senza che nessuno se ne accorga.
+  it('segnala quando Shopify serve una versione API diversa da quella richiesta', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ productsCount: { count: 1 } }, undefined, '2026-04'),
+    );
+
+    await client().getProductsCount();
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('richiesta 2026-07, ricevuta 2026-04'),
+    );
+    warn.mockRestore();
+  });
+
+  it('versione allineata: nessuna segnalazione', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    (global.fetch as any).mockResolvedValueOnce(ok({ productsCount: { count: 1 } }));
+
+    await client().getProductsCount();
+
+    expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 });

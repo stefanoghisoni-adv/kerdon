@@ -22,7 +22,7 @@ import {
   type GdprStep,
 } from './customer-record.server';
 
-type Result = { data?: unknown; error?: unknown; count?: number };
+type Result = { data?: unknown; error?: unknown; count?: number; maxRows?: number };
 
 interface Recorded {
   table: string;
@@ -37,6 +37,35 @@ interface Recorded {
  */
 function fakeClient(replies: Record<string, Result>, calls: Recorded[]) {
   const reply = (table: string): Result => replies[table] ?? { data: [], error: null, count: 0 };
+
+  /**
+   * Una lettura come la restituisce PostgREST: si puo' attendere direttamente,
+   * oppure chiedere una pagina con `.range()`. Il conteggio e' quello vero
+   * della tabella finta, non quello della pagina — e' esattamente la differenza
+   * che permette di accorgersi di un'esportazione troncata.
+   */
+  function selectChain(table: string, filter: unknown) {
+    calls.push({ table, op: 'select', filter });
+    const result = reply(table);
+    const rows = (result.data ?? []) as unknown[];
+    const count = result.error ? undefined : result.count ?? rows.length;
+
+    // `maxRows` e' il tetto per risposta del progetto: se e' piu' basso della
+    // pagina richiesta, il database ne serve meno di quante gliene si chiedono.
+    const cap = result.maxRows ?? Infinity;
+
+    return {
+      ...result,
+      count,
+      range: async (from: number, to: number) => ({
+        ...result,
+        count,
+        data: result.error ? undefined : rows.slice(from, Math.min(to + 1, from + cap)),
+      }),
+      then: (onOk: (v: Result) => unknown, onErr?: (e: unknown) => unknown) =>
+        Promise.resolve({ ...result, count }).then(onOk, onErr),
+    };
+  }
 
   return {
     from: (table: string) => ({
@@ -53,14 +82,8 @@ function fakeClient(replies: Record<string, Result>, calls: Recorded[]) {
         },
       }),
       select: () => ({
-        eq: async (_col: string, value: unknown) => {
-          calls.push({ table, op: 'select', filter: value });
-          return reply(table);
-        },
-        in: async (_col: string, values: unknown) => {
-          calls.push({ table, op: 'select', filter: values });
-          return reply(table);
-        },
+        eq: (_col: string, value: unknown) => selectChain(table, value),
+        in: (_col: string, values: unknown) => selectChain(table, values),
       }),
     }),
   } as never;
@@ -231,6 +254,103 @@ describe('raccolta dei dati per la richiesta di accesso', () => {
     expect(data).toEqual({ customer: null, orders: [], order_lines: [], browsers: [] });
     expect(stepsFailed(steps)).toBe(false);
     expect(step(steps, 'order_lines')).toMatchObject({ outcome: 'skipped' });
+  });
+
+  // Una richiesta di accesso troncata e' peggio di una fallita: alla persona
+  // arriva un documento che sembra completo, e nessuno si accorge di cosa
+  // manca. Questi tre casi sono i modi in cui puo' succedere.
+  it('mille ordini escono tutti, non i primi cinquecento', async () => {
+    const orders = Array.from({ length: 1000 }, (_, i) => ({
+      shopify_order_id: 900 + i,
+      total_price: '1.00',
+    }));
+
+    const { data, steps } = await collectCustomerData(
+      fakeClient(
+        {
+          customers: { data: [{ shopify_customer_id: 4021 }], error: null },
+          orders: { data: orders, error: null },
+        },
+        [],
+      ),
+      'customers',
+      '4021',
+    );
+
+    expect(data.orders).toHaveLength(1000);
+    expect(step(steps, 'orders')).toMatchObject({ outcome: 'read', rows: 1000 });
+    expect(stepsFailed(steps)).toBe(false);
+  });
+
+  it('un progetto con un tetto piu basso della pagina non perde le righe in mezzo', async () => {
+    const orders = Array.from({ length: 350 }, (_, i) => ({
+      shopify_order_id: 900 + i,
+      total_price: '1.00',
+    }));
+
+    const { data, steps } = await collectCustomerData(
+      fakeClient(
+        {
+          customers: { data: [{ shopify_customer_id: 4021 }], error: null },
+          // Il progetto ne serve al massimo 100 per risposta, non 500.
+          orders: { data: orders, error: null, maxRows: 100 },
+        },
+        [],
+      ),
+      'customers',
+      '4021',
+    );
+
+    expect(data.orders).toHaveLength(350);
+    expect(stepsFailed(steps)).toBe(false);
+  });
+
+  it('se il database ne dichiara piu di quante ne arrivano, la raccolta fallisce', async () => {
+    const { steps } = await collectCustomerData(
+      fakeClient(
+        {
+          customers: { data: [{ shopify_customer_id: 4021 }], error: null },
+          // Il database dice 1200, ma di righe ne consegna 3: l'esportazione
+          // sarebbe parziale, e va ritentata invece che consegnata.
+          orders: {
+            data: [{ shopify_order_id: 900 }, { shopify_order_id: 901 }, { shopify_order_id: 902 }],
+            error: null,
+            count: 1200,
+          },
+        },
+        [],
+      ),
+      'customers',
+      '4021',
+    );
+
+    expect(stepsFailed(steps)).toBe(true);
+    expect(step(steps, 'orders')?.detail).toContain('incompleta');
+  });
+
+  it('le righe d ordine si chiedono a lotti quando gli ordini sono tanti', async () => {
+    const calls: Recorded[] = [];
+    const orders = Array.from({ length: 250 }, (_, i) => ({ shopify_order_id: 900 + i }));
+
+    await collectCustomerData(
+      fakeClient(
+        {
+          customers: { data: [{ shopify_customer_id: 4021 }], error: null },
+          orders: { data: orders, error: null },
+          order_lines: { data: [{ shopify_line_id: 1, shopify_order_id: 900 }], error: null },
+        },
+        calls,
+      ),
+      'customers',
+      '4021',
+    );
+
+    // 250 ordini, 100 id per lotto: tre richieste, non una con un URL che il
+    // proxy rifiuta.
+    const batches = calls.filter((c) => c.table === 'order_lines');
+    expect(batches).toHaveLength(3);
+    expect((batches[0].filter as unknown[]).length).toBe(100);
+    expect((batches[2].filter as unknown[]).length).toBe(50);
   });
 
   it('una tabella che non risponde rende incompleta la raccolta', async () => {

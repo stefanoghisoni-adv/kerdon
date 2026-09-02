@@ -23,13 +23,40 @@
 // una riga letta. Un registro di cancellazioni che conserva quello che ha
 // cancellato e' il modo piu' elegante di non aver cancellato niente.
 
-import { createHash } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { prisma } from '~/db.server';
 import type { GdprStep } from './customer-record.server';
 import { stepsFailed, failureMessage } from './customer-record.server';
 
 /** I tre webhook obbligatori. I valori restano quelli storici. */
 export type GdprJobType = 'gdpr_redact' | 'gdpr_data_request' | 'gdpr_shop_redact';
+
+/**
+ * La chiave con cui si firma l'impronta di un riferimento GDPR.
+ *
+ * Non e' `ENCRYPTION_SECRET` usato tale e quale: e' una chiave derivata da
+ * quello con un'etichetta sua. Cosi' la firma di un riferimento non e' la
+ * stessa cosa che cifrare un token — chi arrivasse a una non arriva all'altra —
+ * ma non si aggiunge una variabile d'ambiente obbligatoria che, se un giorno
+ * mancasse, spegnerebbe i webhook di conformita' in produzione.
+ *
+ * `GDPR_AUDIT_SECRET`, se c'e', vince: serve a poter ruotare questa chiave da
+ * sola, senza toccare quella con cui sono cifrati i token dei negozi.
+ */
+const AUDIT_KEY_LABEL = 'coreward:gdpr-audit-ref:v2';
+
+function gdprAuditKey(): Buffer {
+  const dedicated = process.env.GDPR_AUDIT_SECRET;
+  if (dedicated) return Buffer.from(dedicated, 'utf8');
+
+  const base = process.env.ENCRYPTION_SECRET;
+  if (!base) {
+    throw new Error(
+      'ne GDPR_AUDIT_SECRET ne ENCRYPTION_SECRET sono configurati: impossibile firmare i riferimenti di controllo',
+    );
+  }
+  return createHmac('sha256', base).update(AUDIT_KEY_LABEL).digest();
+}
 
 /**
  * L'impronta con cui una richiesta resta riconoscibile dopo la cancellazione.
@@ -43,10 +70,57 @@ export type GdprJobType = 'gdpr_redact' | 'gdpr_data_request' | 'gdpr_shop_redac
  *
  * Il dominio del negozio ci sta dentro apposta: senza, la stessa impronta
  * varrebbe per lo stesso id in negozi diversi.
+ *
+ * VERSIONE 2 (corrente): HMAC-SHA256 con segreto dedicato, in base64url.
+ * Prefisso `v2:` per distinguerla dalle impronte precedenti, che erano hash
+ * semplici e quindi ricalcolabili da chiunque conosca il dominio e provi gli
+ * id plausibili. Chi verifica deve accettare entrambe le forme per un periodo
+ * limitato — le tracce vecchie non possono essere riscritte — ma chi scrive
+ * usa solo la nuova.
  */
-export function customerRef(shopDomain: string, customerId: string | number): string {
-  return createHash('sha256').update(`${shopDomain}:${customerId}`).digest('hex');
+export function createCustomerRef(shopDomain: string, customerId: string | number): string {
+  const payload = `${shopDomain}:${customerId}`;
+  const hmac = createHmac('sha256', gdprAuditKey()).update(payload).digest('base64url');
+  return `v2:${hmac}`;
 }
+
+/**
+ * Verifica che un riferimento corrisponda alla persona indicata.
+ *
+ * Accetta sia la v2 (HMAC firmato, corrente) sia la v1 (hash semplice, per le
+ * tracce scritte prima dell'aggiornamento). La v1 resta verificabile, ma non
+ * piu' generabile: il registro vecchio non puo' essere riscritto, e un
+ * riferimento illeggibile renderebbe inutile una traccia ancora valida.
+ *
+ * FINE DELLA TRANSIZIONE: quando tutte le tracce v1 saranno oltre il termine
+ * di conservazione — cioe' quando nessuna riga `gdpr_*` nel database portera'
+ * piu' un riferimento senza prefisso — la verifica v1 puo' essere rimossa.
+ * Non prima: una traccia ancora dentro il termine deve restare verificabile.
+ */
+export function verifyCustomerRef(
+  ref: string,
+  shopDomain: string,
+  customerId: string | number,
+): boolean {
+  const expected = ref.startsWith('v2:')
+    ? createCustomerRef(shopDomain, customerId)
+    : // v1: hash semplice senza firma (accettato finche' dura la transizione)
+      createHash('sha256').update(`${shopDomain}:${customerId}`).digest('hex');
+
+  // `timingSafeEqual` pretende due buffer della stessa lunghezza e altrimenti
+  // solleva: un riferimento di lunghezza diversa e' semplicemente un
+  // riferimento diverso, non un errore da propagare.
+  const given = Buffer.from(ref);
+  const wanted = Buffer.from(expected);
+  if (given.length !== wanted.length) return false;
+  return timingSafeEqual(given, wanted);
+}
+
+/**
+ * Alias per compatibilita': chi chiama `customerRef` si aspetta di creare un
+ * riferimento nuovo, quindi riceve la v2 corrente.
+ */
+export const customerRef = createCustomerRef;
 
 export interface GdprOutcome {
   jobType: GdprJobType;

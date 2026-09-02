@@ -292,6 +292,20 @@ export class ShopifyAPIClient {
       }
     }
 
+    // Sorveglianza della versione API: se Shopify risponde con una versione diversa
+    // da quella richiesta, significa che quella richiesta e' stata ritirata e
+    // Shopify sta facendo fall-forward in silenzio. Segnalarlo evita che l'app giri
+    // su una versione diversa da quella per cui e' scritta senza che nessuno se ne
+    // accorga.
+    // `?.` non e' difensivismo: e' una diagnostica, e una diagnostica non deve
+    // poter far fallire una richiesta andata a buon fine.
+    const apiVersionReceived = response.headers?.get('X-Shopify-API-Version');
+    if (apiVersionReceived && apiVersionReceived !== this.apiVersion) {
+      console.warn(
+        `[shopify-api] versione API disallineata: richiesta ${this.apiVersion}, ricevuta ${apiVersionReceived}`,
+      );
+    }
+
     return body.data as T;
   }
 
