@@ -59,3 +59,18 @@ ALTER TABLE "compliance_requests"
 ALTER TABLE "compliance_requests"
   ADD CONSTRAINT "compliance_requests_shop_id_fkey"
   FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- RLS, come su tutte le altre.
+--
+-- Mancava, ed era la tabella su cui pesava di piu': `payload` porta il corpo
+-- del webhook (l'id della persona, spesso la sua email) ed `export` porta
+-- l'esportazione intera dei suoi dati. Supabase pubblica lo schema `public`
+-- attraverso la Data API, quindi senza questa riga bastava la chiave pubblica
+-- del progetto — che sta nei browser, non e' un segreto — per leggerla.
+--
+-- Nessuna policy, come per le altre: Prisma si collega come proprietario delle
+-- tabelle e scavalca RLS, e zero policy significa che dalla Data API non si
+-- legge niente. `owner-bootstrap.sql` lo fa con un ciclo su tutte le tabelle;
+-- chi arriva per migrazioni invece deve dirlo tabella per tabella, e qui era
+-- stato dimenticato.
+ALTER TABLE "compliance_requests" ENABLE ROW LEVEL SECURITY;
