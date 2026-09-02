@@ -111,7 +111,7 @@ describe('/rest/v1/tracking_id', () => {
     const body = JSON.parse(await res.text());
     expect(Array.isArray(body)).toBe(true);
     expect(body).toHaveLength(1);
-    expect(body[0].external_id).toMatch(/^corew_\d+_[A-Za-z0-9]{32}$/);
+    expect(body[0].external_id).toMatch(/^corew_[A-Za-z0-9]{32}$/);
   });
 
   it('corpo, header e cookie dicono lo stesso identificativo', async () => {
@@ -193,7 +193,7 @@ describe('/rest/v1/tracking_id — la riga del browser', () => {
     const res = await call({ apikey: 'buono' });
 
     expect(res.status).toBe(200);
-    expect(JSON.parse(await res.text())[0].external_id).toMatch(/^corew_\d+_[A-Za-z0-9]{32}$/);
+    expect(JSON.parse(await res.text())[0].external_id).toMatch(/^corew_[A-Za-z0-9]{32}$/);
   });
 });
 
@@ -263,7 +263,7 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
     expect(res.status).toBe(200);
     const body = JSON.parse(await res.text());
     expect(body).toHaveLength(1);
-    expect(body[0].external_id).toMatch(/^corew_\d+_[A-Za-z0-9]{32}$/);
+    expect(body[0].external_id).toMatch(/^corew_[A-Za-z0-9]{32}$/);
     expect(recordUserSeen).toHaveBeenCalledTimes(1);
   });
 

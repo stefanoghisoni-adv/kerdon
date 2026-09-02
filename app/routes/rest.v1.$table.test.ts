@@ -373,7 +373,7 @@ describe('identificativo esterno (external ID) — con consenso', () => {
 
     const headerValue = res.headers.get('X-CoreW-External-Id');
     expect(headerValue).toBeTruthy();
-    expect(headerValue).toMatch(/^corew_\d+_[A-Za-z0-9]{32}$/);
+    expect(headerValue).toMatch(/^corew_[A-Za-z0-9]{32}$/);
   });
 
   it('con cookie esistente → header presente con stesso valore del cookie', async () => {

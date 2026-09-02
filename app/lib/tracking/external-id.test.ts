@@ -5,28 +5,43 @@ import {
   newExternalId,
   readExternalId,
   incomingExternalId,
+  LEGACY_EXTERNAL_ID_PATTERN,
   EXTERNAL_ID_COOKIE,
   EXTERNAL_ID_HEADER,
   EXISTING_EXTERNAL_ID_PARAM,
 } from './external-id';
 
 describe('newExternalId', () => {
-  it('ha il formato corew_<millisecondi>_<32 caratteri>', () => {
-    const id = newExternalId(1_756_200_000_000);
-    expect(id).toMatch(/^corew_1756200000000_[A-Za-z0-9]{32}$/);
+  it('ha il formato corew_<32 caratteri>, e nient altro', () => {
+    expect(newExternalId()).toMatch(/^corew_[A-Za-z0-9]{32}$/);
+  });
+
+  // Il momento in cui il browser e' stato visto la prima volta sta in
+  // `first_seen_at`, dove il merchant lo controlla e puo' cancellarlo. Dentro
+  // l'identificativo viaggiava ovunque andasse l'identificativo, leggibile da
+  // chiunque lo vedesse passare, e non c'era modo di toglierlo.
+  it('non porta dentro il momento in cui e stato coniato', () => {
+    const prima = Date.now();
+    const id = newExternalId();
+    const dopo = Date.now();
+
+    for (const pezzo of id.slice('corew_'.length).match(/\d+/g) ?? []) {
+      const numero = Number(pezzo);
+      // Nessuna sequenza di cifre puo' essere l'istante di adesso, ne' in
+      // millisecondi ne' in secondi.
+      expect(numero >= prima && numero <= dopo).toBe(false);
+      expect(numero >= Math.floor(prima / 1000) && numero <= Math.ceil(dopo / 1000)).toBe(false);
+    }
   });
 
   it('i 32 caratteri sono lettere e cifre, niente altro', () => {
-    const random = newExternalId().split('_')[2];
+    const random = newExternalId().split('_')[1];
     expect(random).toHaveLength(32);
     expect(random).toMatch(/^[A-Za-z0-9]+$/);
   });
 
-  it('due identificativi non coincidono, nemmeno nello stesso millisecondo', () => {
-    // Il tempo da solo non basta: due visitatori nello stesso istante avrebbero
-    // lo stesso id, e i loro eventi finirebbero insieme.
-    const now = 1_756_200_000_000;
-    const ids = new Set(Array.from({ length: 500 }, () => newExternalId(now)));
+  it('cinquecento identificativi di fila sono cinquecento identificativi diversi', () => {
+    const ids = new Set(Array.from({ length: 500 }, () => newExternalId()));
     expect(ids.size).toBe(500);
   });
 
@@ -35,11 +50,34 @@ describe('newExternalId', () => {
     // in eccesso, le prime lettere uscirebbero piu' spesso delle ultime.
     const seen = new Set<string>();
     for (let i = 0; i < 200; i += 1) {
-      for (const ch of newExternalId().split('_')[2]) seen.add(ch);
+      for (const ch of newExternalId().split('_')[1]) seen.add(ch);
     }
     // Con 6400 caratteri estratti su 62 possibili, mancarne qualcuno vorrebbe
     // dire che non viene mai pescato.
     expect(seen.size).toBe(62);
+  });
+});
+
+// Gli identificativi vecchi sono nei browser delle persone e nelle righe gia'
+// scritte: rifiutarli vorrebbe dire coniarne uno nuovo a chiunque torni, cioe'
+// perdere esattamente cio' per cui esistono.
+describe('gli identificativi del formato precedente', () => {
+  const vecchio = 'corew_1756200000000_aB3dEfGhIjKlMnOpQrStUvWxYz012345';
+
+  it('restano validi', () => {
+    expect(isExternalId(vecchio)).toBe(true);
+  });
+
+  it('si riconoscono ancora come tali', () => {
+    expect(LEGACY_EXTERNAL_ID_PATTERN.test(vecchio)).toBe(true);
+    expect(LEGACY_EXTERNAL_ID_PATTERN.test(newExternalId())).toBe(false);
+  });
+
+  it('arrivano fino in fondo come gli altri', () => {
+    const url = new URL('https://api.coreward.app/rest/v1/tracking_id');
+    const headers = new Headers({ [EXTERNAL_ID_HEADER]: vecchio });
+    expect(incomingExternalId(new Request(url, { headers }))).toBe(vecchio);
+    expect(readExternalId(`${EXTERNAL_ID_COOKIE}=${vecchio}`)).toBe(vecchio);
   });
 });
 
@@ -140,9 +178,9 @@ describe('incomingExternalId', () => {
   // cookie first-party del negozio, che e' la fonte piu' affidabile che
   // abbiamo. Il cookie sul nostro dominio e' quello che Safari accorcia.
   it('l header vince sulla query, e la query sul cookie', () => {
-    const daHeader = newExternalId(1_756_200_000_000);
-    const daQuery = newExternalId(1_756_200_000_001);
-    const daCookie = newExternalId(1_756_200_000_002);
+    const daHeader = newExternalId();
+    const daQuery = newExternalId();
+    const daCookie = newExternalId();
 
     expect(
       incomingExternalId(

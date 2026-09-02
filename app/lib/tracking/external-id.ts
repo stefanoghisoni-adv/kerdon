@@ -6,17 +6,26 @@
  * Senza, ogni visita e' una persona nuova e il profitto per cliente non si puo'
  * costruire.
  *
- * Il formato e' `corew_<millisecondi>_<32 caratteri>`. Le tre parti servono
- * tutte:
+ * Il formato e' `corew_<32 caratteri casuali>`. Due parti, e bastano:
  *
  *  - il prefisso lo rende riconoscibile fra i cookie di un negozio, dove ce ne
  *    sono decine di terzi diversi;
- *  - i millisecondi dicono quando quel browser e' stato visto la prima volta,
- *    che e' l'unica informazione temporale che serve e si legge senza
- *    interrogare niente;
- *  - i 32 caratteri casuali sono cio' che lo rende unico. Il tempo da solo non
- *    basta: due visitatori nello stesso millisecondo avrebbero lo stesso id, e
- *    i loro eventi finirebbero insieme.
+ *  - i 32 caratteri casuali sono cio' che lo rende unico, e non dicono niente
+ *    altro.
+ *
+ * PRIMA C'ERANO ANCHE I MILLISECONDI, e sono stati tolti. Dicevano quando quel
+ * browser era stato visto la prima volta — un'informazione vera e comoda, che
+ * pero' e' gia' scritta in `first_seen_at`, dove il merchant la controlla e
+ * puo' cancellarla. Dentro l'identificativo invece viaggiava ovunque
+ * l'identificativo andasse: nel cookie, nelle richieste, in qualunque sistema a
+ * valle, leggibile da chiunque lo vedesse passare, e non c'era modo di
+ * toglierla senza cambiare l'identificativo. Un identificativo deve identificare
+ * e nient'altro.
+ *
+ * GLI IDENTIFICATIVI VECCHI RESTANO VALIDI. Sono nei browser delle persone e
+ * nelle righe gia' scritte: rifiutarli vorrebbe dire coniarne uno nuovo a
+ * chiunque torni, cioe' perdere esattamente cio' per cui esistono. Si accettano
+ * tutti e due i formati; se ne conia uno solo.
  */
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -26,8 +35,16 @@ export const RANDOM_LENGTH = 32;
 
 export const EXTERNAL_ID_PREFIX = 'corew';
 
-/** Riconosce un identificativo nostro, e ben formato. */
-export const EXTERNAL_ID_PATTERN = /^corew_\d+_[A-Za-z0-9]{32}$/;
+/**
+ * Riconosce un identificativo nostro, e ben formato.
+ *
+ * Due forme: quella corrente (`corew_` piu' 32 caratteri) e quella con i
+ * millisecondi in mezzo, che i browser delle persone hanno ancora.
+ */
+export const EXTERNAL_ID_PATTERN = /^corew_(?:\d+_)?[A-Za-z0-9]{32}$/;
+
+/** La forma vecchia, quella con il momento di conio scritto dentro. */
+export const LEGACY_EXTERNAL_ID_PATTERN = /^corew_\d+_[A-Za-z0-9]{32}$/;
 
 export function isExternalId(value: string | null | undefined): boolean {
   return typeof value === 'string' && EXTERNAL_ID_PATTERN.test(value);
@@ -45,7 +62,7 @@ export function isExternalId(value: string | null | undefined): boolean {
  * multiplo intero si scartano e si ripesca: costa qualche byte in piu' e toglie
  * lo sbilanciamento.
  */
-export function newExternalId(now: number = Date.now()): string {
+export function newExternalId(): string {
   const limit = Math.floor(256 / ALPHABET.length) * ALPHABET.length;
   let out = '';
 
@@ -59,7 +76,7 @@ export function newExternalId(now: number = Date.now()): string {
     }
   }
 
-  return `${EXTERNAL_ID_PREFIX}_${Math.floor(now)}_${out}`;
+  return `${EXTERNAL_ID_PREFIX}_${out}`;
 }
 
 /** Il nome del cookie. */
@@ -83,6 +100,9 @@ export const EXTERNAL_ID_COOKIE = 'corew_eid';
  * Il nostro compito diventa allora piu' piccolo e piu' preciso: ricevere il
  * valore che quel browser ha gia', dirlo se e' buono, coniarne uno nuovo solo
  * se non c'e'. L'header di risposta e' come lo diciamo.
+ *
+ * Il giro completo, e cosa deve fare il container, stanno in
+ * docs/tracking-integration.md.
  *
  * PERCHE' NON DAL BROWSER. Il progetto non ha, e non deve avere, nessun
  * `Access-Control-Allow-Origin` ne' un gestore di `OPTIONS`: una chiamata

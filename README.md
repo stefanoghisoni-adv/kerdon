@@ -125,6 +125,13 @@ Non c'e' una migration iniziale nel repo (la piu' vecchia e' una ALTER), quindi
 - Supabase Free: il progetto si sospende dopo ~7 giorni di inattività
 - Upstash Free: ~10k comandi/giorno
 
+## Tracciamento: l'identificativo del visitatore
+
+Il trasporto supportato e' uno solo — un endpoint first-party del negozio, mai
+il browser — ed e' descritto in [docs/tracking-integration.md](docs/tracking-integration.md):
+il giro completo, cosa deve fare il container e perche' le chiamate dalla
+vetrina non sono supportate.
+
 ## Manutenzione versione API Shopify
 
 **Revisione trimestrale richiesta.** Shopify mantiene le ultime 4 versioni trimestrali
