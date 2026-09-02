@@ -69,3 +69,39 @@ export function formatCountdown(
   const days = Math.round(minutes / (24 * 60));
   return days === 1 ? t.sync.countdown.oneDay : t.sync.countdown.days(days);
 }
+
+/**
+ * L'etichetta della riga "Prossima", che c'e' sempre finche' una prossima corsa
+ * si sa.
+ *
+ * `formatCountdown` restituisce null quando il momento e' passato, ed e'
+ * giusto: un'attesa negativa non si scrive. Ma chi la chiamava faceva sparire
+ * la riga intera, e quel caso non e' raro — e' la norma. `nextSyncAt` per una
+ * corsa gia' scaduta restituisce ADESSO, cioe' l'istante in cui il server ha
+ * preparato la pagina: quando quella pagina arriva al browser e viene disegnata
+ * quell'istante e' gia' passato, sempre, anche solo per il tempo del viaggio.
+ * Risultato: la card mostrava due righe invece di tre, e ricaricando tornavano
+ * tre perche' nel frattempo la corsa era avvenuta.
+ *
+ * Una riga che compare e scompare da sola e' peggio di un'attesa imprecisa:
+ * chi guarda non impara mai dove sta quel dato. Quindi quando il momento e'
+ * passato non si toglie niente, si dice che la corsa e' imminente — che e'
+ * anche la verita': era in ritardo, e parte al primo passaggio utile.
+ *
+ * Resta null solo quando una prossima corsa davvero non si sa: nessuna corsa
+ * precedente da cui contare, o nessuna cadenza. Li' la riga non c'e' proprio,
+ * e non e' un'assenza intermittente.
+ */
+export function syncCountdownLabel(
+  nextSync: string | Date | null,
+  now: Date,
+  t: Pick<Dictionary, 'sync'>,
+): string | null {
+  if (nextSync == null) return null;
+
+  const at = nextSync instanceof Date ? nextSync : new Date(nextSync);
+  if (Number.isNaN(at.getTime())) return null;
+
+  const countdown = formatCountdown(now, at, t);
+  return countdown ? t.sync.inLabel(countdown) : t.sync.imminent;
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextSyncAt, formatCountdown } from './next-sync';
+import { nextSyncAt, formatCountdown, syncCountdownLabel } from './next-sync';
 // Alias: `it` e' anche il nome del caso di test in vitest.
 import { it as itDict } from '~/lib/i18n/it';
 
@@ -92,5 +92,41 @@ describe('sotto il giorno si scrivono anche i minuti', () => {
     expect(
       formatCountdown(at('2026-08-01T00:00:00Z'), at('2026-08-01T23:45:00Z'), itDict),
     ).toBe('23h 45min');
+  });
+});
+
+// La riga "Prossima" spariva dalla card, e ricaricando tornava. Non era un caso
+// raro: per una corsa in ritardo la previsione E' l'istante in cui il server
+// prepara la pagina, quindi al momento di disegnarla e' sempre gia' passato.
+describe('syncCountdownLabel', () => {
+  it('un momento nel futuro: quanto manca', () => {
+    const label = syncCountdownLabel(
+      '2026-08-01T14:00:00Z',
+      at('2026-08-01T12:00:00Z'),
+      itDict,
+    );
+    expect(label).toBe('Tra 2 ore');
+  });
+
+  it('un momento gia passato: la riga resta, e dice che e imminente', () => {
+    const label = syncCountdownLabel(
+      '2026-08-01T12:00:00Z',
+      at('2026-08-01T12:00:03Z'),
+      itDict,
+    );
+    expect(label).toBe('A breve');
+  });
+
+  it('lo stesso istante — il caso di una corsa in ritardo — non fa sparire niente', () => {
+    const stesso = '2026-08-01T12:00:00Z';
+    expect(syncCountdownLabel(stesso, at(stesso), itDict)).toBe('A breve');
+  });
+
+  it('nessuna prossima corsa prevista: nessuna riga, e stabilmente', () => {
+    expect(syncCountdownLabel(null, at('2026-08-01T12:00:00Z'), itDict)).toBeNull();
+  });
+
+  it('una data illeggibile vale come assente, non come un errore', () => {
+    expect(syncCountdownLabel('non-una-data', at('2026-08-01T12:00:00Z'), itDict)).toBeNull();
   });
 });

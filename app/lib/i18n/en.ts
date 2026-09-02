@@ -779,6 +779,13 @@ export const en: typeof it = {
     last: "Last",
     next: "Next",
     inLabel: (countdown: string) => `In ${countdown}`,
+    /**
+     * Quando il momento previsto e' passato: la corsa era in ritardo e parte al
+     * primo passaggio utile. Si scrive questo invece di togliere la riga —
+     * un dato che sparisce e ricompare da solo e' piu' confondente di
+     * un'attesa detta senza numeri.
+     */
+    imminent: "Shortly",
     every: {
       minutes: (n: number) => `Every ${n} minutes`,
       hour: "Every hour",
