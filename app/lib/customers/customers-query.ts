@@ -10,6 +10,8 @@
  * riscrive il profitto di ieri senza che nessuno ricalcoli niente.
  */
 
+import { todayIn } from '~/lib/dates/ranges';
+
 /** Una data di calendario, come la scrive un selettore: 2026-08-01. */
 export function isCalendarDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -172,13 +174,20 @@ WHERE o.cancelled_at IS NULL
   AND o.placed_at < (${to}::date + INTERVAL '1 day');`.trim();
 }
 
-/** Il mese in corso: dal primo a oggi. */
-export function currentMonthRange(now: Date = new Date()): { from: string; to: string } {
-  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  return {
-    from: first.toISOString().slice(0, 10),
-    to: now.toISOString().slice(0, 10),
-  };
+/**
+ * Il mese in corso: dal primo a oggi.
+ *
+ * Nel fuso del negozio quando lo si conosce. "Oggi" preso in UTC e' il giorno
+ * di qualcun altro: a Roma dalle due di notte e' gia' domani, a Los Angeles
+ * fino alle sedici e' ancora ieri, e il primo giorno del mese si sposta con
+ * lui. Senza fuso si resta su UTC, che e' cio' che c'era prima.
+ */
+export function currentMonthRange(
+  now: Date = new Date(),
+  timeZone: string | null = null,
+): { from: string; to: string } {
+  const today = todayIn(timeZone, now);
+  return { from: `${today.slice(0, 7)}-01`, to: today };
 }
 
 /**

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   bfcmRange,
+  todayIn,
+  fromIso,
   comparisonRange,
   dayPlaceholder,
   formatDay,
@@ -355,5 +357,50 @@ describe('parseDay', () => {
     expect(parseDay('ciao', 'it')).toBeNull();
     expect(parseDay('01/08', 'it')).toBeNull();
     expect(parseDay('', 'it')).toBeNull();
+  });
+});
+
+// Il giorno da cui parte ogni periodo. Preso in UTC era il giorno di qualcun
+// altro: il merchant apriva la dashboard e trovava selezionato un periodo che
+// non era quello che aveva in mente, con i numeri di un altro giorno.
+describe('todayIn', () => {
+  it('a Roma, dopo mezzanotte, e gia il giorno dopo', () => {
+    // 23:30 UTC del 3 settembre = 01:30 del 4 a Roma.
+    const istante = new Date('2026-09-03T23:30:00Z');
+    expect(todayIn('Europe/Rome', istante)).toBe('2026-09-04');
+    expect(todayIn(null, istante)).toBe('2026-09-03');
+  });
+
+  it('a Los Angeles, la sera, e ancora il giorno prima', () => {
+    // 02:00 UTC del 4 settembre = 19:00 del 3 a Los Angeles.
+    const istante = new Date('2026-09-04T02:00:00Z');
+    expect(todayIn('America/Los_Angeles', istante)).toBe('2026-09-03');
+    expect(todayIn(null, istante)).toBe('2026-09-04');
+  });
+
+  it('senza fuso resta UTC: e cio che c era prima, non un fuso inventato', () => {
+    expect(todayIn(null, new Date('2026-09-03T12:00:00Z'))).toBe('2026-09-03');
+    expect(todayIn(undefined, new Date('2026-09-03T12:00:00Z'))).toBe('2026-09-03');
+    expect(todayIn('', new Date('2026-09-03T12:00:00Z'))).toBe('2026-09-03');
+  });
+
+  it('un fuso che non esiste non spegne la dashboard', () => {
+    expect(todayIn('Marte/Olympus_Mons', new Date('2026-09-03T12:00:00Z'))).toBe('2026-09-03');
+  });
+
+  // E' il caso per cui esiste: "questo mese" a cavallo del primo giorno.
+  it('il primo del mese cambia mese insieme al negozio', () => {
+    const istante = new Date('2026-08-31T23:30:00Z');
+    expect(todayIn('Europe/Rome', istante)).toBe('2026-09-01');
+    expect(todayIn('America/Los_Angeles', istante)).toBe('2026-08-31');
+  });
+
+  it('i periodi seguono il giorno del negozio', () => {
+    const istante = new Date('2026-08-31T23:30:00Z');
+    const roma = presetRange('monthToDate', fromIso(todayIn('Europe/Rome', istante)));
+    const losAngeles = presetRange('monthToDate', fromIso(todayIn('America/Los_Angeles', istante)));
+
+    expect(roma).toEqual({ from: '2026-09-01', to: '2026-09-01' });
+    expect(losAngeles).toEqual({ from: '2026-08-01', to: '2026-08-31' });
   });
 });

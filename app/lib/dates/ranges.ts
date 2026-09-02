@@ -32,6 +32,42 @@ export type PresetId =
   | 'lastYear'
   | 'custom';
 
+/**
+ * Oggi per il negozio, non per il server ne' per chi guarda.
+ *
+ * "Oggi", "questo mese", "ultimi 30 giorni": sono tutte domande che partono da
+ * un giorno solo, e quel giorno era preso in UTC. Per un negozio a Roma dopo
+ * la mezzanotte "oggi" era ancora ieri; per uno a Los Angeles dopo le 16
+ * "oggi" era gia' domani. Il merchant apriva la dashboard e vedeva un periodo
+ * che non era quello che aveva in mente — e con esso i numeri di un altro
+ * giorno.
+ *
+ * Il fuso e' quello che il negozio dichiara a Shopify. Quando non lo sappiamo
+ * si resta su UTC: e' quello che c'era prima, ed e' meglio di un fuso
+ * inventato.
+ *
+ * Torna un giorno di calendario (`AAAA-MM-GG`) e non una `Date` di proposito:
+ * un istante porta sempre con se' un'ora, e sarebbe di nuovo l'ora sbagliata.
+ * Da qui, `fromIso` per i conti e `toLocalDate` per il calendario.
+ */
+export function todayIn(timeZone: string | null | undefined, now: Date = new Date()): string {
+  if (!timeZone) return iso(now);
+
+  try {
+    // `en-CA` scrive le date come AAAA-MM-GG, che e' gia' la forma che serve.
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now);
+  } catch {
+    // Un fuso che l'ambiente non conosce non deve spegnere la dashboard: si
+    // torna a UTC, che e' il comportamento di prima.
+    return iso(now);
+  }
+}
+
 export function iso(date: Date): string {
   return date.toISOString().slice(0, 10);
 }

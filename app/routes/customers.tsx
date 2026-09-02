@@ -30,6 +30,7 @@ import { BASE_CURRENCY } from '~/lib/billing/money';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { loadCustomersReport } from '~/lib/customers/customers.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
+import { todayIn } from '~/lib/dates/ranges';
 import { matchesCustomerSearch } from '~/lib/customers/customer-search';
 import { formatMoney } from '~/lib/billing/money';
 import { useLocale, useT } from '~/lib/i18n/context';
@@ -47,10 +48,17 @@ import {
 } from '~/lib/customers/birthdate-metafield';
 import { customerMetafieldsUrl, storeHandle } from '~/utils/admin-page';
 
-/** Il mese in corso: il periodo che quasi tutti guardano per primo. */
-function currentMonth(now = new Date()): { from: string; to: string } {
-  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  return { from: first.toISOString().slice(0, 10), to: now.toISOString().slice(0, 10) };
+/**
+ * Il mese in corso: il periodo che quasi tutti guardano per primo.
+ *
+ * Nel fuso del negozio, non in quello del server. Il primo e l'ultimo giorno di
+ * "questo mese" cambiano a seconda di dove si guarda: per un negozio a Los
+ * Angeles il primo del mese comincia otto ore dopo che e' cominciato in UTC, e
+ * per uno a Roma il giorno in corso e' gia' quello dopo dalle due di notte.
+ */
+function currentMonth(timeZone: string | null, now = new Date()): { from: string; to: string } {
+  const today = todayIn(timeZone, now);
+  return { from: `${today.slice(0, 7)}-01`, to: today };
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -61,10 +69,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // ignora e si torna al mese in corso, invece di far fallire la pagina.
   const params = new URL(request.url).searchParams;
   const wanted = { from: params.get('from') ?? '', to: params.get('to') ?? '' };
-  const range =
+  const rangeFromUrl =
     isCalendarDate(wanted.from) && isCalendarDate(wanted.to) && wanted.from <= wanted.to
       ? wanted
-      : currentMonth();
+      : null;
 
   // Il piano decide se questa tabella ha qualcosa da mostrare. Senza la
   // sincronizzazione clienti la tabella nel database del merchant non esiste
@@ -75,10 +83,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     where: { shopDomain: session.shop },
     select: {
       currentPlan: true,
+      ianaTimezone: true,
       birthdateMetafieldNamespace: true,
       birthdateMetafieldKey: true,
     },
   });
+
+  // Il periodo di partenza si sceglie dopo aver letto il negozio, perche' senza
+  // il suo fuso "questo mese" e' il mese di qualcun altro.
+  const range = rangeFromUrl ?? currentMonth(shop?.ianaTimezone ?? null);
   const plan = await findPlanByName(shop?.currentPlan);
   const customersIncluded = plan?.customersSyncEnabled ?? false;
 

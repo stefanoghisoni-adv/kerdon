@@ -30,6 +30,7 @@ import {
   orderRange,
   parseDay,
   presetGroups,
+  todayIn,
   toLocalDate,
   type ComparisonId,
   type DateRange,
@@ -44,6 +45,14 @@ export interface DateRangePickerProps {
   value: DateRange;
   onChange: (range: DateRange) => void;
   disabled?: boolean;
+  /**
+   * Il fuso del negozio, come lo dichiara a Shopify.
+   *
+   * Serve a sapere che giorno e' per il merchant. Senza, "oggi" era il giorno
+   * del server: a Roma dopo mezzanotte si guardava ancora ieri, a Los Angeles
+   * dopo le sedici gia' domani. Assente = UTC, che e' cio' che c'era prima.
+   */
+  timeZone?: string | null;
 }
 
 /**
@@ -83,7 +92,12 @@ const START_FIELD_ID = 'range-picker-start';
  * Niente si applica finche' non si preme Applica, e Applica e' spento finche'
  * non c'e' qualcosa da applicare.
  */
-export function DateRangePicker({ value, onChange, disabled }: DateRangePickerProps) {
+export function DateRangePicker({
+  value,
+  onChange,
+  disabled,
+  timeZone,
+}: DateRangePickerProps) {
   const t = useT();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
@@ -92,20 +106,28 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
   // gia' usando, `draft` e' cio' che si sta scegliendo. Il primo lo cambia solo
   // apply(), e da nessun'altra parte.
   const [draft, setDraft] = useState<DateRange>(value);
-  const [{ month, year }, setVisible] = useState(() => monthsEndingAt(value.to, localToday()));
+
+  // Oggi per il negozio, in tre forme perche' tre sono i modi in cui serve: il
+  // giorno di calendario per i confronti, la data UTC per i conti sui periodi,
+  // la data locale per il calendario di Polaris.
+  const todayIso = todayIn(timeZone);
+  const todayUtc = useMemo(() => fromIso(todayIso), [todayIso]);
+  const todayLocal = useMemo(() => toLocalDate(todayIso), [todayIso]);
+
+  const [{ month, year }, setVisible] = useState(() => monthsEndingAt(value.to, todayLocal));
   // Quale pannello si sta guardando: null e' l'elenco principale.
   const [panel, setPanel] = useState<GroupId | null>(null);
 
-  const groups = useMemo(() => presetGroups(), []);
+  const groups = useMemo(() => presetGroups(todayUtc), [todayUtc]);
   const selectedKey = useMemo(() => {
-    const leaf = matchLeaf(draft);
+    const leaf = matchLeaf(draft, todayUtc);
     return leaf ? leafKey(leaf) : null;
-  }, [draft]);
+  }, [draft, todayUtc]);
   // Nessuna voce descrive la bozza: e' un intervallo personalizzato. Non e' una
   // voce come le altre, e' l'assenza di tutte.
   const isCustom = selectedKey === null;
 
-  const verdict = draftVerdict(draft, value, fromLocalDate(localToday()));
+  const verdict = draftVerdict(draft, value, todayIso);
 
   /**
    * Aprire azzera la bozza su cio' che e' applicato adesso.
@@ -117,11 +139,11 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
    */
   const openPicker = useCallback(() => {
     setDraft(value);
-    setVisible(monthsEndingAt(value.to, localToday()));
-    const leaf = matchLeaf(value);
-    setPanel(leaf ? groupOfLeaf(leaf) : null);
+    setVisible(monthsEndingAt(value.to, todayLocal));
+    const leaf = matchLeaf(value, todayUtc);
+    setPanel(leaf ? groupOfLeaf(leaf, todayUtc) : null);
     setOpen(true);
-  }, [value]);
+  }, [value, todayLocal, todayUtc]);
 
   /** Annulla, Esc e il clic fuori sono la stessa cosa: la bozza si butta via. */
   const cancel = useCallback(() => {
@@ -130,12 +152,15 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
     setOpen(false);
   }, [value]);
 
-  const chooseLeaf = useCallback((leaf: PresetLeaf) => {
-    const range = leafRange(leaf);
-    if (!range) return;
-    setDraft(range);
-    setVisible(monthsEndingAt(range.to, localToday()));
-  }, []);
+  const chooseLeaf = useCallback(
+    (leaf: PresetLeaf) => {
+      const range = leafRange(leaf, todayUtc);
+      if (!range) return;
+      setDraft(range);
+      setVisible(monthsEndingAt(range.to, todayLocal));
+    },
+    [todayUtc, todayLocal],
+  );
 
   const placeholder = dayPlaceholder(locale, t.dates.dayParts);
 
@@ -279,7 +304,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
                 label={t.dates.start}
                 value={draft.from}
                 placeholder={placeholder}
-                onCommit={(next) => setDraft(orderRange(notInTheFuture(next), draft.to))}
+                onCommit={(next) => setDraft(orderRange(notInTheFuture(next, todayIso), draft.to))}
               />
               {/* Una freccia, non un pulsante spento: indica il verso e basta,
                   e un pulsante disabilitato invita a premerlo. Icon senza
@@ -292,7 +317,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
                 label={t.dates.end}
                 value={draft.to}
                 placeholder={placeholder}
-                onCommit={(next) => setDraft(orderRange(draft.from, notInTheFuture(next)))}
+                onCommit={(next) => setDraft(orderRange(draft.from, notInTheFuture(next, todayIso)))}
               />
             </div>
 
@@ -310,7 +335,7 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
                 // periodo che finisce fra due settimane restituisce card vuote
                 // che sembrano un guasto. Spegnerlo nel calendario e' meglio
                 // che spiegarlo dopo con un messaggio d'errore.
-                disableDatesAfter={localToday()}
+                disableDatesAfter={todayLocal}
                 selected={{ start: toLocalDate(draft.from), end: toLocalDate(draft.to) }}
                 onMonthChange={(nextMonth, nextYear) =>
                   setVisible({ month: nextMonth, year: nextYear })
@@ -348,21 +373,8 @@ export function DateRangePicker({ value, onChange, disabled }: DateRangePickerPr
  * la regola varrebbe solo per chi usa il mouse. Il confronto fra stringhe
  * `YYYY-MM-DD` e' un confronto fra date, in quel formato.
  */
-function notInTheFuture(value: string): string {
-  const today = fromLocalDate(localToday());
+function notInTheFuture(value: string, today: string): string {
   return value > today ? today : value;
-}
-
-/**
- * Oggi, come data civile locale.
- *
- * Il calendario di Polaris ragiona in date locali, quindi il confine del futuro
- * va espresso nella stessa lingua: presa in UTC, a est di Greenwich la sera
- * "domani" sarebbe gia' scattato e l'ultimo giorno buono risulterebbe spento.
- */
-function localToday(): Date {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
 /**

@@ -30,7 +30,7 @@ import { MarginCard } from '~/components/Dashboard/MarginCard';
 import { ProfitabilityChart } from '~/components/Dashboard/ProfitabilityChart';
 import { TopProductsCard } from '~/components/Dashboard/TopProductsCard';
 import { ComparisonSelect, DateRangePicker } from '~/components/Dashboard/DateRangePicker';
-import { presetRange, type ComparisonId, type DateRange } from '~/lib/dates/ranges';
+import { fromIso, presetRange, todayIn, type ComparisonId, type DateRange } from '~/lib/dates/ranges';
 import type { Metric } from '~/lib/customers/top-products';
 import type { TopProductsReport } from '~/lib/customers/top-products.server';
 import type { ShopAverages, ShopProfit } from '~/lib/customers/profit.server';
@@ -692,7 +692,11 @@ export default function Dashboard() {
   // Il periodo vale per tutta la pagina: profitto e prodotti rispondono alla
   // stessa domanda su archi diversi solo se glielo si chiede, e due periodi
   // nella stessa schermata sono due schermate.
-  const [range, setRange] = useState<DateRange>(() => presetRange('monthToDate')!);
+  // Il mese in corso per il NEGOZIO, non per il server: il primo periodo che il
+  // merchant vede aprendo la dashboard deve essere quello che ha in mente lui.
+  const [range, setRange] = useState<DateRange>(
+    () => presetRange('monthToDate', fromIso(todayIn(shop.ianaTimezone)))!,
+  );
   // Spento di partenza: un confronto acceso senza averlo chiesto fa leggere
   // ogni numero come una variazione, e la variazione e' una seconda domanda.
   const [comparison, setComparison] = useState<ComparisonId>('none');
@@ -1418,6 +1422,7 @@ export default function Dashboard() {
             <InlineStack gap="200" blockAlign="center" wrap>
               <DateRangePicker
                 value={range}
+                timeZone={shop.ianaTimezone}
                 onChange={(next) => {
                   setRange(next);
                   reloadForPeriod(next, comparison);
