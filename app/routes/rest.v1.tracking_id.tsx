@@ -3,8 +3,8 @@ import {
   EXTERNAL_ID_HEADER,
   expiredExternalIdCookie,
   externalIdCookie,
+  incomingExternalId,
   newExternalId,
-  readExternalId,
 } from '~/lib/tracking/external-id';
 import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
 import {
@@ -99,7 +99,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Si riusa quello che il browser ha gia', se ce l'ha. Coniarne uno nuovo a
   // ogni pagina vorrebbe dire non riconoscere piu' nessuno, che e' l'opposto di
   // cio' per cui esiste.
-  const existing = readExternalId(request.headers.get('Cookie'));
+  //
+  // Non si guarda piu' solo l'intestazione `Cookie`: in una chiamata fatta da
+  // un container quell'intestazione e' del container, non del visitatore, ed
+  // era sempre vuota — quindi si coniava un identificativo nuovo ogni volta e
+  // la stessa persona diventava una riga nuova a ogni visita. Ora il container
+  // ci rimanda il valore letto dal cookie first-party del negozio. Da dove, e
+  // in che ordine, sta in `incomingExternalId`.
+  const existing = incomingExternalId(request);
 
   // Il permesso del visitatore, prima di coniare qualunque cosa.
   //
@@ -141,7 +148,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // niente qui: serve a chi, a valle, decide se mandare questo identificativo
     // a una piattaforma pubblicitaria.
     [SALE_OF_DATA_HEADER]: consent.consent.saleOfData,
-    'Access-Control-Expose-Headers': `${EXTERNAL_ID_HEADER}, ${SALE_OF_DATA_HEADER}`,
     // Un identificativo si conia una volta e vale per sempre: farlo mettere in
     // cache vorrebbe dire darne lo stesso a due browser diversi.
     'Cache-Control': 'no-store',
@@ -179,7 +185,6 @@ async function withoutIdentifier(
   const headers = new Headers({
     'Content-Type': 'application/json',
     [SALE_OF_DATA_HEADER]: consent.consent.saleOfData,
-    'Access-Control-Expose-Headers': `${EXTERNAL_ID_HEADER}, ${SALE_OF_DATA_HEADER}`,
     'Cache-Control': 'no-store',
   });
 

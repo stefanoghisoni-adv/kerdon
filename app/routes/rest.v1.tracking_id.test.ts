@@ -341,11 +341,18 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
     expect(res.headers.get('X-CoreW-Sale-Of-Data')).toBe('denied');
   });
 
-  it('Access-Control-Expose-Headers include sia External-Id sia Sale-Of-Data', async () => {
+  // Prima qui si dichiarava `Access-Control-Expose-Headers`, che serve a far
+  // leggere un header a una pagina di un'altra origine. Non ha mai funzionato:
+  // senza `Access-Control-Allow-Origin` il browser blocca la risposta intera, e
+  // quell'header non c'e' — non qui, non da nessuna parte nell'app. Chi legge
+  // questo endpoint e' un server, non un browser: promettere il contrario
+  // faceva credere che una lettura dalla pagina del negozio potesse funzionare.
+  it('non promette letture da browser: nessuna intestazione CORS', async () => {
     const res = await call({ apikey: 'buono' });
 
-    const exposed = res.headers.get('Access-Control-Expose-Headers');
-    expect(exposed).toContain('X-CoreW-External-Id');
-    expect(exposed).toContain('X-CoreW-Sale-Of-Data');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    expect(res.headers.get('Access-Control-Expose-Headers')).toBeNull();
+    // Gli header con l'identificativo restano: li legge il server che chiama.
+    expect(res.headers.get('X-CoreW-External-Id')).toBeTruthy();
   });
 });

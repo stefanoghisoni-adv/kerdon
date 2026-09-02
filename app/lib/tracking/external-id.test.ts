@@ -4,7 +4,10 @@ import {
   isExternalId,
   newExternalId,
   readExternalId,
+  incomingExternalId,
   EXTERNAL_ID_COOKIE,
+  EXTERNAL_ID_HEADER,
+  EXISTING_EXTERNAL_ID_PARAM,
 } from './external-id';
 
 describe('newExternalId', () => {
@@ -77,7 +80,7 @@ describe('il cookie', () => {
     expect(externalIdCookie(newExternalId())).not.toContain('HttpOnly');
   });
 
-  it('dura un anno', () => {
+  it('chiede un anno di vita al browser, che poi fa come vuole', () => {
     expect(externalIdCookie(newExternalId())).toContain(`Max-Age=${365 * 24 * 60 * 60}`);
   });
 });
@@ -98,5 +101,77 @@ describe('readExternalId', () => {
     // Meglio ripartire con uno buono che trascinarsi dietro qualcosa che
     // nessuna query sapra' incrociare.
     expect(readExternalId(`${EXTERNAL_ID_COOKIE}=rotto`)).toBeNull();
+  });
+});
+
+// L'identificativo e' l'unico appiglio che l'app ha per riconoscere chi torna:
+// se si perde, ogni visita diventa una persona nuova e tutto quello che ci sta
+// sopra — ordini attribuiti, valore nel tempo — non regge piu'. Chi chiama non
+// e' un browser ma un endpoint del negozio, e questi sono i modi in cui ci
+// rimanda il valore che il visitatore ha gia'.
+describe('incomingExternalId', () => {
+  const richiesta = (init?: { header?: string; query?: string; cookie?: string }) => {
+    const url = new URL('https://api.coreward.app/rest/v1/tracking_id');
+    if (init?.query !== undefined) url.searchParams.set(EXISTING_EXTERNAL_ID_PARAM, init.query);
+
+    const headers = new Headers();
+    if (init?.header !== undefined) headers.set(EXTERNAL_ID_HEADER, init.header);
+    if (init?.cookie !== undefined) headers.set('Cookie', init.cookie);
+
+    return new Request(url, { headers });
+  };
+
+  it('legge quello che il container rimanda nell header', () => {
+    const id = newExternalId();
+    expect(incomingExternalId(richiesta({ header: id }))).toBe(id);
+  });
+
+  it('legge il parametro di query dove l header non si puo aggiungere', () => {
+    const id = newExternalId();
+    expect(incomingExternalId(richiesta({ query: id }))).toBe(id);
+  });
+
+  it('legge ancora il cookie, per chi chiama davvero da un browser', () => {
+    const id = newExternalId();
+    expect(incomingExternalId(richiesta({ cookie: `${EXTERNAL_ID_COOKIE}=${id}` }))).toBe(id);
+  });
+
+  // L'ordine non e' arbitrario: l'header lo mette il container leggendo il
+  // cookie first-party del negozio, che e' la fonte piu' affidabile che
+  // abbiamo. Il cookie sul nostro dominio e' quello che Safari accorcia.
+  it('l header vince sulla query, e la query sul cookie', () => {
+    const daHeader = newExternalId(1_756_200_000_000);
+    const daQuery = newExternalId(1_756_200_000_001);
+    const daCookie = newExternalId(1_756_200_000_002);
+
+    expect(
+      incomingExternalId(
+        richiesta({ header: daHeader, query: daQuery, cookie: `${EXTERNAL_ID_COOKIE}=${daCookie}` }),
+      ),
+    ).toBe(daHeader);
+
+    expect(
+      incomingExternalId(richiesta({ query: daQuery, cookie: `${EXTERNAL_ID_COOKIE}=${daCookie}` })),
+    ).toBe(daQuery);
+  });
+
+  it('senza niente da nessuna parte, niente', () => {
+    expect(incomingExternalId(richiesta())).toBeNull();
+  });
+
+  // Un valore scelto da chi chiama non deve poter diventare l identificativo di
+  // qualcun altro: se non ha la nostra forma vale come assente, e se ne conia
+  // uno buono.
+  it('un valore malformato vale come assente, da qualunque parte arrivi', () => {
+    expect(incomingExternalId(richiesta({ header: 'inventato' }))).toBeNull();
+    expect(incomingExternalId(richiesta({ query: '../../etc/passwd' }))).toBeNull();
+    expect(incomingExternalId(richiesta({ cookie: `${EXTERNAL_ID_COOKIE}=rotto` }))).toBeNull();
+  });
+
+  it('un header malformato non nasconde un cookie buono', () => {
+    const id = newExternalId();
+    expect(
+      incomingExternalId(richiesta({ header: 'rotto', cookie: `${EXTERNAL_ID_COOKIE}=${id}` })),
+    ).toBe(id);
   });
 });

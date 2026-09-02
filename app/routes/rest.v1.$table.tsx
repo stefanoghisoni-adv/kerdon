@@ -3,7 +3,7 @@ import {
   expiredExternalIdCookie,
   externalIdCookie,
   newExternalId,
-  readExternalId,
+  incomingExternalId,
   EXTERNAL_ID_HEADER,
 } from '~/lib/tracking/external-id';
 import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
@@ -171,23 +171,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // domanda viene prima: se le finalita' necessarie non sono permesse, non
   // esce niente — ne' corpo, ne' header, ne' cookie.
   const consent = evaluateVisitorConsent(request);
-  const existing = readExternalId(request.headers.get('Cookie'));
+  const existing = incomingExternalId(request);
 
   // La condivisione con terzi si dichiara sempre, permesso o no: e' un'altra
   // domanda, e la risposta serve a valle anche quando qui non si conia niente.
   result.response.headers.set(SALE_OF_DATA_HEADER, consent.consent.saleOfData);
 
-  // Un header di risposta personalizzato non e' leggibile da JavaScript
-  // cross-origin se non e' elencato in `Access-Control-Expose-Headers`. Questo
-  // proxy puo' essere chiamato sia da container server-side (che non hanno
-  // restrizioni CORS) sia da JavaScript nel browser cross-origin (che le ha):
-  // esponendo gli header esplicitamente, li rendiamo leggibili in entrambi i
-  // casi. Si dichiarano anche quando il permesso manca: l'elenco dice cosa si
-  // puo' leggere, non cosa c'e'.
-  result.response.headers.set(
-    'Access-Control-Expose-Headers',
-    `${EXTERNAL_ID_HEADER}, ${SALE_OF_DATA_HEADER}`,
-  );
+  // Qui c'era un `Access-Control-Expose-Headers`, e prometteva una cosa che non
+  // e' mai stata vera: diceva a JavaScript cross-origin quali header poteva
+  // leggere, ma senza un `Access-Control-Allow-Origin` — che questo progetto
+  // non ha e non deve avere — quella chiamata non arriva nemmeno a leggerli.
+  // Un permesso dichiarato dentro una porta chiusa non e' un permesso, e' una
+  // riga che fa credere a chi legge il codice che la vetrina possa chiamarci.
+  // Il trasporto e' uno solo, ed e' scritto in `lib/tracking/external-id`.
 
   if (!consent.allowed) {
     // Revoca esplicita: si toglie anche cio' che c'era. Il cookie torna

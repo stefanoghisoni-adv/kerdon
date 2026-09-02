@@ -403,15 +403,18 @@ describe('identificativo esterno (external ID) — con consenso', () => {
     expect(setCookieHeader).toContain(`corew_eid=${headerValue}`);
   });
 
-  it('header esposto via Access-Control-Expose-Headers per letture cross-origin', async () => {
+  // Vedi la nota gemella in rest.v1.tracking_id.test.ts: qui non c'e' CORS, e
+  // dichiarare quali header sarebbero leggibili da un'altra origine mentre la
+  // risposta intera resta bloccata era una promessa che nessuno manteneva.
+  it('non promette letture da browser: nessuna intestazione CORS', async () => {
     resolveShopReadContext.mockResolvedValueOnce(okCtx());
     forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
 
     const res = await call({ authorization: 'Bearer spx_x' });
 
-    const exposeHeaders = res.headers.get('Access-Control-Expose-Headers');
-    expect(exposeHeaders).toContain('X-CoreW-External-Id');
-    expect(exposeHeaders).toContain('X-CoreW-Sale-Of-Data');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    expect(res.headers.get('Access-Control-Expose-Headers')).toBeNull();
+    expect(res.headers.get('X-CoreW-External-Id')).toBeTruthy();
   });
 });
 
