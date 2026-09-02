@@ -50,3 +50,71 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # Il worker e' un artefatto a se': ha il suo bundle e la sua immagine, e
+      # nessuno dei due passava di qui. Un worker che non si costruisce piu' si
+      # scopriva al deploy.
+      - name: Build worker bundle
+        run: npm run worker:build
+
+  # Da un database vuoto si arriva davvero allo schema che l'app si aspetta?
+  #
+  # `owner-bootstrap.sql` e' l'unica strada per ricostruire il database
+  # dell'app: non c'e' una migration iniziale, quindi `prisma migrate deploy` su
+  # un database vuoto non arriva da nessuna parte. Ed e' anche l'unico file che
+  # nessuno esegue mai — un ambiente si ricostruisce una volta l'anno — quindi
+  # quando resta indietro non lo scopre nessuno. E' gia' successo due volte.
+  #
+  # Il test unitario confronta il file con lo schema leggendoli. Questo lo
+  # ESEGUE, su un Postgres vero, e poi chiede a Prisma se lo schema ottenuto
+  # differisce da quello dichiarato. Sono due controlli diversi: il primo dice
+  # "il file dice le cose giuste", il secondo "il file fa le cose giuste".
+  bootstrap:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: coreward_vuoto
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/coreward_vuoto?schema=public
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `-v ON_ERROR_STOP=1`: senza, psql tira dritto dopo un errore e lo script
+      # "riesce" avendo creato meta' schema — che e' esattamente il guasto che
+      # questo job deve scoprire.
+      - name: Apply owner-bootstrap.sql to an empty database
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f prisma/owner-bootstrap.sql
+
+      - name: Compare the resulting database with the Prisma schema
+        run: |
+          npx prisma migrate diff \
+            --from-url "$DATABASE_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --exit-code
+
+      # Le righe iniziali e RLS: quello che `migrate diff` non guarda.
+      - name: Check seed rows and row level security
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql

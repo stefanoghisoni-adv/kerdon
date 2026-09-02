@@ -463,12 +463,22 @@
   display: none;
 }
 
-/* "Aggiorna a Business" non si spezza a meta'.
+/* Nota su `Polaris-Button__Text`, che qui non c'e' piu'.
+
+   Le due regole che seguono, e quella del peso del testo piu' sotto, prendevano
+   di mira quella classe. In Polaris 13 non esiste: il testo del pulsante e'
+   avvolto in un `Text`, quindi porta `Polaris-Text--root`. Le regole non
+   fallivano — semplicemente non si applicavano piu', in silenzio, che e' il
+   modo in cui una regola morta resta in un foglio di stile per mesi. Da qui
+   `polaris-selectors.test.ts`, che confronta le classi prese di mira con quelle
+   che esistono davvero nella versione installata.
+
+   "Aggiorna a Business" non si spezza a meta'.
 
    E' un comando, e letto su due righe — "Aggiorna a" sopra, il nome del piano
    sotto — smette di sembrarlo: la seconda riga si legge come un'altra frase. Il
    testo intorno puo' andare a capo quanto vuole, questo pezzo no. */
-.Polaris-Banner .Polaris-Button__Text,
+.Polaris-Banner .Polaris-Button,
 .Polaris-Banner .Polaris-Link {
   white-space: nowrap;
 }
@@ -479,8 +489,8 @@
    e' un comando: e' il valore corrente di un campo, uno per riga su venti
    righe. In grassetto quella colonna pesava piu' dei nomi dei campi accanto, e
    si leggeva come se fosse lei il dato principale. */
-.gmc-mapping .Polaris-Button__Text,
-.gmc-mapping .Polaris-Button {
+.gmc-mapping .Polaris-Button,
+.gmc-mapping .Polaris-Button .Polaris-Text--root {
   font-weight: var(--p-font-weight-regular);
 }
 
