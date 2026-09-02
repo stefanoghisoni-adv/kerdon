@@ -80,7 +80,7 @@ function mockClient(product: unknown) {
  * Un client Supabase che registra ogni cancellazione invece di eseguirla, con
  * la catena di concatenazioni che il route percorre davvero.
  */
-function mockSupabase() {
+function mockSupabase(upsertError: { message: string; code?: string } | null = null) {
   const upserted: any[] = [];
   const deletes: { kind: string; args: any[] }[] = [];
 
@@ -88,7 +88,7 @@ function mockSupabase() {
     from: () => ({
       upsert: async (rows: any[]) => {
         upserted.push(...rows);
-        return { error: null };
+        return { error: upsertError };
       },
       delete: () => ({
         eq: (...eqArgs: any[]) => {
@@ -298,5 +298,32 @@ describe('webhook products/create — chi non ha diritto non scrive', () => {
   it('progetto scollegato: niente scritture', async () => {
     mockShop({ supabaseConfig: { connectionVerifiedAt: null, tableNameProducts: 'products' } });
     await nonSiScrive();
+  });
+});
+
+// Rispondere 200 a Shopify vuol dire "ricevuto e a posto", e Shopify non ripete
+// piu' quella consegna. Dirlo su una scrittura fallita significa che quella
+// modifica del prodotto non arriva mai — il merchant vede nei suoi conti un
+// prezzo o un costo che nel negozio e' gia' cambiato.
+describe('webhook products/create — una scrittura fallita non si dichiara riuscita', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('upsert rifiutato → 500 e riga nel registro dei job', async () => {
+    mockShop();
+    mockClient({ id: 1, variants_complete: true, variants: [{ id: 11 }] });
+    mockSupabase({ message: 'permission denied for table products', code: '42501' });
+
+    (transformProduct as any).mockReturnValue([
+      { shopify_product_id: 1, shopify_variant_id: 11, cost_per_item: 5, net_value: 5 },
+    ]);
+
+    const res = await action({ request: req({ id: 1, variants: [{ id: 11 }] }) } as any);
+
+    expect(res.status).toBe(500);
+    const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
+    expect(job).toMatchObject({ shopId: 'shop-1', status: 'failed' });
+    expect(job.errors.message).toContain('permission denied');
   });
 });

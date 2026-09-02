@@ -67,13 +67,13 @@ function mockShop(over: Record<string, unknown> = {}) {
 }
 
 /** Raccoglie le tabelle su cui e' stata chiesta una cancellazione. */
-function mockSupabase() {
+function mockSupabase(error: { message: string; code?: string } | null = null) {
   const deleted: string[] = [];
   (createSupabaseClient as any).mockReturnValue({
     from: (table: string) => ({
       delete: () => {
         deleted.push(table);
-        return { eq: async () => ({ error: null }) };
+        return { eq: async () => ({ error }) };
       },
     }),
   });
@@ -157,5 +157,47 @@ describe('webhook customers/delete', () => {
       customersSyncEnabled: false,
     });
     await nonSiCancella();
+  });
+});
+
+// Una cancellazione dichiarata riuscita quando non lo e' lascia nel database del
+// merchant una riga che Shopify considera sparita: il prodotto continua a
+// comparire nei suoi conti, i dati della persona restano dove non dovrebbero.
+// Ed e' definitivo, perche' con il 200 Shopify non ripete la consegna.
+describe('una cancellazione fallita non si dichiara riuscita', () => {
+  it('prodotto non cancellato → 500 e riga nel registro dei job', async () => {
+    mockShop();
+    mockSupabase({ message: 'permission denied for table products', code: '42501' });
+
+    const res = await deleteProduct({ request: req('products/delete', { id: 99 }) } as any);
+
+    expect(res.status).toBe(500);
+    const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
+    expect(job).toMatchObject({ shopId: 'shop-1', status: 'failed' });
+    expect(job.errors.message).toContain('permission denied');
+  });
+
+  it('cliente non cancellato → 500 e riga nel registro dei job', async () => {
+    mockShop();
+    mockSupabase({ message: 'permission denied for table customers', code: '42501' });
+
+    const res = await deleteCustomer({ request: req('customers/delete', { id: 7 }) } as any);
+
+    expect(res.status).toBe(500);
+    const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
+    expect(job).toMatchObject({ shopId: 'shop-1', status: 'failed' });
+    expect(job.errors.message).toContain('permission denied');
+  });
+
+  // Il guasto che non sappiamo gestire e' passeggero quanto l'altro: il
+  // database dell'app che non risponde non deve costare la cancellazione.
+  it('database dell app irraggiungibile → 500, non un finto ricevuto', async () => {
+    (prisma.shop.findUnique as any).mockRejectedValue(new Error('connection refused'));
+
+    const prodotto = await deleteProduct({ request: req('products/delete', { id: 99 }) } as any);
+    const cliente = await deleteCustomer({ request: req('customers/delete', { id: 7 }) } as any);
+
+    expect(prodotto.status).toBe(500);
+    expect(cliente.status).toBe(500);
   });
 });

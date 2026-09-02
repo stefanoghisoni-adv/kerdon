@@ -302,9 +302,9 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
 
     const res = await action({ request: req(orderPayload()) } as any);
 
-    // A Shopify si continua a rispondere 200: un 500 farebbe ritentare e alla
-    // lunga spegnerebbe la sottoscrizione.
-    expect(res.status).toBe(200);
+    // 500: la scrittura non e' riuscita, e con il 200 Shopify considerava la
+    // consegna andata a buon fine — quell'ordine non tornava mai piu'.
+    expect(res.status).toBe(500);
     // Le righe non si scrivono senza l'ordine che le raggruppa.
     expect(writes.order_lines).toBeUndefined();
 
@@ -322,8 +322,11 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
     mockShop();
     const { writes } = mockSupabase({ order_lines: { message: 'value too long' } });
 
-    await action({ request: req(orderPayload()) } as any);
+    const res = await action({ request: req(orderPayload()) } as any);
 
+    // Anche qui 500: l'ordine c'e' ma le sue righe no, e una consegna ripetuta
+    // riscrive lo stesso ordine e aggiunge le righe che mancavano.
+    expect(res.status).toBe(500);
     expect(writes.orders).toHaveLength(1);
     expect(lastTrace(errored)).toMatchObject({ status: 'failed' });
     expect((prisma.syncJob.create as any).mock.calls[0][0].data.errors.message).toContain(

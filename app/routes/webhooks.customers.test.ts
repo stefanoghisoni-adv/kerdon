@@ -209,3 +209,72 @@ describe('webhook customers/create — chi non ha diritto non scrive', () => {
     await nonSiScrive();
   });
 });
+
+// Un webhook che risponde 200 dice a Shopify "ricevuto e a posto", e Shopify non
+// lo ripete piu'. Dirlo su una scrittura fallita significa perdere quel cliente
+// fino alla corsa periodica — o per sempre, se la corsa non copre quel caso.
+describe('webhook customers/create — una scrittura fallita non si dichiara riuscita', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (prisma.shop.findUnique as any).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
+      trackingAuthorization: 'ENABLED',
+      scopes: 'read_products,read_customers',
+      currentPlan: 'pro',
+      supabaseConfig: {
+        connectionVerifiedAt: new Date(),
+        tableNameCustomers: 'customers',
+      },
+    });
+    (prisma.plan.findFirst as any).mockResolvedValue({
+      planName: 'pro',
+      customersSyncEnabled: true,
+    });
+    (prisma.syncJob.create as any).mockResolvedValue({});
+  });
+
+  it('upsert rifiutato → 500, cosi Shopify riprova', async () => {
+    (createSupabaseClient as any).mockReturnValue({
+      from: () => ({
+        upsert: async () => ({ error: { message: 'permission denied', code: '42501' } }),
+        update: () => ({ eq: async () => ({ error: null }) }),
+      }),
+    });
+
+    const res = await action({
+      request: req({
+        id: 7,
+        email: 'chi@esempio.it',
+        email_marketing_consent: { state: 'subscribed' },
+      }),
+    } as any);
+
+    expect(res.status).toBe(500);
+    // Il fallimento resta scritto anche nel registro dei job, non solo nel log.
+    const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
+    expect(job).toMatchObject({ shopId: 'shop-1', status: 'failed' });
+    expect(job.errors.message).toContain('permission denied');
+  });
+
+  it('scrittura riuscita → 200, e nessun tentativo in piu', async () => {
+    (createSupabaseClient as any).mockReturnValue({
+      from: () => ({
+        upsert: async () => ({ error: null }),
+        update: () => ({ eq: async () => ({ error: null }) }),
+      }),
+    });
+
+    const res = await action({
+      request: req({
+        id: 7,
+        email: 'chi@esempio.it',
+        email_marketing_consent: { state: 'subscribed' },
+      }),
+    } as any);
+
+    expect(res.status).toBe(200);
+  });
+});

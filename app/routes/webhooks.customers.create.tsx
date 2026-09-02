@@ -89,7 +89,14 @@ export async function action({ request }: ActionFunctionArgs) {
           errors: { message: error.message, code: error.code },
         },
       });
-      return json({ ok: true }, { status: 200 });
+      // 500, non 200. Il database del merchant non ha accettato la scrittura:
+      // e' quasi sempre passeggero, e Shopify riprova con attese crescenti per
+      // circa quarantott'ore. Rispondendo 200 la consegna risultava riuscita e
+      // quel cliente non tornava mai piu' — fino alla corsa periodica, che pero'
+      // non e' l'unica rete che vogliamo avere.
+      //
+      // La consegna ripetuta non fa danni: e' un upsert sulla stessa chiave.
+      return json({ error: 'customer_write_failed' }, { status: 500 });
     }
 
     await prisma.syncJob.create({

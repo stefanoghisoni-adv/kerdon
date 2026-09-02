@@ -35,10 +35,16 @@ import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
  * si traduce invece di rileggere l'ordine dall'API come fanno i prodotti, stanno
  * in lib/customers/order-webhook-payload.
  *
- * LA TRACCIA. Sotto si risponde 200 qualunque cosa vada storta, ed e' giusto
- * cosi' (vedi il commento al `try`), ma rispondere 200 non e' tacere: ogni esito
- * lascia una riga `[webhook orders]` nel log, e un fallimento lascia anche una
- * riga nel registro dei job. E' lo stesso doppio canale dei webhook GDPR, per lo
+ * QUANDO SI RISPONDE COSA. 200 vuol dire "non c'e' niente da riprovare": il
+ * corpo illeggibile, l'ordine senza id, il negozio non collegato o sospeso.
+ * 500 vuol dire "riprova": la scrittura non riuscita e tutto cio' che non
+ * sappiamo gestire. La differenza non e' formale — un 200 su una scrittura
+ * fallita e' un ordine che non torna mai piu', perche' Shopify considera la
+ * consegna riuscita e non la ripete.
+ *
+ * LA TRACCIA. Comunque si risponda, non si tace: ogni esito lascia una riga
+ * `[webhook orders]` nel log, e un fallimento lascia anche una riga nel
+ * registro dei job. E' lo stesso doppio canale dei webhook GDPR, per lo
  * stesso motivo: il log si legge subito ma scorre via, il registro resta. Senza,
  * un handler che risponde sempre "va tutto bene" e' indistinguibile da uno che
  * non ha mai scritto niente — che e' esattamente com'e' stato per un po'.
@@ -329,7 +335,11 @@ export async function action({ request }: ActionFunctionArgs) {
         lines: rows.lines.length,
         linesComplete: order.lines_complete,
       });
-      return json({ ok: true }, { status: 200 });
+      // 500: il database del merchant non ha accettato la scrittura, e quasi
+      // sempre e' passeggero. Rispondendo 200 diremmo a Shopify "ricevuto,
+      // tutto a posto" per un ordine che non c'e' — e quella consegna non si
+      // ripete piu'.
+      return json({ error: 'order_write_failed' }, { status: 500 });
     }
 
     // Il legame piu' forte che esiste fra un browser e una persona, e arriva
@@ -360,7 +370,10 @@ export async function action({ request }: ActionFunctionArgs) {
           lines: rows.lines.length,
           linesComplete: order.lines_complete,
         });
-        return json({ ok: true }, { status: 200 });
+        // 500 come sopra. L'ordine e' gia' scritto, ma la consegna ripetuta non
+        // fa danni: sono due upsert sulla stessa chiave, che riscrivono lo
+        // stesso ordine e aggiungono le righe che mancavano.
+        return json({ error: 'lines_write_failed' }, { status: 500 });
       }
     }
 

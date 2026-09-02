@@ -72,6 +72,10 @@ export async function action({ request }: ActionFunctionArgs) {
           errors: { message: error.message, code: error.code },
         },
       });
+      // 500: il prodotto e' rimasto nel database del merchant e continuerebbe a
+      // comparire nei suoi conti. Shopify riprova, e cancellare due volte lo
+      // stesso prodotto non fa danni.
+      return json({ error: 'product_delete_failed' }, { status: 500 });
     } else {
       await prisma.syncJob.create({
         data: {
@@ -110,6 +114,8 @@ export async function action({ request }: ActionFunctionArgs) {
       // Silent fail on logging
     }
 
-    return json({ ok: true }, { status: 200 });
+    // 500 anche qui: qui si arriva per i guasti nostri, che sono passeggeri, e
+    // un guasto nostro non deve costare la cancellazione.
+    return json({ error: 'processing_failed' }, { status: 500 });
   }
 }

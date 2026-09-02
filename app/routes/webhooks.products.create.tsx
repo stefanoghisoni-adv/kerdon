@@ -171,7 +171,11 @@ export async function action({ request }: ActionFunctionArgs) {
           errors: { message: error.message, code: error.code },
         },
       });
-      return json({ ok: true }, { status: 200 });
+      // 500, non 200: la scrittura non e' riuscita, e dire a Shopify che e'
+      // andata bene vuol dire non riceverla mai piu'. Shopify riprova con
+      // attese crescenti, e la consegna ripetuta e' un upsert sulla stessa
+      // chiave, quindi non fa danni.
+      return json({ error: 'product_write_failed' }, { status: 500 });
     }
 
     // Riconcilia: elimina le righe del prodotto il cui variant_id non è più tra

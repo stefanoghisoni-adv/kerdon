@@ -70,6 +70,11 @@ export async function action({ request }: ActionFunctionArgs) {
           errors: { message: error.message, code: error.code },
         },
       });
+      // 500: una cancellazione non riuscita e' il fallimento che meno di tutti
+      // si puo' dichiarare riuscito — resterebbero nel database del merchant i
+      // dati di una persona che Shopify considera cancellata. Shopify riprova,
+      // e una cancellazione ripetuta non fa danni.
+      return json({ error: 'customer_delete_failed' }, { status: 500 });
     } else {
       await prisma.syncJob.create({
         data: {
@@ -105,6 +110,10 @@ export async function action({ request }: ActionFunctionArgs) {
       // Silent fail on logging
     }
 
-    return json({ ok: true }, { status: 200 });
+    // 500 anche qui: si arriva in questo punto per cio' che non sappiamo
+    // gestire — il database dell'app che non risponde, una chiave non
+    // decifrabile — e sono guasti nostri, passeggeri. Un guasto nostro non deve
+    // costare la cancellazione.
+    return json({ error: 'processing_failed' }, { status: 500 });
   }
 }
