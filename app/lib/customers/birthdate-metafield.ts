@@ -41,9 +41,28 @@ export const BIRTHDATE_METAFIELD = {
  * amministratore lo decide Shopify, e mandarlo lo fa rifiutare l'input.
  */
 export const BIRTHDATE_METAFIELD_ACCESS = {
-  /** Leggibile dalla vetrina: serve a chi personalizza il tema. */
-  storefront: 'PUBLIC_READ',
-  /** Il cliente puo' leggerla e correggerla dal proprio account. */
+  /**
+   * `NONE`, non `PUBLIC_READ`.
+   *
+   * Prima era leggibile dalla vetrina "per chi personalizza il tema", ma
+   * nessuna parte di questa app la legge da li': il valore ci arriva
+   * dall'Admin API, con la sessione del negozio. Restava un permesso concesso
+   * per un'ipotesi — e una data di nascita e' un dato personale, non un colore
+   * del tema. Il livello minimo che fa funzionare cio' che esiste e' questo.
+   *
+   * Se un giorno un tema dovra' davvero leggerla, alzarlo e' una riga; averla
+   * lasciata aperta nel frattempo non si sarebbe potuto disfare, perche' i mesi
+   * in cui e' stata leggibile restano quelli.
+   */
+  storefront: 'NONE',
+  /**
+   * Il cliente puo' leggerla e correggerla dal proprio account.
+   *
+   * Questo resta, e non e' in contraddizione con quanto sopra: e' il dato
+   * della persona, letto dalla persona stessa dopo essersi identificata. E'
+   * anche il modo piu' diretto che ha di correggerlo — un diritto che
+   * altrimenti dovrebbe esercitare scrivendo al negozio.
+   */
   customerAccount: 'READ_WRITE',
 } as const;
 

@@ -779,7 +779,7 @@ describe('Initial bulk sync processor', () => {
     expect(customerIds).toEqual([1, 3]);
   });
 
-  it('marca accepts_marketing=false sui clienti che hanno revocato, senza inserirli', async () => {
+  it('chi ha revocato non entra, e cio che lo identificava viene svuotato', async () => {
     const mockShop = {
       id: 'shop-1',
       shopDomain: 'test-shop.myshopify.com',
@@ -840,10 +840,17 @@ describe('Initial bulk sync processor', () => {
 
     // I revocanti NON finiscono nell'upsert...
     expect(upserted.map((r) => r.shopify_customer_id).filter((v) => v != null)).toEqual([1]);
-    // ...ma vengono marcati in una sola chiamata.
+    // ...e in una sola chiamata perdono il consenso e i dati che li
+    // identificavano: una riga marcata ma intatta restava leggibile per sempre
+    // a chi ha le credenziali del database del merchant.
     expect(revokedUpdates).toHaveLength(1);
-    expect(revokedUpdates[0].payload).toEqual({ accepts_marketing: false });
     expect(revokedUpdates[0].ids).toEqual([2, 4]);
+    expect(revokedUpdates[0].payload.accepts_marketing).toBe(false);
+    expect(revokedUpdates[0].payload.email_address).toBeNull();
+    expect(revokedUpdates[0].payload.first_name).toBeNull();
+    expect(revokedUpdates[0].payload.external_id).toBeNull();
+    // I numeri del negozio restano: raccontano il negozio, non la persona.
+    expect(revokedUpdates[0].payload).not.toHaveProperty('total_spent');
   });
 
   it('registra il dettaglio dei prodotti: nuove varianti aggiunte, righe spazzate rimosse', async () => {

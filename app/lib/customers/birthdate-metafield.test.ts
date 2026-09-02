@@ -137,9 +137,13 @@ describe('la definizione che l app abilita', () => {
 
   // `admin` non si manda: su una definizione standard il livello
   // amministratore lo decide Shopify, e mandarlo fa rifiutare l'input.
-  it('chiede la vetrina in lettura e l account cliente in lettura e scrittura', () => {
+  // La vetrina non la legge: nessuna parte dell'app passa di li', e una data di
+  // nascita concessa in lettura "per ogni evenienza" e' un dato personale
+  // esposto per un'ipotesi. L'account cliente si', perche' e' la persona che
+  // legge e corregge il proprio dato.
+  it('non apre la vetrina, e lascia al cliente il proprio dato', () => {
     expect(BIRTHDATE_METAFIELD_ACCESS).toEqual({
-      storefront: 'PUBLIC_READ',
+      storefront: 'NONE',
       customerAccount: 'READ_WRITE',
     });
     expect(BIRTHDATE_METAFIELD_ACCESS).not.toHaveProperty('admin');

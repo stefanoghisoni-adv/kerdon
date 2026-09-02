@@ -91,7 +91,7 @@ describe('webhook customers/create — consenso', () => {
     expect(res.status).toBe(200);
   });
 
-  it('cliente unsubscribed → chiama update con accepts_marketing=false, non upsert', async () => {
+  it('cliente unsubscribed → svuota cio che lo identifica, e non lo inserisce', async () => {
     let upsertCalled = false;
     const updates: Array<{ payload: any; id: any }> = [];
     (createSupabaseClient as any).mockReturnValue({
@@ -120,9 +120,70 @@ describe('webhook customers/create — consenso', () => {
 
     expect(upsertCalled).toBe(false);
     expect(updates).toHaveLength(1);
-    expect(updates[0].payload).toEqual({ accepts_marketing: false });
     expect(updates[0].id).toBe(2);
     expect(res.status).toBe(200);
+
+    // Il consenso a false, che e' cio' su cui il proxy nega la lettura...
+    expect(updates[0].payload.accepts_marketing).toBe(false);
+    // ...e con lui tutto quello che diceva chi fosse: restava li' per sempre,
+    // leggibile da chiunque avesse le credenziali del database del merchant.
+    for (const colonna of [
+      'email_address',
+      'phone_number',
+      'first_name',
+      'last_name',
+      'country',
+      'address',
+      'zipcode',
+      'region',
+      'date_of_birth',
+      'external_id',
+      'note',
+    ]) {
+      expect(updates[0].payload[colonna]).toBeNull();
+    }
+    // I numeri del negozio non si toccano: sono fatti suoi, non della persona.
+    expect(updates[0].payload).not.toHaveProperty('total_spent');
+    expect(updates[0].payload).not.toHaveProperty('orders_count');
+    expect(updates[0].payload).not.toHaveProperty('shopify_customer_id');
+  });
+
+  // Le tabelle del merchant nascono al collegamento e non cambiano da sole: una
+  // creata da una versione precedente puo' non avere tutte le colonne, e
+  // PostgREST rifiuta l'intera update per una sola che non conosce. Perdere
+  // anche la marcatura del consenso sarebbe peggio del ritardo.
+  it('tabella senza tutte le colonne: il consenso viene marcato lo stesso', async () => {
+    const updates: Array<{ payload: any; id: any }> = [];
+    (createSupabaseClient as any).mockReturnValue({
+      from: () => ({
+        upsert: async () => ({ error: null }),
+        update: (payload: any) => ({
+          eq: async (_col: string, id: any) => {
+            updates.push({ payload, id });
+            return updates.length === 1
+              ? {
+                  error: {
+                    code: 'PGRST204',
+                    message: "Could not find the 'external_id' column of 'customers'",
+                  },
+                }
+              : { error: null };
+          },
+        }),
+      }),
+    });
+
+    const res = await action({
+      request: req({
+        id: 3,
+        email: 'opt-out@example.com',
+        email_marketing_consent: { state: 'unsubscribed' },
+      }),
+    } as any);
+
+    expect(res.status).toBe(200);
+    expect(updates).toHaveLength(2);
+    expect(updates[1].payload).toEqual({ accepts_marketing: false });
   });
 
   it('entrambi i casi restituiscono 200', async () => {
