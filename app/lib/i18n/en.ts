@@ -993,6 +993,13 @@ export const en: typeof it = {
     colStatus: "Status",
     colAvailable: "Available until",
     download: "Download",
+    retentionTitle: "Customers who opt out of marketing",
+    retentionBody:
+      "When a customer withdraws marketing consent, we remove from your database the details that identify them: name, email, phone, address and date of birth. We also remove the link between them and their visits to the site.",
+    retentionKept:
+      "Your store's figures stay — how many orders, how much they spent — because they describe your sales, not the person: your totals do not change.",
+    retentionBack:
+      "If the customer opts back in, their details return from Shopify at the next sync.",
     topics: {
       "customers/data_request": "Copy of the data",
       "customers/redact": "Customer deletion",

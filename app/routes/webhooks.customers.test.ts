@@ -64,7 +64,7 @@ describe('webhook customers/create — consenso', () => {
     const upserted: any[] = [];
     let updateCalled = false;
     (createSupabaseClient as any).mockReturnValue({
-      from: () => ({
+      from: (_table: string) => ({
         upsert: async (rows: any) => {
           upserted.push(rows);
           return { error: null };
@@ -93,17 +93,17 @@ describe('webhook customers/create — consenso', () => {
 
   it('cliente unsubscribed → svuota cio che lo identifica, e non lo inserisce', async () => {
     let upsertCalled = false;
-    const updates: Array<{ payload: any; id: any }> = [];
+    const updates: Array<{ table: string; payload: any; id: any }> = [];
     (createSupabaseClient as any).mockReturnValue({
-      from: () => ({
+      from: (table: string) => ({
         upsert: async () => {
           upsertCalled = true;
           return { error: null };
         },
         update: (payload: any) => ({
           eq: async (_col: string, id: any) => {
-            updates.push({ payload, id });
-            return { error: null };
+            updates.push({ table, payload, id });
+            return { error: null, count: 1 };
           },
         }),
       }),
@@ -119,12 +119,13 @@ describe('webhook customers/create — consenso', () => {
     } as any);
 
     expect(upsertCalled).toBe(false);
-    expect(updates).toHaveLength(1);
-    expect(updates[0].id).toBe(2);
     expect(res.status).toBe(200);
 
+    const cliente = updates.find((u) => u.table === 'customers')!;
+    expect(cliente.id).toBe(2);
+
     // Il consenso a false, che e' cio' su cui il proxy nega la lettura...
-    expect(updates[0].payload.accepts_marketing).toBe(false);
+    expect(cliente.payload.accepts_marketing).toBe(false);
     // ...e con lui tutto quello che diceva chi fosse: restava li' per sempre,
     // leggibile da chiunque avesse le credenziali del database del merchant.
     for (const colonna of [
@@ -140,12 +141,19 @@ describe('webhook customers/create — consenso', () => {
       'external_id',
       'note',
     ]) {
-      expect(updates[0].payload[colonna]).toBeNull();
+      expect(cliente.payload[colonna]).toBeNull();
     }
     // I numeri del negozio non si toccano: sono fatti suoi, non della persona.
-    expect(updates[0].payload).not.toHaveProperty('total_spent');
-    expect(updates[0].payload).not.toHaveProperty('orders_count');
-    expect(updates[0].payload).not.toHaveProperty('shopify_customer_id');
+    expect(cliente.payload).not.toHaveProperty('total_spent');
+    expect(cliente.payload).not.toHaveProperty('orders_count');
+    expect(cliente.payload).not.toHaveProperty('shopify_customer_id');
+
+    // E il legame col browser si scioglie: svuotare la riga del cliente e
+    // lasciarlo intatto avrebbe lasciato la persona ricollegabile dall'altro
+    // lato.
+    const browser = updates.find((u) => u.table === 'users')!;
+    expect(browser).toBeDefined();
+    expect(browser.payload).toEqual({ shopify_customer_id: null });
   });
 
   // Le tabelle del merchant nascono al collegamento e non cambiano da sole: una
@@ -153,13 +161,13 @@ describe('webhook customers/create — consenso', () => {
   // PostgREST rifiuta l'intera update per una sola che non conosce. Perdere
   // anche la marcatura del consenso sarebbe peggio del ritardo.
   it('tabella senza tutte le colonne: il consenso viene marcato lo stesso', async () => {
-    const updates: Array<{ payload: any; id: any }> = [];
+    const updates: Array<{ table: string; payload: any; id: any }> = [];
     (createSupabaseClient as any).mockReturnValue({
-      from: () => ({
+      from: (table: string) => ({
         upsert: async () => ({ error: null }),
         update: (payload: any) => ({
           eq: async (_col: string, id: any) => {
-            updates.push({ payload, id });
+            updates.push({ table, payload, id });
             return updates.length === 1
               ? {
                   error: {
@@ -167,7 +175,7 @@ describe('webhook customers/create — consenso', () => {
                     message: "Could not find the 'external_id' column of 'customers'",
                   },
                 }
-              : { error: null };
+              : { error: null, count: 1 };
           },
         }),
       }),
@@ -182,7 +190,8 @@ describe('webhook customers/create — consenso', () => {
     } as any);
 
     expect(res.status).toBe(200);
-    expect(updates).toHaveLength(2);
+    // Primo tentativo rifiutato, secondo con la sola marcatura, poi il browser.
+    expect(updates.map((u) => u.table)).toEqual(['customers', 'customers', 'users']);
     expect(updates[1].payload).toEqual({ accepts_marketing: false });
   });
 

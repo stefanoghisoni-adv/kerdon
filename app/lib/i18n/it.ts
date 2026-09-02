@@ -1181,6 +1181,21 @@ export const it = {
     colStatus: "Stato",
     colAvailable: "Disponibile fino al",
     download: "Scarica",
+    /**
+     * Cosa succede quando qualcuno si disiscrive.
+     *
+     * Il merchant deve poterlo sapere senza chiederlo: e' una cosa che
+     * avviene da sola sui suoi dati, e trovarla scritta dopo — o non trovarla
+     * affatto — e' il modo in cui nasce una sorpresa. Detto per cio' che
+     * cambia per lui, non per come e' fatto dentro.
+     */
+    retentionTitle: "Chi si disiscrive dal marketing",
+    retentionBody:
+      "Se un cliente ritira il consenso al marketing, togliamo dal tuo database i dati con cui si riconosce chi e': nome, email, telefono, indirizzo e data di nascita. Togliamo anche il collegamento fra lui e le visite al sito.",
+    retentionKept:
+      "Restano i numeri del negozio — quanti ordini, quanto ha speso — perche' raccontano le tue vendite, non la persona: i tuoi totali non cambiano.",
+    retentionBack:
+      "Se il cliente torna a dare il consenso, alla sincronizzazione successiva i suoi dati tornano al loro posto da Shopify.",
     topics: {
       "customers/data_request": "Copia dei dati",
       "customers/redact": "Cancellazione cliente",

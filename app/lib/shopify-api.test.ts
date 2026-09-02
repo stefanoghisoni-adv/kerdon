@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ShopifyAPIClient } from './shopify-api.server';
+import { ShopifyAPIClient, resolveApiVersion, DEFAULT_API_VERSION } from './shopify-api.server';
 
 global.fetch = vi.fn();
 
@@ -747,5 +747,37 @@ describe('Paginazione delle connessioni annidate', () => {
 
     expect(orders[0].lines).toHaveLength(120);
     expect(orders[0].lines_complete).toBe(true);
+  });
+});
+
+// Una versione storta non fallisce in modo riconoscibile: Shopify serve
+// comunque qualcosa — la piu' vecchia ancora supportata — e l'app gira per mesi
+// su una versione che nessuno ha scelto.
+describe('la versione API configurata', () => {
+  it('una versione ben formata si usa cosi com e', () => {
+    expect(resolveApiVersion('2026-04')).toBe('2026-04');
+    expect(resolveApiVersion('2027-01')).toBe('2027-01');
+    // Gli spazi intorno capitano copiando da una guida.
+    expect(resolveApiVersion('  2026-10  ')).toBe('2026-10');
+  });
+
+  it('assente: si usa quella predefinita, senza rumore', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(resolveApiVersion(undefined)).toBe(DEFAULT_API_VERSION);
+    expect(resolveApiVersion('')).toBe(DEFAULT_API_VERSION);
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('storta: si dice ad alta voce e si riparte da un valore noto', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    for (const storta of ['latest', '2026-13', '2026', 'v2026-07', '2026-05', 'unstable']) {
+      expect(resolveApiVersion(storta)).toBe(DEFAULT_API_VERSION);
+    }
+
+    expect(error).toHaveBeenCalledTimes(6);
+    expect(error.mock.calls[0][0]).toContain('SHOPIFY_API_VERSION non valida');
+    error.mockRestore();
   });
 });

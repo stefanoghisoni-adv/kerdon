@@ -4,45 +4,11 @@ import { verifyWebhook } from '~/lib/webhooks/verify.server';
 import { transformCustomer } from '~/lib/transformers/customer.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
-import {
-  WITHDRAWN_CUSTOMER_FIELDS,
-  WITHDRAWN_CUSTOMER_MINIMUM,
-  isUnknownColumn,
-} from '~/lib/customers/consent-withdrawal';
+import { withdrawConsentFor } from '~/lib/customers/consent-withdrawal';
 import { isCustomerOptedIn } from '~/lib/stats/customer-consent-stats';
 import type { ShopifyCustomer } from '~/types/shopify';
 import { can } from '~/lib/authz/capabilities';
 import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
-
-/**
- * Ritira il consenso su una riga gia' scritta.
- *
- * Due tentativi e non uno: se la tabella del merchant e' nata da una versione
- * precedente puo' non avere tutte le colonne, e PostgREST rifiuta l'intera
- * update per una sola che non conosce. Perdere anche la marcatura del consenso
- * — cioe' il 403 in lettura, che gia' funzionava — sarebbe un danno peggiore
- * del ritardo nello svuotamento.
- */
-async function withdrawConsent(
-  supabase: ReturnType<typeof createSupabaseClient>,
-  table: string,
-  customerId: number,
-): Promise<{ error: { message: string; code?: string } | null }> {
-  const full = await supabase
-    .from(table)
-    .update(WITHDRAWN_CUSTOMER_FIELDS)
-    .eq('shopify_customer_id', customerId);
-
-  if (!isUnknownColumn(full.error)) return full;
-
-  console.warn(
-    `[webhook customers] tabella senza tutte le colonne su ${table}: svuotamento parziale (${full.error?.message ?? ''})`,
-  );
-  return supabase
-    .from(table)
-    .update(WITHDRAWN_CUSTOMER_MINIMUM)
-    .eq('shopify_customer_id', customerId);
-}
 
 export async function action({ request }: ActionFunctionArgs) {
   // Verify HMAC signature
@@ -109,7 +75,7 @@ export async function action({ request }: ActionFunctionArgs) {
           onConflict: 'shopify_customer_id',
           ignoreDuplicates: false,
         })
-      : await withdrawConsent(supabase, table, customer.id);
+      : await withdrawConsentFor(supabase, table, [customer.id]);
 
     if (error) {
       console.error('Supabase customer upsert error:', error);

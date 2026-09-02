@@ -749,7 +749,8 @@ describe('Initial bulk sync processor', () => {
           in: async () => ({ data: [], error: null }),
         }),
         update: () => ({
-          in: () => ({ error: null }),
+          in: () => ({ error: null, count: 0 }),
+          eq: () => ({ error: null, count: 0 }),
         }),
         delete: () => ({
           gte: vi.fn().mockReturnValue({ error: null }),
@@ -802,9 +803,9 @@ describe('Initial bulk sync processor', () => {
     vi.mocked(prisma.shop.update).mockResolvedValue({} as any);
 
     const upserted: any[] = [];
-    const revokedUpdates: Array<{ payload: any; ids: any }> = [];
+    const revokedUpdates: Array<{ table: string; payload: any; ids: any }> = [];
     vi.mocked(createSupabaseClient).mockReturnValue({
-      from: () => ({
+      from: (table: string) => ({
         upsert: (rows: any[]) => { upserted.push(...rows); return { error: null }; },
         select: () => ({
           limit: async () => ({ data: [{ shopify_customer_id: 1 }], error: null }),
@@ -813,8 +814,8 @@ describe('Initial bulk sync processor', () => {
         }),
         update: (payload: any) => ({
           in: (_col: string, ids: any) => {
-            revokedUpdates.push({ payload, ids });
-            return { error: null };
+            revokedUpdates.push({ table, payload, ids });
+            return { error: null, count: ids.length };
           },
         }),
         delete: () => ({
@@ -843,14 +844,21 @@ describe('Initial bulk sync processor', () => {
     // ...e in una sola chiamata perdono il consenso e i dati che li
     // identificavano: una riga marcata ma intatta restava leggibile per sempre
     // a chi ha le credenziali del database del merchant.
-    expect(revokedUpdates).toHaveLength(1);
-    expect(revokedUpdates[0].ids).toEqual([2, 4]);
-    expect(revokedUpdates[0].payload.accepts_marketing).toBe(false);
-    expect(revokedUpdates[0].payload.email_address).toBeNull();
-    expect(revokedUpdates[0].payload.first_name).toBeNull();
-    expect(revokedUpdates[0].payload.external_id).toBeNull();
+    const cliente = revokedUpdates.find((u) => u.table === 'customers')!;
+    expect(cliente.ids).toEqual([2, 4]);
+    expect(cliente.payload.accepts_marketing).toBe(false);
+    expect(cliente.payload.email_address).toBeNull();
+    expect(cliente.payload.first_name).toBeNull();
+    expect(cliente.payload.external_id).toBeNull();
     // I numeri del negozio restano: raccontano il negozio, non la persona.
-    expect(revokedUpdates[0].payload).not.toHaveProperty('total_spent');
+    expect(cliente.payload).not.toHaveProperty('total_spent');
+
+    // E il legame col browser si scioglie: senza, la persona sarebbe rimasta
+    // ricollegabile alle sue visite dal lato opposto.
+    const browser = revokedUpdates.find((u) => u.table === 'users')!;
+    expect(browser).toBeDefined();
+    expect(browser.payload).toEqual({ shopify_customer_id: null });
+    expect(browser.ids).toEqual([2, 4]);
   });
 
   it('registra il dettaglio dei prodotti: nuove varianti aggiunte, righe spazzate rimosse', async () => {

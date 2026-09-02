@@ -378,6 +378,26 @@ describe('todayIn', () => {
     expect(todayIn(null, istante)).toBe('2026-09-04');
   });
 
+  // Il fuso piu' avanti di tutti: ad Auckland il giorno nuovo comincia mentre
+  // in Europa e' ancora pomeriggio del giorno prima.
+  it('ad Auckland il giorno e gia cambiato quando in UTC manca ancora mezza giornata', () => {
+    // 12:00 UTC del 3 settembre = mezzanotte passata del 4 ad Auckland.
+    const istante = new Date('2026-09-03T12:00:00Z');
+    expect(todayIn('Pacific/Auckland', istante)).toBe('2026-09-04');
+    expect(todayIn('Europe/Rome', istante)).toBe('2026-09-03');
+    expect(todayIn('America/Los_Angeles', istante)).toBe('2026-09-03');
+    expect(todayIn(null, istante)).toBe('2026-09-03');
+  });
+
+  it('i tre fusi a cavallo della mezzanotte UTC danno tre "oggi" diversi', () => {
+    // 23:30 UTC: a Roma e' gia' il 4, ad Auckland pure (e' l'11:30 del 4), a
+    // Los Angeles sono le 16:30 del 3.
+    const istante = new Date('2026-09-03T23:30:00Z');
+    expect(todayIn('Pacific/Auckland', istante)).toBe('2026-09-04');
+    expect(todayIn('Europe/Rome', istante)).toBe('2026-09-04');
+    expect(todayIn('America/Los_Angeles', istante)).toBe('2026-09-03');
+  });
+
   it('senza fuso resta UTC: e cio che c era prima, non un fuso inventato', () => {
     expect(todayIn(null, new Date('2026-09-03T12:00:00Z'))).toBe('2026-09-03');
     expect(todayIn(undefined, new Date('2026-09-03T12:00:00Z'))).toBe('2026-09-03');

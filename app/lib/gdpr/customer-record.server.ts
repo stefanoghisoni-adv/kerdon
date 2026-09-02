@@ -87,6 +87,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import type { GdprStep, QueryError } from './steps';
 import { toStep } from './steps';
+import { pagedStep, readAllByEq, readAllByIn } from './paged-read';
 import { collectLinkedBrowsers, eraseBrowsersOfCustomer } from './identity-graph.server';
 
 // Il vocabolario dei passi vive in `steps.ts` — ci arriva anche il grafo delle
@@ -95,26 +96,6 @@ import { collectLinkedBrowsers, eraseBrowsersOfCustomer } from './identity-graph
 // di far cambiare gli import a mezzo repository per una divisione interna.
 export type { GdprStep, QueryError } from './steps';
 export { stepsFailed, failureMessage } from './steps';
-
-/**
- * Quante righe si leggono per pagina.
- *
- * PostgREST ha un tetto configurato per risposta (di default 1000), e un URL
- * troppo lungo puo' essere rifiutato dal proxy. Cinquecento e' abbastanza
- * grande da essere efficiente — poche richieste per cliente — e abbastanza
- * piccolo da non rischiare ne' troncamenti ne' problemi di lunghezza.
- */
-const PAGE_SIZE = 500;
-
-/**
- * Quanti id si mettono in un solo `.in()` quando si leggono le righe d'ordine.
- *
- * Diecimila id in una query non e' una query, e' un errore che aspetta: il
- * filtro diventa un URL troppo lungo, e anche quando passa la richiesta e'
- * lenta. Si spezza in lotti, ciascuno abbastanza grande da ammortizzare
- * l'andata e ritorno ma abbastanza piccolo da stare in una richiesta.
- */
-const ORDER_IDS_BATCH_SIZE = 100;
 
 // I nomi che la DDL crea per ordini e righe. Non sono configurabili come lo e'
 // la tabella clienti: chi scrive gli ordini (webhook e sync) li usa cablati, e
@@ -203,132 +184,6 @@ export function emptyCustomerDataPackage(): CustomerDataPackage {
 }
 
 /**
- * L'esito di una lettura paginata.
- *
- * `expected` e' quante righe il database dice che esistono, quando lo dice:
- * serve a distinguere "ho letto tutto" da "ho smesso di leggere". Se resta
- * null, il conteggio non e' arrivato e ci si affida alla pagina corta.
- */
-interface PagedRead {
-  rows: Record<string, unknown>[];
-  error: unknown;
-  expected: number | null;
-}
-
-/**
- * Scorre una lettura pagina per pagina fino a esaurirla.
- *
- * Il caso che questa funzione esiste per evitare: PostgREST ha un tetto di
- * righe per risposta, e una risposta al tetto sembra identica a una risposta
- * completa. Chi chiedeva una volta sola e prendeva quello che tornava
- * consegnava alla persona un'esportazione troncata dichiarandola intera.
- *
- * L'avanzamento e' di quante righe sono davvero arrivate, non di `PAGE_SIZE`:
- * se il progetto ha un tetto piu' basso di quello che chiediamo, saltare di
- * PAGE_SIZE lascerebbe fuori tutto quello che sta in mezzo.
- */
-async function drainPages(
-  page: (from: number, to: number) => PromiseLike<{
-    data?: unknown;
-    error?: unknown;
-    count?: number | null;
-  }>,
-): Promise<PagedRead> {
-  const rows: Record<string, unknown>[] = [];
-  let offset = 0;
-  let expected: number | null = null;
-
-  for (;;) {
-    const response = await page(offset, offset + PAGE_SIZE - 1);
-    if (response.error) return { rows, error: response.error, expected };
-
-    const got = (response.data ?? []) as Record<string, unknown>[];
-    rows.push(...got);
-    if (typeof response.count === 'number') expected = response.count;
-
-    // Una pagina vuota e' la fine, sempre: anche se il conteggio dicesse altro,
-    // continuare vorrebbe dire girare a vuoto per sempre.
-    if (got.length === 0) break;
-    offset += got.length;
-
-    if (expected !== null ? rows.length >= expected : got.length < PAGE_SIZE) break;
-  }
-
-  return { rows, error: null, expected };
-}
-
-/** Tutte le righe di una tabella con `column = value`, paginate. */
-function readAllByEq(
-  supabase: SupabaseClient,
-  table: string,
-  column: string,
-  value: string,
-): Promise<PagedRead> {
-  return drainPages((from, to) =>
-    supabase.from(table).select('*', { count: 'exact' }).eq(column, value).range(from, to),
-  );
-}
-
-/**
- * Le righe d'ordine di un gruppo di ordini, in lotti e ciascun lotto paginato.
- *
- * Due tetti diversi, e servono entrambi: gli id nel filtro finiscono in un URL,
- * che ha una lunghezza massima, e le righe che tornano finiscono in una
- * risposta, che ha un numero massimo di righe. Cento ordini stanno nell'URL ma
- * le loro righe possono essere migliaia, quindi ogni lotto si pagina come una
- * lettura qualsiasi.
- */
-async function readOrderLinesByBatches(
-  supabase: SupabaseClient,
-  orderIds: (string | number)[],
-): Promise<PagedRead> {
-  const rows: Record<string, unknown>[] = [];
-  let expected: number | null = 0;
-
-  for (let i = 0; i < orderIds.length; i += ORDER_IDS_BATCH_SIZE) {
-    const batch = orderIds.slice(i, i + ORDER_IDS_BATCH_SIZE);
-    const read = await drainPages((from, to) =>
-      supabase
-        .from(ORDER_LINES_TABLE)
-        .select('*', { count: 'exact' })
-        .in('shopify_order_id', batch)
-        .range(from, to),
-    );
-
-    rows.push(...read.rows);
-    if (read.error) return { rows, error: read.error, expected: null };
-
-    // Basta un lotto senza conteggio perche' il totale atteso non sia piu'
-    // affidabile: meglio nessun controllo che un controllo su un numero falso.
-    expected = expected === null || read.expected === null ? null : expected + read.expected;
-  }
-
-  return { rows, error: null, expected };
-}
-
-/**
- * Il passo da registrare per una lettura paginata.
- *
- * Se il database aveva dichiarato un totale e le righe raccolte non lo
- * raggiungono, il passo fallisce: la richiesta viene ritentata invece di
- * consegnare un'esportazione parziale che a chi la legge sembra completa.
- */
-function pagedStep(table: string, read: PagedRead): GdprStep {
-  if (read.error) return toStep(table, 'read', { error: read.error as QueryError });
-
-  if (read.expected !== null && read.rows.length !== read.expected) {
-    return {
-      table,
-      outcome: 'failed',
-      rows: read.rows.length,
-      detail: `il database ne dichiara ${read.expected}, esportate ${read.rows.length}: esportazione incompleta`,
-    };
-  }
-
-  return toStep(table, 'read', { error: null, count: read.rows.length });
-}
-
-/**
  * Raccoglie i dati della persona per una richiesta di accesso.
  *
  * Le stesse tabelle della cancellazione, lette invece che svuotate: se una
@@ -381,7 +236,7 @@ export async function collectCustomerData(
       detail: 'nessun ordine da cui partire',
     });
   } else {
-    const linesRead = await readOrderLinesByBatches(supabase, orderIds);
+    const linesRead = await readAllByIn(supabase, ORDER_LINES_TABLE, 'shopify_order_id', orderIds);
     pack.order_lines = linesRead.rows;
     steps.push(pagedStep(ORDER_LINES_TABLE, linesRead));
   }

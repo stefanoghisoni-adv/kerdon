@@ -219,6 +219,36 @@ const NESTED_PAGE_SIZE = 250;
 // dichiarando l'elenco incompleto, che e' l'esito prudente.
 const MAX_NESTED_PAGES = 20;
 
+/**
+ * La versione dell'API che l'app chiede. Il default e' la piu' recente
+ * supportata; cambiarlo si fa qui e nei tre posti elencati nel README.
+ */
+export const DEFAULT_API_VERSION = '2026-07';
+
+/** Le versioni si chiamano tutte cosi': anno, trattino, mese del trimestre. */
+const API_VERSION_SHAPE = /^\d{4}-(01|04|07|10)$/;
+
+/**
+ * La versione configurata, se ha senso; altrimenti quella predefinita.
+ *
+ * Un valore storto — un refuso, una versione inventata, `latest` — non fa
+ * fallire la richiesta in modo riconoscibile: Shopify serve comunque qualcosa,
+ * la piu' vecchia ancora supportata, e l'app gira per mesi su una versione che
+ * nessuno ha scelto. Meglio accorgersene qui, dove si puo' ancora dire cosa e'
+ * successo, e ripartire da un valore noto invece che da uno inventato.
+ */
+export function resolveApiVersion(configured: string | undefined): string {
+  if (!configured) return DEFAULT_API_VERSION;
+
+  const value = configured.trim();
+  if (API_VERSION_SHAPE.test(value)) return value;
+
+  console.error(
+    `[shopify-api] SHOPIFY_API_VERSION non valida ("${configured}"): si usa ${DEFAULT_API_VERSION}. Le versioni hanno la forma AAAA-MM, con MM fra 01, 04, 07 e 10.`,
+  );
+  return DEFAULT_API_VERSION;
+}
+
 export class ShopifyAPIClient {
   private shopDomain: string;
   private accessToken: string;
@@ -230,7 +260,7 @@ export class ShopifyAPIClient {
   constructor(shopDomain: string, accessToken: string) {
     this.shopDomain = shopDomain;
     this.accessToken = accessToken;
-    this.apiVersion = process.env.SHOPIFY_API_VERSION || '2026-07';
+    this.apiVersion = resolveApiVersion(process.env.SHOPIFY_API_VERSION);
   }
 
   // Unico modo corretto di costruire il client. Il token NON si legge piu' dalla

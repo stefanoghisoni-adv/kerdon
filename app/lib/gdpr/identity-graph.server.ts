@@ -32,8 +32,9 @@
 // tocca lo si dichiara nella traccia invece di far finta di niente.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { GdprStep } from './steps';
+import type { GdprStep, QueryError } from './steps';
 import { toStep } from './steps';
+import { inBatches, pagedStep, readAllByEq, readAllByIn } from './paged-read';
 
 /** Il nome e' cablato nella DDL: chi scrive queste righe non lo configura. */
 export const USERS_TABLE = 'users';
@@ -86,18 +87,19 @@ export async function resolveIdentityGraph(
   supabase: SupabaseClient,
   customerId: string,
 ): Promise<IdentityGraph> {
-  const seeds = await supabase
-    .from(USERS_TABLE)
-    .select('*')
-    .eq('shopify_customer_id', customerId);
+  // Paginata, e non per scrupolo: una persona che naviga da telefono, tablet e
+  // due computer ha gia' quattro righe, e un negozio che riconosce i browser da
+  // anni puo' averne molte di piu'. Una lettura che si ferma al tetto di righe
+  // del progetto qui non troncherebbe solo un'esportazione: farebbe dichiarare
+  // completa una cancellazione che ha lasciato indietro delle righe.
+  const seeds = await readAllByEq(supabase, USERS_TABLE, 'shopify_customer_id', customerId);
+  const seedsStep = pagedStep(USERS_TABLE, seeds);
 
-  if (seeds.error) {
-    return {
-      rows: [],
-      ids: [],
-      step: toStep(USERS_TABLE, 'read', { error: seeds.error }),
-      truncated: false,
-    };
+  // Si esce su qualunque errore, non solo su quelli fatali: una tabella che non
+  // c'e' produce un passo 'skipped', e quel passo deve arrivare nella traccia
+  // invece di essere sostituito da un "letto, zero righe" che non e' vero.
+  if (seeds.error || seedsStep.outcome === 'failed') {
+    return { rows: [], ids: [], step: seedsStep, truncated: false };
   }
 
   const found = new Map<string, Row>();
@@ -112,7 +114,7 @@ export async function resolveIdentityGraph(
     return fresh;
   };
 
-  let frontier = collect((seeds.data ?? []) as Row[]);
+  let frontier = collect(seeds.rows as Row[]);
   let truncated = false;
   let depth = 0;
 
@@ -135,28 +137,30 @@ export async function resolveIdentityGraph(
     const next: Row[] = [];
 
     if (targets.length > 0) {
-      const parents = await supabase.from(USERS_TABLE).select('*').in('external_id', targets);
-      if (parents.error) {
+      const parents = await readAllByIn(supabase, USERS_TABLE, 'external_id', targets);
+      const parentsStep = pagedStep(USERS_TABLE, parents);
+      if (parents.error || parentsStep.outcome === 'failed') {
         return {
           rows: [...found.values()],
           ids: [...found.keys()],
-          step: toStep(USERS_TABLE, 'read', { error: parents.error }),
+          step: parentsStep,
           truncated,
         };
       }
-      next.push(...((parents.data ?? []) as Row[]));
+      next.push(...(parents.rows as Row[]));
     }
 
-    const children = await supabase.from(USERS_TABLE).select('*').in('merged_into', frontier);
-    if (children.error) {
+    const children = await readAllByIn(supabase, USERS_TABLE, 'merged_into', frontier);
+    const childrenStep = pagedStep(USERS_TABLE, children);
+    if (children.error || childrenStep.outcome === 'failed') {
       return {
         rows: [...found.values()],
         ids: [...found.keys()],
-        step: toStep(USERS_TABLE, 'read', { error: children.error }),
+        step: childrenStep,
         truncated,
       };
     }
-    next.push(...((children.data ?? []) as Row[]));
+    next.push(...(children.rows as Row[]));
 
     frontier = collect(next);
   }
@@ -218,6 +222,29 @@ export async function collectLinkedBrowsers(
  * Ripetibile senza danno: alla seconda passata non ci sono righe da cui
  * partire, e i due passi si dichiarano saltati con zero righe.
  */
+/**
+ * La stessa scrittura su tutti gli id, un lotto alla volta.
+ *
+ * Gli identificativi finiscono nell'URL della richiesta, che ha una lunghezza
+ * massima: mille id in un solo `.in()` non sono una scrittura piu' veloce, sono
+ * una richiesta rifiutata. I conteggi si sommano, e al primo errore ci si ferma
+ * — quello che era gia' stato fatto resta fatto, e il ritentativo lo ritrova.
+ */
+async function inGroups(
+  ids: readonly string[],
+  write: (batch: string[]) => PromiseLike<{ error?: QueryError | null; count?: number | null }>,
+): Promise<{ error: QueryError | null; count: number }> {
+  let count = 0;
+
+  for (const batch of inBatches(ids)) {
+    const result = await write(batch);
+    count += result.count ?? 0;
+    if (result.error) return { error: result.error, count };
+  }
+
+  return { error: null, count };
+}
+
 export async function eraseBrowsersOfCustomer(
   supabase: SupabaseClient,
   customerId: string,
@@ -253,10 +280,15 @@ export async function eraseBrowsersOfCustomer(
   // arrivata nel frattempo. Un `merged_into` che punta al nulla non e' un
   // dettaglio estetico: e' un identificativo che resta scritto su una riga viva
   // e continua a dire "questo browser e' quella persona".
-  const unlinked = await supabase
-    .from(USERS_TABLE)
-    .update({ merged_into: null }, { count: 'exact' })
-    .in('merged_into', graph.ids);
+  // A lotti, come le letture: gli id finiscono nell'URL della richiesta, e
+  // milleduecento non ci stanno. Un solo lotto rifiutato per lunghezza avrebbe
+  // fatto fallire lo scioglimento di tutti.
+  const unlinked = await inGroups(graph.ids, (batch) =>
+    supabase
+      .from(USERS_TABLE)
+      .update({ merged_into: null }, { count: 'exact' })
+      .in('merged_into', batch),
+  );
   steps.push({
     ...toStep(`${USERS_TABLE}.merged_into`, 'anonymized', unlinked),
     detail: 'riferimenti che entravano nel gruppo dall esterno, sciolti prima di cancellare',
@@ -266,10 +298,9 @@ export async function eraseBrowsersOfCustomer(
   // esattamente i puntatori appesi che il passo di sopra doveva togliere.
   if (steps[0].outcome === 'failed') return steps;
 
-  const deleted = await supabase
-    .from(USERS_TABLE)
-    .delete({ count: 'exact' })
-    .in('external_id', graph.ids);
+  const deleted = await inGroups(graph.ids, (batch) =>
+    supabase.from(USERS_TABLE).delete({ count: 'exact' }).in('external_id', batch),
+  );
   steps.push(toStep(USERS_TABLE, 'deleted', deleted));
 
   // Il tetto toccato NON rende fallita la richiesta, e vale la pena dire

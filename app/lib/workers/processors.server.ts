@@ -30,6 +30,7 @@ import {
   WITHDRAWN_CUSTOMER_FIELDS,
   WITHDRAWN_CUSTOMER_MINIMUM,
   isUnknownColumn,
+  unlinkBrowsersOf,
 } from '~/lib/customers/consent-withdrawal';
 
 // Solo la parte del Job BullMQ che i processor usano davvero. Tipandola cosi'
@@ -305,6 +306,11 @@ async function syncCustomers(
         );
         ({ rows: suspendedRows, error: revokeError } = await revoke(WITHDRAWN_CUSTOMER_MINIMUM));
       }
+
+      // Il legame fra browser e persona: svuotare la riga del cliente e
+      // lasciarlo intatto non avrebbe cambiato niente, perche' la persona
+      // sarebbe rimasta ricollegabile alle sue visite dal lato opposto.
+      if (!revokeError) await unlinkBrowsersOf(supabase, revokedIds);
 
       if (revokeError) {
         // Non fatale: gli opt-in sono gia' scritti, la corsa successiva ritenta.

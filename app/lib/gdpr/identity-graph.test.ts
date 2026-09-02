@@ -37,7 +37,7 @@ interface Failures {
   delete?: { code: string; message: string };
 }
 
-function fakeSupabase(rows: Row[], failures: Failures = {}) {
+function fakeSupabase(rows: Row[], failures: Failures = {}, maxRows?: number) {
   const table = [...rows];
   const log: string[] = [];
 
@@ -47,18 +47,49 @@ function fakeSupabase(rows: Row[], failures: Failures = {}) {
       return value !== null && value !== undefined && values.includes(String(value));
     });
 
+  /**
+   * Una lettura come la restituisce PostgREST: si puo' attendere direttamente,
+   * oppure chiedere una pagina con `.range()`. Il conteggio e' quello vero
+   * della tabella finta, non quello della pagina — e' la differenza che
+   * permette di accorgersi di una lettura fermata a meta'.
+   *
+   * `maxRows` e' il tetto per risposta del progetto: se e' piu' basso della
+   * pagina richiesta, il database ne serve meno di quante gliene si chiedono.
+   */
+  const selectChain = (column: string, values: string[]) => {
+    if (failures.select) {
+      const failed = { data: null, error: failures.select, count: null };
+      return {
+        ...failed,
+        range: async () => failed,
+        then: (ok: (v: unknown) => unknown) => Promise.resolve(failed).then(ok),
+      };
+    }
+
+    const hit = match(column, values);
+    const cap = maxRows ?? Infinity;
+    const base = { data: hit, error: null, count: hit.length };
+
+    return {
+      ...base,
+      range: async (from: number, to: number) => ({
+        ...base,
+        data: hit.slice(from, Math.min(to + 1, from + cap)),
+      }),
+      then: (ok: (v: unknown) => unknown) => Promise.resolve(base).then(ok),
+    };
+  };
+
   const client = {
     from: () => ({
       select: () => ({
-        eq: async (column: string, value: string) => {
+        eq: (column: string, value: string) => {
           log.push(`select ${column}`);
-          if (failures.select) return { data: null, error: failures.select };
-          return { data: match(column, [value]), error: null };
+          return selectChain(column, [value]);
         },
-        in: async (column: string, values: string[]) => {
+        in: (column: string, values: string[]) => {
           log.push(`select ${column} in`);
-          if (failures.select) return { data: null, error: failures.select };
-          return { data: match(column, values), error: null };
+          return selectChain(column, values);
         },
       }),
       update: (values: Record<string, unknown>) => ({
@@ -313,5 +344,61 @@ describe('cosa resta dopo la cancellazione', () => {
     expect(steps.some((s) => s.outcome === 'failed')).toBe(false);
     expect(step(steps, 'users')?.detail ?? steps.at(-1)?.detail).toBeDefined();
     expect(warnSpy).toHaveBeenCalled();
+  });
+});
+
+// Il caso che l'audit ha chiamato per nome: una lettura che si ferma al tetto
+// di righe del progetto. Su questa tabella non troncherebbe soltanto
+// un'esportazione — farebbe dichiarare completa una cancellazione che ha
+// lasciato indietro delle righe, che e' il modo peggiore di fallire.
+describe('quando i browser sono piu di una pagina', () => {
+  /** `n` browser della stessa persona, piu' un estraneo che non va toccato. */
+  const molti = (n: number): Row[] => [
+    ...Array.from({ length: n }, (_, i) => ({
+      external_id: `corew_b${i}`,
+      shopify_customer_id: '4021',
+    })),
+    { external_id: 'corew_altro', shopify_customer_id: '9999' },
+  ];
+
+  it('mille e duecento righe escono tutte, non le prime cinquecento', async () => {
+    const { client } = fakeSupabase(molti(1200));
+
+    const { rows, step } = await collectLinkedBrowsers(client, '4021');
+
+    expect(rows).toHaveLength(1200);
+    expect(step).toMatchObject({ outcome: 'read', rows: 1200 });
+  });
+
+  it('un progetto con un tetto piu basso della pagina non perde le righe in mezzo', async () => {
+    // Il progetto ne serve al massimo 100 per risposta, non 500.
+    const { client } = fakeSupabase(molti(1200), {}, 100);
+
+    const { rows } = await collectLinkedBrowsers(client, '4021');
+
+    expect(rows).toHaveLength(1200);
+  });
+
+  it('la cancellazione le toglie tutte, e non tocca chi non c entra', async () => {
+    const { client, table } = fakeSupabase(molti(1200), {}, 100);
+
+    const steps = await eraseBrowsersOfCustomer(client, '4021');
+
+    expect(steps.some((s) => s.outcome === 'failed')).toBe(false);
+    // Resta solo il browser dell'altra persona.
+    expect(table).toHaveLength(1);
+    expect(table[0].external_id).toBe('corew_altro');
+  });
+
+  // Gli id finiscono nell'URL della richiesta: milleduecento in un `.in()` solo
+  // non sono una scrittura piu' veloce, sono una richiesta rifiutata.
+  it('anche le scritture vanno a lotti, non tutte in una richiesta', async () => {
+    const { client, log } = fakeSupabase(molti(1200));
+
+    await eraseBrowsersOfCustomer(client, '4021');
+
+    // 1200 id, 100 per lotto: dodici scioglimenti e dodici cancellazioni.
+    expect(log.filter((l) => l.startsWith('update ')).length).toBe(12);
+    expect(log.filter((l) => l.startsWith('delete ')).length).toBe(12);
   });
 });

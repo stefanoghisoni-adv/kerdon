@@ -157,6 +157,26 @@ export default function PrivacyPage() {
                 </IndexTable>
               )}
             </Card>
+
+            {/* Cosa succede senza che nessuno chieda niente.
+                Una disiscrizione dal marketing non arriva in questa lista —
+                non e' una richiesta privacy — ma cambia i dati del merchant lo
+                stesso, e trovarselo spiegato solo dopo e' il modo in cui nasce
+                una sorpresa. */}
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h2" variant="headingMd">
+                  {strings.retentionTitle}
+                </Text>
+                <Text as="p">{strings.retentionBody}</Text>
+                <Text as="p" tone="subdued">
+                  {strings.retentionKept}
+                </Text>
+                <Text as="p" tone="subdued">
+                  {strings.retentionBack}
+                </Text>
+              </BlockStack>
+            </Card>
           </BlockStack>
         </Layout.Section>
       </Layout>
