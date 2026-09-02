@@ -14,8 +14,16 @@
 --   npx prisma migrate diff --from-empty \
 --     --to-schema-datamodel prisma/schema.prisma --script
 --
--- e si rimettono in coda i dati iniziali, che stanno in fondo e non si
--- generano: sono scelte, non struttura.
+-- e si rimette in coda tutto cio' che sta dopo le chiavi esterne generate: i
+-- cinque piani, il listino, le due chiavi esterne sul nome del piano, l'attivazione
+-- di RLS e il partner iniziale. Non si generano perche' non sono struttura.
+--
+-- SOSTITUIRE, non aggiungere: la volta scorsa la DDL nuova e' finita SOPRA
+-- quella vecchia invece che al suo posto, e nove tabelle sono rimaste
+-- dichiarate due volte — su un database vuoto lo script si ferma al primo
+-- `CREATE TABLE` ripetuto. Da allora c'e' `owner-bootstrap.test.ts`, che
+-- confronta questo file con lo schema e non lascia passare ne' una tabella
+-- ripetuta ne' una colonna mancante.
 
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
@@ -362,7 +370,8 @@ CREATE UNIQUE INDEX "supabase_configs_shop_id_key" ON "supabase_configs"("shop_i
 -- CreateIndex
 CREATE UNIQUE INDEX "plans_plan_name_key" ON "plans"("plan_name");
 
--- CreateIndex
+-- Un prezzo solo per piano e valuta: due righe per la stessa coppia sarebbero
+-- di nuovo due prezzi in disaccordo, che e' il guaio da cui si viene.
 CREATE UNIQUE INDEX "plan_prices_plan_name_currency_key" ON "plan_prices"("plan_name", "currency");
 
 -- CreateIndex
@@ -442,7 +451,7 @@ CREATE INDEX "feed_field_mappings_shop_id_platform_idx" ON "feed_field_mappings"
 -- CreateIndex
 CREATE UNIQUE INDEX "feed_field_mappings_shop_id_platform_field_key" ON "feed_field_mappings"("shop_id", "platform", "field");
 
--- AddForeignKey
+-- SET NULL e non CASCADE: cancellare un partner non deve portarsi via i negozi.
 ALTER TABLE "shops" ADD CONSTRAINT "shops_partner_name_fkey" FOREIGN KEY ("partner_name") REFERENCES "partners"("name") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -451,7 +460,8 @@ ALTER TABLE "tracking_setups" ADD CONSTRAINT "tracking_setups_shop_id_fkey" FORE
 -- AddForeignKey
 ALTER TABLE "supabase_configs" ADD CONSTRAINT "supabase_configs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
+-- Rinominare un piano porta con se' i suoi prezzi; cancellarlo li porta via.
+-- Un prezzo orfano sarebbe un listino per un piano che non esiste.
 ALTER TABLE "plan_prices" ADD CONSTRAINT "plan_prices_plan_name_fkey" FOREIGN KEY ("plan_name") REFERENCES "plans"("plan_name") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -481,7 +491,8 @@ ALTER TABLE "product_eligibility_snapshots" ADD CONSTRAINT "product_eligibility_
 -- AddForeignKey
 ALTER TABLE "sync_job_events" ADD CONSTRAINT "sync_job_events_sync_job_id_fkey" FOREIGN KEY ("sync_job_id") REFERENCES "sync_jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
+-- SET NULL e non CASCADE: se il negozio sparisce il registro resta. Un log che
+-- si cancella insieme a cio' che documenta non e' un log.
 ALTER TABLE "customer_data_access_logs" ADD CONSTRAINT "customer_data_access_logs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- SET NULL e non CASCADE: shop/redact cancella il negozio, e la riga che sta
@@ -493,224 +504,6 @@ ALTER TABLE "product_feeds" ADD CONSTRAINT "product_feeds_shop_id_fkey" FOREIGN 
 
 -- AddForeignKey
 ALTER TABLE "feed_field_mappings" ADD CONSTRAINT "feed_field_mappings_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- I piani: cosa concedono, non quanto costano. Il listino sta in
--- `plan_prices`, una riga per piano e valuta, dollaro compreso.
-CREATE TABLE "plans" (
-    "id" TEXT NOT NULL,
-    "plan_name" TEXT NOT NULL,
-    "max_products" INTEGER,
-    "max_customers" INTEGER,
-    "max_sync_frequency_hours" DOUBLE PRECISION NOT NULL,
-    "custom_fields_limit" INTEGER,
-    "support_level" TEXT NOT NULL,
-    "customers_sync_enabled" BOOLEAN NOT NULL DEFAULT false,
-    "product_feeds_enabled" BOOLEAN NOT NULL DEFAULT false,
-    "trial_days" INTEGER,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "plans_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "billing_charges" (
-    "id" TEXT NOT NULL,
-    "shop_id" TEXT NOT NULL,
-    "shopify_charge_id" BIGINT,
-    "plan_type" TEXT NOT NULL,
-    "price" DECIMAL(10,2),
-    "billing_cycle" TEXT,
-    "status" TEXT NOT NULL,
-    "trial_days" INTEGER NOT NULL DEFAULT 7,
-    "trial_ends_at" TIMESTAMP(3),
-    "confirmation_url" TEXT,
-    "activated_at" TIMESTAMP(3),
-    "cancelled_at" TIMESTAMP(3),
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "billing_charges_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "sync_jobs" (
-    "id" TEXT NOT NULL,
-    "shop_id" TEXT NOT NULL,
-    "job_type" TEXT NOT NULL,
-    "status" TEXT NOT NULL,
-    "started_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "completed_at" TIMESTAMP(3),
-    "products_synced" INTEGER NOT NULL DEFAULT 0,
-    "variants_synced" INTEGER NOT NULL DEFAULT 0,
-    "customers_synced" INTEGER NOT NULL DEFAULT 0,
-    "products_added" INTEGER NOT NULL DEFAULT 0,
-    "products_removed" INTEGER NOT NULL DEFAULT 0,
-    "customers_added" INTEGER NOT NULL DEFAULT 0,
-    "customers_updated" INTEGER NOT NULL DEFAULT 0,
-    "customers_suspended" INTEGER NOT NULL DEFAULT 0,
-    "errors" JSONB,
-
-    CONSTRAINT "sync_jobs_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "custom_fields" (
-    "id" TEXT NOT NULL,
-    "shop_id" TEXT NOT NULL,
-    "field_name" TEXT NOT NULL,
-    "field_type" TEXT NOT NULL,
-    "applies_to" TEXT NOT NULL,
-    "default_value" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "custom_fields_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "field_mappings" (
-    "id" TEXT NOT NULL,
-    "shop_id" TEXT NOT NULL,
-    "shopify_field" TEXT NOT NULL,
-    "enabled" BOOLEAN NOT NULL DEFAULT false,
-    "sync_to_column" TEXT,
-    "applies_to" TEXT NOT NULL,
-
-    CONSTRAINT "field_mappings_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "supabase_oauth_tokens" (
-    "id" TEXT NOT NULL,
-    "shop_id" TEXT NOT NULL,
-    "access_token" TEXT NOT NULL,
-    "refresh_token" TEXT NOT NULL,
-    "expires_at" TIMESTAMP(3) NOT NULL,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "supabase_oauth_tokens_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "product_eligibility_snapshots" (
-    "id" TEXT NOT NULL,
-    "shop_id" TEXT NOT NULL,
-    "day" DATE NOT NULL,
-    "eligible_count" INTEGER NOT NULL,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "product_eligibility_snapshots_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "sync_job_events" (
-    "id" TEXT NOT NULL,
-    "sync_job_id" TEXT NOT NULL,
-    "entity" TEXT NOT NULL,
-    "action" TEXT NOT NULL,
-    "shopify_id" BIGINT,
-    "variant_id" BIGINT,
-    "label" TEXT NOT NULL,
-    "sublabel" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "sync_job_events_pkey" PRIMARY KEY ("id")
-);
-
--- CreateIndex
-CREATE UNIQUE INDEX "dismissed_tracking_sources_shop_id_kind_name_key" ON "dismissed_tracking_sources"("shop_id", "kind", "name");
-
--- CreateIndex
-CREATE UNIQUE INDEX "partners_name_key" ON "partners"("name");
-
--- CreateIndex
-CREATE UNIQUE INDEX "partner_plan_prices_partner_name_plan_name_key" ON "partner_plan_prices"("partner_name", "plan_name");
-
--- CreateIndex
-CREATE UNIQUE INDEX "shops_shop_domain_key" ON "shops"("shop_domain");
-
--- CreateIndex
-CREATE UNIQUE INDEX "shops_read_proxy_token_hash_key" ON "shops"("read_proxy_token_hash");
-
--- CreateIndex
-CREATE INDEX "shops_shop_domain_idx" ON "shops"("shop_domain");
-
--- CreateIndex
-CREATE UNIQUE INDEX "supabase_configs_shop_id_key" ON "supabase_configs"("shop_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "plans_plan_name_key" ON "plans"("plan_name");
-
--- Un prezzo solo per piano e valuta: due righe per la stessa coppia sarebbero
--- di nuovo due prezzi in disaccordo, che e' il guaio da cui si viene.
-CREATE UNIQUE INDEX "plan_prices_plan_name_currency_key" ON "plan_prices"("plan_name", "currency");
-
--- CreateIndex
-CREATE UNIQUE INDEX "billing_charges_shopify_charge_id_key" ON "billing_charges"("shopify_charge_id");
-
--- CreateIndex
-CREATE INDEX "billing_charges_shop_id_idx" ON "billing_charges"("shop_id");
-
--- CreateIndex
-CREATE INDEX "sync_jobs_shop_id_idx" ON "sync_jobs"("shop_id");
-
--- CreateIndex
-CREATE INDEX "sync_jobs_status_idx" ON "sync_jobs"("status");
-
--- CreateIndex
-CREATE INDEX "sync_jobs_started_at_idx" ON "sync_jobs"("started_at" DESC);
-
--- CreateIndex
-CREATE UNIQUE INDEX "custom_fields_shop_id_field_name_applies_to_key" ON "custom_fields"("shop_id", "field_name", "applies_to");
-
--- CreateIndex
-CREATE UNIQUE INDEX "field_mappings_shop_id_shopify_field_key" ON "field_mappings"("shop_id", "shopify_field");
-
--- CreateIndex
-CREATE UNIQUE INDEX "supabase_oauth_tokens_shop_id_key" ON "supabase_oauth_tokens"("shop_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "product_eligibility_snapshots_shop_id_day_key" ON "product_eligibility_snapshots"("shop_id", "day");
-
--- CreateIndex
-CREATE INDEX "sync_job_events_sync_job_id_idx" ON "sync_job_events"("sync_job_id");
-
--- AddForeignKey
-ALTER TABLE "dismissed_tracking_sources" ADD CONSTRAINT "dismissed_tracking_sources_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "partner_plan_prices" ADD CONSTRAINT "partner_plan_prices_partner_name_fkey" FOREIGN KEY ("partner_name") REFERENCES "partners"("name") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- Rinominare un piano porta con se' i suoi prezzi; cancellarlo li porta via.
--- Un prezzo orfano sarebbe un listino per un piano che non esiste.
-ALTER TABLE "plan_prices" ADD CONSTRAINT "plan_prices_plan_name_fkey" FOREIGN KEY ("plan_name") REFERENCES "plans"("plan_name") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
--- SET NULL e non CASCADE: cancellare un partner non deve portarsi via i negozi.
-ALTER TABLE "shops" ADD CONSTRAINT "shops_partner_name_fkey" FOREIGN KEY ("partner_name") REFERENCES "partners"("name") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "supabase_configs" ADD CONSTRAINT "supabase_configs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "billing_charges" ADD CONSTRAINT "billing_charges_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "sync_jobs" ADD CONSTRAINT "sync_jobs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "custom_fields" ADD CONSTRAINT "custom_fields_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "field_mappings" ADD CONSTRAINT "field_mappings_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "supabase_oauth_tokens" ADD CONSTRAINT "supabase_oauth_tokens_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "product_eligibility_snapshots" ADD CONSTRAINT "product_eligibility_snapshots_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "sync_job_events" ADD CONSTRAINT "sync_job_events_sync_job_id_fkey" FOREIGN KEY ("sync_job_id") REFERENCES "sync_jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- I piani: cinque righe copiate dal database owner in uso.
 --
@@ -757,30 +550,6 @@ ALTER TABLE "shops" ADD CONSTRAINT "shops_current_plan_fkey"
 ALTER TABLE "shops" ADD CONSTRAINT "shops_last_synced_plan_fkey"
   FOREIGN KEY ("last_synced_plan") REFERENCES "plans"("plan_name")
   ON UPDATE CASCADE ON DELETE SET NULL;
-
--- Registro degli accessi ai dati personali dei clienti.
--- Ci finisce solo l'esito di ogni lettura di `customers` attraverso il proxy:
--- mai i dati letti, mai la query (una search PostgREST puo' contenere un
--- indirizzo email). I prodotti non vengono registrati: non sono dati personali.
-CREATE TABLE "customer_data_access_logs" (
-    "id" TEXT NOT NULL,
-    "shop_id" TEXT,
-    "outcome" TEXT NOT NULL,
-    "status" INTEGER NOT NULL,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "customer_data_access_logs_pkey" PRIMARY KEY ("id")
-);
-
-CREATE INDEX "customer_data_access_logs_shop_id_created_at_idx" ON "customer_data_access_logs"("shop_id", "created_at" DESC);
-
-CREATE INDEX "customer_data_access_logs_created_at_idx" ON "customer_data_access_logs"("created_at");
-
--- SET NULL e non CASCADE: se il negozio sparisce il registro resta. Un log che
--- si cancella insieme a cio' che documenta non e' un log.
-ALTER TABLE "customer_data_access_logs" ADD CONSTRAINT "customer_data_access_logs_shop_id_fkey"
-  FOREIGN KEY ("shop_id") REFERENCES "shops"("id")
-  ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- RLS attiva ovunque, e nessuna policy: e' voluto.
 --
