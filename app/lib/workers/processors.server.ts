@@ -32,6 +32,13 @@ import {
   isUnknownColumn,
   unlinkBrowsersOf,
 } from '~/lib/customers/consent-withdrawal';
+import { birthdateMetafieldOf, type MetafieldKey } from '~/lib/customers/birthdate-metafield';
+import {
+  birthdateWritebackTarget,
+  planBirthdateWriteback,
+  type BirthdateWriteTarget,
+} from '~/lib/customers/birthdate-writeback';
+import { hasCustomerWriteAccess } from '~/lib/sync/customers-write-access';
 
 // Solo la parte del Job BullMQ che i processor usano davvero. Tipandola cosi'
 // il bulk sync puo' girare anche senza coda (allineamento automatico dal cron),
@@ -140,31 +147,119 @@ function collectAddedProducts(
 }
 
 /**
- * Quali dei clienti della pagina sono gia' su Supabase: chi c'e' verra'
- * aggiornato dall'upsert, chi manca aggiunto. Va chiesto PRIMA dell'upsert,
+ * Cosa c'e' gia' su Supabase dei clienti di questa pagina, PRIMA dell'upsert —
  * che e' proprio l'operazione che cancella la differenza.
  *
+ * Una lettura sola, due usi. Il primo c'era gia': chi compare qui verra'
+ * aggiornato, chi manca aggiunto. Il secondo e' la data di nascita che il
+ * merchant puo' aver scritto a mano nella sua tabella, e che va riportata su
+ * Shopify quando Shopify non ne ha una. Sono la stessa domanda allo stesso
+ * insieme di righe: farne due — o peggio, una per cliente — sarebbe un giro a
+ * vuoto per ogni pagina di ogni corsa.
+ *
  * null quando la lettura non riesce: senza risposta non si tira a indovinare
- * fra aggiunta e aggiornamento, si rinuncia al dettaglio.
+ * fra aggiunta e aggiornamento, si rinuncia al dettaglio — e non si riscrive
+ * niente verso Shopify, perche' non sapere cosa c'e' sul database del merchant
+ * non autorizza a indovinare cosa mandargli.
  */
-async function fetchExistingCustomerIds(
+interface ExistingCustomerRow {
+  shopify_customer_id?: number | null;
+  date_of_birth?: string | null;
+}
+
+async function fetchExistingCustomers(
   supabase: SupabaseClient,
   tableName: string,
   ids: number[],
-): Promise<Set<number> | null> {
-  if (ids.length === 0) return new Set();
+): Promise<Map<number, string | null> | null> {
+  if (ids.length === 0) return new Map();
+
+  const read = async (
+    columns: string,
+  ): Promise<{
+    data: ExistingCustomerRow[] | null;
+    error: { code?: string; message?: string } | null;
+  }> =>
+    (await supabase
+      .from(tableName)
+      .select(columns)
+      .in('shopify_customer_id', ids)) as unknown as {
+      data: ExistingCustomerRow[] | null;
+      error: { code?: string; message?: string } | null;
+    };
 
   try {
-    const { data, error } = await supabase
-      .from(tableName)
-      .select('shopify_customer_id')
-      .in('shopify_customer_id', ids);
+    let { data, error } = await read('shopify_customer_id, date_of_birth');
+
+    // Una tabella nata da una versione precedente puo' non avere
+    // `date_of_birth`, e PostgREST rifiuta l'intera select per una colonna che
+    // non conosce. Il dettaglio aggiunto/aggiornato pero' da quella colonna non
+    // dipende: si ripiega sulla sola chiave, e la riscrittura verso Shopify non
+    // trovera' semplicemente niente da riportare indietro.
+    if (isUnknownColumn(error)) {
+      ({ data, error } = await read('shopify_customer_id'));
+    }
 
     if (error || !data) return null;
-    return new Set(data.map((row) => row.shopify_customer_id as number));
+
+    const existing = new Map<number, string | null>();
+    for (const row of data) {
+      if (row.shopify_customer_id == null) continue;
+      existing.set(row.shopify_customer_id, row.date_of_birth ?? null);
+    }
+    return existing;
   } catch (error) {
     console.warn('Lettura dei clienti gia\' presenti fallita:', error);
     return null;
+  }
+}
+
+/**
+ * Riporta su Shopify le date di nascita che vivono solo sul database del
+ * merchant.
+ *
+ * Chi va riscritto lo decide `planBirthdateWriteback`, che di rete non sa
+ * niente ed e' testabile da solo; qui restano la chiamata e cio' che si fa
+ * quando va storta.
+ *
+ * E va storta senza fermare niente: i clienti sono gia' scritti sul database
+ * del merchant, e il valore che non e' arrivato a Shopify e' ancora dov'era.
+ * Alla corsa successiva Shopify sara' ancora vuoto e si ritenta. Far fallire la
+ * sincronizzazione dei clienti per una riscrittura che e' un di piu' vorrebbe
+ * dire perdere il molto per il poco.
+ */
+async function writeBackBirthdates(
+  shopifyClient: ShopifyAPIClient,
+  target: BirthdateWriteTarget,
+  optedIn: readonly ShopifyCustomer[],
+  stored: ReadonlyMap<number, string | null> | null,
+): Promise<void> {
+  const { writes, invalid } = planBirthdateWriteback(optedIn, stored);
+
+  // Quello che il merchant ha scritto e non e' una data non si manda a Shopify
+  // "corretto a naso": si nomina. Senza questa riga la sua cella resterebbe a
+  // meta' per sempre e nessuno saprebbe dirgli perche'.
+  if (invalid.length > 0) {
+    console.warn(
+      `[data di nascita] ${invalid.length} valori non riconoscibili come data sul database del merchant, non riscritti su Shopify (clienti: ${invalid.slice(0, 10).join(', ')})`,
+    );
+  }
+
+  if (writes.length === 0) return;
+
+  try {
+    const { written, errors } = await shopifyClient.setCustomerBirthdates(writes, target);
+    if (errors.length > 0) {
+      console.warn(
+        `[data di nascita] Shopify ha rifiutato ${errors.length} scritture: ${errors.slice(0, 3).join('; ')}`,
+      );
+    }
+    console.log(`[data di nascita] ${written} riportate su Shopify dal database del merchant`);
+  } catch (error) {
+    console.warn(
+      '[data di nascita] riscrittura su Shopify non riuscita:',
+      error instanceof Error ? error.message : error,
+    );
   }
 }
 
@@ -227,7 +322,19 @@ async function syncCustomers(
   shopifyClient: ShopifyAPIClient,
   supabase: SupabaseClient,
   tableName: string,
-  updatedAtMin?: string
+  updatedAtMin?: string,
+  /**
+   * Il metafield da cui leggere la data di nascita, scelto dal merchant.
+   * `null` = non ne ha scelto nessuno, quindi non la si chiede nemmeno e la
+   * colonna sul suo database resta com'e'.
+   */
+  birthdateMetafield?: MetafieldKey | null,
+  /**
+   * Dove riscrivere la data che vive solo sul database del merchant, o `null`
+   * se non si riscrive (permesso mancante, campo non scelto, campo che non e'
+   * quello standard). Deciso da `birthdateWritebackTarget` a monte.
+   */
+  birthdateTarget?: BirthdateWriteTarget | null,
 ): Promise<CustomerSyncResult> {
   let total = 0;
   let nextPageInfo: string | null = null;
@@ -241,6 +348,7 @@ async function syncCustomers(
       limit: 250,
       pageInfo: nextPageInfo || undefined,
       updatedAtMin,
+      birthdateMetafield: birthdateMetafield ?? null,
     });
 
     if (!customers || customers.length === 0) break;
@@ -252,7 +360,7 @@ async function syncCustomers(
     const rows = optedIn.map(transformCustomer);
     const revokedIds = revoked.map((c) => c.id);
 
-    const alreadyPresent = await fetchExistingCustomerIds(
+    const alreadyPresent = await fetchExistingCustomers(
       supabase,
       tableName,
       optedIn.map((c) => c.id),
@@ -269,6 +377,21 @@ async function syncCustomers(
       if (error) {
         throw new Error(`Supabase customer upsert failed: ${error.message}`);
       }
+    }
+
+    // La meta' che mancava alla regola: Shopify vince quando ha un valore, ma
+    // quando non ce l'ha il valore del merchant non si limita a sopravvivere —
+    // torna indietro, sul metafield di Shopify, dove anche i temi, i segmenti e
+    // le automazioni possono vederlo. Solo i consenzienti: chi ha detto di no
+    // non e' in questo elenco, e non deve esserci.
+    //
+    // Dopo l'upsert e non prima, per il motivo opposto a quello che verrebbe in
+    // mente: non perche' l'upsert cambi qualcosa qui — `alreadyPresent` e'
+    // stato letto prima ed e' la fotografia giusta — ma perche' una riscrittura
+    // che fallisse a meta' non deve lasciare indietro la scrittura sul database
+    // del merchant, che e' il compito principale di questa corsa.
+    if (birthdateTarget) {
+      await writeBackBirthdates(shopifyClient, birthdateTarget, optedIn, alreadyPresent);
     }
 
     // Dopo l'upsert: un upsert fallito lancia, e non ha aggiunto nessuno.
@@ -359,6 +482,17 @@ async function syncCustomersIfEnabled(opts: {
   shopifyClient: ShopifyAPIClient;
   supabase: SupabaseClient;
   updatedAtMin?: string;
+  /**
+   * La riga del negozio, per due cose sole: da quale metafield leggere la data
+   * di nascita, e se il negozio ci ha concesso di scriverla. Si passa il
+   * negozio e non i due valori gia' estratti perche' chi chiama ce l'ha in
+   * mano, e perche' i due viaggiano sempre insieme.
+   */
+  shop?: {
+    scopes?: string | null;
+    birthdateMetafieldNamespace?: string | null;
+    birthdateMetafieldKey?: string | null;
+  } | null;
 }): Promise<CustomerSyncResult> {
   if (!opts.customersSyncEnabled) return { total: 0, events: createEventBuffer() };
 
@@ -376,11 +510,22 @@ async function syncCustomersIfEnabled(opts: {
   // delta lascerebbe la tabella quasi vuota.
   const updatedAtMin = table.empty ? undefined : opts.updatedAtMin;
 
+  const birthdateMetafield = birthdateMetafieldOf(opts.shop);
+
   return syncCustomers(
     opts.shopifyClient,
     opts.supabase,
     opts.config.tableNameCustomers,
     updatedAtMin,
+    birthdateMetafield,
+    // Il permesso si constata, non si tenta: un negozio installato quando
+    // l'app leggeva soltanto non ha dato `write_customers`, e ogni mutation
+    // tornerebbe indietro con un 403 a ogni corsa. Senza permesso si legge e
+    // basta, che e' esattamente il comportamento di prima.
+    birthdateWritebackTarget(
+      birthdateMetafield,
+      hasCustomerWriteAccess(opts.shop?.scopes),
+    ),
   );
 }
 
@@ -812,6 +957,7 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
       shopifyClient,
       supabase,
       updatedAtMin: lastSyncTime.toISOString(),
+      shop,
     });
     const totalCustomers = customers.total;
     collector.absorb(customers.events);
@@ -1102,6 +1248,7 @@ export async function processInitialBulkSync(
       customersSyncEnabled: can(caps, 'sync_customers'),
       shopifyClient,
       supabase,
+      shop,
     });
     const totalCustomers = customers.total;
     collector.absorb(customers.events);

@@ -372,6 +372,61 @@ describe('Shopify API Client (GraphQL)', () => {
     expect(res).toEqual({ id: 111, cost: '9.99' });
   });
 
+  it('scrive le date di nascita sul metafield del cliente', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ metafieldsSet: { metafields: [{ id: 'gid://shopify/Metafield/1' }], userErrors: [] } }),
+    );
+
+    const result = await client().setCustomerBirthdates([{ customerId: 7, date: '1985-04-23' }]);
+
+    expect(result).toEqual({ written: 1, errors: [] });
+    const body = sentBody();
+    expect(body.variables.metafields).toEqual([
+      {
+        ownerId: 'gid://shopify/Customer/7',
+        namespace: 'facts',
+        key: 'birth_date',
+        type: 'date',
+        value: '1985-04-23',
+      },
+    ]);
+  });
+
+  it('oltre venticinque per volta la mutation verrebbe rifiutata: si spezza', async () => {
+    // Il tetto e' di Shopify, non nostro: una pagina da 250 clienti mandata in
+    // blocco non scriverebbe niente, non scriverebbe "quasi tutto".
+    (global.fetch as any)
+      .mockResolvedValueOnce(ok({ metafieldsSet: { metafields: new Array(25).fill({ id: 'x' }), userErrors: [] } }))
+      .mockResolvedValueOnce(ok({ metafieldsSet: { metafields: [{ id: 'x' }], userErrors: [] } }));
+
+    const entries = Array.from({ length: 26 }, (_, i) => ({ customerId: i + 1, date: '1985-04-23' }));
+    const result = await client().setCustomerBirthdates(entries);
+
+    expect((global.fetch as any).mock.calls).toHaveLength(2);
+    expect(sentBody(0).variables.metafields).toHaveLength(25);
+    expect(sentBody(1).variables.metafields).toHaveLength(1);
+    expect(result.written).toBe(26);
+  });
+
+  it('un rifiuto applicativo torna indietro invece di far saltare la sync', async () => {
+    // Qui gli userErrors NON si alzano, al contrario delle altre mutation: la
+    // riscrittura della data e' un di piu' che al giro dopo si ritenta, e i
+    // clienti sono gia' scritti sul database del merchant.
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ metafieldsSet: { metafields: [], userErrors: [{ field: null, message: 'Owner does not exist' }] } }),
+    );
+
+    const result = await client().setCustomerBirthdates([{ customerId: 7, date: '1985-04-23' }]);
+
+    expect(result).toEqual({ written: 0, errors: ['Owner does not exist'] });
+  });
+
+  it('senza nessuno da riscrivere non si chiama Shopify', async () => {
+    const result = await client().setCustomerBirthdates([]);
+    expect(result).toEqual({ written: 0, errors: [] });
+    expect((global.fetch as any).mock.calls).toHaveLength(0);
+  });
+
   it('getShopInfo restituisce fuso orario, dominio principale e valuta di vendita', async () => {
     (global.fetch as any).mockResolvedValueOnce(
       ok({

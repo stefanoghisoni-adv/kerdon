@@ -23,6 +23,11 @@ export function transformCustomer(customer: ShopifyCustomer): SupabaseCustomerRo
 
   const address = customer.default_address;
 
+  // Normalizzata una volta sola: serve due volte — per decidere se la chiave
+  // entra nella riga e per il valore che ci finisce dentro — e chiamarla due
+  // volte inviterebbe a cambiarne una sola.
+  const birthdate = normalizeBirthdate(customer.date_of_birth);
+
   const tags = customer.tags
     ? customer.tags.split(',').map((tag) => tag.trim()).filter(Boolean)
     : [];
@@ -74,16 +79,27 @@ export function transformCustomer(customer: ShopifyCustomer): SupabaseCustomerRo
     // riga a null vorrebbe dire cancellarli a ogni sincronizzazione, cioe'
     // proprio a chi li ha appena scritti.
     //
-    // La data di nascita compare nella riga solo quando la si e' davvero
-    // chiesta a Shopify. Il payload dei webhook i metafield non li porta: se
-    // finisse comunque nella riga con dentro null, ogni modifica di un cliente
-    // — un ordine, un tag, un indirizzo cambiato — cancellerebbe la data che la
-    // corsa periodica aveva letto, e nessuno capirebbe perche' il campo si
-    // svuota da solo. La chiave assente dice a PostgREST di non toccare la
-    // colonna; il null, che il metafield e' stato letto ed e' vuoto.
-    ...(customer.date_of_birth !== undefined
-      ? { date_of_birth: normalizeBirthdate(customer.date_of_birth) }
-      : {}),
+    // La data di nascita entra nella riga SOLO quando Shopify ne ha una.
+    //
+    // Sono due i modi in cui puo' non essercene una, e prima portavano a esiti
+    // diversi: il payload dei webhook i metafield non li porta affatto (chiave
+    // assente), mentre la corsa periodica che il metafield lo chiede riceve
+    // `null` per il cliente che non l'ha compilato. Il secondo caso finiva
+    // nella riga come `date_of_birth: null` e CANCELLAVA il valore che il
+    // merchant aveva scritto a mano sul suo database — l'unico posto in cui
+    // quel valore esisteva.
+    //
+    // Ora i due casi si comportano allo stesso modo, perche' dicono la stessa
+    // cosa: "da Shopify non arriva niente". La chiave assente dice a PostgREST
+    // di non toccare la colonna, e la colonna resta com'e' senza bisogno di
+    // rileggerla prima. Shopify vince quando ha un valore; quando non ce l'ha
+    // non cancella, e ci pensa la riscrittura (`birthdate-writeback`) a
+    // portargli quello che il merchant aveva gia'.
+    //
+    // Anche una data illeggibile finisce qui dentro: `normalizeBirthdate`
+    // restituisce null per cio' che non e' una data, e scriverlo vorrebbe dire
+    // buttare via un valore buono per rimpiazzarlo con niente.
+    ...(birthdate !== null ? { date_of_birth: birthdate } : {}),
     synced_at: new Date().toISOString(),
   };
 }

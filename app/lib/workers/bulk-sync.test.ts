@@ -861,6 +861,275 @@ describe('Initial bulk sync processor', () => {
     expect(browser.ids).toEqual([2, 4]);
   });
 
+  // La data di nascita nei due versi. Il merchant puo' scriverla a mano nella
+  // sua tabella, ed e' l'unico posto in cui quel valore esiste: Shopify vince
+  // quando ne ha una, ma quando non ce l'ha non deve cancellarla — e quello che
+  // ha solo lui va rimesso su Shopify, dove temi, segmenti e automazioni lo
+  // vedono.
+  describe('data di nascita', () => {
+    const shopWith = (extra: Record<string, unknown>) => ({
+      id: 'shop-1',
+      shopDomain: 'test-shop.myshopify.com',
+      accessToken: 'encrypted-token',
+      authorization: 'ENABLED',
+      currentPlan: 'pro',
+      scopes: 'read_products,read_customers,write_customers',
+      // Il campo standard, quello che l'app sa accendere sul negozio.
+      birthdateMetafieldNamespace: 'facts',
+      birthdateMetafieldKey: 'birth_date',
+      supabaseConfig: {
+        connectionVerifiedAt: new Date(),
+        tableNameProducts: 'products',
+        tableNameCustomers: 'customers',
+        supabaseUrl: 'https://test.supabase.co',
+        supabasePublicKey: 'k',
+        supabaseServiceRoleKey: 's',
+      },
+      ...extra,
+    });
+
+    /**
+     * Il database del merchant, con dentro quello che ha scritto a mano.
+     * `select().in()` e' la lettura che il processor fa PRIMA dell'upsert, ed e'
+     * la stessa che gia' serviva a distinguere aggiunti da aggiornati.
+     */
+    const supabaseWith = (stored: any[], upserted: any[]) => ({
+      from: () => ({
+        upsert: (rows: any[]) => { upserted.push(...rows); return { error: null }; },
+        select: () => ({
+          limit: async () => ({ data: [{ shopify_customer_id: 1 }], error: null }),
+          range: async () => ({ data: [], error: null }),
+          in: async () => ({ data: stored, error: null }),
+        }),
+        update: () => ({
+          in: () => ({ error: null, count: 0 }),
+          eq: () => ({ error: null, count: 0 }),
+        }),
+        delete: () => ({
+          gte: vi.fn().mockReturnValue({ error: null }),
+          lt: vi.fn().mockReturnValue({ error: null }),
+        }),
+      }),
+    });
+
+    const prepare = (shop: any) => {
+      vi.mocked(prisma.shop.findUnique).mockResolvedValue(shop as any);
+      vi.mocked(prisma.plan.findFirst).mockResolvedValue({ maxProducts: null, customersSyncEnabled: true } as any);
+      vi.mocked(prisma.syncJob.create).mockResolvedValue({ id: 'job-1' } as any);
+      vi.mocked(prisma.syncJob.update).mockResolvedValue({} as any);
+      vi.mocked(prisma.shop.update).mockResolvedValue({} as any);
+    };
+
+    it('Shopify ha la data: vince lei, e non si riscrive niente', async () => {
+      prepare(shopWith({}));
+      const upserted: any[] = [];
+      vi.mocked(createSupabaseClient).mockReturnValue(
+        supabaseWith([{ shopify_customer_id: 1, date_of_birth: '19700101' }], upserted) as any,
+      );
+
+      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 0, errors: [] });
+      vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
+        getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
+        getCustomers: vi.fn().mockResolvedValue({
+          customers: [
+            {
+              id: 1,
+              email: 'si@x.it',
+              email_marketing_consent: { state: 'subscribed' },
+              date_of_birth: '1985-04-23',
+            },
+          ],
+          nextPageInfo: null,
+        }),
+        setCustomerBirthdates,
+      }) as any);
+
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+      const cliente = upserted.find((r) => r.shopify_customer_id === 1);
+      expect(cliente.date_of_birth).toBe('19850423');
+      expect(setCustomerBirthdates).not.toHaveBeenCalled();
+    });
+
+    it('Shopify vuoto e database del merchant pieno: la colonna non si azzera e la data torna su Shopify', async () => {
+      prepare(shopWith({}));
+      const upserted: any[] = [];
+      vi.mocked(createSupabaseClient).mockReturnValue(
+        supabaseWith([{ shopify_customer_id: 1, date_of_birth: '19850423' }], upserted) as any,
+      );
+
+      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 1, errors: [] });
+      vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
+        getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
+        getCustomers: vi.fn().mockResolvedValue({
+          customers: [
+            {
+              id: 1,
+              email: 'si@x.it',
+              email_marketing_consent: { state: 'subscribed' },
+              // Il metafield e' stato chiesto ed e' vuoto.
+              date_of_birth: null,
+            },
+          ],
+          nextPageInfo: null,
+        }),
+        setCustomerBirthdates,
+      }) as any);
+
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+      // La chiave fuori dalla riga: PostgREST non tocca la colonna, e il valore
+      // scritto a mano dal merchant resta dov'e'.
+      const cliente = upserted.find((r) => r.shopify_customer_id === 1);
+      expect('date_of_birth' in cliente).toBe(false);
+
+      // E parte per Shopify, nella forma che vuole un metafield `date`.
+      expect(setCustomerBirthdates).toHaveBeenCalledWith(
+        [{ customerId: 1, date: '1985-04-23' }],
+        { namespace: 'facts', key: 'birth_date', type: 'date' },
+      );
+    });
+
+    it('Shopify vuoto e database del merchant vuoto: non succede niente', async () => {
+      prepare(shopWith({}));
+      const upserted: any[] = [];
+      vi.mocked(createSupabaseClient).mockReturnValue(
+        supabaseWith([{ shopify_customer_id: 1, date_of_birth: null }], upserted) as any,
+      );
+
+      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 0, errors: [] });
+      vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
+        getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
+        getCustomers: vi.fn().mockResolvedValue({
+          customers: [
+            { id: 1, email: 'si@x.it', email_marketing_consent: { state: 'subscribed' }, date_of_birth: null },
+          ],
+          nextPageInfo: null,
+        }),
+        setCustomerBirthdates,
+      }) as any);
+
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+      const cliente = upserted.find((r) => r.shopify_customer_id === 1);
+      expect('date_of_birth' in cliente).toBe(false);
+      expect(setCustomerBirthdates).not.toHaveBeenCalled();
+    });
+
+    it('senza il permesso di scrittura si salta, e la sincronizzazione arriva in fondo lo stesso', async () => {
+      prepare(shopWith({ scopes: 'read_products,read_customers' }));
+      const upserted: any[] = [];
+      vi.mocked(createSupabaseClient).mockReturnValue(
+        supabaseWith([{ shopify_customer_id: 1, date_of_birth: '19850423' }], upserted) as any,
+      );
+
+      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 0, errors: [] });
+      vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
+        getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
+        getCustomers: vi.fn().mockResolvedValue({
+          customers: [
+            { id: 1, email: 'si@x.it', email_marketing_consent: { state: 'subscribed' }, date_of_birth: null },
+          ],
+          nextPageInfo: null,
+        }),
+        setCustomerBirthdates,
+      }) as any);
+
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+      expect(setCustomerBirthdates).not.toHaveBeenCalled();
+      // Il cliente e' comunque sincronizzato: il permesso mancante non e' un
+      // guasto, e non deve far fallire cio' che sa gia' funzionare.
+      expect(upserted.some((r) => r.shopify_customer_id === 1)).toBe(true);
+    });
+
+    it('una data malformata sul database del merchant non parte per Shopify', async () => {
+      prepare(shopWith({}));
+      const upserted: any[] = [];
+      vi.mocked(createSupabaseClient).mockReturnValue(
+        supabaseWith([{ shopify_customer_id: 1, date_of_birth: 'boh' }], upserted) as any,
+      );
+
+      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 0, errors: [] });
+      vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
+        getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
+        getCustomers: vi.fn().mockResolvedValue({
+          customers: [
+            { id: 1, email: 'si@x.it', email_marketing_consent: { state: 'subscribed' }, date_of_birth: null },
+          ],
+          nextPageInfo: null,
+        }),
+        setCustomerBirthdates,
+      }) as any);
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+      warn.mockRestore();
+
+      expect(setCustomerBirthdates).not.toHaveBeenCalled();
+    });
+
+    it('chi ha revocato il consenso non viene mai riscritto su Shopify', async () => {
+      prepare(shopWith({}));
+      const upserted: any[] = [];
+      vi.mocked(createSupabaseClient).mockReturnValue(
+        supabaseWith([{ shopify_customer_id: 2, date_of_birth: '19850423' }], upserted) as any,
+      );
+
+      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 0, errors: [] });
+      vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
+        getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
+        getCustomers: vi.fn().mockResolvedValue({
+          customers: [
+            { id: 2, email: 'no@x.it', email_marketing_consent: { state: 'unsubscribed' }, date_of_birth: null },
+          ],
+          nextPageInfo: null,
+        }),
+        setCustomerBirthdates,
+      }) as any);
+
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+      // I suoi dati stanno per essere svuotati, non rimessi in circolo.
+      expect(setCustomerBirthdates).not.toHaveBeenCalled();
+    });
+
+    it('il campo scelto dal merchant si legge ma non si riscrive: del suo tipo non sappiamo niente', async () => {
+      prepare(shopWith({
+        birthdateMetafieldNamespace: 'custom',
+        birthdateMetafieldKey: 'data_di_nascita',
+      }));
+      const upserted: any[] = [];
+      vi.mocked(createSupabaseClient).mockReturnValue(
+        supabaseWith([{ shopify_customer_id: 1, date_of_birth: '19850423' }], upserted) as any,
+      );
+
+      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 0, errors: [] });
+      const getCustomers = vi.fn().mockResolvedValue({
+        customers: [
+          { id: 1, email: 'si@x.it', email_marketing_consent: { state: 'subscribed' }, date_of_birth: null },
+        ],
+        nextPageInfo: null,
+      });
+      vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
+        getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
+        getCustomers,
+        setCustomerBirthdates,
+      }) as any);
+
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+      // Letto si', dal campo che il merchant ha indicato...
+      expect(getCustomers.mock.calls[0][0].birthdateMetafield).toEqual({
+        namespace: 'custom',
+        key: 'data_di_nascita',
+      });
+      // ...riscritto no: scrivere altrove da dove si legge ripeterebbe la
+      // stessa mutation a ogni corsa.
+      expect(setCustomerBirthdates).not.toHaveBeenCalled();
+    });
+  });
+
   it('registra il dettaglio dei prodotti: nuove varianti aggiunte, righe spazzate rimosse', async () => {
     const mockShop = {
       id: 'shop-1',

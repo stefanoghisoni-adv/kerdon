@@ -942,6 +942,74 @@ export class ShopifyAPIClient {
   }
 
   /**
+   * Scrive la data di nascita sul metafield del cliente, in blocco.
+   *
+   * E' la meta' che mancava alla data di nascita: finora il valore viaggiava
+   * solo da Shopify verso il database del merchant, e quello che il merchant
+   * scriveva a mano nella sua tabella non usciva di li' — nessun tema, nessun
+   * segmento, nessuna automazione di Shopify poteva vederlo. Chi decide QUALI
+   * clienti riscrivere sta in `customers/birthdate-writeback`; qui si scrive e
+   * basta.
+   *
+   * `metafieldsSet` e non una mutation per cliente: ne accetta 25 per chiamata,
+   * e su una corsa da centomila clienti la differenza fra 25 e 1 e' la
+   * differenza fra una sincronizzazione che finisce e una che sbatte contro il
+   * limite di chiamate.
+   *
+   * Gli errori non si alzano, si restituiscono. Un cliente rifiutato — sparito
+   * nel frattempo, valore non gradito alla definizione — non deve far fallire
+   * la sincronizzazione dei clienti, che di suo aveva gia' scritto tutto quello
+   * che doveva: la riscrittura e' un di piu' che al giro dopo si ritenta.
+   */
+  async setCustomerBirthdates(
+    entries: readonly { customerId: number; date: string }[],
+    field: { namespace: string; key: string; type: string } = BIRTHDATE_METAFIELD,
+  ): Promise<{ written: number; errors: string[] }> {
+    let written = 0;
+    const errors: string[] = [];
+    // Il tetto e' di Shopify, non nostro: oltre i 25 la mutation viene
+    // rifiutata per intero, quindi le pagine da 250 clienti vanno spezzate qui
+    // e non a monte.
+    const BATCH = 25;
+
+    for (let i = 0; i < entries.length; i += BATCH) {
+      const batch = entries.slice(i, i + BATCH);
+      const data = await this.graphql<{
+        metafieldsSet: {
+          metafields: { id: string }[] | null;
+          userErrors: { field: string[] | null; message: string }[];
+        } | null;
+      }>(
+        `mutation SetCustomerBirthdates($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields { id }
+            userErrors { field message }
+          }
+        }`,
+        {
+          metafields: batch.map((entry) => ({
+            ownerId: `gid://shopify/Customer/${entry.customerId}`,
+            namespace: field.namespace,
+            key: field.key,
+            type: field.type,
+            value: entry.date,
+          })),
+        },
+      );
+
+      // Le mutation hanno un secondo canale d'errore, distinto da `errors`: un
+      // rifiuto applicativo arriva qui, con la mutation formalmente riuscita.
+      // Ignorarlo farebbe risultare scritto cio' che non lo e'.
+      for (const error of data.metafieldsSet?.userErrors ?? []) {
+        errors.push(error.message);
+      }
+      written += data.metafieldsSet?.metafields?.length ?? 0;
+    }
+
+    return { written, errors };
+  }
+
+  /**
    * Gli ordini, una pagina alla volta.
    *
    * Di un ordine si prende il minimo che serve al profitto: quando, di chi, e

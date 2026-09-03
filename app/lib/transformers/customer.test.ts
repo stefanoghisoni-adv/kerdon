@@ -165,14 +165,30 @@ describe("l'indirizzo del cliente", () => {
     expect('date_of_birth' in row).toBe(false);
   });
 
-  it('letta e vuota, invece, la colonna si svuota davvero', () => {
+  // La regola: Shopify vince quando ha un valore. Quando non ce l'ha, non
+  // cancella — perche' il merchant la data puo' averla scritta a mano nella sua
+  // tabella, e quello e' l'unico posto in cui esiste. Prima il metafield letto e
+  // vuoto arrivava come `date_of_birth: null` e la cancellava a ogni corsa.
+  it('letta e vuota non cancella: la chiave resta fuori dalla riga', () => {
     const row = transformCustomer({ ...base, date_of_birth: null } as never);
-    expect('date_of_birth' in row).toBe(true);
-    expect(row.date_of_birth).toBeNull();
+    expect('date_of_birth' in row).toBe(false);
+  });
+
+  it('anche la stringa vuota lascia in pace la colonna', () => {
+    const row = transformCustomer({ ...base, date_of_birth: '' } as never);
+    expect('date_of_birth' in row).toBe(false);
   });
 
   it('la data letta si scrive senza separatori, come la vogliono le piattaforme', () => {
     const row = transformCustomer({ ...base, date_of_birth: '1985-04-23' } as never);
     expect(row.date_of_birth).toBe('19850423');
+  });
+
+  // Un metafield di testo libero puo' contenere qualunque cosa. Scrivere null
+  // al posto di quello che non si sa leggere butterebbe via un valore buono per
+  // rimpiazzarlo con niente.
+  it('quello che non e una data non tocca la colonna', () => {
+    const row = transformCustomer({ ...base, date_of_birth: 'boh' } as never);
+    expect('date_of_birth' in row).toBe(false);
   });
 });
