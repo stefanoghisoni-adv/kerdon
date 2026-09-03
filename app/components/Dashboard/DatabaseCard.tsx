@@ -2,11 +2,14 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   Card,
   BlockStack,
+  Icon,
   InlineStack,
   Text,
   Button,
   Divider,
+  Tooltip,
 } from '@shopify/polaris';
+import { InfoIcon } from '@shopify/polaris-icons';
 import { MetricRow } from './MetricRow';
 import { middleTruncate } from './copy-value';
 import { CopyIconButton } from './CopyIconButton';
@@ -47,15 +50,35 @@ export interface DatabaseCardProps {
  * cosi' i valori cadono nella colonna del badge dello stato e la card si legge
  * per colonne invece che a blocchi.
  */
-function CopyableRow({ label, value }: { label: string; value: string }) {
+function CopyableRow({
+  label,
+  value,
+  help,
+}: {
+  label: string;
+  value: string;
+  help?: string;
+}) {
   return (
     // Il valore non e' piu' il bersaglio del clic: accanto c'e' un pulsante che
     // dice apertamente cosa fa. Cliccare un testo per copiarlo lo sapeva solo
     // chi ci passava sopra col puntatore.
     <InlineStack align="space-between" blockAlign="center" gap="200" wrap={false}>
-      <Text as="span" variant="bodyMd">
-        {label}
-      </Text>
+      <InlineStack gap="100" blockAlign="center" wrap={false}>
+        <Text as="span" variant="bodyMd">
+          {label}
+        </Text>
+        {/* Cosa farsene di questo valore. Sono due stringhe che il merchant
+            copia altrove: senza sapere dove vanno, copiarle non gli dice
+            niente. */}
+        {help ? (
+          <Tooltip content={help}>
+            <span className="info-icon">
+              <Icon source={InfoIcon} tone="subdued" />
+            </span>
+          </Tooltip>
+        ) : null}
+      </InlineStack>
       <InlineStack gap="200" blockAlign="center" wrap={false}>
         <Text as="span" tone="subdued" truncate>
           {middleTruncate(value)}
@@ -79,16 +102,18 @@ function ValueRow({
   label,
   value,
   available,
+  help,
 }: {
   label: string;
   value: string | null;
   available: boolean;
+  help?: string;
 }) {
   const t = useT();
   if (!available || !value) {
-    return <MetricRow label={label} badge={{ content: t.database.notConfigured }} />;
+    return <MetricRow label={label} badge={{ content: t.database.notConfigured }} info={help} />;
   }
-  return <CopyableRow label={label} value={value} />;
+  return <CopyableRow label={label} value={value} help={help} />;
 }
 
 /**
@@ -167,9 +192,15 @@ export function DatabaseCard({
             content: connected ? t.common.connected : t.common.notConnected,
           }}
         />
-        <ValueRow label={t.database.appUrl} value={appUrl} available={connected} />
+        <ValueRow
+          label={t.database.appUrl}
+          value={appUrl}
+          available={connected}
+          help={t.database.appUrlHelp}
+        />
         <ValueRow
           label={t.database.readKey}
+          help={t.database.readKeyHelp}
           value={readKey}
           available={connected}
         />

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { filterProblemVariants, pageCount, pageSlice } from './problem-filter';
+import { filterProblemVariants } from './problem-filter';
+import { pageCount, pageSlice } from '~/lib/table/pagination';
 import type { ProblemVariant } from './product-readiness';
 
 const row = (over: Partial<ProblemVariant>): ProblemVariant =>

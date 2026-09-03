@@ -3,7 +3,13 @@ import { InlineStack, Badge, Text, Icon, Tooltip } from '@shopify/polaris';
 import { InfoIcon } from '@shopify/polaris-icons';
 
 export interface MetricRowProps {
-  label: string;
+  /**
+   * Di solito una stringa. Accetta anche un nodo perche' una riga sola — il
+   * matching avanzato — porta il proprio colore, e passare una classe da fuori
+   * era l'alternativa: una prop di stile su un componente che di stile non
+   * parla.
+   */
+  label: ReactNode;
   /**
    * Omesso quando l'azione dice gia' tutto (es. "Aggiorna a Business" al posto
    * di "Non attiva"): la riga resta a due colonne invece di ripetere lo stesso
@@ -26,7 +32,9 @@ export function MetricRow({ label, badge, info, action }: MetricRowProps) {
         </Text>
         {info ? (
           <Tooltip content={info}>
-            <Icon source={InfoIcon} tone="subdued" />
+            <span className="info-icon">
+              <Icon source={InfoIcon} tone="subdued" />
+            </span>
           </Tooltip>
         ) : null}
       </InlineStack>

@@ -60,6 +60,8 @@ export const it = {
   account: {
     title: "Account",
     plan: "Piano",
+    ordersSync: "Sincronizzazione ordini",
+    matching: "Matching avanzato",
     productsSync: "Sincronizzazione prodotti",
     customersSync: "Sincronizzazione clienti",
     productFeeds: "Multi-feed prodotto",
@@ -72,6 +74,8 @@ export const it = {
     status: "Stato connessione",
     appUrl: "App URL",
     readKey: "Chiave API pubblica",
+    appUrlHelp: "È l'URL del progetto che ti servirà per leggere le informazioni da Google Tag Manager server-side",
+    readKeyHelp: "È la chiave API pubblica che ti servirà per leggere le informazioni da Google Tag Manager server-side",
     notConfigured: "Non configurato",
     ownerUrl: "URL Database proprietario",
     open: "Vai al database",
@@ -536,6 +540,7 @@ export const it = {
       databaseLimited: "Database limitato",
       databaseExtended: "Database esteso",
       databaseHelp: "Sincronizzazione di tutti i dati utente, in linea con il GDPR, e delle connessioni con gli ordini",
+      databaseHelpLimited: "Sincronizzazione dei prodotti per tracciare il valore del profitto",
       push: "Push manuale",
       chat: "Chat dedicata",
     },
@@ -809,6 +814,10 @@ export const it = {
 
   // La tab Clienti: chi ha comprato, e quanto ci si e' guadagnato.
   customers: {
+    extraFields: {
+      title: "Campi aggiuntivi",
+      help: "Informazioni integrate sfruttando i metafield dei clienti",
+    },
     title: "Clienti",
     intro:
       "Quanto rende ogni cliente, al netto del costo dei prodotti che ha comprato.",

@@ -20,13 +20,3 @@ export function filterProblemVariants(
     ].some((field) => field.toLowerCase().includes(q)),
   );
 }
-
-export function pageCount(total: number, perPage: number): number {
-  if (total <= 0 || perPage <= 0) return 0;
-  return Math.ceil(total / perPage);
-}
-
-export function pageSlice<T>(rows: T[], page: number, perPage: number): T[] {
-  const start = (page - 1) * perPage;
-  return rows.slice(start, start + perPage);
-}

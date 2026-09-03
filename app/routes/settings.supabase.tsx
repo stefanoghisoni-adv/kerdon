@@ -16,6 +16,7 @@ import {
 } from '@shopify/polaris';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
+import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import { getReadProxyTokenForDisplay } from '~/lib/read-proxy/token.server';
 import { AccountCard } from '~/components/Dashboard/AccountCard';
 import { DatabaseCard } from '~/components/Dashboard/DatabaseCard';
@@ -96,7 +97,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     connected,
     planName: shop?.currentPlan ?? '',
     productsSyncActive: syncRunning,
+    // Gli ordini non dipendono dal piano ma dal permesso: un negozio installato
+    // prima che l'app li leggesse non l'ha concesso, e finche' non riautorizza
+    // quella sincronizzazione non puo' avvenire. Vale la pena mostrarlo, perche'
+    // e' anche il motivo per cui il profitto resta senza numeri.
+    ordersSyncActive: syncRunning && hasOrdersAccess(shop?.scopes),
     customersSyncActive: syncRunning && customersIncluded,
+    // Il riconoscimento fra dispositivi poggia sui dati dei clienti: dove
+    // quelli non si sincronizzano non c'e' niente da riconoscere.
+    matchingActive: syncRunning && customersIncluded,
     productFeedsActive: productFeedsIncluded,
     // Il piano da proporre si calcola solo quando serve davvero.
     customersUpgradePlan: customersIncluded
@@ -274,6 +283,8 @@ export default function SupabaseSettings() {
                 <AccountCard
                   planName={account.planName}
                   productsSyncActive={account.productsSyncActive}
+                  ordersSyncActive={account.ordersSyncActive}
+                  matchingActive={account.matchingActive}
                   customersSyncActive={account.customersSyncActive}
                   productFeedsActive={account.productFeedsActive}
                   feedsUpgradePlan={account.feedsUpgradePlan}

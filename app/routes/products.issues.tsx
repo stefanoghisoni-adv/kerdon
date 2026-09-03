@@ -50,7 +50,9 @@ import {
 } from '~/lib/stats/product-readiness';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
-import { filterProblemVariants, pageCount, pageSlice } from '~/lib/stats/problem-filter';
+import { filterProblemVariants } from '~/lib/stats/problem-filter';
+import { PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
+import { TablePagination } from '~/components/Dashboard/TablePagination';
 import {
   selectSoldProblemVariants,
   soldVariantsMissingFromCatalog,
@@ -63,8 +65,6 @@ import {
   parseStoredCosts,
   costRatioLabel,
 } from '~/lib/stats/cost-edit';
-
-const PER_PAGE = 20;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -741,6 +741,9 @@ export default function ProblemProducts() {
                 </InlineGrid>
               </BlockStack>
             </Box>
+            {/* Vedi il gemello nella tab Clienti: le larghezze stanno in
+                `dashboard.css`, nell'ordine delle intestazioni qui sotto. */}
+            <div className="stable-columns stable-columns--issues">
             <IndexTable
               resourceName={t.issues.resource}
               itemCount={visibleRows.length}
@@ -767,24 +770,8 @@ export default function ProblemProducts() {
                 />
               ))}
             </IndexTable>
-            {totalPages > 1 && (
-              <Box padding="400">
-                {/* Numeri fuori dalle frecce, a destra: la label integrata di
-                    Pagination starebbe in mezzo ai due pulsanti, qui invece la
-                    rendiamo come Text accanto al gruppo di frecce. */}
-                <InlineStack align="center" blockAlign="center" gap="300">
-                  <Pagination
-                    hasPrevious={page > 1}
-                    onPrevious={() => setPage((p) => p - 1)}
-                    hasNext={page < totalPages}
-                    onNext={() => setPage((p) => p + 1)}
-                  />
-                  <Text as="span" tone="subdued">
-                    {t.issues.pageOf(page, totalPages)}
-                  </Text>
-                </InlineStack>
-              </Box>
-            )}
+            </div>
+            <TablePagination total={filtered.length} page={page} onPage={setPage} />
           </Card>
         )}
         {/* Respiro in fondo: senza, il bordo della card/tabella tocca il fondo dell'iframe. */}

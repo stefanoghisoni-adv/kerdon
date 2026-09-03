@@ -555,8 +555,23 @@
 }
 
 .plan-feature-database-icon .Polaris-Icon {
-  width: 17px;
-  height: 17px;
+  width: 19px;
+  height: 19px;
+}
+
+/* Le "i" informative, un pixel piu' in basso.
+
+   Sono cerchi pieni accanto a testo con le lettere alte: allineate al centro
+   geometrico sembrano leggermente in alto rispetto alla parola che spiegano,
+   perche' l'occhio prende come riferimento la riga di base e non il centro
+   della riga. Un pixel non si nota — si nota solo quando manca.
+
+   `translate` e non `margin`: sposta il disegno senza cambiare lo spazio che
+   l'icona occupa, quindi non muove di mezzo pixel tutto quello che le sta
+   accanto. */
+.info-icon {
+  display: inline-flex;
+  transform: translateY(1px);
 }
 
 /* Il pulsante che aspetta qualche secondo prima di potersi premere.
@@ -594,4 +609,58 @@
    trasformarlo in un bordo. */
 .plan-feature-divider hr {
   border-block-start: 0.75px solid rgba(47, 47, 47, 0.5);
+}
+
+/* Le colonne che smettono di ballare.
+
+   La larghezza di una colonna, per default, la decide il suo contenuto: basta
+   che una ricerca lasci nomi piu' corti perche' l'intera tabella si riassesti,
+   e chi sta leggendo vede le colonne muoversi sotto gli occhi a ogni lettera
+   che scrive. Il dato non e' cambiato — e' cambiato quanto spazio occupa.
+
+   `table-layout: fixed` toglie quella dipendenza: le larghezze si leggono dalla
+   prima riga di intestazioni e non si rivedono piu'. Le percentuali stanno qui,
+   nell'ordine esatto delle intestazioni dichiarate nelle rotte, e sommano 100:
+   se un giorno si aggiunge una colonna, e' qui che il conto va rifatto.
+
+   Nota sulle classi `Polaris-IndexTable__*`: sono interne, come quelle del
+   DatePicker, e per la stessa ragione — la tabella non espone nessun appiglio
+   pubblico per la larghezza di una colonna. Le copre `polaris-selectors.test.ts`,
+   che fallisce se un aggiornamento di Polaris le rinomina. */
+.stable-columns .Polaris-IndexTable__Table {
+  table-layout: fixed;
+}
+
+/* Clienti: cliente, spia, ordini, profitto medio, profitto totale, stato, azioni. */
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(1) { width: 26%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(2) { width: 6%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(3) { width: 10%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(4) { width: 14%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(5) { width: 14%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(6) { width: 15%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(7) { width: 15%; }
+
+/* Prodotti non idonei: prodotto, variante, SKU, prezzo, costo, percentuale.
+   Al costo serve piu' spazio delle altre: dentro c'e' un campo da compilare,
+   non un numero da leggere. */
+.stable-columns--issues .Polaris-IndexTable__Table th:nth-child(1) { width: 28%; }
+.stable-columns--issues .Polaris-IndexTable__Table th:nth-child(2) { width: 18%; }
+.stable-columns--issues .Polaris-IndexTable__Table th:nth-child(3) { width: 16%; }
+.stable-columns--issues .Polaris-IndexTable__Table th:nth-child(4) { width: 12%; }
+.stable-columns--issues .Polaris-IndexTable__Table th:nth-child(5) { width: 16%; }
+.stable-columns--issues .Polaris-IndexTable__Table th:nth-child(6) { width: 10%; }
+
+/* Con le larghezze fisse un testo lungo non allarga piu' la colonna: deborda.
+   Si taglia con i puntini invece di uscire dal bordo — e il titolo intero resta
+   leggibile passandoci sopra, perche' il testo e' comunque nel documento. */
+.stable-columns .Polaris-IndexTable__TableCell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* I numeri e i badge non vanno a capo: una cifra spezzata su due righe si
+   legge come due cifre. */
+.stable-columns .Polaris-IndexTable__TableCell .Polaris-Badge,
+.stable-columns .Polaris-IndexTable__TableHeading {
+  white-space: nowrap;
 }

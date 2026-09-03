@@ -88,7 +88,9 @@ export function PlanFeatureList({ features, planName }: Props) {
               esteso allungherebbe la card piu' delle altre tre. */}
           {feature.key === 'feeds' && (
             <Tooltip content={t.plan.features.feedsHelp}>
+              <span className="info-icon">
               <Icon source={InfoIcon} tone="subdued" />
+            </span>
             </Tooltip>
           )}
           {/* Il database c'e' su tutti i piani, ma "limitato" o "esteso" non
@@ -97,8 +99,20 @@ export function PlanFeatureList({ features, planName }: Props) {
               si tratta di dati utente GDPR-compliant e connessioni con ordini,
               senza nomi di tabelle o colonne. */}
           {feature.key === 'database' && (
-            <Tooltip content={t.plan.features.databaseHelp}>
+            /* Due spiegazioni e non una: sul Free il database sincronizza i
+               soli prodotti — non gli ordini, non i dati dei clienti — e
+               promettergli "tutti i dati utente" sarebbe scritto falso proprio
+               sulla card di chi non li ha. */
+            <Tooltip
+              content={
+                isDatabaseExtended(planName)
+                  ? t.plan.features.databaseHelp
+                  : t.plan.features.databaseHelpLimited
+              }
+            >
+              <span className="info-icon">
               <Icon source={InfoIcon} tone="subdued" />
+            </span>
             </Tooltip>
           )}
         </InlineStack>

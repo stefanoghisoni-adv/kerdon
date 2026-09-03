@@ -8,7 +8,7 @@ import {
   countSoldWithoutCostInCatalog,
 } from './sold-without-cost';
 import { collectProblemVariants } from './product-readiness';
-import { pageCount, pageSlice } from './problem-filter';
+import { pageCount, pageSlice } from '~/lib/table/pagination';
 import type { ShopifyProduct } from '~/types/shopify';
 
 // Un prodotto con una variante sola: `cost` a null significa costo mai

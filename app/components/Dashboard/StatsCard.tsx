@@ -55,7 +55,9 @@ export function StatsCard({
             <Tooltip content={info}>
               {/* span necessario: il Tooltip ha bisogno di un elemento focusabile/hoverabile */}
               <span style={{ display: 'inline-flex', cursor: 'help' }} tabIndex={0}>
-                <Icon source={InfoIcon} tone="subdued" />
+                <span className="info-icon">
+              <Icon source={InfoIcon} tone="subdued" />
+            </span>
               </span>
             </Tooltip>
           )}

@@ -55,6 +55,8 @@ export const en: typeof it = {
   account: {
     title: "Account",
     plan: "Plan",
+    ordersSync: "Order sync",
+    matching: "Advanced matching",
     productsSync: "Product sync",
     customersSync: "Customer sync",
     productFeeds: "Multi product feed",
@@ -67,6 +69,8 @@ export const en: typeof it = {
     status: "Status",
     appUrl: "App URL",
     readKey: "Publishable API key",
+    appUrlHelp: "The project URL you will need to read the information from server-side Google Tag Manager",
+    readKeyHelp: "The public API key you will need to read the information from server-side Google Tag Manager",
     notConfigured: "Not configured",
     ownerUrl: "Your database URL",
     open: "Open database",
@@ -484,6 +488,7 @@ export const en: typeof it = {
       databaseLimited: "Limited database",
       databaseExtended: "Extended database",
       databaseHelp: "Sync of all user data, GDPR-compliant, and of the connections with orders",
+      databaseHelpLimited: "Product sync, to track the value of your profit",
       push: "Manual push",
       chat: "Dedicated chat",
     },
@@ -697,6 +702,10 @@ export const en: typeof it = {
   },
 
   customers: {
+    extraFields: {
+      title: "Additional fields",
+      help: "Information integrated using customer metafields",
+    },
     title: "Customers",
     intro: "What each customer is worth, after the cost of what they bought.",
     range: "Period",

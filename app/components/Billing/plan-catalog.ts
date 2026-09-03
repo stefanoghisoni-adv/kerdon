@@ -12,10 +12,14 @@ import { isSelectablePlan } from './plan-access';
 // disponibilita' (spunta verde / X grigia) e il valore dentro la label. Cosi' le
 // righe delle card restano allineate e le card hanno la stessa altezza.
 export const FEATURE_ORDER = [
+  // Per prima, in cima a tutte: e' cio' che il piano fa — sincronizzare — e le
+  // righe sotto ne sono le misure (ogni quanto, quanti prodotti, quanti
+  // clienti). Leggerla dopo i numeri che la descrivono voleva dire incontrare
+  // le risposte prima della domanda.
+  'database',
   'sync',
   'products',
   'customers',
-  'database',
   'feeds',
   'push',
   // Ultima e staccata dalle altre: non e' una funzione in piu' nell'elenco, e'
@@ -132,16 +136,19 @@ export function matchingIncluded(plan: { customersSyncEnabled: boolean }): boole
 
 export function buildPlanFeatures(plan: PlanRow): PlanFeature[] {
   const level = (plan.supportLevel ?? '').trim().toLowerCase();
-  // L'ordine va dal vincolo che si sente ogni giorno a quello che si nota una
-  // volta sola: prima ogni quanto i dati si allineano, poi quanti prodotti e
-  // quanti clienti ci stanno, poi cosa si puo' farci. L'assistenza non e' piu'
-  // in elenco: era su tutte le card uguale, e una riga identica ovunque non
-  // aiuta a scegliere.
+  // L'ordine, e deve restare quello di `FEATURE_ORDER`: c'e' un test che li
+  // confronta, perche' due elenchi che dicono l'ordine in due posti diversi
+  // prima o poi non lo dicono piu' uguale.
+  //
+  // In cima il database, che e' cio' che il piano fa; sotto, le sue misure —
+  // ogni quanto i dati si allineano, quanti prodotti e quanti clienti ci
+  // stanno; poi cosa si puo' farci. L'assistenza non e' piu' in elenco: era su
+  // tutte le card uguale, e una riga identica ovunque non aiuta a scegliere.
   return [
+    databaseFeature(plan),
     { key: 'sync', included: true, value: plan.maxSyncFrequencyHours },
     productsFeature(plan),
     customersFeature(plan),
-    databaseFeature(plan),
     feedsFeature(plan),
     { key: 'push', included: PUSH_LEVELS.has(level), value: null },
     // Il riconoscimento di uno stesso cliente fra dispositivi diversi poggia

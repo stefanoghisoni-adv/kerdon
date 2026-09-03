@@ -139,15 +139,16 @@ describe('buildPlanFeatures', () => {
   });
 
   it('l elenco segue l ordine in cui si legge un piano', () => {
-    // Prima ogni quanto i dati si allineano, poi quanto ci sta, poi cosa si
-    // puo' farci: dal vincolo che si sente ogni giorno a quello che si nota
-    // una volta sola. Il database viene prima dei feed perche' e' una base
-    // (tutti i dati sincronizzati) piu' che una funzione aggiuntiva.
+    // In cima il database: e' cio' che il piano fa, e le righe sotto ne sono le
+    // misure — ogni quanto i dati si allineano, quanti prodotti e quanti
+    // clienti ci stanno. Leggerlo dopo i numeri che lo descrivono voleva dire
+    // incontrare le risposte prima della domanda. Poi cosa si puo' farci: dal
+    // vincolo che si sente ogni giorno a quello che si nota una volta sola.
     expect(buildPlanFeatures(row()).map((f) => f.key)).toEqual([
+      'database',
       'sync',
       'products',
       'customers',
-      'database',
       'feeds',
       'push',
       'matching',

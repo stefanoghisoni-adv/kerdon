@@ -11,10 +11,14 @@ import {
 
 export interface AccountCardProps {
   planName: string;
+  /** Gli ordini: non una funzione del piano ma un permesso concesso o no. */
+  ordersSyncActive: boolean;
   productsSyncActive: boolean;
   customersSyncActive: boolean;
   /** I feed di catalogo verso le piattaforme: previsti dal piano, o no. */
   productFeedsActive: boolean;
+  /** Il riconoscimento della stessa persona fra dispositivi diversi. */
+  matchingActive: boolean;
   /**
    * Piano da proporre quando i clienti non sono inclusi (nome tecnico). Null
    * quando i clienti sono gia' inclusi o non c'e' un piano superiore da
@@ -34,9 +38,11 @@ export interface AccountCardProps {
 
 export function AccountCard({
   planName,
+  ordersSyncActive,
   productsSyncActive,
   customersSyncActive,
   productFeedsActive,
+  matchingActive,
   customersUpgradePlan,
   feedsUpgradePlan,
   preferences,
@@ -59,6 +65,13 @@ export function AccountCard({
           {t.account.title}
         </Text>
         <MetricRow label={t.account.plan} badge={{ content: planLabel(planName) }} />
+        {/* Gli ordini per primi, sopra i prodotti: sono la base del profitto,
+            e quando mancano non manca una funzione in piu' — mancano i numeri
+            che il merchant e' venuto a vedere. */}
+        <MetricRow
+          label={t.account.ordersSync}
+          badge={syncStatusBadge(ordersSyncActive, t)}
+        />
         <MetricRow
           label={t.account.productsSync}
           badge={syncStatusBadge(productsSyncActive, t)}
@@ -84,6 +97,15 @@ export function AccountCard({
           label={t.account.productFeeds}
           action={feedsUpgrade ? <PlanUpgradeAction plan={feedsUpgradePlan} /> : undefined}
           badge={feedsUpgrade ? undefined : syncStatusBadge(productFeedsActive, t)}
+        />
+        {/* Il matching in viola, come nelle card dei piani: e' lo stesso nome
+            per la stessa cosa, e un colore diverso qui lo farebbe sembrare
+            un'altra. Il viola sta sulla sola scritta — il badge resta verde o
+            grigio come tutte le righe sopra, perche' risponde alla stessa
+            domanda. */}
+        <MetricRow
+          label={<span className="plan-feature-matching">{t.account.matching}</span>}
+          badge={syncStatusBadge(matchingActive, t)}
         />
 
         {/* La lingua sta qui e non in una card sua: e' una preferenza

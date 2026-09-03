@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useFetcher, useLoaderData } from '@remix-run/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Badge,
   Banner,
@@ -31,6 +31,8 @@ import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { loadCustomersReport } from '~/lib/customers/customers.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
 import { defaultRange } from '~/lib/dates/ranges';
+import { PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
+import { TablePagination } from '~/components/Dashboard/TablePagination';
 import { matchesCustomerSearch } from '~/lib/customers/customer-search';
 import { formatMoney } from '~/lib/billing/money';
 import { useLocale, useT } from '~/lib/i18n/context';
@@ -41,6 +43,7 @@ import {
   useBirthdateNotice,
 } from '~/components/Customers/BirthdateMetafieldCard';
 import { BirthdateStatusRow } from '~/components/Customers/BirthdateStatusRow';
+import { ExtraFieldsCard } from '~/components/Customers/ExtraFieldsCard';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   BIRTHDATE_METAFIELD_KEY,
@@ -304,11 +307,30 @@ export default function Customers() {
     row.coveredLines < row.totalLines;
   const filtered = onlyIssues ? rows.filter(needsWork) : rows;
   const hiddenByFilter = rows.length - filtered.length;
-  const visibleRows = filtered.filter((row) => matchesCustomerSearch(row, query));
+  const matching = filtered.filter((row) => matchesCustomerSearch(row, query));
+
+  // La pagina che si sta guardando. Le righe le porta il caricamento tutte
+  // insieme — sono gia' filtrate dal periodo — quindi si impagina qui, dove si
+  // sa anche cosa la ricerca ha lasciato.
+  const [page, setPage] = useState(1);
+  const visibleRows = pageSlice(matching, page, PER_PAGE);
+
+  // Cambiando ricerca o filtro si riparte da pagina 1: restare a pagina 4 su un
+  // risultato che ne ha due mostrerebbe una tabella vuota senza spiegazione.
+  useEffect(() => {
+    setPage(1);
+  }, [query, onlyIssues]);
+
+  // E se le righe si accorciano sotto i piedi — un filtro acceso mentre si e'
+  // in fondo — si arretra invece di restare su una pagina che non c'e' piu'.
+  const totalPages = pageCount(matching.length, PER_PAGE);
+  useEffect(() => {
+    if (totalPages > 0 && page > totalPages) setPage(totalPages);
+  }, [totalPages, page]);
   // Con una ricerca senza risultati la tabella resta vuota: senza dirlo
   // sembrerebbe un negozio senza clienti, mentre e' solo la ricerca a non aver
   // trovato nulla.
-  const noSearchResults = query.trim().length > 0 && visibleRows.length === 0;
+  const noSearchResults = query.trim().length > 0 && matching.length === 0;
 
   return (
     <Page
@@ -370,14 +392,6 @@ export default function Customers() {
             due non finiscono mai a schermo insieme. */}
         {birthdate && <BirthdateMetafieldCard {...birthdate} notice={notice} />}
 
-        {/* Sopra la tabella, dove si guardano i clienti: e' li' che viene in
-            mente di volerne sapere la data di nascita. Sta nello stesso posto
-            del riquadro perche' e' la stessa cosa detta in breve — l'una al
-            posto dell'altro, mai le due insieme. */}
-        {birthdate && notice.view === 'status' && (
-          <BirthdateStatusRow active={birthdate.state === 'in_use'} onOpen={notice.open} />
-        )}
-
         {/* Due filtri, come nei prodotti non idonei: a sinistra, sopra la
             tabella. "Richiedono un intervento" tiene solo le righe con la spia
             gialla — quelle il cui profitto e' calcolato su prodotti senza
@@ -427,13 +441,28 @@ export default function Customers() {
           </InlineGrid>
         )}
 
+        {/* Tabella a sinistra, campi aggiuntivi a destra.
+
+            `alignItems="start"` e' la riga che conta: senza, la griglia allunga
+            la card fino all'altezza della tabella, e accanto a cinquanta righe
+            diventa una colonna vuota alta uno schermo con tre parole in cima.
+            Con `start` la card e' alta quanto il suo contenuto e resta dov'e'. */}
         {unavailable === null && (
+          <InlineGrid
+            columns={{ xs: 1, md: ['twoThirds', 'oneThird'] }}
+            gap="400"
+            alignItems="start"
+          >
           <Card padding="0">
             <Box padding="400">
               <Text as="p" tone="subdued">
                 {t.customers.intro}
               </Text>
             </Box>
+            {/* Le colonne non si riassestano a ogni lettera scritta nella
+                ricerca: le larghezze stanno in `dashboard.css`, dichiarate una
+                volta nell'ordine delle intestazioni qui sotto. */}
+            <div className="stable-columns stable-columns--customers">
             <IndexTable
               resourceName={t.customers.resource}
               itemCount={visibleRows.length}
@@ -547,7 +576,16 @@ export default function Customers() {
                 </IndexTable.Row>
               ))}
             </IndexTable>
+            </div>
+            <TablePagination total={matching.length} page={page} onPage={setPage} />
           </Card>
+
+          {birthdate && notice.view === 'status' && (
+            <ExtraFieldsCard>
+              <BirthdateStatusRow active={birthdate.state === 'in_use'} onOpen={notice.open} />
+            </ExtraFieldsCard>
+          )}
+          </InlineGrid>
         )}
       </BlockStack>
       <Box paddingBlockEnd="800" />
