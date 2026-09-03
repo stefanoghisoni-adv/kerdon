@@ -108,6 +108,12 @@ export interface ShopifyCustomer {
     city?: string | null;
     province?: string | null;
     country?: string | null;
+    /**
+     * La sigla ISO a due lettere (`IT`, `DE`, `CA`). Nome piatto alla REST
+     * perche' e' la forma in cui arriva il payload dei webhook; la corsa
+     * periodica lo chiede a GraphQL come `countryCodeV2` e lo riporta qui.
+     */
+    country_code?: string | null;
     zip?: string | null;
   } | null;
 }
@@ -131,9 +137,16 @@ export interface SupabaseCustomerRow {
   tax_exempt: boolean | null;
   created_at: string | null;
   updated_at: string | null;
-  /** Dall'indirizzo predefinito: paese, via, CAP, regione. */
+  /** Dall'indirizzo predefinito: paese, via, citta', CAP, regione. */
   country: string | null;
+  /**
+   * La sigla ISO del paese, accanto al nome esteso e non al suo posto: le
+   * piattaforme pubblicitarie confrontano `IT`, chi legge la tabella vuole
+   * `Italy`.
+   */
+  country_code: string | null;
   address: string | null;
+  city: string | null;
   zipcode: string | null;
   region: string | null;
   /**

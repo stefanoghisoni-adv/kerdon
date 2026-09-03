@@ -92,13 +92,30 @@ describe("l'indirizzo del cliente", () => {
       city: 'Milano',
       province: 'Lombardia',
       country: 'Italy',
+      country_code: 'IT',
       zip: '20100',
     });
 
     expect(row.country).toBe('Italy');
     expect(row.address).toBe('Via Roma 1');
+    expect(row.city).toBe('Milano');
     expect(row.zipcode).toBe('20100');
     expect(row.region).toBe('Lombardia');
+  });
+
+  it('la citta arriva in tabella, non si legge e si butta', () => {
+    // Shopify la manda da sempre nell'indirizzo predefinito: era l'unico pezzo
+    // dell'indirizzo che il transformer riceveva e non scriveva da nessuna
+    // parte.
+    expect(withAddress({ city: 'Milano', country: 'Italy' }).city).toBe('Milano');
+  });
+
+  it('la sigla del paese sta accanto al nome esteso, non al suo posto', () => {
+    // `IT` e' cio' che le piattaforme pubblicitarie confrontano, `Italy` cio'
+    // che il merchant si aspetta di leggere: servono tutti e due.
+    const row = withAddress({ country: 'Italy', country_code: 'IT' });
+    expect(row.country).toBe('Italy');
+    expect(row.country_code).toBe('IT');
   });
 
   it('la seconda riga entra nello stesso indirizzo', () => {
@@ -111,9 +128,22 @@ describe("l'indirizzo del cliente", () => {
   it('senza indirizzo le colonne restano vuote, non stringhe vuote', () => {
     const row = withAddress(null);
     expect(row.country).toBeNull();
+    expect(row.country_code).toBeNull();
     expect(row.address).toBeNull();
+    expect(row.city).toBeNull();
     expect(row.zipcode).toBeNull();
     expect(row.region).toBeNull();
+  });
+
+  it('profitto e login di Meta e Google non entrano nella riga', () => {
+    // Esistono in tabella ma nessuno li scrive di qui: il profitto si calcola
+    // in SQL sugli ordini, i due login li riempira' l'accesso con le
+    // piattaforme. Scriverli a null vorrebbe dire cancellarli a ogni
+    // sincronizzazione, cioe' proprio a chi li ha appena valorizzati.
+    const row = withAddress({ country: 'Italy' });
+    for (const colonna of ['total_profit', 'fb_login_id', 'google_login_id']) {
+      expect(row).not.toHaveProperty(colonna);
+    }
   });
 
   it('external_id resta vuoto finche non c e da dove leggerlo', () => {

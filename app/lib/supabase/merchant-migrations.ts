@@ -134,8 +134,22 @@ WHERE phone_number = '';
  * pero' viaggia solo se questo numero e' salito. Senza il numero, i progetti
  * gia' collegati resterebbero senza la tabella e il riconoscimento del
  * visitatore non partirebbe mai per nessuno di loro.
+ *
+ * La 8 porta cinque colonne sui clienti: `city` (che Shopify mandava da sempre
+ * e non veniva scritta da nessuna parte), `country_code` accanto al nome
+ * esteso del paese, `total_profit` e i due identificativi dell'accesso con
+ * Meta e Google. Nessun passo esplicito in MERCHANT_MIGRATIONS, e non per
+ * dimenticanza: sono cinque aggiunte pure, senza rinomine ne' cambi di tipo ne'
+ * dati da spostare, e per quelle basta la DDL additiva — che pero' viaggia solo
+ * se questo numero e' salito. Un passo con dentro le stesse ADD COLUMN sarebbe
+ * un doppione da tenere allineato a mano alla prossima modifica.
+ *
+ * Su chi si e' aggiunto `city` a mano prima di noi non cambia niente: la DDL e'
+ * ADD COLUMN IF NOT EXISTS e il tipo dichiarato e' TEXT, lo stesso che avrebbe
+ * scelto chiunque per una citta'. La colonna esistente resta com'e', coi dati
+ * dentro.
  */
-export const LATEST_SCHEMA_VERSION = 7;
+export const LATEST_SCHEMA_VERSION = 8;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

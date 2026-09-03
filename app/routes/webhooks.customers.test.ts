@@ -134,17 +134,22 @@ describe('webhook customers/create — consenso', () => {
       'first_name',
       'last_name',
       'country',
+      'country_code',
       'address',
+      'city',
       'zipcode',
       'region',
       'date_of_birth',
       'external_id',
+      'fb_login_id',
+      'google_login_id',
       'note',
     ]) {
       expect(cliente.payload[colonna]).toBeNull();
     }
     // I numeri del negozio non si toccano: sono fatti suoi, non della persona.
     expect(cliente.payload).not.toHaveProperty('total_spent');
+    expect(cliente.payload).not.toHaveProperty('total_profit');
     expect(cliente.payload).not.toHaveProperty('orders_count');
     expect(cliente.payload).not.toHaveProperty('shopify_customer_id');
 

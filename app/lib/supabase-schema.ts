@@ -93,20 +93,47 @@ const CUSTOMERS_COLUMNS: Column[] = [
   // Due colonne con lo stesso nome e significati diversi sono un errore che si
   // scopre tardi.
   { name: 'country', type: 'TEXT' },
+  // La sigla ISO a due lettere ACCANTO al nome esteso, non al suo posto: le
+  // piattaforme pubblicitarie confrontano `IT`, mentre chi apre la tabella si
+  // aspetta di leggere `Italy`. Tenerne una sola costringerebbe a ricavare
+  // l'altra, e per farlo servirebbe un elenco di nazioni aggiornato a mano
+  // dentro l'app — che prima o poi sbaglia proprio sui paesi meno frequenti.
+  { name: 'country_code', type: 'TEXT' },
   { name: 'address', type: 'TEXT' },
+  // La citta' arrivava gia' da Shopify e non veniva scritta da nessuna parte:
+  // era l'unico pezzo dell'indirizzo che si leggeva e si buttava via.
+  { name: 'city', type: 'TEXT' },
   { name: 'zipcode', type: 'TEXT' },
   { name: 'region', type: 'TEXT' },
-  // Le due che Shopify non ha come campi propri: restano vuote finche' non si
-  // decide da quale metafield leggerle. La colonna c'e' lo stesso, cosi' chi
-  // costruisce un pubblico o una integrazione trova il posto gia' pronto e non
-  // deve rifare una migrazione per un campo solo.
+  // Le colonne che Shopify non ha come campi propri: restano vuote finche' non
+  // c'e' da dove leggerle — un metafield da scegliere, o un accesso che ancora
+  // non esiste. Ci sono lo stesso, cosi' chi costruisce un pubblico o una
+  // integrazione trova il posto gia' pronto e non deve rifare una migrazione
+  // per un campo solo.
   { name: 'external_id', type: 'TEXT' },
+  // Gli identificativi che Meta e Google danno alla persona quando entra col
+  // loro accesso (per Google e' il claim `sub` del token). Restano vuote
+  // finche' non ci sara' l'accesso con Meta e Google: oggi quel dato l'app non
+  // lo vede mai, e non c'e' niente da cui dedurlo. La colonna c'e' lo stesso
+  // per la stessa ragione di `external_id` qui sopra — il posto e' pronto, e
+  // il giorno in cui arrivera' il login non servira' una migrazione per due
+  // campi.
+  { name: 'fb_login_id', type: 'TEXT' },
+  { name: 'google_login_id', type: 'TEXT' },
   // TEXT e non DATE: il formato voluto e' `YYYYMMDD` senza separatori, che e'
   // quello che le piattaforme pubblicitarie confrontano. Un DATE lo
   // restituirebbe sempre come 1985-04-23, e chi legge dovrebbe rifare la
   // conversione ogni volta.
   { name: 'date_of_birth', type: 'TEXT' },
   { name: 'total_spent', type: 'NUMERIC(10, 2)' },
+  // Il profitto del cliente: la colonna c'e', il valore per ora no, e non e'
+  // una dimenticanza. Il profitto nasce dagli ordini e dai costi dei prodotti,
+  // e si calcola in SQL al momento della lettura (vedi `customers-query`): e'
+  // il motivo per cui compilare un costo oggi corregge il profitto di ieri.
+  // Scriverlo qui vorrebbe dire congelare un numero che cambia da solo, e
+  // mostrare a chi legge la tabella quello di ieri. Resta vuota finche' non ci
+  // sara' un motivo per fissarlo davvero.
+  { name: 'total_profit', type: 'NUMERIC(10, 2)' },
   { name: 'orders_count', type: 'INTEGER' },
   { name: 'customer_state', type: 'TEXT' },
   { name: 'tags', type: 'TEXT[]' },

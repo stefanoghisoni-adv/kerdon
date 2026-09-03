@@ -269,6 +269,15 @@ describe('Shopify API Client (GraphQL)', () => {
               taxExempt: false,
               createdAt: '2026-01-01T00:00:00Z',
               updatedAt: '2026-02-01T00:00:00Z',
+              defaultAddress: {
+                address1: 'Via Roma 1',
+                address2: null,
+                city: 'Milano',
+                province: 'Lombardia',
+                country: 'Italy',
+                countryCodeV2: 'IT',
+                zip: '20100',
+              },
             },
           ],
         },
@@ -287,6 +296,20 @@ describe('Shopify API Client (GraphQL)', () => {
     expect(c.orders_count).toBe(3);
     expect(c.state).toBe('enabled');
     expect(c.tags).toBe('VIP');
+    // L'indirizzo esce nella forma piatta della REST, che e' quella che il
+    // transformer legge anche dal payload dei webhook: una chiave diversa qui
+    // vorrebbe dire colonne piene dal webhook e vuote dalla corsa periodica.
+    expect(c.default_address).toEqual({
+      address1: 'Via Roma 1',
+      address2: null,
+      city: 'Milano',
+      province: 'Lombardia',
+      country: 'Italy',
+      // `countryCodeV2` e' il campo GraphQL che restituisce la sigla a due
+      // lettere, l'unica forma che le piattaforme pubblicitarie confrontano.
+      country_code: 'IT',
+      zip: '20100',
+    });
   });
 
   // ─── Conteggi, inventario, negozio ───

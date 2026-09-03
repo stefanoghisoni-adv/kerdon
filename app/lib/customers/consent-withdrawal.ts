@@ -34,8 +34,8 @@ import { USERS_TABLE } from '~/lib/tracking/users';
 /**
  * Le colonne che dicono CHI e', azzerate.
  *
- * Non ci sono `total_spent`, `orders_count`, le date e lo stato: quelli
- * raccontano il negozio, non la persona. Non c'e' `shopify_customer_id`, che e'
+ * Non ci sono `total_spent`, `total_profit`, `orders_count`, le date e lo
+ * stato: quelli raccontano il negozio, non la persona. Non c'e' `shopify_customer_id`, che e'
  * la chiave con cui la riga si ritrova — e senza, ritirare il consenso due
  * volte creerebbe due righe orfane invece di aggiornare la stessa.
  */
@@ -46,10 +46,23 @@ export const WITHDRAWN_CUSTOMER_FIELDS = {
   first_name: null,
   last_name: null,
   country: null,
+  country_code: null,
   address: null,
+  city: null,
   zipcode: null,
   region: null,
   date_of_birth: null,
+  /**
+   * I due identificativi dell'accesso con Meta e Google.
+   *
+   * Oggi sono sempre vuoti — il login non c'e' ancora — ma stanno in elenco da
+   * subito: il giorno in cui cominceranno a riempirsi, chi ritira il consenso
+   * non deve dipendere da qualcuno che si ricordi di aggiungerli qui. Sono
+   * l'identita' pubblicitaria della persona sulle due piattaforme, che e'
+   * esattamente cio' che ha smesso di autorizzare.
+   */
+  fb_login_id: null,
+  google_login_id: null,
   /**
    * Anche il legame col browser se ne va.
    *

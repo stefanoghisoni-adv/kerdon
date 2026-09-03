@@ -17,11 +17,21 @@ describe('cosa resta di un cliente che ritira il consenso', () => {
       'first_name',
       'last_name',
       'country',
+      // Un indirizzo e' un dato personale per intero: la sigla del paese e la
+      // citta' ne fanno parte come la via.
+      'country_code',
       'address',
+      'city',
       'zipcode',
       'region',
       'date_of_birth',
       'external_id',
+      // Oggi sempre vuoti, il login con Meta e Google non c'e' ancora. Stanno
+      // in elenco da subito perche' il giorno in cui cominceranno a riempirsi
+      // il ritiro del consenso non deve dipendere da chi si ricorda di
+      // aggiungerli: sono l'identita' pubblicitaria della persona.
+      'fb_login_id',
+      'google_login_id',
       'note',
     ] as const;
 
@@ -39,7 +49,15 @@ describe('cosa resta di un cliente che ritira il consenso', () => {
   // Quanti clienti, quanto hanno speso: sono fatti del negozio, e restano veri
   // anche senza sapere di chi fossero.
   it('i numeri del negozio restano', () => {
-    for (const colonna of ['total_spent', 'orders_count', 'created_at', 'customer_state']) {
+    for (const colonna of [
+      'total_spent',
+      // Il profitto e' un numero del negozio, non della persona: resta vero
+      // anche senza sapere di chi fosse.
+      'total_profit',
+      'orders_count',
+      'created_at',
+      'customer_state',
+    ]) {
       expect(WITHDRAWN_CUSTOMER_FIELDS).not.toHaveProperty(colonna);
     }
   });

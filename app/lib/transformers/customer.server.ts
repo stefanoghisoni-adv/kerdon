@@ -48,10 +48,19 @@ export function transformCustomer(customer: ShopifyCustomer): SupabaseCustomerRo
     created_at: customer.created_at ?? null,
     updated_at: customer.updated_at ?? null,
     country: address?.country || null,
+    // La sigla ISO accanto al nome esteso: `IT` e' cio' che le piattaforme
+    // pubblicitarie confrontano, `Italy` cio' che il merchant si aspetta di
+    // leggere. Dedurre l'una dall'altro vorrebbe dire tenersi in casa un
+    // elenco di nazioni, quando Shopify la sigla ce l'ha gia'.
+    country_code: address?.country_code || null,
     // Via e civico in una colonna sola, con la seconda riga in coda quando c'e'
     // (interno, scala, presso). Sono due campi su Shopify ma un indirizzo solo:
     // separati costringerebbero chiunque li legga a ricomporli.
     address: [address?.address1, address?.address2].filter(Boolean).join(', ') || null,
+    // La citta' Shopify la manda da sempre, in ogni payload: prima si leggeva
+    // e si buttava via, ed era l'unico pezzo dell'indirizzo a non arrivare
+    // dall'altra parte.
+    city: address?.city || null,
     zipcode: address?.zip || null,
     region: address?.province || null,
     // Shopify non ha questi due come campi del cliente: la colonna esiste, il
@@ -59,6 +68,12 @@ export function transformCustomer(customer: ShopifyCustomer): SupabaseCustomerRo
     // `external_id`, per dire — sarebbe peggio di lasciarla vuota: chi la legge
     // crederebbe che sia il suo identificativo.
     external_id: null,
+    // `fb_login_id`, `google_login_id` e `total_profit` esistono in tabella ma
+    // NON compaiono qui, ed e' voluto: i primi due li riempira' l'accesso con
+    // Meta e Google, il terzo si calcola in SQL sugli ordini. Metterli nella
+    // riga a null vorrebbe dire cancellarli a ogni sincronizzazione, cioe'
+    // proprio a chi li ha appena scritti.
+    //
     // La data di nascita compare nella riga solo quando la si e' davvero
     // chiesta a Shopify. Il payload dei webhook i metafield non li porta: se
     // finisse comunque nella riga con dentro null, ogni modifica di un cliente

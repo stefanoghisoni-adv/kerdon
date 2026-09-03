@@ -139,3 +139,32 @@ describe('la versione 7 porta i browser conosciuti', () => {
     expect(sql).not.toContain('CREATE TABLE IF NOT EXISTS customers');
   });
 });
+
+describe('la versione 8 completa l anagrafica del cliente', () => {
+  it('chi si era collegato prima riceve le cinque colonne nuove', () => {
+    // Sono aggiunte pure, quindi non hanno un passo esplicito: le porta la DDL
+    // idempotente, che pero' viaggia solo se il numero di versione e' salito.
+    // Senza, le vedrebbero solo i negozi che si collegano da adesso in poi.
+    const sql = buildSchemaUpdateSQL(7, true, true)!;
+    for (const column of ['city', 'country_code', 'total_profit', 'fb_login_id', 'google_login_id']) {
+      expect(sql).toContain(`ADD COLUMN IF NOT EXISTS ${column} `);
+    }
+  });
+
+  it('nessun passo esplicito: cinque ADD COLUMN sarebbero un doppione', () => {
+    // I passi di MERCHANT_MIGRATIONS servono a cio' che una DDL additiva non
+    // sa fare — rinominare, cambiare tipo, spostare dati. Qui non c'e' niente
+    // del genere, e un passo con dentro le stesse ADD COLUMN sarebbe solo una
+    // copia da tenere allineata a mano.
+    expect(MERCHANT_MIGRATIONS.some((m) => m.version === 8)).toBe(false);
+  });
+
+  it('su chi si era aggiunto city a mano non cambia niente', () => {
+    // ADD COLUMN IF NOT EXISTS su una colonna TEXT gia' presente e' un'operazione
+    // a vuoto: la colonna resta com'e', coi dati dentro.
+    const sql = buildSchemaUpdateSQL(7, true)!;
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS city TEXT');
+    expect(sql).not.toMatch(/DROP\s+COLUMN/i);
+    expect(sql).not.toMatch(/ALTER COLUMN city/i);
+  });
+});

@@ -665,6 +665,7 @@ export class ShopifyAPIClient {
             city: string | null;
             province: string | null;
             country: string | null;
+            countryCodeV2: string | null;
             zip: string | null;
           } | null;
           metafield?: { value: string | null } | null;
@@ -680,7 +681,7 @@ export class ShopifyAPIClient {
             amountSpent { amount }
             numberOfOrders
             state tags note verifiedEmail taxExempt createdAt updatedAt
-            defaultAddress { address1 address2 city province country zip }
+            defaultAddress { address1 address2 city province country countryCodeV2 zip }
             ${birthdateField}
           }
         }
@@ -730,6 +731,11 @@ export class ShopifyAPIClient {
               city: c.defaultAddress.city,
               province: c.defaultAddress.province,
               country: c.defaultAddress.country,
+              // `countryCodeV2` e' il campo che restituisce la sigla a due
+              // lettere; qui prende il nome piatto della REST perche' il
+              // transformer legge la stessa chiave anche dal payload dei
+              // webhook, che quella forma la manda tuttora.
+              country_code: c.defaultAddress.countryCodeV2,
               zip: c.defaultAddress.zip,
             }
           : null,

@@ -45,6 +45,50 @@ describe('supabase-schema', () => {
   });
 });
 
+/**
+ * Le colonne dei clienti che non arrivano dall'anagrafica di Shopify, piu' la
+ * citta' che ci arrivava e non veniva scritta da nessuna parte.
+ */
+describe('colonne dei clienti', () => {
+  it('la citta e una colonna, non un dato che si legge e si butta', () => {
+    // Shopify la manda in ogni payload dell'indirizzo predefinito: era l'unico
+    // pezzo dell'indirizzo a non arrivare dall'altra parte.
+    expect(CUSTOMERS_TABLE_SQL).toContain('city TEXT');
+    expect(CUSTOMERS_TABLE_SQL).toContain('ADD COLUMN IF NOT EXISTS city TEXT');
+  });
+
+  it('la sigla del paese sta ACCANTO al nome esteso, non al suo posto', () => {
+    // Le piattaforme pubblicitarie confrontano `IT`, chi apre la tabella si
+    // aspetta `Italy`: tenerne una sola vorrebbe dire dedurre l'altra da un
+    // elenco di nazioni scritto a mano.
+    expect(CUSTOMERS_TABLE_SQL).toContain('country TEXT');
+    expect(CUSTOMERS_TABLE_SQL).toContain('country_code TEXT');
+  });
+
+  it('il profitto ha la colonna ma non il valore', () => {
+    // Si calcola in SQL sugli ordini al momento della lettura: scriverlo qui
+    // congelerebbe un numero che cambia da solo ogni volta che un costo viene
+    // compilato.
+    expect(CUSTOMERS_TABLE_SQL).toContain('total_profit NUMERIC(10, 2)');
+  });
+
+  it('i login di Meta e Google hanno il posto pronto prima del login', () => {
+    // Restano vuoti finche' non ci sara' l'accesso con le due piattaforme: la
+    // colonna c'e' per non dover fare una migrazione per due campi.
+    expect(CUSTOMERS_TABLE_SQL).toContain('fb_login_id TEXT');
+    expect(CUSTOMERS_TABLE_SQL).toContain('google_login_id TEXT');
+  });
+
+  it('arrivano anche su una tabella gia esistente, senza toccare i dati', () => {
+    // Sono aggiunte pure: la DDL additiva basta, e su chi si era gia' aggiunto
+    // `city` a mano la ADD COLUMN IF NOT EXISTS non fa niente.
+    for (const column of ['city', 'country_code', 'total_profit', 'fb_login_id', 'google_login_id']) {
+      expect(CUSTOMERS_TABLE_SQL).toContain(`ADD COLUMN IF NOT EXISTS ${column} `);
+    }
+    expect(CUSTOMERS_TABLE_SQL).not.toMatch(/DROP\s+(TABLE|COLUMN)/i);
+  });
+});
+
 describe('tabelle degli ordini', () => {
   const sql = buildOrdersSchemaSQL();
 
