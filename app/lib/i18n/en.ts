@@ -978,39 +978,4 @@ export const en: typeof it = {
     notConnected: "Connect your database to see the catalogue.",
   },
   /** The page where the merchant collects privacy requests. */
-  privacy: {
-    title: "Privacy requests",
-    subtitle: "Access and deletion requests received for this store",
-    intro:
-      "When someone asks for a copy of their data, we prepare it and you can download it here for thirty days. Deletion requests we carry out ourselves: the list shows you they are done.",
-    emptyTitle: "No requests yet",
-    emptyBody:
-      "Your customers' privacy requests will appear here as soon as they arrive, each with its outcome.",
-    resourceSingular: "request",
-    resourcePlural: "requests",
-    colRequest: "Request",
-    colReceived: "Received",
-    colStatus: "Status",
-    colAvailable: "Available until",
-    download: "Download",
-    retentionTitle: "Customers who opt out of marketing",
-    retentionBody:
-      "When a customer withdraws marketing consent, we remove from your database the details that identify them: name, email, phone, address and date of birth. We also remove the link between them and their visits to the site.",
-    retentionKept:
-      "Your store's figures stay — how many orders, how much they spent — because they describe your sales, not the person: your totals do not change.",
-    retentionBack:
-      "If the customer opts back in, their details return from Shopify at the next sync.",
-    topics: {
-      "customers/data_request": "Copy of the data",
-      "customers/redact": "Customer deletion",
-      "shop/redact": "Store deletion",
-    },
-    statuses: {
-      queued: "Waiting",
-      processing: "In progress",
-      completed: "Completed",
-      failed: "Will retry",
-      dead_letter: "Needs attention",
-    },
-  },
 };

@@ -1166,49 +1166,6 @@ export const it = {
     notConnected: "Collega il database per vedere il catalogo.",
   },
   /** La pagina da cui il merchant ritira le richieste privacy. */
-  privacy: {
-    title: "Richieste privacy",
-    subtitle: "Le richieste di accesso e di cancellazione ricevute per questo negozio",
-    intro:
-      "Quando una persona chiede una copia dei suoi dati, la prepariamo e la trovi qui da scaricare per trenta giorni. Le richieste di cancellazione le eseguiamo da soli: in elenco vedi che sono state completate.",
-    emptyTitle: "Nessuna richiesta finora",
-    emptyBody:
-      "Le richieste privacy dei tuoi clienti compariranno qui appena arrivano, con l'esito di ognuna.",
-    resourceSingular: "richiesta",
-    resourcePlural: "richieste",
-    colRequest: "Richiesta",
-    colReceived: "Ricevuta il",
-    colStatus: "Stato",
-    colAvailable: "Disponibile fino al",
-    download: "Scarica",
-    /**
-     * Cosa succede quando qualcuno si disiscrive.
-     *
-     * Il merchant deve poterlo sapere senza chiederlo: e' una cosa che
-     * avviene da sola sui suoi dati, e trovarla scritta dopo — o non trovarla
-     * affatto — e' il modo in cui nasce una sorpresa. Detto per cio' che
-     * cambia per lui, non per come e' fatto dentro.
-     */
-    retentionTitle: "Chi si disiscrive dal marketing",
-    retentionBody:
-      "Se un cliente ritira il consenso al marketing, togliamo dal tuo database i dati con cui si riconosce chi e': nome, email, telefono, indirizzo e data di nascita. Togliamo anche il collegamento fra lui e le visite al sito.",
-    retentionKept:
-      "Restano i numeri del negozio — quanti ordini, quanto ha speso — perche' raccontano le tue vendite, non la persona: i tuoi totali non cambiano.",
-    retentionBack:
-      "Se il cliente torna a dare il consenso, alla sincronizzazione successiva i suoi dati tornano al loro posto da Shopify.",
-    topics: {
-      "customers/data_request": "Copia dei dati",
-      "customers/redact": "Cancellazione cliente",
-      "shop/redact": "Cancellazione negozio",
-    },
-    statuses: {
-      queued: "In attesa",
-      processing: "In corso",
-      completed: "Completata",
-      failed: "Da riprovare",
-      dead_letter: "Richiede attenzione",
-    },
-  },
   // Nessun `as const`: con i tipi letterali l'inglese non potrebbe scrivere
   // niente di diverso dall'italiano, che e' esattamente il suo mestiere.
 };
