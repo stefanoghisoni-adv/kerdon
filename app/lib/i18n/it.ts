@@ -1163,7 +1163,7 @@ export const it = {
       warnedCount: (n: number) =>
         n === 1 ? "1 da sistemare" : `${n} da sistemare`,
       okBadge: "Pronto",
-      warnBadge: "Da sistemare",
+      warnBadge: "Migliorabile",
       blockedBadge: "Escluso",
     },
     issues: {
