@@ -26,12 +26,8 @@ import { applyMerchantSchemaUpdate } from '../supabase/apply-schema-update.serve
 import { findPlanByName } from '../billing/find-plan.server';
 import { can, denialOf } from '~/lib/authz/capabilities';
 import { shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
-import {
-  WITHDRAWN_CUSTOMER_FIELDS,
-  WITHDRAWN_CUSTOMER_MINIMUM,
-  isUnknownColumn,
-  unlinkBrowsersOf,
-} from '~/lib/customers/consent-withdrawal';
+import { WITHDRAWN_CUSTOMER_FIELDS } from '~/lib/customers/consent-withdrawal';
+import { isUnknownColumn } from '~/lib/supabase/column-errors';
 import { birthdateMetafieldOf, type MetafieldKey } from '~/lib/customers/birthdate-metafield';
 import {
   birthdateWritebackTarget,
@@ -408,32 +404,19 @@ async function syncCustomers(
     // perche' il proxy decide il 403 leggendo proprio questa colonna. Una
     // `update` non crea righe: sui clienti mai sincronizzati e' un no-op.
     if (revokedIds.length > 0) {
-      const revoke = (fields: Record<string, unknown>) =>
-        runReturningRows<{ shopify_customer_id?: number | null }>(
-          supabase
-            .from(tableName)
-            .update(fields)
-            .in('shopify_customer_id', revokedIds) as unknown as ReturningBuilder,
-          'shopify_customer_id',
-        );
-
-      let { rows: suspendedRows, error: revokeError } = await revoke(WITHDRAWN_CUSTOMER_FIELDS);
-
-      // Una tabella nata da una versione precedente puo' non avere tutte quelle
-      // colonne, e PostgREST rifiuta l'intera update per una sola che non
-      // conosce. Meglio uno svuotamento rimandato che perdere anche la
-      // marcatura del consenso, che e' cio' su cui il proxy nega la lettura.
-      if (isUnknownColumn(revokeError)) {
-        console.warn(
-          `Tabella ${tableName} senza tutte le colonne: svuotamento parziale alla revoca (${revokeError?.message ?? ''})`,
-        );
-        ({ rows: suspendedRows, error: revokeError } = await revoke(WITHDRAWN_CUSTOMER_MINIMUM));
-      }
-
-      // Il legame fra browser e persona: svuotare la riga del cliente e
-      // lasciarlo intatto non avrebbe cambiato niente, perche' la persona
-      // sarebbe rimasta ricollegabile alle sue visite dal lato opposto.
-      if (!revokeError) await unlinkBrowsersOf(supabase, revokedIds);
+      // Una sola colonna, e nessun dato cancellato: la riga resta la fotografia
+      // del giorno in cui il consenso c'era. Quello che cambia e' l'uso — da qui
+      // in avanti la sincronizzazione non la aggiorna piu' e il proxy si rifiuta
+      // di servirla. Il perche' per esteso sta in `consent-withdrawal.ts`.
+      const { rows: suspendedRows, error: revokeError } = await runReturningRows<{
+        shopify_customer_id?: number | null;
+      }>(
+        supabase
+          .from(tableName)
+          .update(WITHDRAWN_CUSTOMER_FIELDS)
+          .in('shopify_customer_id', revokedIds) as unknown as ReturningBuilder,
+        'shopify_customer_id',
+      );
 
       if (revokeError) {
         // Non fatale: gli opt-in sono gia' scritti, la corsa successiva ritenta.

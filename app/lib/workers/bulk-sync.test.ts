@@ -780,7 +780,7 @@ describe('Initial bulk sync processor', () => {
     expect(customerIds).toEqual([1, 3]);
   });
 
-  it('chi ha revocato non entra, e cio che lo identificava viene svuotato', async () => {
+  it('chi ha revocato non entra, e la sua riga resta dov e', async () => {
     const mockShop = {
       id: 'shop-1',
       shopDomain: 'test-shop.myshopify.com',
@@ -844,21 +844,15 @@ describe('Initial bulk sync processor', () => {
     // ...e in una sola chiamata perdono il consenso e i dati che li
     // identificavano: una riga marcata ma intatta restava leggibile per sempre
     // a chi ha le credenziali del database del merchant.
-    const cliente = revokedUpdates.find((u) => u.table === 'customers')!;
+    // Una sola scrittura, su una colonna sola: non si cancella niente. Chi si
+    // disiscrive dalle comunicazioni non ha chiesto di sparire dagli archivi
+    // del negozio, e a impedire che il dato venga usato e' il rifiuto del
+    // proxy, non la cancellazione.
+    expect(revokedUpdates).toHaveLength(1);
+    const cliente = revokedUpdates[0];
+    expect(cliente.table).toBe('customers');
     expect(cliente.ids).toEqual([2, 4]);
-    expect(cliente.payload.accepts_marketing).toBe(false);
-    expect(cliente.payload.email_address).toBeNull();
-    expect(cliente.payload.first_name).toBeNull();
-    expect(cliente.payload.external_id).toBeNull();
-    // I numeri del negozio restano: raccontano il negozio, non la persona.
-    expect(cliente.payload).not.toHaveProperty('total_spent');
-
-    // E il legame col browser si scioglie: senza, la persona sarebbe rimasta
-    // ricollegabile alle sue visite dal lato opposto.
-    const browser = revokedUpdates.find((u) => u.table === 'users')!;
-    expect(browser).toBeDefined();
-    expect(browser.payload).toEqual({ shopify_customer_id: null });
-    expect(browser.ids).toEqual([2, 4]);
+    expect(cliente.payload).toEqual({ accepts_marketing: false });
   });
 
   // La data di nascita nei due versi. Il merchant puo' scriverla a mano nella

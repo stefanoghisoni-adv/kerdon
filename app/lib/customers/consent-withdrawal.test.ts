@@ -1,87 +1,56 @@
 import { describe, it, expect } from 'vitest';
-import {
-  WITHDRAWN_CUSTOMER_FIELDS,
-  WITHDRAWN_CUSTOMER_MINIMUM,
-  isUnknownColumn,
-} from './consent-withdrawal';
+import { WITHDRAWN_CUSTOMER_FIELDS } from './consent-withdrawal';
 
-describe('cosa resta di un cliente che ritira il consenso', () => {
-  it('il consenso a false: e cio su cui la lettura viene negata', () => {
+/**
+ * La regola, decisa dal proprietario del progetto: **non si cancella niente**.
+ *
+ * Chi ritira il consenso al marketing non ha chiesto di sparire dagli archivi
+ * del negozio: ha chiesto che non lo si usi piu' per il marketing. I dati gia'
+ * sincronizzati restano dove sono; cambia l'uso, non la conservazione — la
+ * sincronizzazione smette di aggiornarli e il proxy si rifiuta di servirli.
+ *
+ * Una versione precedente svuotava le colonne identificative. Questi test
+ * esistono perche' quel comportamento non torni per sbaglio.
+ */
+describe('cosa comporta ritirare il consenso', () => {
+  it('una colonna sola: il consenso a false', () => {
+    expect(WITHDRAWN_CUSTOMER_FIELDS).toEqual({ accepts_marketing: false });
+  });
+
+  // E' quella su cui il proxy nega la lettura: senza, il rifiuto non avrebbe
+  // niente su cui appoggiarsi.
+  it('e proprio quella su cui si decide il rifiuto', () => {
     expect(WITHDRAWN_CUSTOMER_FIELDS.accepts_marketing).toBe(false);
   });
 
-  it('tutto cio che dice chi e viene azzerato', () => {
-    const identificano = [
+  it('nessun dato della persona viene toccato', () => {
+    const dellaPersona = [
       'email_address',
       'phone_number',
       'first_name',
       'last_name',
       'country',
-      // Un indirizzo e' un dato personale per intero: la sigla del paese e la
-      // citta' ne fanno parte come la via.
       'country_code',
-      'address',
       'city',
+      'address',
       'zipcode',
       'region',
       'date_of_birth',
       'external_id',
-      // Oggi sempre vuoti, il login con Meta e Google non c'e' ancora. Stanno
-      // in elenco da subito perche' il giorno in cui cominceranno a riempirsi
-      // il ritiro del consenso non deve dipendere da chi si ricorda di
-      // aggiungerli: sono l'identita' pubblicitaria della persona.
       'fb_login_id',
       'google_login_id',
       'note',
-    ] as const;
+    ];
 
-    for (const colonna of identificano) {
-      expect(WITHDRAWN_CUSTOMER_FIELDS).toHaveProperty(colonna, null);
-    }
-  });
-
-  // La riga deve restare, e restare ritrovabile: senza chiave, ritirare il
-  // consenso due volte lascerebbe righe orfane invece di aggiornare la stessa.
-  it('la chiave della riga non si tocca', () => {
-    expect(WITHDRAWN_CUSTOMER_FIELDS).not.toHaveProperty('shopify_customer_id');
-  });
-
-  // Quanti clienti, quanto hanno speso: sono fatti del negozio, e restano veri
-  // anche senza sapere di chi fossero.
-  it('i numeri del negozio restano', () => {
-    for (const colonna of [
-      'total_spent',
-      // Il profitto e' un numero del negozio, non della persona: resta vero
-      // anche senza sapere di chi fosse.
-      'total_profit',
-      'orders_count',
-      'created_at',
-      'customer_state',
-    ]) {
+    for (const colonna of dellaPersona) {
       expect(WITHDRAWN_CUSTOMER_FIELDS).not.toHaveProperty(colonna);
     }
   });
 
-  it('il ripiego marca il consenso e nient altro', () => {
-    expect(WITHDRAWN_CUSTOMER_MINIMUM).toEqual({ accepts_marketing: false });
-  });
-});
-
-// Serve a distinguere "questa tabella e' vecchia" da un guasto vero: solo nel
-// primo caso ha senso riprovare con il ripiego.
-describe('isUnknownColumn', () => {
-  it('riconosce il modo di PostgREST e quello di Postgres', () => {
-    expect(isUnknownColumn({ code: 'PGRST204' })).toBe(true);
-    expect(isUnknownColumn({ code: '42703' })).toBe(true);
-    expect(
-      isUnknownColumn({ message: "Could not find the 'external_id' column of 'customers'" }),
-    ).toBe(true);
-    expect(isUnknownColumn({ message: 'column "date_of_birth" does not exist' })).toBe(true);
-  });
-
-  it('un guasto vero non e una colonna mancante', () => {
-    expect(isUnknownColumn(null)).toBe(false);
-    expect(isUnknownColumn({ code: '57014', message: 'statement timeout' })).toBe(false);
-    expect(isUnknownColumn({ code: '42501', message: 'permission denied' })).toBe(false);
+  // Senza chiave la riga non si ritrova, e i totali non raccontano la persona.
+  it('nemmeno la chiave e i numeri del negozio', () => {
+    for (const colonna of ['shopify_customer_id', 'total_spent', 'orders_count']) {
+      expect(WITHDRAWN_CUSTOMER_FIELDS).not.toHaveProperty(colonna);
+    }
   });
 });

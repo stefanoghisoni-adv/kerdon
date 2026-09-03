@@ -91,7 +91,7 @@ describe('webhook customers/create — consenso', () => {
     expect(res.status).toBe(200);
   });
 
-  it('cliente unsubscribed → svuota cio che lo identifica, e non lo inserisce', async () => {
+  it('cliente unsubscribed → si marca il consenso, e non si cancella niente', async () => {
     let upsertCalled = false;
     const updates: Array<{ table: string; payload: any; id: any }> = [];
     (createSupabaseClient as any).mockReturnValue({
@@ -121,84 +121,16 @@ describe('webhook customers/create — consenso', () => {
     expect(upsertCalled).toBe(false);
     expect(res.status).toBe(200);
 
-    const cliente = updates.find((u) => u.table === 'customers')!;
-    expect(cliente.id).toBe(2);
-
-    // Il consenso a false, che e' cio' su cui il proxy nega la lettura...
-    expect(cliente.payload.accepts_marketing).toBe(false);
-    // ...e con lui tutto quello che diceva chi fosse: restava li' per sempre,
-    // leggibile da chiunque avesse le credenziali del database del merchant.
-    for (const colonna of [
-      'email_address',
-      'phone_number',
-      'first_name',
-      'last_name',
-      'country',
-      'country_code',
-      'address',
-      'city',
-      'zipcode',
-      'region',
-      'date_of_birth',
-      'external_id',
-      'fb_login_id',
-      'google_login_id',
-      'note',
-    ]) {
-      expect(cliente.payload[colonna]).toBeNull();
-    }
-    // I numeri del negozio non si toccano: sono fatti suoi, non della persona.
-    expect(cliente.payload).not.toHaveProperty('total_spent');
-    expect(cliente.payload).not.toHaveProperty('total_profit');
-    expect(cliente.payload).not.toHaveProperty('orders_count');
-    expect(cliente.payload).not.toHaveProperty('shopify_customer_id');
-
-    // E il legame col browser si scioglie: svuotare la riga del cliente e
-    // lasciarlo intatto avrebbe lasciato la persona ricollegabile dall'altro
-    // lato.
-    const browser = updates.find((u) => u.table === 'users')!;
-    expect(browser).toBeDefined();
-    expect(browser.payload).toEqual({ shopify_customer_id: null });
+    // Una sola scrittura, su una sola tabella e una sola colonna: chi si
+    // disiscrive dalle comunicazioni non ha chiesto di sparire dagli archivi
+    // del negozio. A impedire che il dato venga usato e' il rifiuto del proxy,
+    // non la cancellazione.
+    expect(updates).toHaveLength(1);
+    expect(updates[0].table).toBe('customers');
+    expect(updates[0].id).toBe(2);
+    expect(updates[0].payload).toEqual({ accepts_marketing: false });
   });
 
-  // Le tabelle del merchant nascono al collegamento e non cambiano da sole: una
-  // creata da una versione precedente puo' non avere tutte le colonne, e
-  // PostgREST rifiuta l'intera update per una sola che non conosce. Perdere
-  // anche la marcatura del consenso sarebbe peggio del ritardo.
-  it('tabella senza tutte le colonne: il consenso viene marcato lo stesso', async () => {
-    const updates: Array<{ table: string; payload: any; id: any }> = [];
-    (createSupabaseClient as any).mockReturnValue({
-      from: (table: string) => ({
-        upsert: async () => ({ error: null }),
-        update: (payload: any) => ({
-          eq: async (_col: string, id: any) => {
-            updates.push({ table, payload, id });
-            return updates.length === 1
-              ? {
-                  error: {
-                    code: 'PGRST204',
-                    message: "Could not find the 'external_id' column of 'customers'",
-                  },
-                }
-              : { error: null, count: 1 };
-          },
-        }),
-      }),
-    });
-
-    const res = await action({
-      request: req({
-        id: 3,
-        email: 'opt-out@example.com',
-        email_marketing_consent: { state: 'unsubscribed' },
-      }),
-    } as any);
-
-    expect(res.status).toBe(200);
-    // Primo tentativo rifiutato, secondo con la sola marcatura, poi il browser.
-    expect(updates.map((u) => u.table)).toEqual(['customers', 'customers', 'users']);
-    expect(updates[1].payload).toEqual({ accepts_marketing: false });
-  });
 
   it('entrambi i casi restituiscono 200', async () => {
     (createSupabaseClient as any).mockReturnValue({
