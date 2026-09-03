@@ -1,10 +1,10 @@
+import { defaultRange } from '~/lib/dates/ranges';
 import { prisma } from '~/db.server';
 import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { runQueryRows } from '~/lib/supabase-management.server';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import {
   averagesSQL,
-  currentMonthRange,
   previousRange,
   shopProfitSQL,
 } from './customers-query';
@@ -77,7 +77,8 @@ export async function loadShopProfit(
 
   const token = await getValidAccessToken(shop.id);
   const ref = shop.supabaseConfig.supabaseProjectRef;
-  const range = input?.range ?? currentMonthRange();
+  // Senza un periodo indicato vale il default dell'app: gli ultimi 30 giorni.
+  const range = input?.range ?? defaultRange(null);
   // Senza un confronto chiesto si prende il periodo precedente: la variazione
   // e' meta' di cio' che quella card dice, e toglierla per difetto la
   // dimezzerebbe.

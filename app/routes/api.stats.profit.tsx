@@ -3,7 +3,8 @@ import { json } from '@remix-run/node';
 import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { loadShopAverages, loadShopProfit } from '~/lib/customers/profit.server';
-import { currentMonthRange, isCalendarDate } from '~/lib/customers/customers-query';
+import { isCalendarDate } from '~/lib/customers/customers-query';
+import { defaultRange } from '~/lib/dates/ranges';
 import { comparisonRange, type ComparisonId } from '~/lib/dates/ranges';
 
 const COMPARISONS: ComparisonId[] = [
@@ -21,19 +22,19 @@ const COMPARISONS: ComparisonId[] = [
  * l'intera dashboard per un numero che puo' arrivare un istante dopo.
  */
 /**
- * Il mese in corso per il negozio, letto solo se serve davvero.
+ * Il periodo di partenza del negozio, letto solo se serve davvero.
  *
  * Serve quando la URL non porta date valide, che e' il caso raro: la dashboard
  * le manda sempre. Il fuso pero' sta sul database, e pagarlo a ogni chiamata
  * per un ripiego che quasi mai si usa sarebbe una lettura in piu' su ogni
  * aggiornamento della pagina. Quindi si legge solo quando quel ripiego scatta.
  */
-async function shopMonth(shopDomain: string): Promise<{ from: string; to: string }> {
+async function shopDefaultRange(shopDomain: string): Promise<{ from: string; to: string }> {
   const shop = await prisma.shop.findUnique({
     where: { shopDomain },
     select: { ianaTimezone: true },
   });
-  return currentMonthRange(new Date(), shop?.ianaTimezone ?? null);
+  return defaultRange(shop?.ianaTimezone ?? null);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -51,7 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const fallback =
     fromAsked && toAsked
       ? { from: fromAsked, to: toAsked }
-      : await shopMonth(session.shop);
+      : await shopDefaultRange(session.shop);
   const range = { from: fromAsked ?? fallback.from, to: toAsked ?? fallback.to };
 
   const asked = params.get('compare') ?? 'none';

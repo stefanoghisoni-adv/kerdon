@@ -6,7 +6,6 @@ import {
   lifetimeProfitSQL,
   previousRange,
   shopProfitSQL,
-  currentMonthRange,
 } from './customers-query';
 
 describe('isCalendarDate', () => {
@@ -125,27 +124,6 @@ describe('shopProfitSQL', () => {
   });
 });
 
-describe('currentMonthRange', () => {
-  // Il fuso del negozio decide che giorno e', e quindi anche quale mese.
-  it('nel fuso del negozio, non in quello del server', () => {
-    const istante = new Date('2026-08-31T23:30:00Z');
-    expect(currentMonthRange(istante, 'Europe/Rome')).toEqual({
-      from: '2026-09-01',
-      to: '2026-09-01',
-    });
-    expect(currentMonthRange(istante, 'America/Los_Angeles')).toEqual({
-      from: '2026-08-01',
-      to: '2026-08-31',
-    });
-  });
-
-  it('dal primo del mese a oggi', () => {
-    expect(currentMonthRange(new Date('2026-08-24T10:00:00Z'))).toEqual({
-      from: '2026-08-01',
-      to: '2026-08-24',
-    });
-  });
-});
 
 describe('il periodo delle medie non entra nella query senza controllo', () => {
   it('una data valida diventa un letterale fra apici', () => {

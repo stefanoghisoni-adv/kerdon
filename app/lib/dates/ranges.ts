@@ -18,6 +18,25 @@ export interface DateRange {
   to: string;
 }
 
+/**
+ * Il periodo che si vede aprendo: gli ultimi 30 giorni.
+ *
+ * Prima era il mese in corso, ed era una scelta che cambiava significato con il
+ * calendario: il primo del mese la dashboard mostrava un giorno solo, il
+ * trentuno ne mostrava trentuno. Lo stesso posto rispondeva a una domanda
+ * diversa a seconda di quando lo si apriva, e il confronto fra due visite non
+ * voleva dire niente.
+ *
+ * Trenta giorni mobili durano sempre trenta giorni. E' anche l'arco su cui si
+ * legge una campagna: abbastanza lungo da smussare il singolo giorno storto,
+ * abbastanza corto da non annacquare cio' che sta succedendo adesso.
+ *
+ * Sta scritto in un posto solo perche' lo usano in cinque: la dashboard, la tab
+ * Clienti e le rotte delle statistiche. Sparso, sarebbe gia' cinque default
+ * diversi al primo che qualcuno dimentica.
+ */
+export const DEFAULT_PRESET = 'last30';
+
 export type PresetId =
   | 'today'
   | 'yesterday'
@@ -172,6 +191,23 @@ export function presetRange(preset: PresetId, now: Date = new Date()): DateRange
       return null;
   }
 }
+
+/**
+ * Il periodo di partenza per un negozio: gli ultimi 30 giorni nel SUO
+ * calendario.
+ *
+ * Il fuso non e' un dettaglio: "ultimi 30 giorni" finisce oggi, e quale sia
+ * oggi dipende da dove sta il negozio. Vedi `todayIn`.
+ */
+export function defaultRange(
+  timeZone: string | null | undefined,
+  now: Date = new Date(),
+): DateRange {
+  // `presetRange` restituisce null solo per 'custom': con un preset vero il
+  // valore c'e' sempre.
+  return presetRange(DEFAULT_PRESET, fromIso(todayIn(timeZone, now)))!;
+}
+
 
 /**
  * Il periodo scelto, riconosciuto fra quelli predefiniti.

@@ -3,6 +3,8 @@ import {
   bfcmRange,
   todayIn,
   fromIso,
+  defaultRange,
+  DEFAULT_PRESET,
   comparisonRange,
   dayPlaceholder,
   formatDay,
@@ -422,5 +424,43 @@ describe('todayIn', () => {
 
     expect(roma).toEqual({ from: '2026-09-01', to: '2026-09-01' });
     expect(losAngeles).toEqual({ from: '2026-08-01', to: '2026-08-31' });
+  });
+});
+
+// Il periodo che il merchant vede aprendo. Era il mese in corso, e cambiava
+// significato con il calendario: il primo del mese mostrava un giorno solo, il
+// trentuno ne mostrava trentuno. Trenta giorni mobili durano sempre trenta
+// giorni.
+describe('defaultRange', () => {
+  it('sono gli ultimi 30 giorni, estremi compresi', () => {
+    const range = defaultRange(null, new Date('2026-09-03T12:00:00Z'));
+
+    expect(range).toEqual({ from: '2026-08-05', to: '2026-09-03' });
+    expect(lengthInDays(range)).toBe(30);
+  });
+
+  it('dura trenta giorni qualunque giorno del mese sia', () => {
+    for (const giorno of ['2026-09-01', '2026-09-15', '2026-09-30', '2026-03-01']) {
+      const range = defaultRange(null, new Date(`${giorno}T12:00:00Z`));
+      expect(lengthInDays(range)).toBe(30);
+      expect(range.to).toBe(giorno);
+    }
+  });
+
+  it('finisce nel giorno del negozio, non in quello del server', () => {
+    // 23:30 UTC del 3 settembre: a Roma e' gia' il 4, a Los Angeles ancora il 3.
+    const istante = new Date('2026-09-03T23:30:00Z');
+
+    expect(defaultRange('Europe/Rome', istante).to).toBe('2026-09-04');
+    expect(defaultRange('America/Los_Angeles', istante).to).toBe('2026-09-03');
+    expect(defaultRange('Pacific/Auckland', istante).to).toBe('2026-09-04');
+  });
+
+  it('e lo stesso periodo che il selettore chiama per nome', () => {
+    const istante = new Date('2026-09-03T12:00:00Z');
+    expect(defaultRange(null, istante)).toEqual(presetRange(DEFAULT_PRESET, istante));
+    // Se il default cambia, questo test non deve passare per caso: la voce
+    // scelta deve essere una di quelle che il menu mostra davvero.
+    expect(matchPreset(defaultRange(null, istante), istante)).toBe(DEFAULT_PRESET);
   });
 });

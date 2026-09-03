@@ -30,7 +30,7 @@ import { BASE_CURRENCY } from '~/lib/billing/money';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { loadCustomersReport } from '~/lib/customers/customers.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
-import { todayIn } from '~/lib/dates/ranges';
+import { defaultRange } from '~/lib/dates/ranges';
 import { matchesCustomerSearch } from '~/lib/customers/customer-search';
 import { formatMoney } from '~/lib/billing/money';
 import { useLocale, useT } from '~/lib/i18n/context';
@@ -48,18 +48,6 @@ import {
 } from '~/lib/customers/birthdate-metafield';
 import { customerMetafieldsUrl, storeHandle } from '~/utils/admin-page';
 
-/**
- * Il mese in corso: il periodo che quasi tutti guardano per primo.
- *
- * Nel fuso del negozio, non in quello del server. Il primo e l'ultimo giorno di
- * "questo mese" cambiano a seconda di dove si guarda: per un negozio a Los
- * Angeles il primo del mese comincia otto ore dopo che e' cominciato in UTC, e
- * per uno a Roma il giorno in corso e' gia' quello dopo dalle due di notte.
- */
-function currentMonth(timeZone: string | null, now = new Date()): { from: string; to: string } {
-  const today = todayIn(timeZone, now);
-  return { from: `${today.slice(0, 7)}-01`, to: today };
-}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -90,8 +78,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   // Il periodo di partenza si sceglie dopo aver letto il negozio, perche' senza
-  // il suo fuso "questo mese" e' il mese di qualcun altro.
-  const range = rangeFromUrl ?? currentMonth(shop?.ianaTimezone ?? null);
+  // il suo fuso "gli ultimi 30 giorni" finiscono nel giorno di qualcun altro.
+  const range = rangeFromUrl ?? defaultRange(shop?.ianaTimezone ?? null);
   const plan = await findPlanByName(shop?.currentPlan);
   const customersIncluded = plan?.customersSyncEnabled ?? false;
 
