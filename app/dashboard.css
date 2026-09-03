@@ -561,7 +561,12 @@
    se': l'icona resta della misura voluta, e la riga torna a misurare quanto le
    sue vicine. */
 .plan-feature-database-icon {
-  display: inline-flex;
+  /* `flex` e non `inline-flex`: un riquadro di livello in linea si appoggia
+     alla linea di base del testo, e sotto la linea di base il browser lascia
+     lo spazio dei discendenti — la coda di una "g". Sono i cinque pixel che
+     rendevano questa riga alta 25 contro i 20 di tutte le altre. Con `flex` il
+     riquadro esce dal flusso in linea e non se li porta piu' dietro. */
+  display: flex;
   align-items: center;
   width: 19px;
   height: 19px;
@@ -590,7 +595,10 @@
    l'icona occupa, quindi non muove di mezzo pixel tutto quello che le sta
    accanto. */
 .info-icon {
-  display: inline-flex;
+  /* Stessa ragione della nota qui sopra: in linea si porterebbe dietro lo
+     spazio dei discendenti e alzerebbe la riga che la contiene. */
+  display: flex;
+  align-items: center;
   transform: translateY(1px);
 }
 

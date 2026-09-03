@@ -275,6 +275,10 @@ export default function SupabaseSettings() {
             <InlineGrid
               columns={{ xs: 1, md: 'minmax(0, 35fr) minmax(0, 65fr)' }}
               gap="400"
+              // Senza, le due colonne si allungano fino all'altezza della piu'
+              // alta: la card Database, che ha quattro righe, si stirava fino
+              // in fondo alla colonna di sinistra e restava mezza vuota.
+              alignItems="start"
             >
               {/* A sinistra le due card corte, impilate: cosi' la colonna
                   stretta si riempie e quella larga puo' crescere in altezza
@@ -306,6 +310,10 @@ export default function SupabaseSettings() {
                 />
               </BlockStack>
 
+              {/* A destra le due card del database, impilate: erano una accanto
+                  all'altra come celle separate della griglia, e la seconda
+                  finiva a capo sotto la colonna di sinistra. */}
+              <BlockStack gap="400">
               <DatabaseCard
                 connected={account.connected}
                 databaseUrl={config?.databaseUrl ?? null}
@@ -366,6 +374,7 @@ export default function SupabaseSettings() {
                 appUrl={config?.proxyBaseUrl || null}
                 readKey={config?.readToken ?? null}
               />
+              </BlockStack>
             </InlineGrid>
 
 
