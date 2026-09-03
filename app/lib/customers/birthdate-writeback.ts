@@ -21,10 +21,11 @@
  * Shopify e' VUOTO. E' l'unica ragione per cui questa riscrittura non ripete
  * all'infinito la stessa mutation a ogni giro del cron.
  *
- * Da qui anche il limite di `birthdateWritebackTarget`: si scrive soltanto sul
- * campo standard `facts.birth_date`. Scriverne uno diverso da quello che si
- * legge romperebbe proprio quella catena — Shopify resterebbe vuoto dalla parte
- * che guardiamo, e la stessa scrittura ripartirebbe a ogni corsa.
+ * Da qui anche la regola che `birthdateWritebackTarget` non tradisce mai: si
+ * scrive SOLTANTO nel campo da cui si legge, qualunque esso sia. Scriverne uno
+ * diverso romperebbe proprio quella catena — Shopify resterebbe vuoto dalla
+ * parte che guardiamo, e la stessa scrittura ripartirebbe a ogni corsa, per
+ * sempre.
  *
  * ## Chi non viene mai toccato
  *
@@ -36,7 +37,12 @@
  */
 
 import { normalizeBirthdate } from '~/lib/transformers/customer-format';
-import { BIRTHDATE_METAFIELD, type MetafieldKey } from './birthdate-metafield';
+import {
+  BIRTHDATE_METAFIELD,
+  isDateMetafieldType,
+  isStandardBirthdateField,
+  type MetafieldKey,
+} from './birthdate-metafield';
 
 /** Il metafield su cui si scrive, con il tipo che Shopify si aspetta. */
 export interface BirthdateWriteTarget extends MetafieldKey {
@@ -52,30 +58,59 @@ export interface BirthdateWriteTarget extends MetafieldKey {
  *    indietro: si salta e basta, non e' un errore);
  *  - il merchant un campo l'ha scelto (se non l'ha scelto, Shopify non lo
  *    leggiamo nemmeno: "vuoto" non lo sapremmo distinguere da "non chiesto");
- *  - quel campo e' `facts.birth_date`, il campo standard che questa app sa
- *    accendere sul negozio.
+ *  - di quel campo si sa il TIPO, ed e' un tipo su cui si possa scrivere una
+ *    data.
  *
- * L'ultima e' la piu' opinabile e va detta chiaro: di un campo scelto dal
- * merchant fra i suoi non conosciamo il tipo — sulla riga del negozio stanno
- * namespace e chiave, non il tipo — e `metafieldsSet` con un tipo sbagliato non
- * scrive niente, rifiuta. Di `facts.birth_date` il tipo lo sappiamo per
- * definizione: e' `date`. Su un campo personalizzato quindi si continua a
- * leggere e basta, come prima: una colonna che non si aggiorna e' meglio di una
- * mutation che fallisce in silenzio a ogni corsa.
+ * L'ultima e' quella che qui e' cambiata. `metafieldsSet` col tipo sbagliato
+ * non scrive niente, rifiuta: senza tipo non si parte. Del campo standard il
+ * tipo lo sappiamo per definizione — e' `date`, e `type` non serve nemmeno
+ * passarlo — mentre di uno scelto dal merchant fra i suoi lo si legge
+ * dall'elenco delle definizioni del negozio, la stessa risposta che riempie la
+ * tendina nella tab Clienti. Chiamando questa funzione lo si passa gia' letto:
+ * qui dentro non si parla con nessuno, e la domanda a Shopify resta una per
+ * corsa e non una per cliente.
+ *
+ * `type` a `null` significa "non lo sappiamo" — elenco non leggibile, oppure
+ * campo che sul negozio non c'e' (piu'). Non e' un permesso a tirare a
+ * indovinare: si legge e basta, com'era prima.
+ *
+ * ## Perche' `date_time` no
+ *
+ * `date_time` contiene una data — `isDateMetafieldType` lo dice, ed e' giusto
+ * cosi': di la' la data si LEGGE benissimo. Ma per scriverci dentro servirebbe
+ * anche un'ora, e di una data di nascita l'ora non esiste: qualunque la
+ * scegliessimo sarebbe inventata da noi. Non e' un dettaglio invisibile —
+ * Shopify conserva `date_time` in UTC e lo mostra al merchant nel fuso del suo
+ * negozio, quindi la mezzanotte che scrivessimo diventerebbe il giorno prima
+ * per ogni negozio a ovest di Greenwich: gli scriveremmo un compleanno
+ * sbagliato di un giorno, e sbagliato in modo credibile. Da un campo cosi' si
+ * continua solo a leggere, che e' esattamente cio' che accadeva prima per tutti
+ * i campi personalizzati.
  */
 export function birthdateWritebackTarget(
   configured: MetafieldKey | null | undefined,
   canWriteCustomers: boolean,
+  /**
+   * Il tipo del campo, letto dalle definizioni del negozio. Si omette per il
+   * campo standard, il cui tipo non e' in discussione.
+   */
+  type?: string | null,
 ): BirthdateWriteTarget | null {
   if (!canWriteCustomers) return null;
   if (!configured) return null;
-  if (
-    configured.namespace !== BIRTHDATE_METAFIELD.namespace ||
-    configured.key !== BIRTHDATE_METAFIELD.key
-  ) {
-    return null;
-  }
-  return { ...BIRTHDATE_METAFIELD };
+
+  if (isStandardBirthdateField(configured)) return { ...BIRTHDATE_METAFIELD };
+
+  const declared = (type ?? '').trim().toLowerCase();
+  if (!declared) return null;
+  // Un campo di testo si continua a leggere: da li' la data si ricava quando e'
+  // scritta in modo riconoscibile, ma scriverci dentro il nostro formato
+  // vorrebbe dire decidere noi come il merchant tiene i suoi dati.
+  if (!isDateMetafieldType(declared)) return null;
+  // Solo `date`: il perche' di `date_time` sta nel commento qui sopra.
+  if (declared !== BIRTHDATE_METAFIELD.type) return null;
+
+  return { namespace: configured.namespace, key: configured.key, type: declared };
 }
 
 /**

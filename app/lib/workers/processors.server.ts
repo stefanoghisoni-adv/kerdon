@@ -28,7 +28,12 @@ import { can, denialOf } from '~/lib/authz/capabilities';
 import { shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
 import { WITHDRAWN_CUSTOMER_FIELDS } from '~/lib/customers/consent-withdrawal';
 import { isUnknownColumn } from '~/lib/supabase/column-errors';
-import { birthdateMetafieldOf, type MetafieldKey } from '~/lib/customers/birthdate-metafield';
+import {
+  birthdateMetafieldOf,
+  formatMetafieldKey,
+  isStandardBirthdateField,
+  type MetafieldKey,
+} from '~/lib/customers/birthdate-metafield';
 import {
   birthdateWritebackTarget,
   planBirthdateWriteback,
@@ -211,6 +216,66 @@ async function fetchExistingCustomers(
 }
 
 /**
+ * Dove riscrivere la data di nascita, tipo del campo compreso.
+ *
+ * Il tipo e' l'unica cosa che mancava per riscrivere anche sui campi che il
+ * merchant si e' fatto da se': `metafieldsSet` col tipo sbagliato rifiuta, e
+ * sulla riga del negozio di quel campo stanno solo namespace e chiave. Non e'
+ * pero' un dato da conservare: il merchant puo' cambiare la definizione sul suo
+ * negozio quando vuole, e un tipo salvato mesi fa diventerebbe una bugia che
+ * nessuno saprebbe smentire. Si chiede a Shopify, che e' l'unico a saperlo — la
+ * stessa domanda che gia' riempie la tendina nella tab Clienti.
+ *
+ * UNA VOLTA PER CORSA, e solo quando serve davvero: del campo standard il tipo
+ * si sa per definizione, quindi per lui non si chiede niente e la riscrittura
+ * regge anche se l'elenco non si potesse leggere.
+ *
+ * Elenco non leggibile, o campo che sul negozio non c'e' (piu'): si legge e
+ * basta, come prima. Meglio una colonna che non si aggiorna che una mutation
+ * rifiutata a ogni giro del cron.
+ */
+async function resolveBirthdateTarget(
+  shopifyClient: ShopifyAPIClient,
+  configured: MetafieldKey | null,
+  canWriteCustomers: boolean,
+): Promise<BirthdateWriteTarget | null> {
+  if (!configured || !canWriteCustomers) {
+    return birthdateWritebackTarget(configured, canWriteCustomers);
+  }
+  if (isStandardBirthdateField(configured)) {
+    return birthdateWritebackTarget(configured, canWriteCustomers);
+  }
+
+  let type: string | null = null;
+  try {
+    const definitions = await shopifyClient.listCustomerMetafieldDefinitions();
+    type =
+      definitions.find(
+        (d) => d.namespace === configured.namespace && d.key === configured.key,
+      )?.type ?? null;
+  } catch (error) {
+    console.warn(
+      '[data di nascita] elenco dei campi cliente non leggibile, si legge soltanto:',
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+
+  const target = birthdateWritebackTarget(configured, canWriteCustomers, type);
+
+  // Un tipo su cui non si scrive non e' un guasto: e' una scelta del merchant,
+  // e va detta una riga sola. Senza, la sua colonna resterebbe ferma senza che
+  // nessun registro sappia spiegare il perche'.
+  if (!target) {
+    console.log(
+      `[data di nascita] il campo ${formatMetafieldKey(configured)} e' di tipo "${type ?? 'sconosciuto'}": si continua a leggerlo, non lo si riscrive`,
+    );
+  }
+
+  return target;
+}
+
+/**
  * Riporta su Shopify le date di nascita che vivono solo sul database del
  * merchant.
  *
@@ -327,8 +392,9 @@ async function syncCustomers(
   birthdateMetafield?: MetafieldKey | null,
   /**
    * Dove riscrivere la data che vive solo sul database del merchant, o `null`
-   * se non si riscrive (permesso mancante, campo non scelto, campo che non e'
-   * quello standard). Deciso da `birthdateWritebackTarget` a monte.
+   * se non si riscrive (permesso mancante, campo non scelto, tipo del campo
+   * sconosciuto o non adatto). Deciso da `resolveBirthdateTarget` a monte, una
+   * volta per corsa.
    */
   birthdateTarget?: BirthdateWriteTarget | null,
 ): Promise<CustomerSyncResult> {
@@ -495,20 +561,26 @@ async function syncCustomersIfEnabled(opts: {
 
   const birthdateMetafield = birthdateMetafieldOf(opts.shop);
 
+  // Il permesso si constata, non si tenta: un negozio installato quando l'app
+  // leggeva soltanto non ha dato `write_customers`, e ogni mutation tornerebbe
+  // indietro con un 403 a ogni corsa. Senza permesso si legge e basta, che e'
+  // esattamente il comportamento di prima.
+  //
+  // Qui e non dentro la paginazione: la domanda sul tipo del campo si fa una
+  // volta per corsa, non una per pagina di clienti.
+  const birthdateTarget = await resolveBirthdateTarget(
+    opts.shopifyClient,
+    birthdateMetafield,
+    hasCustomerWriteAccess(opts.shop?.scopes),
+  );
+
   return syncCustomers(
     opts.shopifyClient,
     opts.supabase,
     opts.config.tableNameCustomers,
     updatedAtMin,
     birthdateMetafield,
-    // Il permesso si constata, non si tenta: un negozio installato quando
-    // l'app leggeva soltanto non ha dato `write_customers`, e ogni mutation
-    // tornerebbe indietro con un 403 a ogni corsa. Senza permesso si legge e
-    // basta, che e' esattamente il comportamento di prima.
-    birthdateWritebackTarget(
-      birthdateMetafield,
-      hasCustomerWriteAccess(opts.shop?.scopes),
-    ),
+    birthdateTarget,
   );
 }
 

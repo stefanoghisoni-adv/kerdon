@@ -218,3 +218,21 @@ export function birthdateFieldState(
   if (definitionKeys == null) return 'in_use';
   return definitionKeys.includes(configured) ? 'in_use' : 'missing';
 }
+
+/**
+ * E' il campo standard di Shopify, quello che questa app sa accendere?
+ *
+ * Serve a chi deve sapere il TIPO del campo: di questo lo si sa per
+ * definizione (`date`), di uno scelto dal merchant lo si deve chiedere al
+ * negozio. Distinguerli qui, e non a occhio sul posto, evita che il confronto
+ * fra namespace e chiave venga riscritto ogni volta che serve — e riscritto una
+ * volta a meta' vorrebbe dire scrivere su un campo col tipo di un altro.
+ */
+export function isStandardBirthdateField(
+  field: MetafieldKey | null | undefined,
+): boolean {
+  return (
+    field?.namespace === BIRTHDATE_METAFIELD.namespace &&
+    field?.key === BIRTHDATE_METAFIELD.key
+  );
+}

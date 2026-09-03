@@ -882,6 +882,18 @@ export const it = {
       create: "Crea nuovo metafield",
       doneTitle: "Data di nascita attiva",
       change: "Cambia campo",
+      /**
+       * La riga sopra la tabella dei clienti, quando l'avviso non c'è: dice
+       * com'è messa la data di nascita e offre l'unico gesto che ha senso da
+       * li'. I due verbi sono diversi di proposito — chi non ha niente
+       * aggiunge, chi ha già un campo lo cambia — perché la stessa parola per
+       * entrambi lascerebbe credere di poterne collegare due.
+       */
+      statusLabel: "Data di nascita:",
+      statusOn: "Attivo",
+      statusOff: "Non attivo",
+      statusAdd: "Aggiungi",
+      statusChange: "Cambia",
       useExisting: "Utilizza esistente",
       working: "Un attimo\u2026",
       present: "Campo gi\u00e0 presente",

@@ -28,12 +28,65 @@ describe('birthdateWritebackTarget', () => {
     expect(birthdateWritebackTarget(undefined, true)).toBeNull();
   });
 
-  it('su un campo personalizzato si continua a leggere e basta', () => {
-    // Di un campo del merchant non conosciamo il tipo — sulla riga del negozio
-    // stanno namespace e chiave — e `metafieldsSet` col tipo sbagliato non
-    // scrive, rifiuta. E scrivere altrove da dove si legge ripeterebbe la
-    // stessa mutation a ogni corsa, per sempre.
+  it('su un campo del merchant di tipo data si riscrive, nel campo stesso', () => {
+    // Il tipo arriva dalle definizioni del negozio, lette una volta per corsa:
+    // e' l'unica cosa che mancava, perche' `metafieldsSet` col tipo sbagliato
+    // non scrive, rifiuta.
+    expect(birthdateWritebackTarget(CUSTOM, true, 'date')).toEqual({
+      namespace: 'custom',
+      key: 'data_di_nascita',
+      type: 'date',
+    });
+  });
+
+  it('senza sapere il tipo non si scrive: elenco non letto, o campo sparito dal negozio', () => {
     expect(birthdateWritebackTarget(CUSTOM, true)).toBeNull();
+    expect(birthdateWritebackTarget(CUSTOM, true, null)).toBeNull();
+    expect(birthdateWritebackTarget(CUSTOM, true, '   ')).toBeNull();
+  });
+
+  it('su un campo che non contiene una data si continua a leggere e basta', () => {
+    // Da un testo libero la data si ricava quando e' scritta in modo
+    // riconoscibile; scriverci dentro il nostro formato vorrebbe dire decidere
+    // noi come il merchant tiene i suoi dati.
+    expect(birthdateWritebackTarget(CUSTOM, true, 'single_line_text_field')).toBeNull();
+    expect(birthdateWritebackTarget(CUSTOM, true, 'number_integer')).toBeNull();
+  });
+
+  it('su date_time si legge soltanto: l ora di una nascita non esiste', () => {
+    // Shopify conserva date_time in UTC e lo mostra nel fuso del negozio: la
+    // mezzanotte che scrivessimo diventerebbe il giorno prima per ogni negozio
+    // a ovest di Greenwich.
+    expect(birthdateWritebackTarget(CUSTOM, true, 'date_time')).toBeNull();
+  });
+
+  it('il tipo si legge come lo manda Shopify, spazi e maiuscole comprese', () => {
+    expect(birthdateWritebackTarget(CUSTOM, true, ' Date ')).toEqual({
+      namespace: 'custom',
+      key: 'data_di_nascita',
+      type: 'date',
+    });
+  });
+
+  it('del campo standard il tipo non si chiede: si sa per definizione', () => {
+    // Regge anche quando l'elenco delle definizioni non si e' potuto leggere,
+    // ed e' voluto: il campo che questa app accende sul negozio e' `date`, e su
+    // quello la riscrittura non deve dipendere da una domanda in piu'.
+    expect(birthdateWritebackTarget(STANDARD, true, null)).toEqual({
+      namespace: 'facts',
+      key: 'birth_date',
+      type: 'date',
+    });
+    // E nemmeno un tipo sbagliato arrivato dall'elenco lo smuove.
+    expect(birthdateWritebackTarget(STANDARD, true, 'single_line_text_field')).toEqual({
+      namespace: 'facts',
+      key: 'birth_date',
+      type: 'date',
+    });
+  });
+
+  it('senza il permesso non si scrive nemmeno su un campo data del merchant', () => {
+    expect(birthdateWritebackTarget(CUSTOM, false, 'date')).toBeNull();
   });
 });
 
@@ -122,6 +175,28 @@ describe('planBirthdateWriteback', () => {
 
     // Scritto il metafield, alla corsa dopo Shopify quel valore ce l'ha: rientra
     // dalla porta principale e questa riscrittura non ha piu' nulla da dire.
+    const second = planBirthdateWriteback(
+      [{ id: 7, date_of_birth: first.writes[0].date }],
+      stored,
+    );
+    expect(second.writes).toEqual([]);
+  });
+
+  it('col campo del merchant la catena si chiude uguale: si scrive dove si legge', () => {
+    // E' la ragione per cui il campo personalizzato si puo' riscrivere senza
+    // ripetere la stessa mutation per sempre: il bersaglio della scrittura e'
+    // lo stesso campo da cui la corsa successiva legge, quindi al giro dopo
+    // Shopify quel valore ce l'ha e qui non resta niente da fare.
+    const campo = { namespace: 'custom', key: 'data_di_nascita' };
+    const target = birthdateWritebackTarget(campo, true, 'date');
+    expect(target).toEqual({ ...campo, type: 'date' });
+
+    const stored = new Map([[7, '19850423']]);
+    const first = planBirthdateWriteback([{ id: 7, date_of_birth: null }], stored);
+    expect(first.writes).toEqual([{ customerId: 7, date: '1985-04-23' }]);
+
+    // Il valore appena scritto rientra dalla lettura del campo `custom.…`,
+    // perche' e' quello indicato nella configurazione del negozio.
     const second = planBirthdateWriteback(
       [{ id: 7, date_of_birth: first.writes[0].date }],
       stored,

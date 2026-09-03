@@ -7,6 +7,7 @@ import {
   birthdateMetafieldOf,
   formatMetafieldKey,
   isDateMetafieldType,
+  isStandardBirthdateField,
   parseMetafieldKey,
   supportedCapabilities,
 } from './birthdate-metafield';
@@ -198,5 +199,22 @@ describe('birthdateFieldState', () => {
   // potuto leggere non si smentisce una scelta fatta davvero.
   it('elenco non letto: non smentisce niente', () => {
     expect(birthdateFieldState('custom.data_di_nascita', null)).toBe('in_use');
+  });
+});
+
+describe('isStandardBirthdateField', () => {
+  it('riconosce il campo che questa app sa accendere sul negozio', () => {
+    expect(isStandardBirthdateField(BIRTHDATE_METAFIELD_KEY)).toBe(true);
+    expect(isStandardBirthdateField({ namespace: 'facts', key: 'birth_date' })).toBe(true);
+  });
+
+  it('un campo del merchant non e quello standard, per quanto si somiglino', () => {
+    // Conta perche' del campo standard il tipo si sa per definizione, e di uno
+    // del merchant si deve chiedere al negozio: scambiarli vorrebbe dire
+    // scrivere su un campo con il tipo di un altro.
+    expect(isStandardBirthdateField({ namespace: 'custom', key: 'birth_date' })).toBe(false);
+    expect(isStandardBirthdateField({ namespace: 'facts', key: 'birthday' })).toBe(false);
+    expect(isStandardBirthdateField(null)).toBe(false);
+    expect(isStandardBirthdateField(undefined)).toBe(false);
   });
 });

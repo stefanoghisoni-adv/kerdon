@@ -36,7 +36,11 @@ import { formatMoney } from '~/lib/billing/money';
 import { useLocale, useT } from '~/lib/i18n/context';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { PlanUpgradeAction } from '~/components/Dashboard/PlanUpgradeAction';
-import { BirthdateMetafieldCard } from '~/components/Customers/BirthdateMetafieldCard';
+import {
+  BirthdateMetafieldCard,
+  useBirthdateNotice,
+} from '~/components/Customers/BirthdateMetafieldCard';
+import { BirthdateStatusRow } from '~/components/Customers/BirthdateStatusRow';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   BIRTHDATE_METAFIELD_KEY,
@@ -288,6 +292,14 @@ export default function Customers() {
   const [onlyIssues, setOnlyIssues] = useState(false);
   const [query, setQuery] = useState('');
 
+  // Della data di nascita si vede una cosa sola alla volta: il riquadro con cui
+  // si sceglie il campo, l'avviso che conferma la scelta appena fatta, o la
+  // riga di stato qui sopra la tabella. Chi decide quale sta nell'hook, non
+  // qui: lo stesso verdetto serve al riquadro e alla riga, e due copie della
+  // stessa regola sono due cose da tenere allineate. Chiamato sempre, anche
+  // senza il riquadro da mostrare: un hook non si salta.
+  const notice = useBirthdateNotice(birthdate?.configured ?? '', birthdate?.state ?? 'none');
+
   const needsWork = (row: { coveredLines: number; totalLines: number }) =>
     row.coveredLines < row.totalLines;
   const filtered = onlyIssues ? rows.filter(needsWork) : rows;
@@ -352,8 +364,19 @@ export default function Customers() {
 
         {/* Il campo "Data di nascita" sulla scheda cliente. Compare solo con un
             piano che sincronizza i clienti: senza, sarebbe un campo che il
-            merchant compila e che poi non arriva da nessuna parte. */}
-        {birthdate && <BirthdateMetafieldCard {...birthdate} />}
+            merchant compila e che poi non arriva da nessuna parte.
+            Il riquadro rende da se' l'avviso di conferma, e non rende niente
+            quando la parola passa alla riga di stato qui sotto: e' cosi' che i
+            due non finiscono mai a schermo insieme. */}
+        {birthdate && <BirthdateMetafieldCard {...birthdate} notice={notice} />}
+
+        {/* Sopra la tabella, dove si guardano i clienti: e' li' che viene in
+            mente di volerne sapere la data di nascita. Sta nello stesso posto
+            del riquadro perche' e' la stessa cosa detta in breve — l'una al
+            posto dell'altro, mai le due insieme. */}
+        {birthdate && notice.view === 'status' && (
+          <BirthdateStatusRow active={birthdate.state === 'in_use'} onOpen={notice.open} />
+        )}
 
         {/* Due filtri, come nei prodotti non idonei: a sinistra, sopra la
             tabella. "Richiedono un intervento" tiene solo le righe con la spia

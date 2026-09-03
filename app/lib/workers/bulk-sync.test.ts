@@ -1088,39 +1088,123 @@ describe('Initial bulk sync processor', () => {
       expect(setCustomerBirthdates).not.toHaveBeenCalled();
     });
 
-    it('il campo scelto dal merchant si legge ma non si riscrive: del suo tipo non sappiamo niente', async () => {
+    /**
+     * Il campo che il merchant si e' fatto da se'.
+     *
+     * Di quello non sappiamo il tipo dalla riga del negozio — li' stanno
+     * namespace e chiave — e `metafieldsSet` col tipo sbagliato rifiuta. Lo si
+     * chiede a Shopify, una volta per corsa, dalla stessa risposta che riempie
+     * la tendina nella tab Clienti.
+     */
+    const conCampoDelMerchant = (definizioni: any, extra: Record<string, unknown> = {}) => {
       prepare(shopWith({
         birthdateMetafieldNamespace: 'custom',
         birthdateMetafieldKey: 'data_di_nascita',
+        ...extra,
       }));
       const upserted: any[] = [];
       vi.mocked(createSupabaseClient).mockReturnValue(
         supabaseWith([{ shopify_customer_id: 1, date_of_birth: '19850423' }], upserted) as any,
       );
 
-      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 0, errors: [] });
+      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 1, errors: [] });
       const getCustomers = vi.fn().mockResolvedValue({
         customers: [
           { id: 1, email: 'si@x.it', email_marketing_consent: { state: 'subscribed' }, date_of_birth: null },
         ],
         nextPageInfo: null,
       });
+      const listCustomerMetafieldDefinitions = vi.fn(definizioni);
       vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
         getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
         getCustomers,
+        listCustomerMetafieldDefinitions,
+        setCustomerBirthdates,
+      }) as any);
+
+      return { getCustomers, listCustomerMetafieldDefinitions, setCustomerBirthdates };
+    };
+
+    it('il campo del merchant e di tipo data: si riscrive li dentro, dove si legge', async () => {
+      const { getCustomers, listCustomerMetafieldDefinitions, setCustomerBirthdates } =
+        conCampoDelMerchant(async () => [
+          { namespace: 'custom', key: 'altro', name: 'Altro', type: 'single_line_text_field' },
+          { namespace: 'custom', key: 'data_di_nascita', name: 'Data di nascita', type: 'date' },
+        ]);
+
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+      // Letto dal campo che il merchant ha indicato...
+      expect(getCustomers.mock.calls[0][0].birthdateMetafield).toEqual({
+        namespace: 'custom',
+        key: 'data_di_nascita',
+      });
+      // ...e riscritto nello stesso, col tipo che il negozio dichiara. Scrivere
+      // altrove da dove si legge ripeterebbe la stessa mutation a ogni corsa.
+      expect(setCustomerBirthdates).toHaveBeenCalledWith(
+        [{ customerId: 1, date: '1985-04-23' }],
+        { namespace: 'custom', key: 'data_di_nascita', type: 'date' },
+      );
+      // Una domanda sola per corsa, non una per cliente ne una per pagina.
+      expect(listCustomerMetafieldDefinitions).toHaveBeenCalledTimes(1);
+    });
+
+    it('il campo del merchant non contiene una data: si legge soltanto', async () => {
+      const { setCustomerBirthdates } = conCampoDelMerchant(async () => [
+        { namespace: 'custom', key: 'data_di_nascita', name: 'Data', type: 'single_line_text_field' },
+      ]);
+
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+      log.mockRestore();
+
+      expect(setCustomerBirthdates).not.toHaveBeenCalled();
+    });
+
+    it('elenco dei campi non leggibile: si legge soltanto, e la corsa arriva in fondo', async () => {
+      const { setCustomerBirthdates } = conCampoDelMerchant(async () => {
+        throw new Error('403');
+      });
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+      warn.mockRestore();
+
+      // Non sapere il tipo non autorizza a indovinarlo: meglio una colonna
+      // ferma che una mutation rifiutata a ogni giro del cron.
+      expect(setCustomerBirthdates).not.toHaveBeenCalled();
+    });
+
+    it('del campo standard il tipo non si chiede: nessuna domanda in piu', async () => {
+      prepare(shopWith({}));
+      const upserted: any[] = [];
+      vi.mocked(createSupabaseClient).mockReturnValue(
+        supabaseWith([{ shopify_customer_id: 1, date_of_birth: '19850423' }], upserted) as any,
+      );
+
+      const setCustomerBirthdates = vi.fn().mockResolvedValue({ written: 1, errors: [] });
+      const listCustomerMetafieldDefinitions = vi.fn().mockResolvedValue([]);
+      vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
+        getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
+        getCustomers: vi.fn().mockResolvedValue({
+          customers: [
+            { id: 1, email: 'si@x.it', email_marketing_consent: { state: 'subscribed' }, date_of_birth: null },
+          ],
+          nextPageInfo: null,
+        }),
+        listCustomerMetafieldDefinitions,
         setCustomerBirthdates,
       }) as any);
 
       await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
 
-      // Letto si', dal campo che il merchant ha indicato...
-      expect(getCustomers.mock.calls[0][0].birthdateMetafield).toEqual({
-        namespace: 'custom',
-        key: 'data_di_nascita',
-      });
-      // ...riscritto no: scrivere altrove da dove si legge ripeterebbe la
-      // stessa mutation a ogni corsa.
-      expect(setCustomerBirthdates).not.toHaveBeenCalled();
+      // `facts.birth_date` e' `date` per definizione: la riscrittura non deve
+      // dipendere da una lettura che puo' fallire.
+      expect(listCustomerMetafieldDefinitions).not.toHaveBeenCalled();
+      expect(setCustomerBirthdates).toHaveBeenCalledWith(
+        [{ customerId: 1, date: '1985-04-23' }],
+        { namespace: 'facts', key: 'birth_date', type: 'date' },
+      );
     });
   });
 
