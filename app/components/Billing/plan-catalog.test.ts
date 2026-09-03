@@ -141,11 +141,13 @@ describe('buildPlanFeatures', () => {
   it('l elenco segue l ordine in cui si legge un piano', () => {
     // Prima ogni quanto i dati si allineano, poi quanto ci sta, poi cosa si
     // puo' farci: dal vincolo che si sente ogni giorno a quello che si nota
-    // una volta sola.
+    // una volta sola. Il database viene prima dei feed perche' e' una base
+    // (tutti i dati sincronizzati) piu' che una funzione aggiuntiva.
     expect(buildPlanFeatures(row()).map((f) => f.key)).toEqual([
       'sync',
       'products',
       'customers',
+      'database',
       'feeds',
       'push',
       'matching',
@@ -161,11 +163,39 @@ describe('buildPlanFeatures', () => {
     expect(feeds(false)).toBe(false);
   });
 
+  it('il database e sempre incluso su tutti i piani', () => {
+    // Il Free ha un database limitato (solo prodotti, con tetto), gli altri ce
+    // l'hanno esteso (prodotti e clienti, tetti piu' alti o assenti), ma tutti
+    // i piani sincronizzano qualcosa: la riga e' sempre verde. L'etichetta
+    // cambia col piano (limitato/esteso), non l'inclusione.
+    for (const plan of PLANS) {
+      const database = buildPlanFeatures(row(plan)).find((f) => f.key === 'database')!;
+      expect(database.included).toBe(true);
+      expect(database.value).toBeNull();
+    }
+  });
+
+  it('le label del database cambiano col piano: limitato sul Free, esteso sugli altri', () => {
+    // Il Free sincronizza solo prodotti (con tetto), gli altri anche clienti e
+    // con tetti piu' alti: l'etichetta dice "limitato" o "esteso" di
+    // conseguenza. Il planName serve a featureLabel per scegliere.
+    const database = buildPlanFeatures(row()).find((f) => f.key === 'database')!;
+    expect(featureLabel(database, itDict, 'it', 'free')).toBe('Database limitato');
+    expect(featureLabel(database, itDict, 'it', 'pro')).toBe('Database esteso');
+    expect(featureLabel(database, itDict, 'it', 'business')).toBe('Database esteso');
+    expect(featureLabel(database, itDict, 'it', 'enterprise')).toBe('Database esteso');
+    // Inglese
+    expect(featureLabel(database, enDict, 'en', 'free')).toBe('Limited database');
+    expect(featureLabel(database, enDict, 'en', 'pro')).toBe('Extended database');
+  });
+
   it('le label restano corte in ogni lingua, altrimenti una card si alza sulle altre', () => {
     for (const dictionary of [itDict, enDict]) {
       for (const plan of buildPlanCards(PLANS)) {
         for (const feature of plan.features) {
-          const label = featureLabel(feature, dictionary, 'it');
+          // Il planName serve per l'etichetta del database: senza, featureLabel
+          // non puo' decidere fra "limitato" ed "esteso".
+          const label = featureLabel(feature, dictionary, 'it', plan.name);
           expect(label.length).toBeLessThanOrEqual(26);
         }
       }

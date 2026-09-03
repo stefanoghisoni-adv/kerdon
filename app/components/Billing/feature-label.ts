@@ -14,6 +14,8 @@ export function featureLabel(
   feature: PlanFeature,
   t: Pick<Dictionary, 'common' | 'plan' | 'sync'>,
   locale: Locale,
+  /** Nome del piano: serve per decidere se il database e' limitato o esteso. */
+  planName?: string,
 ): string {
   switch (feature.key) {
     case 'products':
@@ -30,6 +32,13 @@ export function featureLabel(
       return feature.value == null
         ? t.plan.features.customersUnlimited
         : t.plan.features.customers(amount(feature.value, locale));
+    case 'database':
+      // Il database si sincronizza su tutti i piani, ma sul Free e' limitato
+      // (solo prodotti, con un tetto) mentre sugli altri e' esteso (prodotti e
+      // clienti, tetti piu' alti o assenti). L'etichetta cambia col piano.
+      return (planName ?? '').trim().toLowerCase() === 'free'
+        ? t.plan.features.databaseLimited
+        : t.plan.features.databaseExtended;
     case 'feeds':
       return t.plan.features.feeds;
     case 'push':

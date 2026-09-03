@@ -15,6 +15,7 @@ export const FEATURE_ORDER = [
   'sync',
   'products',
   'customers',
+  'database',
   'feeds',
   'push',
   // Ultima e staccata dalle altre: non e' una funzione in piu' nell'elenco, e'
@@ -77,6 +78,15 @@ function feedsFeature(plan: PlanRow): PlanFeature {
   return { key: 'feeds', included: plan.productFeedsEnabled, value: null };
 }
 
+// Il database si sincronizza su tutti i piani — incluso il Free — quindi la
+// riga e' sempre inclusa. Cambia solo l'etichetta: "limitato" sul Free (che ha
+// un tetto di prodotti e non sincronizza i clienti), "esteso" sugli altri.
+// L'etichetta dinamica si compone in feature-label.ts, che riceve il planName e
+// lo confronta — qui basta dichiarare che la riga c'e'.
+function databaseFeature(plan: PlanRow): PlanFeature {
+  return { key: 'database', included: true, value: null };
+}
+
 function customersFeature(plan: PlanRow): PlanFeature {
   if (!plan.customersSyncEnabled) {
     return { key: 'customers', included: false, value: null };
@@ -131,6 +141,7 @@ export function buildPlanFeatures(plan: PlanRow): PlanFeature[] {
     { key: 'sync', included: true, value: plan.maxSyncFrequencyHours },
     productsFeature(plan),
     customersFeature(plan),
+    databaseFeature(plan),
     feedsFeature(plan),
     { key: 'push', included: PUSH_LEVELS.has(level), value: null },
     // Il riconoscimento di uno stesso cliente fra dispositivi diversi poggia

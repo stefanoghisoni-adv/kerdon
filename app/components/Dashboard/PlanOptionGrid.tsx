@@ -142,7 +142,7 @@ export function PlanOptionGrid({
                     )}
                   </BlockStack>
 
-                  <PlanFeatureList features={card.features} />
+                  <PlanFeatureList features={card.features} planName={card.name} />
                 </BlockStack>
               </div>
             </Card>

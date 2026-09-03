@@ -1,5 +1,5 @@
 import { BlockStack, Box, Divider, InlineStack, Icon, Text, Tooltip } from '@shopify/polaris';
-import { CheckCircleIcon, InfoIcon, XCircleIcon } from '@shopify/polaris-icons';
+import { CheckCircleIcon, DatabaseIcon, InfoIcon, XCircleIcon } from '@shopify/polaris-icons';
 import type { PlanFeature } from './plan-catalog';
 import { sortFeatures } from './plan-features';
 import { featureLabel } from './feature-label';
@@ -8,6 +8,8 @@ import { useT, useLocale } from '~/lib/i18n/context';
 
 interface Props {
   features: PlanFeature[];
+  /** Nome del piano: serve per l'etichetta del database (limitato/esteso). */
+  planName?: string;
 }
 
 // Feature incluse in verde con la spunta cerchiata, non incluse in grigio con
@@ -22,7 +24,7 @@ interface Props {
 //
 // wrap={false} tiene icona e testo sulla stessa riga: che la label non vada a
 // capo dipende invece dalla sua lunghezza, verificata nei test del catalogo.
-export function PlanFeatureList({ features }: Props) {
+export function PlanFeatureList({ features, planName }: Props) {
   const t = useT();
   const locale = useLocale();
 
@@ -37,13 +39,28 @@ export function PlanFeatureList({ features }: Props) {
     <BlockStack gap="300" inlineAlign="start">
       {sorted.map((feature) => (
         <InlineStack key={feature.key} align="start" gap="200" blockAlign="center" wrap={false}>
+          {/* Il cerchio spuntato resta anche sul database: e' la colonna che
+              dice "questo il piano ce l'ha", e saltarla su una riga sola
+              spezzerebbe l'allineamento verticale di tutte le altre. */}
           <Icon
             source={feature.included ? CheckCircleIcon : XCircleIcon}
             tone={feature.included ? 'success' : 'subdued'}
           />
           <Text as="span" tone={feature.included ? 'success' : 'subdued'}>
-            {featureLabel(feature, t, locale)}
+            {featureLabel(feature, t, locale, planName)}
           </Text>
+          {/* Il database, accanto al suo nome. E' l'icona `database` di
+              `@shopify/polaris-icons` — quella vera, non un disegno somigliante:
+              la libreria e' gia' installata e ce l'ha.
+
+              17px invece dei 20 nativi: accanto a un testo da corpo del testo
+              un'icona a piena misura pesa piu' della parola che accompagna, e
+              qui deve accompagnarla, non annunciarla. */}
+          {feature.key === 'database' && (
+            <span className="plan-feature-database-icon">
+              <Icon source={DatabaseIcon} tone={feature.included ? 'success' : 'subdued'} />
+            </span>
+          )}
           {/* "Multi-feed prodotto" e' l'unica riga che nomina una cosa invece
               di misurarla: chi sta scegliendo un piano non sa per forza cosa
               sia un feed, e senza spiegazione quella riga non lo aiuta a
@@ -51,6 +68,16 @@ export function PlanFeatureList({ features }: Props) {
               esteso allungherebbe la card piu' delle altre tre. */}
           {feature.key === 'feeds' && (
             <Tooltip content={t.plan.features.feedsHelp}>
+              <Icon source={InfoIcon} tone="subdued" />
+            </Tooltip>
+          )}
+          {/* Il database c'e' su tutti i piani, ma "limitato" o "esteso" non
+              dice a chi legge cosa cambia davvero: senza spiegare cosa si
+              sincronizza, la riga non aiuta a scegliere. Il tooltip dice che
+              si tratta di dati utente GDPR-compliant e connessioni con ordini,
+              senza nomi di tabelle o colonne. */}
+          {feature.key === 'database' && (
+            <Tooltip content={t.plan.features.databaseHelp}>
               <Icon source={InfoIcon} tone="subdued" />
             </Tooltip>
           )}
@@ -87,7 +114,7 @@ export function PlanFeatureList({ features }: Props) {
               tone={matching.included ? undefined : 'subdued'}
             />
             <Text as="span" tone={matching.included ? undefined : 'subdued'}>
-              {featureLabel(matching, t, locale)}
+              {featureLabel(matching, t, locale, planName)}
             </Text>
           </InlineStack>
           </div>

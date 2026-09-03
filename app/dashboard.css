@@ -544,6 +544,21 @@
   color: inherit;
 }
 
+/* L'icona database nella riga "Database limitato/esteso".
+   17px invece dei 20px nativi di Polaris: un database piu' piccolo si legge
+   meglio affiancato al testo, perche' a 20px coprirebbe troppo della riga e
+   attirerebbe piu' attenzione del testo stesso — che e' cio' che il merchant
+   deve leggere per scegliere il piano. L'icona dice di cosa si tratta, il testo
+   dice cosa cambia fra un piano e l'altro. */
+.plan-feature-database-icon {
+  display: inline-flex;
+}
+
+.plan-feature-database-icon .Polaris-Icon {
+  width: 17px;
+  height: 17px;
+}
+
 /* Il pulsante che aspetta qualche secondo prima di potersi premere.
    Il testo vero resta nel pulsante anche mentre il conto scorre — e' lui a
    dargli la larghezza — ma si fa trasparente, e il numero gli sta sopra
