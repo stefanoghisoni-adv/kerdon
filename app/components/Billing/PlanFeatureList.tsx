@@ -2,7 +2,7 @@ import { BlockStack, Box, Divider, InlineStack, Icon, Text, Tooltip } from '@sho
 import { CheckCircleIcon, DatabaseIcon, InfoIcon, XCircleIcon } from '@shopify/polaris-icons';
 import type { PlanFeature } from './plan-catalog';
 import { sortFeatures } from './plan-features';
-import { featureLabel } from './feature-label';
+import { featureLabel, isDatabaseExtended } from './feature-label';
 import { BoltFilledIcon, BoltIcon } from './BoltIcon';
 import { useT, useLocale } from '~/lib/i18n/context';
 
@@ -39,28 +39,48 @@ export function PlanFeatureList({ features, planName }: Props) {
     <BlockStack gap="300" inlineAlign="start">
       {sorted.map((feature) => (
         <InlineStack key={feature.key} align="start" gap="200" blockAlign="center" wrap={false}>
-          {/* Il cerchio spuntato resta anche sul database: e' la colonna che
-              dice "questo il piano ce l'ha", e saltarla su una riga sola
-              spezzerebbe l'allineamento verticale di tutte le altre. */}
-          <Icon
-            source={feature.included ? CheckCircleIcon : XCircleIcon}
-            tone={feature.included ? 'success' : 'subdued'}
-          />
-          <Text as="span" tone={feature.included ? 'success' : 'subdued'}>
+          {/* Il database porta la propria icona al posto del cerchio spuntato.
+              Sulle altre righe il cerchio dice "questo il piano ce l'ha"; qui
+              non servirebbe a niente, perche' il database c'e' su tutti i piani
+              — quello che cambia e' quanto. Lo dicono l'etichetta ("limitato" o
+              "esteso") e il colore dell'icona: grigia sul Free, verde dove il
+              database e' quello esteso.
+
+              La condizione e' la stessa che sceglie l'etichetta, e viene dallo
+              stesso posto: due condizioni scritte a mano prima o poi
+              divergono, e una card direbbe "esteso" con l'icona spenta.
+
+              E' l'icona `database` di `@shopify/polaris-icons` — quella vera,
+              non un disegno somigliante. 17px invece dei 20 nativi: nella
+              colonna dei simboli un database a piena misura pesa piu' dei
+              cerchi che gli stanno sopra e sotto, e sbilancia la lettura. */}
+          {feature.key === 'database' ? (
+            <span className="plan-feature-database-icon">
+              <Icon
+                source={DatabaseIcon}
+                tone={isDatabaseExtended(planName) ? 'success' : 'subdued'}
+              />
+            </span>
+          ) : (
+            <Icon
+              source={feature.included ? CheckCircleIcon : XCircleIcon}
+              tone={feature.included ? 'success' : 'subdued'}
+            />
+          )}
+          <Text
+            as="span"
+            tone={
+              feature.key === 'database'
+                ? isDatabaseExtended(planName)
+                  ? 'success'
+                  : 'subdued'
+                : feature.included
+                  ? 'success'
+                  : 'subdued'
+            }
+          >
             {featureLabel(feature, t, locale, planName)}
           </Text>
-          {/* Il database, accanto al suo nome. E' l'icona `database` di
-              `@shopify/polaris-icons` — quella vera, non un disegno somigliante:
-              la libreria e' gia' installata e ce l'ha.
-
-              17px invece dei 20 nativi: accanto a un testo da corpo del testo
-              un'icona a piena misura pesa piu' della parola che accompagna, e
-              qui deve accompagnarla, non annunciarla. */}
-          {feature.key === 'database' && (
-            <span className="plan-feature-database-icon">
-              <Icon source={DatabaseIcon} tone={feature.included ? 'success' : 'subdued'} />
-            </span>
-          )}
           {/* "Multi-feed prodotto" e' l'unica riga che nomina una cosa invece
               di misurarla: chi sta scegliendo un piano non sa per forza cosa
               sia un feed, e senza spiegazione quella riga non lo aiuta a

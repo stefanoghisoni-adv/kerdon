@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { featureLabel } from './feature-label';
+import { featureLabel, isDatabaseExtended } from './feature-label';
 // Alias: `it` e' anche il nome del caso di test in vitest.
 import { it as itDict } from '~/lib/i18n/it';
 import { en as enDict } from '~/lib/i18n/en';
@@ -238,5 +238,28 @@ describe('manualSyncAllowed', () => {
       )!.included;
       expect(manualSyncAllowed(level)).toBe(inCard);
     }
+  });
+});
+
+// Colore ed etichetta della riga del database devono dire la stessa cosa: se
+// una card scrivesse "esteso" con l'icona grigia, non ci sarebbe modo di sapere
+// a quale delle due credere. Vengono dalla stessa condizione, e questo test
+// esiste perche' resti una sola.
+describe('limitato o esteso', () => {
+  it('il Free ha il database limitato, gli altri esteso', () => {
+    expect(isDatabaseExtended('Free')).toBe(false);
+    expect(isDatabaseExtended('free')).toBe(false);
+    expect(isDatabaseExtended('  Free  ')).toBe(false);
+
+    for (const piano of ['Pro', 'Business', 'Enterprise', 'Lifetime']) {
+      expect(isDatabaseExtended(piano)).toBe(true);
+    }
+  });
+
+  // Senza nome del piano non si puo' dire che sia il Free: meglio l'esteso, che
+  // e' il caso di tutti i piani tranne uno.
+  it('senza nome del piano vale l esteso', () => {
+    expect(isDatabaseExtended(undefined)).toBe(true);
+    expect(isDatabaseExtended('')).toBe(true);
   });
 });
