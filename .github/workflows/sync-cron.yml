@@ -1,23 +1,32 @@
 name: Sync Cron Trigger
 
-# Vercel Cron on the Free plan runs at most once per day, so the every-30-minutes
-# periodic sync is delegated to GitHub Actions (free).
+# Il giro ogni 30 minuti.
 #
-# Configure in repo settings:
-#   - Variables: APP_URL = https://api.coreward.app
-#   - Secrets:   CRON_SECRET (from Vercel env var)
+# Vercel Cron sul piano Free arriva al massimo a una volta al giorno: quella
+# corsa c'e' gia' (`vercel.json`, alle 03:00) e fa da rete. Questo workflow e' il
+# giro frequente, ed e' l'unico motivo per cui i dati del merchant non restano
+# fermi ventiquattr'ore.
 #
-# APP_URL deve essere il dominio IN USO, non uno che ci reindirizza. Il dominio
-# vecchio (supabase-sync-six.vercel.app) risponde 307 verso quello nuovo, e un
-# 307 non e' un errore: `curl` senza `-L` lo prende, esce con successo e la
-# sincronizzazione non parte. Nessun errore da nessuna parte, e il giro non
-# avviene — che e' esattamente il modo in cui un cron smette di girare senza che
-# nessuno se ne accorga.
+# L'INDIRIZZO STA QUI, e non fra le Variables del repository.
 #
-# Nemmeno seguire il reindirizzamento sarebbe una soluzione: `curl` non porta
-# l'header `Authorization` su un host diverso, quindi arriverebbe senza segreto
-# e si prenderebbe un 401. Il controllo qui sotto rende rumoroso il caso invece
-# di ripararlo di nascosto.
+# Prima era `vars.APP_URL`, e non era mai stata configurata: `curl` riceveva un
+# URL che cominciava con "/api/...", falliva, e il giro frequente non e' mai
+# partito da quando esiste. Una variabile che vive in un pannello, che va tenuta
+# allineata al dominio a mano e che nessuno vede quando manca, e' un pezzo di
+# configurazione che si rompe in silenzio. Il dominio dell'app e' stabile e sta
+# in git, dove si legge e si rivede insieme al resto.
+#
+# `vars.APP_URL` resta come scavalco, per chi lavora su un fork o su un
+# ambiente di prova. Se c'e', deve essere il dominio IN USO e non uno che ci
+# reindirizza: il vecchio supabase-sync-six.vercel.app risponde 307 verso
+# quello nuovo, e un 307 non e' un errore — `curl` senza `-L` lo prende, esce
+# con successo, e il giro non avviene. Seguirlo non aiuterebbe, perche' `curl`
+# non porta l'header `Authorization` su un host diverso e arriverebbe un 401.
+# Il controllo qui sotto rende rumoroso quel caso invece di ripararlo di
+# nascosto.
+#
+# Il segreto invece resta un segreto: Secrets → CRON_SECRET, lo stesso valore
+# che sta fra le env di Vercel.
 
 on:
   schedule:
@@ -32,8 +41,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "${APP_URL:-}" ]; then
-            echo "APP_URL non e' configurata fra le Variables del repository." >&2
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "CRON_SECRET non e' configurato fra i Secrets del repository." >&2
             exit 1
           fi
 
@@ -59,5 +68,6 @@ jobs:
               ;;
           esac
         env:
-          APP_URL: ${{ vars.APP_URL }}
+          # Il dominio in uso; `vars.APP_URL` lo scavalca dove serve.
+          APP_URL: ${{ vars.APP_URL || 'https://api.coreward.app' }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
