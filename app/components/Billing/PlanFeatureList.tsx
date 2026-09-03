@@ -55,11 +55,12 @@ export function PlanFeatureList({ features, planName }: Props) {
               colonna dei simboli un database a piena misura pesa piu' dei
               cerchi che gli stanno sopra e sotto, e sbilancia la lettura. */}
           {feature.key === 'database' ? (
+            /* Verde su tutti i piani, Free compreso: il database c'e' sempre,
+               e un'icona spenta direbbe che manca. Quello che cambia — quanto
+               sincronizza — lo dicono l'etichetta e il tooltip, che sul Free
+               parlano di soli prodotti. */
             <span className="plan-feature-database-icon">
-              <Icon
-                source={DatabaseIcon}
-                tone={isDatabaseExtended(planName) ? 'success' : 'subdued'}
-              />
+              <Icon source={DatabaseIcon} tone="success" />
             </span>
           ) : (
             <Icon
@@ -67,17 +68,12 @@ export function PlanFeatureList({ features, planName }: Props) {
               tone={feature.included ? 'success' : 'subdued'}
             />
           )}
+          {/* Il database e' verde su tutti i piani, icona e scritta: c'e'
+              sempre, e spegnerlo sul Free direbbe che manca. Le altre righe
+              invece si spengono quando il piano non le comprende. */}
           <Text
             as="span"
-            tone={
-              feature.key === 'database'
-                ? isDatabaseExtended(planName)
-                  ? 'success'
-                  : 'subdued'
-                : feature.included
-                  ? 'success'
-                  : 'subdued'
-            }
+            tone={feature.key === 'database' || feature.included ? 'success' : 'subdued'}
           >
             {featureLabel(feature, t, locale, planName)}
           </Text>

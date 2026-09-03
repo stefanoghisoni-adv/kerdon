@@ -20,6 +20,7 @@ import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import { getReadProxyTokenForDisplay } from '~/lib/read-proxy/token.server';
 import { AccountCard } from '~/components/Dashboard/AccountCard';
 import { DatabaseCard, TrackingCredentialsCard } from '~/components/Dashboard/DatabaseCard';
+import { DataRequestsCard } from '~/components/Dashboard/DataRequestsCard';
 import { firstPlanWithCustomersSync, firstPlanWithFeeds } from '~/components/Dashboard/account-format';
 import { samePlanName } from '~/lib/billing/plan-name';
 import { can } from '~/lib/authz/capabilities';
@@ -139,9 +140,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // della connessione, che da qui in poi vive su questa pagina.
   const authorization = normalizeAuthorization(shop?.authorization);
 
+  // Le copie dei dati pronte da consegnare.
+  //
+  // Quando una persona chiede al negozio una copia dei propri dati, Shopify ce
+  // lo dice ma la risposta la deve dare il titolare, entro trenta giorni: noi
+  // prepariamo il file, lui lo ritira e lo gira a chi l'ha chiesto. Senza
+  // questo elenco il file veniva preparato, aspettava trenta giorni e si
+  // cancellava senza che nessuno potesse prenderlo.
+  //
+  // Solo quelle davvero ritirabili: completate, con la copia ancora presente e
+  // dentro la sua finestra. Una riga che promette un file scaduto e' peggio di
+  // nessuna riga.
+  const dataRequests = (
+    await prisma.complianceRequest.findMany({
+      where: {
+        shopDomain: session.shop,
+        topic: 'customers/data_request',
+        status: 'completed',
+        exportExpiresAt: { gt: new Date() },
+      },
+      orderBy: { receivedAt: 'desc' },
+      take: 20,
+      select: { id: true, receivedAt: true, exportExpiresAt: true, customerRef: true },
+    })
+  ).map((r) => ({
+    id: r.id,
+    receivedAt: r.receivedAt.toISOString(),
+    expiresAt: r.exportExpiresAt!.toISOString(),
+    // Il riferimento breve distingue due pratiche nella stessa lista. L'id
+    // della persona non passa di qui.
+    ref: r.customerRef ? r.customerRef.slice(-8) : null,
+  }));
+
   const config = shop?.supabaseConfig;
   if (!config) {
-    return json({ account, config: null, sync, authorization });
+    return json({ account, config: null, sync, authorization, dataRequests });
   }
 
   // Le letture di tracciamento non passano più dalla anon key del merchant ma
@@ -157,6 +190,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     account,
     sync,
     authorization,
+    dataRequests,
     config: {
       readToken,
       proxyBaseUrl,
@@ -179,7 +213,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // automatica e non ha impostazioni, la chiave di lettura viene emessa una volta
 // al collegamento del progetto e le chiavi del progetto non si toccano da qui.
 export default function SupabaseSettings() {
-  const { account, config, sync, authorization } = useLoaderData<typeof loader>();
+  const { account, config, sync, authorization, dataRequests } =
+    useLoaderData<typeof loader>();
   const t = useT();
   // L'avviso sul limite dei database: lo accende il menu dentro la card, e lo
   // rende questa pagina, in cima.
@@ -230,6 +265,11 @@ export default function SupabaseSettings() {
                 onDismiss={() => setPlanLimit(null)}
               />
             )}
+            {/* Una copia dei dati da consegnare ha una scadenza, e passata
+                quella la richiesta resta senza risposta: sta prima di tutto il
+                resto, e c'e' solo quando c'e' davvero qualcosa da ritirare. */}
+            <DataRequestsCard requests={dataRequests ?? []} />
+
             {/* Gli avvisi stanno in cima, prima delle card: dicono se quello
                 che si sta per leggere ha senso — senza un progetto collegato,
                 meta' dei valori sotto sono vuoti per forza. In fondo li si

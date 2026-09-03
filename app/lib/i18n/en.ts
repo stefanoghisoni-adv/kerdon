@@ -63,6 +63,14 @@ export const en: typeof it = {
     upgradeTo: (planName: string) => `Upgrade to ${planName}`,
   },
 
+  dataRequests: {
+    title: "Data copies to hand over",
+    intro:
+      "A customer asked for a copy of their data. Download it and send it to them: you have thirty days from the request.",
+    received: (data: string) => `Requested on ${data}`,
+    expires: (data: string) => `Available until ${data}`,
+    download: "Download",
+  },
   database: {
     name: "Database name",
     title: "Database",

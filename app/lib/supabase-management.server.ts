@@ -317,8 +317,16 @@ export function projectUrl(ref: string): string {
  * a una pagina da guardare. Chi clicca "Vai al database" vuole vedere le sue
  * tabelle, quindi va portato qui.
  */
+/**
+ * La pagina del progetto su Supabase, aperta dove servono le tabelle.
+ *
+ * `/editor` e non la radice: chi clicca "Vai al database" vuole vedere le righe
+ * che l'app gli ha scritto, e la panoramica del progetto e' una schermata di
+ * grafici da cui bisogna comunque navigare. Un clic in meno, e soprattutto
+ * nessun dubbio su dove guardare.
+ */
 export function projectDashboardUrl(ref: string): string {
-  return `https://supabase.com/dashboard/project/${ref}`;
+  return `https://supabase.com/dashboard/project/${ref}/editor`;
 }
 
 export type SupabasePlan = 'free' | 'pro' | 'team' | 'enterprise' | 'platform';

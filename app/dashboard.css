@@ -599,7 +599,7 @@
      spazio dei discendenti e alzerebbe la riga che la contiene. */
   display: flex;
   align-items: center;
-  transform: translateY(1px);
+  transform: translateY(0.5px);
 }
 
 /* Il pulsante che aspetta qualche secondo prima di potersi premere.

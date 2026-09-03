@@ -68,6 +68,14 @@ export const it = {
     upgradeTo: (planName: string) => `Aggiorna a ${planName}`,
   },
 
+  dataRequests: {
+    title: "Copie dei dati da consegnare",
+    intro:
+      "Un cliente ha chiesto una copia dei suoi dati. Scaricala e inviagliela: hai trenta giorni di tempo dalla richiesta.",
+    received: (data: string) => `Richiesta del ${data}`,
+    expires: (data: string) => `Disponibile fino al ${data}`,
+    download: "Scarica",
+  },
   database: {
     name: "Nome database",
     title: "Database",
