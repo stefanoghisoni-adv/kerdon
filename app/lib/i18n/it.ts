@@ -69,9 +69,9 @@ export const it = {
   database: {
     name: "Nome database",
     title: "Database",
-    status: "Stato",
+    status: "Stato connessione",
     appUrl: "App URL",
-    readKey: "Publishable API Key",
+    readKey: "Chiave API pubblica",
     notConfigured: "Non configurato",
     ownerUrl: "URL Database proprietario",
     open: "Vai al database",
@@ -524,7 +524,7 @@ export const it = {
       email: "Supporto via email",
       customers: (amount: string) => `Fino a ${amount} clienti`,
       customersUnlimited: "Clienti illimitati",
-      customersSync: "Sync clienti",
+      customersSync: "-",
       /**
        * Il multi-feed. L'icona accanto spiega cosa vuol dire "feed" a chi non
        * lo sa gia': senza, la riga si legge come un termine tecnico e chi sta
