@@ -17,10 +17,6 @@ import { useT } from '~/lib/i18n/context';
 
 export interface DatabaseCardProps {
   connected: boolean;
-  /** Indirizzo dell'app a cui puntare il tool di tracciamento. */
-  appUrl: string | null;
-  /** Chiave di lettura da usare insieme all'indirizzo qui sopra. */
-  readKey: string | null;
   /** Indirizzo a cui il progetto risponde: si legge e si copia. */
   databaseUrl: string | null;
   /**
@@ -32,10 +28,8 @@ export interface DatabaseCardProps {
   /**
    * Le righe del collegamento — account e database — in cima alla card.
    *
-   * Stavano in una card a parte, che pero' ripeteva lo "Stato" gia' scritto
-   * qui: due riquadri per la stessa cosa. Le compone chi ha i dati, questa card
-   * si limita a dar loro il posto giusto: prima di tutto il resto, perche'
-   * dicono a cosa si riferiscono i valori sotto.
+   * Le compone chi ha i dati, questa card si limita a dar loro il posto
+   * giusto: prima dell'indirizzo, perche' dicono a cosa si riferisce.
    */
   header?: ReactNode;
 }
@@ -166,8 +160,6 @@ function DatabaseAddress({ url, openUrl }: { url: string; openUrl: string }) {
 
 export function DatabaseCard({
   connected,
-  appUrl,
-  readKey,
   databaseUrl,
   dashboardUrl,
   header,
@@ -185,6 +177,43 @@ export function DatabaseCard({
             <Divider />
           </>
         )}
+        {connected && databaseUrl && (
+          <DatabaseAddress url={databaseUrl} openUrl={dashboardUrl ?? databaseUrl} />
+        )}
+      </BlockStack>
+    </Card>
+  );
+}
+
+/**
+ * Le credenziali con cui si legge da fuori, in una card loro.
+ *
+ * Stavano insieme al database, e le due cose si somigliano solo di nome: sopra
+ * c'e' il progetto del merchant — dove i suoi dati vivono e da dove li guarda —
+ * qui ci sono i due valori che copia altrove per farli leggere al proprio
+ * tracciamento. Chi cerca l'uno non sta cercando gli altri, e tenerli in una
+ * card sola faceva scorrere quattro righe per trovarne una.
+ *
+ * Lo stato sta qui e non di la' perche' e' lo stato di QUESTO: se non e'
+ * collegato, i due valori sotto non esistono ancora ed e' quella riga a dirlo.
+ */
+export function TrackingCredentialsCard({
+  connected,
+  appUrl,
+  readKey,
+}: {
+  connected: boolean;
+  appUrl: string | null;
+  readKey: string | null;
+}) {
+  const t = useT();
+
+  return (
+    <Card>
+      <BlockStack gap="300">
+        <Text as="h2" variant="headingMd">
+          {t.database.trackingTitle}
+        </Text>
         <MetricRow
           label={t.database.status}
           badge={{
@@ -204,12 +233,6 @@ export function DatabaseCard({
           value={readKey}
           available={connected}
         />
-        {connected && databaseUrl && (
-          <>
-            <Divider />
-            <DatabaseAddress url={databaseUrl} openUrl={dashboardUrl ?? databaseUrl} />
-          </>
-        )}
       </BlockStack>
     </Card>
   );

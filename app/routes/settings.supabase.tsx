@@ -19,7 +19,7 @@ import { prisma } from '~/db.server';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import { getReadProxyTokenForDisplay } from '~/lib/read-proxy/token.server';
 import { AccountCard } from '~/components/Dashboard/AccountCard';
-import { DatabaseCard } from '~/components/Dashboard/DatabaseCard';
+import { DatabaseCard, TrackingCredentialsCard } from '~/components/Dashboard/DatabaseCard';
 import { firstPlanWithCustomersSync, firstPlanWithFeeds } from '~/components/Dashboard/account-format';
 import { samePlanName } from '~/lib/billing/plan-name';
 import { can } from '~/lib/authz/capabilities';
@@ -308,8 +308,6 @@ export default function SupabaseSettings() {
 
               <DatabaseCard
                 connected={account.connected}
-                appUrl={config?.proxyBaseUrl || null}
-                readKey={config?.readToken ?? null}
                 databaseUrl={config?.databaseUrl ?? null}
                 dashboardUrl={config?.dashboardUrl ?? null}
                 header={
@@ -358,6 +356,15 @@ export default function SupabaseSettings() {
                     </BlockStack>
                   ) : undefined
                 }
+              />
+
+              {/* Le credenziali con cui il tracciamento legge da fuori: card a
+                  se', perche' chi cerca il proprio database non sta cercando
+                  loro e viceversa. */}
+              <TrackingCredentialsCard
+                connected={account.connected}
+                appUrl={config?.proxyBaseUrl || null}
+                readKey={config?.readToken ?? null}
               />
             </InlineGrid>
 

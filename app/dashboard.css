@@ -550,13 +550,33 @@
    attirerebbe piu' attenzione del testo stesso — che e' cio' che il merchant
    deve leggere per scegliere il piano. L'icona dice di cosa si tratta, il testo
    dice cosa cambia fra un piano e l'altro. */
+/* L'icona del database: 19px, e la riga alta come le altre.
+
+   Polaris disegna l'svg piu' grande del riquadro che gli assegna e lascia che
+   sbordi. Con le altre icone non si nota, qui si: la riga del database veniva
+   alta 25px contro i 20px di tutte le altre, e in una colonna di voci allineate
+   quella differenza si legge come un errore di impaginazione.
+
+   Il contenitore si dichiara alto 19 e l'svg lo riempie invece di decidere da
+   se': l'icona resta della misura voluta, e la riga torna a misurare quanto le
+   sue vicine. */
 .plan-feature-database-icon {
   display: inline-flex;
+  align-items: center;
+  width: 19px;
+  height: 19px;
 }
 
 .plan-feature-database-icon .Polaris-Icon {
   width: 19px;
   height: 19px;
+  display: block;
+}
+
+.plan-feature-database-icon .Polaris-Icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 /* Le "i" informative, un pixel piu' in basso.
@@ -631,13 +651,18 @@
   table-layout: fixed;
 }
 
-/* Clienti: cliente, spia, ordini, profitto medio, profitto totale, stato, azioni. */
-.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(1) { width: 26%; }
-.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(2) { width: 6%; }
-.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(3) { width: 10%; }
-.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(4) { width: 14%; }
+/* Clienti: cliente, spia, ordini, profitto medio, profitto totale, stato, azioni.
+
+   "Profitto medio per ordine" e' l'intestazione piu' lunga della tabella e
+   detta la misura della sua colonna: con meno spazio il titolo non ci sta, e
+   con `nowrap` non andava a capo — debordava sopra la colonna accanto, che a
+   schermo si leggeva come due parole appiccicate ("...per ordinePro fitto"). */
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(1) { width: 23%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(2) { width: 5%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(3) { width: 8%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(4) { width: 18%; }
 .stable-columns--customers .Polaris-IndexTable__Table th:nth-child(5) { width: 14%; }
-.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(6) { width: 15%; }
+.stable-columns--customers .Polaris-IndexTable__Table th:nth-child(6) { width: 17%; }
 .stable-columns--customers .Polaris-IndexTable__Table th:nth-child(7) { width: 15%; }
 
 /* Prodotti non idonei: prodotto, variante, SKU, prezzo, costo, percentuale.
@@ -658,9 +683,17 @@
   text-overflow: ellipsis;
 }
 
-/* I numeri e i badge non vanno a capo: una cifra spezzata su due righe si
-   legge come due cifre. */
-.stable-columns .Polaris-IndexTable__TableCell .Polaris-Badge,
-.stable-columns .Polaris-IndexTable__TableHeading {
+/* I badge non vanno a capo: una parola spezzata dentro una pillola colorata
+   la fa sembrare due pillole. */
+.stable-columns .Polaris-IndexTable__TableCell .Polaris-Badge {
   white-space: nowrap;
+}
+
+/* Le intestazioni invece SI', e non e' una svista: con le larghezze fisse un
+   titolo che non va a capo non si accorcia — deborda sulla colonna accanto, e
+   le due si leggono come una parola sola. Meglio due righe sopra la tabella
+   che due titoli sovrapposti. */
+.stable-columns .Polaris-IndexTable__TableHeading {
+  white-space: normal;
+  overflow-wrap: break-word;
 }

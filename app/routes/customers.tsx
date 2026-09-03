@@ -449,7 +449,12 @@ export default function Customers() {
             Con `start` la card e' alta quanto il suo contenuto e resta dov'e'. */}
         {unavailable === null && (
           <InlineGrid
-            columns={{ xs: 1, md: ['twoThirds', 'oneThird'] }}
+            // Un quarto e non un terzo: dentro c'e' una riga sola, e una colonna
+            // larga quanto un terzo dello schermo per tre parole sottrae spazio
+            // alla tabella, che di spazio ne ha bisogno davvero.
+            // Una stringa e non gli alias: `oneThird` sarebbe il 33%, e qui ne
+            // serve un quarto. Polaris passa la stringa a `grid-template-columns`.
+            columns={{ xs: 1, md: '3fr 1fr' }}
             gap="400"
             alignItems="start"
           >

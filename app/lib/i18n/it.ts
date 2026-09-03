@@ -78,6 +78,7 @@ export const it = {
     readKeyHelp: "È la chiave API pubblica che ti servirà per leggere le informazioni da Google Tag Manager server-side",
     notConfigured: "Non configurato",
     ownerUrl: "URL Database proprietario",
+    trackingTitle: "Connessione e credenziali di tracking",
     open: "Vai al database",
     copy: "Copia",
     copied: "Copiato!",

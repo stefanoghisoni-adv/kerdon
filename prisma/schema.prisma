@@ -154,8 +154,6 @@ model Shop {
   supabaseOAuthToken       SupabaseOAuthToken?
   billingCharges           BillingCharge[]
   syncJobs                 SyncJob[]
-  customFields             CustomField[]
-  fieldMappings            FieldMapping[]
   eligibilitySnapshots     ProductEligibilitySnapshot[]
   customerDataAccessLogs   CustomerDataAccessLog[]
   dismissedTrackingSources DismissedTrackingSource[]
@@ -411,35 +409,6 @@ model SyncJob {
   @@index([status])
   @@index([startedAt(sort: Desc)])
   @@map("sync_jobs")
-}
-
-model CustomField {
-  id           String   @id @default(uuid())
-  shopId       String   @map("shop_id")
-  fieldName    String   @map("field_name")
-  fieldType    String   @map("field_type")
-  appliesTo    String   @map("applies_to")
-  defaultValue String?  @map("default_value")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId, fieldName, appliesTo])
-  @@map("custom_fields")
-}
-
-model FieldMapping {
-  id           String  @id @default(uuid())
-  shopId       String  @map("shop_id")
-  shopifyField String  @map("shopify_field")
-  enabled      Boolean @default(false)
-  syncToColumn String? @map("sync_to_column")
-  appliesTo    String  @map("applies_to")
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId, shopifyField])
-  @@map("field_mappings")
 }
 
 model SupabaseOAuthToken {

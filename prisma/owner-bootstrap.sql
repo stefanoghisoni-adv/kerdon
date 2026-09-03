@@ -226,31 +226,6 @@ CREATE TABLE "sync_jobs" (
 );
 
 -- CreateTable
-CREATE TABLE "custom_fields" (
-    "id" TEXT NOT NULL,
-    "shop_id" TEXT NOT NULL,
-    "field_name" TEXT NOT NULL,
-    "field_type" TEXT NOT NULL,
-    "applies_to" TEXT NOT NULL,
-    "default_value" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "custom_fields_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "field_mappings" (
-    "id" TEXT NOT NULL,
-    "shop_id" TEXT NOT NULL,
-    "shopify_field" TEXT NOT NULL,
-    "enabled" BOOLEAN NOT NULL DEFAULT false,
-    "sync_to_column" TEXT,
-    "applies_to" TEXT NOT NULL,
-
-    CONSTRAINT "field_mappings_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "supabase_oauth_tokens" (
     "id" TEXT NOT NULL,
     "shop_id" TEXT NOT NULL,
@@ -402,12 +377,6 @@ CREATE INDEX "sync_jobs_status_idx" ON "sync_jobs"("status");
 CREATE INDEX "sync_jobs_started_at_idx" ON "sync_jobs"("started_at" DESC);
 
 -- CreateIndex
-CREATE UNIQUE INDEX "custom_fields_shop_id_field_name_applies_to_key" ON "custom_fields"("shop_id", "field_name", "applies_to");
-
--- CreateIndex
-CREATE UNIQUE INDEX "field_mappings_shop_id_shopify_field_key" ON "field_mappings"("shop_id", "shopify_field");
-
--- CreateIndex
 CREATE UNIQUE INDEX "supabase_oauth_tokens_shop_id_key" ON "supabase_oauth_tokens"("shop_id");
 
 -- CreateIndex
@@ -475,12 +444,6 @@ ALTER TABLE "billing_charges" ADD CONSTRAINT "billing_charges_shop_id_fkey" FORE
 
 -- AddForeignKey
 ALTER TABLE "sync_jobs" ADD CONSTRAINT "sync_jobs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "custom_fields" ADD CONSTRAINT "custom_fields_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "field_mappings" ADD CONSTRAINT "field_mappings_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "supabase_oauth_tokens" ADD CONSTRAINT "supabase_oauth_tokens_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;

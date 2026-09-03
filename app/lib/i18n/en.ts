@@ -73,6 +73,7 @@ export const en: typeof it = {
     readKeyHelp: "The public API key you will need to read the information from server-side Google Tag Manager",
     notConfigured: "Not configured",
     ownerUrl: "Your database URL",
+    trackingTitle: "Tracking connection and credentials",
     open: "Open database",
     copy: "Copy",
     copied: "Copied!",

@@ -60,16 +60,12 @@ async function testDatabase() {
     const configCount = await prisma.supabaseConfig.count();
     const chargeCount = await prisma.billingCharge.count();
     const syncJobCount = await prisma.syncJob.count();
-    const customFieldCount = await prisma.customField.count();
-    const fieldMappingCount = await prisma.fieldMapping.count();
 
     console.log(`  ✅ shops: ${shopCount} records`);
     console.log(`  ✅ supabase_configs: ${configCount} records`);
     console.log(`  ✅ plans: ${planCount} records`);
     console.log(`  ✅ billing_charges: ${chargeCount} records`);
     console.log(`  ✅ sync_jobs: ${syncJobCount} records`);
-    console.log(`  ✅ custom_fields: ${customFieldCount} records`);
-    console.log(`  ✅ field_mappings: ${fieldMappingCount} records`);
 
     console.log('\n' + '='.repeat(80));
     console.log('\n✨ Database test completed successfully!\n');
