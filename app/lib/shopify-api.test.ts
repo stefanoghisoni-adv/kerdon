@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ShopifyAPIClient, resolveApiVersion, DEFAULT_API_VERSION } from './shopify-api.server';
+import {
+  ShopifyAPIClient,
+  ShopifyRequestError,
+  isMutation,
+  resolveApiVersion,
+  retryDelay,
+  DEFAULT_API_VERSION,
+  MAX_ATTEMPTS,
+} from './shopify-api.server';
 
 global.fetch = vi.fn();
 
@@ -857,5 +865,104 @@ describe('la versione API configurata', () => {
     expect(error).toHaveBeenCalledTimes(6);
     expect(error.mock.calls[0][0]).toContain('SHOPIFY_API_VERSION non valida');
     error.mockRestore();
+  });
+});
+
+// Il 4 settembre due chiamate identiche a un secondo di distanza hanno dato una
+// il catalogo e l'altra INTERNAL_SERVER_ERROR, e la dashboard ha risposto 500
+// su una card che al secondo tentativo si sarebbe riempita da sola.
+describe('i guasti passeggeri si ritentano', () => {
+  // Il finto va rifatto qui: `global.fetch` e' condiviso, e senza azzerarlo si
+  // contano anche le chiamate dei blocchi precedenti.
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+
+  it('riconosce una mutazione anche dopo commenti e righe vuote', () => {
+    expect(isMutation('mutation Crea($x: ID!) { ... }')).toBe(true);
+    expect(isMutation('\n  # un commento\n  mutation { ... }')).toBe(true);
+    expect(isMutation('query Elenco { products { id } }')).toBe(false);
+    // La forma abbreviata e' una lettura: senza parola davanti, e' una query.
+    expect(isMutation('{ products { id } }')).toBe(false);
+    // "mutationLog" non e' "mutation": la parola dev'essere intera.
+    expect(isMutation('query mutationLog { id }')).toBe(false);
+  });
+
+  it('una lettura si ritenta sui guasti dell altra parte, non sui nostri', () => {
+    const interno = new ShopifyRequestError('x', null, null, 'INTERNAL_SERVER_ERROR');
+    expect(retryDelay(interno, 1, false)).toBe(300);
+    expect(retryDelay(interno, 2, false)).toBe(600);
+    // Al terzo si smette: l'attesa totale e' gia' quasi un secondo, e chi
+    // guarda la dashboard sta aspettando.
+    expect(retryDelay(interno, MAX_ATTEMPTS, false)).toBeNull();
+
+    expect(retryDelay(new ShopifyRequestError('x', 503), 1, false)).toBe(300);
+    // Un token scaduto, un permesso mancante, una richiesta sbagliata: non
+    // cambiano idea riprovando, e ritentarli ritarda solo l errore da mostrare.
+    expect(retryDelay(new ShopifyRequestError('x', 401), 1, false)).toBeNull();
+    expect(retryDelay(new ShopifyRequestError('x', 403), 1, false)).toBeNull();
+    expect(retryDelay(new ShopifyRequestError('x', 422), 1, false)).toBeNull();
+  });
+
+  it('una scrittura si ritenta solo quando e certo che non sia passata', () => {
+    // 429 e THROTTLED: respinta prima di essere eseguita, ripeterla e sicuro.
+    expect(retryDelay(new ShopifyRequestError('x', 429), 1, true)).toBe(300);
+    expect(retryDelay(new ShopifyRequestError('x', null, null, 'THROTTLED'), 1, true)).toBe(300);
+    // 500 e connessione caduta: non si sa se l addebito sia stato applicato.
+    expect(retryDelay(new ShopifyRequestError('x', 500), 1, true)).toBeNull();
+    expect(retryDelay(new TypeError('fetch failed'), 1, true)).toBeNull();
+    // La stessa connessione caduta, su una lettura, si riprova.
+    expect(retryDelay(new TypeError('fetch failed'), 1, false)).toBe(300);
+  });
+
+  it('quando Shopify dice quanto aspettare, si aspetta quello', () => {
+    expect(retryDelay(new ShopifyRequestError('x', 429, 2), 1, false)).toBe(2000);
+    // Mai meno dell attesa nostra: un Retry-After di zero non autorizza a
+    // ripartire nello stesso istante.
+    expect(retryDelay(new ShopifyRequestError('x', 429, 0), 2, false)).toBe(600);
+  });
+
+  it('la lettura che fallisce una volta arriva comunque in fondo', async () => {
+    vi.useFakeTimers();
+    (global.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'X-Shopify-API-Version': '2026-07' }),
+        json: async () => ({
+          errors: [{ message: 'Internal error.', extensions: { code: 'INTERNAL_SERVER_ERROR' } }],
+        }),
+      })
+      .mockResolvedValueOnce(ok({ productsCount: { count: 7 } }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const pending = client().getProductsCount();
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(pending).resolves.toBe(7);
+
+    expect((global.fetch as any).mock.calls).toHaveLength(2);
+    expect(warn.mock.calls[0][0]).toContain('tentativo 1 fallito');
+    warn.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('se il guasto non passa, l errore arriva a chi ha chiesto', async () => {
+    vi.useFakeTimers();
+    (global.fetch as any).mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: new Headers(),
+      text: async () => 'niente',
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const pending = client().getProductsCount();
+    const atteso = expect(pending).rejects.toThrow('503');
+    await vi.advanceTimersByTimeAsync(1000);
+    await atteso;
+
+    expect((global.fetch as any).mock.calls).toHaveLength(MAX_ATTEMPTS);
+    warn.mockRestore();
+    vi.useRealTimers();
   });
 });

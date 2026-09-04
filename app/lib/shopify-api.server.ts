@@ -354,6 +354,88 @@ export function resolveApiVersion(configured: string | undefined): string {
   return DEFAULT_API_VERSION;
 }
 
+/**
+ * Un errore che si porta dietro il motivo, non solo il testo.
+ *
+ * Chi decide se ritentare aveva davanti una `Error` e basta, e per capire se
+ * fosse un 429 o un 403 avrebbe dovuto leggere una sottostringa del messaggio:
+ * una regola che si rompe la prima volta che Shopify cambia una parola.
+ */
+export class ShopifyRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | null = null,
+    readonly retryAfterSeconds: number | null = null,
+    readonly graphqlCode: string | null = null,
+  ) {
+    super(message);
+    this.name = 'ShopifyRequestError';
+  }
+}
+
+/** Quante volte si prova in tutto, primo tentativo compreso. */
+export const MAX_ATTEMPTS = 3;
+
+/**
+ * Se l'operazione scrive.
+ *
+ * Serve a una domanda sola — si puo' ripetere senza rischiare di applicarla due
+ * volte? — e la risposta sta nella prima parola utile del documento GraphQL.
+ * Il documento puo' cominciare con righe di commento o con spazi, quindi si
+ * guarda la prima parola vera e non il primo carattere.
+ */
+export function isMutation(query: string): boolean {
+  const firstWord = query
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .join(' ')
+    .trimStart();
+  return /^mutation\b/.test(firstWord);
+}
+
+/**
+ * Quanti millisecondi aspettare prima di riprovare, o null per arrendersi.
+ *
+ * Si ritenta solo cio' che ha buone probabilita' di riuscire da solo al giro
+ * dopo: il limite di frequenza, i guasti interni di Shopify, la connessione
+ * caduta. Un 401, un 403 e un 422 non cambiano idea riprovando — sono un token
+ * scaduto, un permesso mancante, una richiesta sbagliata — e ritentarli
+ * ritarda soltanto l'errore che va mostrato.
+ *
+ * L'attesa raddoppia a ogni giro perche' un guasto che dura piu' di un istante
+ * dura di solito qualche secondo, e tre richieste ravvicinate lo attraversano
+ * tutte e tre.
+ */
+export function retryDelay(error: unknown, attempt: number, mutation: boolean): number | null {
+  if (attempt >= MAX_ATTEMPTS) return null;
+
+  const backoff = 300 * 2 ** (attempt - 1);
+
+  if (error instanceof ShopifyRequestError) {
+    const throttled = error.status === 429 || error.graphqlCode === 'THROTTLED';
+    // Fermati e riprova: la richiesta e' stata respinta prima di essere
+    // eseguita, quindi ripeterla e' sicuro anche se scriveva.
+    if (throttled) {
+      return error.retryAfterSeconds != null
+        ? Math.max(error.retryAfterSeconds * 1000, backoff)
+        : backoff;
+    }
+
+    // Da qui in giu' non si sa se l'operazione sia passata: solo le letture.
+    if (mutation) return null;
+
+    if (error.graphqlCode === 'INTERNAL_SERVER_ERROR') return backoff;
+    if (error.status != null && error.status >= 500) return backoff;
+    return null;
+  }
+
+  // Non e' una risposta di Shopify: e' `fetch` che non e' arrivato in fondo
+  // (DNS, connessione chiusa, timeout). Per una lettura si riprova, per una
+  // scrittura no — la richiesta potrebbe essere arrivata comunque.
+  return mutation ? null : backoff;
+}
+
 export class ShopifyAPIClient {
   private shopDomain: string;
   private accessToken: string;
@@ -380,7 +462,44 @@ export class ShopifyAPIClient {
     return new ShopifyAPIClient(shopDomain, session.accessToken ?? '');
   }
 
+  /**
+   * Una richiesta a Shopify, ritentata quando il guasto e' dell'altra parte.
+   *
+   * Shopify risponde INTERNAL_SERVER_ERROR ogni tanto senza che ci sia niente di
+   * sbagliato nella richiesta: il 4 settembre due chiamate identiche a un
+   * secondo di distanza hanno dato una il catalogo e l'altra un errore, e la
+   * dashboard ha mostrato 500 su una card che al secondo tentativo si sarebbe
+   * riempita da sola. Un guasto che passa da solo non deve arrivare al merchant.
+   *
+   * Le mutazioni si ritentano SOLO quando e' certo che non siano state
+   * eseguite, cioe' quando Shopify ha risposto 429 o THROTTLED: li' la
+   * richiesta e' stata rifiutata prima di toccare qualcosa. Su un 500 o su una
+   * connessione caduta non si sa se la scrittura sia passata, e riprovare
+   * significherebbe rischiare di applicarla due volte — un addebito doppio, un
+   * prodotto creato due volte. Meglio un errore che un duplicato.
+   */
   private async graphql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+    const mutation = isMutation(query);
+    let attempt = 0;
+
+    for (;;) {
+      try {
+        return await this.graphqlOnce<T>(query, variables);
+      } catch (err) {
+        attempt += 1;
+        const retry = retryDelay(err, attempt, mutation);
+        if (retry === null) throw err;
+        console.warn(
+          `[shopify-api] tentativo ${attempt} fallito, riprovo fra ${retry}ms: ${
+            err instanceof Error ? err.message.slice(0, 200) : String(err)
+          }`,
+        );
+        await this.sleep(retry);
+      }
+    }
+  }
+
+  private async graphqlOnce<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
     const response = await fetch(`https://${this.shopDomain}/admin/api/${this.apiVersion}/graphql.json`, {
       method: 'POST',
       headers: {
@@ -396,8 +515,12 @@ export class ShopifyAPIClient {
       // sbagliata, quando il messaggio "Non-expiring access tokens are no longer
       // accepted" era li' e lo stavamo buttando via.
       const detail = await response.text().catch(() => '');
-      throw new Error(
+      throw new ShopifyRequestError(
         `Shopify API error: ${response.status} ${response.statusText}${detail ? ` — ${detail.slice(0, 300)}` : ''}`,
+        response.status,
+        // Shopify dice lui quanto aspettare quando ci ferma: rispettarlo e'
+        // l'unico modo di non farsi fermare di nuovo al tentativo dopo.
+        Number(response.headers?.get('Retry-After')) || null,
       );
     }
 
@@ -412,7 +535,20 @@ export class ShopifyAPIClient {
     // passerebbe per successo e scriverebbe righe vuote nel database del
     // merchant — un guasto silenzioso, il peggior tipo.
     if (body.errors) {
-      throw new Error(`Shopify API error: ${JSON.stringify(body.errors).slice(0, 300)}`);
+      const serialized = JSON.stringify(body.errors);
+      throw new ShopifyRequestError(
+        `Shopify API error: ${serialized.slice(0, 300)}`,
+        null,
+        null,
+        // Il codice sta dentro `extensions`, e da li' si capisce se il guasto e'
+        // passeggero. Cercarlo nella stringa e' brutale ma regge qualunque
+        // forma abbia l'elenco degli errori, che GraphQL non fissa.
+        serialized.includes('INTERNAL_SERVER_ERROR')
+          ? 'INTERNAL_SERVER_ERROR'
+          : serialized.includes('THROTTLED')
+            ? 'THROTTLED'
+            : null,
+      );
     }
 
     // Il limite non si conta piu' in richieste ma in punti: il serbatoio si

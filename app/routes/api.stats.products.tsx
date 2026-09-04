@@ -47,7 +47,46 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  const client = await ShopifyAPIClient.forShop(shop.shopDomain);
+  try {
+    return json(await computeReadiness(shop.id, shop.shopDomain, session.shop));
+  } catch (err) {
+    // Un guasto di Shopify non deve diventare una card rotta.
+    //
+    // Il 4 settembre due letture del catalogo a un secondo di distanza hanno
+    // dato una il catalogo e l'altra INTERNAL_SERVER_ERROR: la dashboard ha
+    // risposto 500 su una card che al richiamo dopo si sarebbe riempita da
+    // sola, e nei log non c'era una riga che dicesse perche'. Il client adesso
+    // ritenta i guasti passeggeri; quando anche i tentativi finiscono, qui si
+    // dice ad alta voce che cos'e' successo e si mostra l'ultimo numero noto.
+    console.error(`[api.stats.products] lettura del catalogo fallita per ${session.shop}:`, err);
+
+    const cached = await getReadinessCache(shop.id);
+    if (!cached) throw err;
+
+    return json({
+      totalProducts: cached.totalProducts,
+      totalVariants: cached.readyCount + cached.problemCount,
+      readyCount: cached.readyCount,
+      problemCount: cached.problemCount,
+      soldWithoutCost: cached.soldWithoutCost ?? null,
+      cached: true,
+      // Il numero e' vecchio ed e' vecchio per un guasto, non perche' nessuno
+      // abbia ancora chiesto il ricalcolo. Chi legge la risposta deve poter
+      // distinguere i due casi: dal primo si esce da soli, dal secondo no.
+      stale: true,
+    });
+  }
+}
+
+/**
+ * La lettura del catalogo, dalla prima pagina al conteggio finale.
+ *
+ * Sta in una funzione sua perche' e' tutto e solo cio' che dipende da Shopify:
+ * il chiamante ci mette intorno il try, e non deve stare attento a quali righe
+ * comprendere e quali no.
+ */
+async function computeReadiness(shopId: string, shopDomain: string, sessionShop: string) {
+  const client = await ShopifyAPIClient.forShop(shopDomain);
 
   let totalProducts = 0;
   let readyCount = 0;
@@ -86,11 +125,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // annunciare prodotti che l'elenco non poteva mostrare. Il catalogo lo stiamo
   // gia' leggendo per la readiness: chiedere al merchant che cosa ha venduto
   // costa una riga di query in piu', non una seconda passata su Shopify.
-  const sold = await loadSoldVariantIds(session.shop);
+  const sold = await loadSoldVariantIds(sessionShop);
   const soldWithoutCost = countSoldProblemVariants(problemRows, sold.ids);
 
   const result = { totalProducts, readyCount, problemCount, soldWithoutCost };
-  await setReadinessCache(shop.id, result);
+  await setReadinessCache(shopId, result);
 
   // Aggiorna lo snapshot di oggi: i prodotti possono diventare idonei durante la
   // giornata (il merchant inserisce i costi mancanti dalla tab "Prodotti con problemi"),
@@ -100,10 +139,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // scriviamo una riga per variante, quindi e' quello il numero "sincronizzabile"
   // che il merchant vede nella card e nel recap.
   try {
-    await upsertTodayEligibilitySnapshot(shop.id, readyCount);
+    await upsertTodayEligibilitySnapshot(shopId, readyCount);
   } catch (err) {
     console.error('Failed to update today eligibility snapshot:', err);
   }
 
-  return json({ ...result, totalVariants: readyCount + problemCount, cached: false });
+  return { ...result, totalVariants: readyCount + problemCount, cached: false };
 }
