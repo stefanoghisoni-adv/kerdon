@@ -199,6 +199,15 @@
   font-size: 0.8125rem;
 }
 
+/* La misura va imposta anche al testo DENTRO la voce: Polaris avvolge
+   l'etichetta in un `Text` che porta la propria, e quella vince su quella
+   ereditata dal contenitore. Senza questa riga la colonna restava grande come
+   prima e sembrava che la modifica non fosse arrivata. */
+.range-picker__sidebar .Polaris-ActionList__Item .Polaris-Text--root {
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
 .range-picker__main {
   display: flex;
   flex-direction: column;
@@ -760,6 +769,12 @@
   background: transparent;
 }
 
+/* Il calendario fa da riferimento alla barra delle frecce, che gli sta sopra
+   in posizione assoluta. */
+.range-picker__calendar {
+  position: relative;
+}
+
 /* Le frecce dei mesi: le nostre, sulla riga del titolo.
 
    Quella di Polaris e' un blocco in posizione assoluta ancorato in alto, che
@@ -774,15 +789,62 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  /* Sopra i titoli dei mesi, e sovrapposta a loro di quel tanto che basta a
-     stare sulla stessa riga: i titoli sono le didascalie delle due tabelle e
-     non si possono spostare, quindi si porta la barra da loro. */
-  margin-block-end: -1.75rem;
-  position: relative;
+  /* Sulla riga dei titoli, non sopra.
+
+     I titoli sono le didascalie delle due tabelle e non si possono spostare:
+     si porta la barra da loro, sovrapponendola. Con un margine negativo la
+     misura andava indovinata e restava sfalsata di qualche pixel; ancorandola
+     in alto dentro il calendario, invece, le frecce cadono sulla prima riga —
+     che e' quella delle didascalie — qualunque altezza abbiano. */
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
   z-index: 1;
+  /* La barra copre tutta la larghezza ma lascia passare i clic: solo i due
+     pulsanti li raccolgono, altrimenti coprirebbe i titoli e la prima riga. */
   pointer-events: none;
 }
 
 .range-picker__months > * {
   pointer-events: auto;
+}
+
+/* Gli estremi con la punta.
+
+   Nel selettore di Shopify il quadrato scuro non galleggia sulla banda: la
+   banda gli si infila sotto, e nell'angolo dove le due forme si incontrano
+   resta uno spicchio grigio con l'angolo vivo. E' quel dettaglio a far leggere
+   i due estremi come le PUNTE di un intervallo invece che come due caselle
+   selezionate a caso dentro una fascia.
+
+   Si ottiene arrotondando la banda solo dal lato che guarda fuori
+   dall'intervallo, e lasciandola squadrata dal lato che tocca l'estremo: la
+   cella subito dopo l'inizio si arrotonda a sinistra, quella subito prima
+   della fine si arrotonda a destra. */
+.range-picker__calendar
+  .Polaris-DatePicker__DayCell:has(.Polaris-DatePicker__Day--firstInRange)
+  + .Polaris-DatePicker__DayCell--inRange {
+  border-start-start-radius: var(--p-border-radius-200);
+  border-end-start-radius: var(--p-border-radius-200);
+}
+
+.range-picker__calendar
+  .Polaris-DatePicker__DayCell--inRange:has(
+    + .Polaris-DatePicker__DayCell .Polaris-DatePicker__Day--lastInRange
+  ) {
+  border-start-end-radius: var(--p-border-radius-200);
+  border-end-end-radius: var(--p-border-radius-200);
+}
+
+/* A capo riga la banda si chiude comunque: l'ultima cella di una settimana e la
+   prima della successiva non si toccano, e senza questo il grigio finirebbe di
+   taglio contro il bordo della tabella. */
+.range-picker__calendar .Polaris-DatePicker__Week > .Polaris-DatePicker__DayCell--inRange:first-child {
+  border-start-start-radius: var(--p-border-radius-200);
+  border-end-start-radius: var(--p-border-radius-200);
+}
+
+.range-picker__calendar .Polaris-DatePicker__Week > .Polaris-DatePicker__DayCell--inRange:last-child {
+  border-start-end-radius: var(--p-border-radius-200);
+  border-end-end-radius: var(--p-border-radius-200);
 }
