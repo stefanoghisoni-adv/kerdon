@@ -12,7 +12,8 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "worker": "tsx watch worker.ts",
-    "worker:build": "node build-worker.mjs"
+    "worker:build": "node build-worker.mjs",
+    "build:verified": "npm run typecheck && vitest run && npm run build"
   },
   "keywords": [],
   "author": "",

@@ -87,8 +87,16 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+    # Due indirizzi per lo stesso database, e servono entrambi.
+    #
+    # Prisma vuole `?schema=public`; `psql` quel parametro non lo conosce e
+    # rifiuta l'intero indirizzo con "invalid URI query parameter: schema". Con
+    # un solo valore uno dei due strumenti si ferma sempre — ed e' quello che
+    # succedeva: il job moriva al primo `psql` e i controlli su deriva, dati
+    # iniziali e RLS non venivano mai eseguiti.
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/coreward_vuoto?schema=public
+      PSQL_URL: postgresql://ci:ci@localhost:5432/coreward_vuoto
 
     steps:
       - uses: actions/checkout@v4
@@ -106,7 +114,7 @@ jobs:
       # "riesce" avendo creato meta' schema — che e' esattamente il guasto che
       # questo job deve scoprire.
       - name: Apply owner-bootstrap.sql to an empty database
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f prisma/owner-bootstrap.sql
+        run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/owner-bootstrap.sql
 
       - name: Compare the resulting database with the Prisma schema
         run: |
@@ -117,4 +125,4 @@ jobs:
 
       # Le righe iniziali e RLS: quello che `migrate diff` non guarda.
       - name: Check seed rows and row level security
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql
+        run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql

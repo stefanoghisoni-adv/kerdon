@@ -1,9 +1,11 @@
 {
-  "buildCommand": "npm run build",
+  "buildCommand": "npm run build:verified",
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "remix",
-  "regions": ["cdg1"],
+  "regions": [
+    "cdg1"
+  ],
   "crons": [
     {
       "path": "/api/cron/sync",
