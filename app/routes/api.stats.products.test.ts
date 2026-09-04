@@ -90,7 +90,11 @@ describe('/api/stats/products', () => {
     getInventoryItemCosts.mockResolvedValue(new Map());
 
     const res = await call('https://app/api/stats/products?refresh=1');
-    const body = await res.json();
+    // Il tipo va allargato a mano: `stale` esiste solo sul ramo che risponde
+    // con la cache, e TypeScript, restringendo alla risposta riuscita, non
+    // lascerebbe nemmeno CHIEDERE se il campo c'e' — che e' proprio cio' che
+    // questa riga deve verificare.
+    const body = (await res.json()) as Record<string, unknown>;
 
     expect(body).toMatchObject({ totalProducts: 1, cached: false });
     expect(body.stale).toBeUndefined();
