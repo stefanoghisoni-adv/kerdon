@@ -251,6 +251,8 @@ const ORDER_SKIP_DETAIL: Record<DenialReason, string> = {
   not_authorized: 'uso dell app sospeso: la sincronizzazione e ferma',
   tracking_suspended: 'tracciamento sospeso',
   plan_required: 'funzione non compresa nel piano',
+  trial_expired:
+    'periodo di prova terminato: la sincronizzazione riparte scegliendo un piano',
 };
 
 export async function action({ request }: ActionFunctionArgs) {

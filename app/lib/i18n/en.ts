@@ -689,6 +689,12 @@ export const en: typeof it = {
     deleteUnknown: "This database is no longer in your Supabase account.",
     deleteFailed: "Couldn’t delete the database. Try again.",
     recheckFailed: "The recheck didn’t go through. Try again.",
+    deleteDataFailed:
+      "The tables could not be deleted from your database, so the connection is still active. Try again shortly.",
+    deleteDataBlocked:
+      "The tables could not be deleted from your database. The connection is still active: contact support before trying again.",
+    deleteDataInProgress:
+      "A deletion is already running for this store. Wait for it to finish.",
   },
 
   chart: {

@@ -303,3 +303,107 @@ describe('policy — la lettura non eredita le condizioni della scrittura', () =
     ).toBe('tracking_suspended');
   });
 });
+
+describe('policy — la prova gratuita che finisce', () => {
+  /**
+   * Il buco: la scadenza esisteva solo dove qualcuno passava a scriverla — il
+   * loader della dashboard. Il merchant che non riapriva l'app continuava a
+   * sincronizzare, a farsi servire il feed e a leggere i suoi dati per mesi
+   * dopo la fine della prova. Qui la scadenza e' una risposta della policy, e
+   * la policy risponde a tutti nello stesso modo.
+   */
+  const SCADENZA = new Date('2026-03-01T00:00:00.000Z');
+
+  const inProva = (over: Partial<ShopCapabilityFacts> = {}) =>
+    con({ isInTrial: true, trialEndsAt: SCADENZA, activeChargeId: null, ...over });
+
+  it("un istante prima della scadenza non cambia niente", () => {
+    const facts = inProva({ now: new Date(SCADENZA.getTime() - 1) });
+    expect(concesse(facts)).toEqual([...CAPABILITIES]);
+  });
+
+  it('allo scoccare della scadenza si ferma tutto', () => {
+    // Il confine e' l'istante stesso: alla scadenza la prova e' finita, non le
+    // manca ancora un millisecondo.
+    const facts = inProva({ now: SCADENZA });
+    expect(concesse(facts)).toEqual([]);
+    for (const capability of CAPABILITIES) {
+      expect(motivo(facts, capability)).toBe('trial_expired');
+    }
+  });
+
+  it('ferma anche le letture, che hanno un\'autorizzazione loro', () => {
+    // Il container nella vetrina del merchant continuava a farsi servire i dati
+    // dei clienti a tempo indeterminato: e' la parte che nessuno guardava.
+    expect(motivo(inProva({ now: SCADENZA }), 'use_read_proxy')).toBe('trial_expired');
+  });
+
+  it("non dipende da nessuna scrittura: la colonna dice ancora ENABLED", () => {
+    // E' il punto. Il riconciliatore che porta la colonna in PENDING puo' non
+    // essere mai passato — il merchant non riapre l'app — e la risposta non
+    // deve cambiare per questo.
+    const facts = inProva({ authorization: 'ENABLED', now: SCADENZA });
+    expect(motivo(facts, 'sync_products')).toBe('trial_expired');
+  });
+
+  it("un abbonamento attivo vuol dire che il merchant paga: la prova non lo tocca", () => {
+    // La sottoscrizione a pagamento con i giorni di prova concessi da Shopify:
+    // alla fine di quei giorni comincia l'addebito, non la sospensione. Senza
+    // questa regola il primo giorno di fatturazione spegnerebbe l'app a un
+    // cliente pagante.
+    const facts = inProva({ activeChargeId: '1234', now: SCADENZA });
+    expect(concesse(facts)).toEqual([...CAPABILITIES]);
+  });
+
+  it('il piano assegnato dall owner non ha una prova che possa scadere', () => {
+    // Lifetime non si compra: farlo scadere spegnerebbe l'app a chi non ha
+    // nessun modo di riaccenderla, visto che la tab Piano a lui non risponde.
+    const facts = inProva({
+      plan: { customersSyncEnabled: true, productFeedsEnabled: true, planName: 'lifetime' },
+      now: SCADENZA,
+    });
+    expect(concesse(facts)).toEqual([...CAPABILITIES]);
+  });
+
+  it('un piano gratuito senza prova non scade mai', () => {
+    // Nessuna data scritta = niente da far scadere. Non si ricostruisce da
+    // `installedAt` piu' i giorni del piano: quel conto dava una seconda
+    // scadenza, diversa da questa a ogni cambio di listino.
+    for (const senza of [null, undefined]) {
+      expect(concesse(inProva({ trialEndsAt: senza, now: SCADENZA }))).toEqual([...CAPABILITIES]);
+    }
+  });
+
+  it("una prova gia' chiusa non riscade", () => {
+    // Cambio di piano: `isInTrial` passa a false e la data resta indietro.
+    const facts = inProva({ isInTrial: false, now: new Date('2027-01-01T00:00:00Z') });
+    expect(concesse(facts)).toEqual([...CAPABILITIES]);
+  });
+
+  it("la disinstallazione e la sospensione vengono prima", () => {
+    // Sono decisioni prese, e sono quelle che il merchant si vede raccontate
+    // nel banner; la prova scaduta copre il caso che nessuno ha ancora toccato.
+    const scaduta = { now: SCADENZA };
+    expect(motivo(inProva({ ...scaduta, uninstalledAt: new Date() }), 'use_app')).toBe(
+      'uninstalled',
+    );
+    expect(motivo(inProva({ ...scaduta, authorization: 'DISABLED' }), 'use_app')).toBe(
+      'not_authorized',
+    );
+    expect(
+      motivo(inProva({ ...scaduta, trackingAuthorization: 'DISABLED' }), 'use_read_proxy'),
+    ).toBe('tracking_suspended');
+  });
+
+  it('viene prima dello scollegamento: non e\' il database che manca', () => {
+    const facts = inProva({ connectionVerifiedAt: null, now: SCADENZA });
+    expect(motivo(facts, 'use_read_proxy')).toBe('trial_expired');
+  });
+
+  it("senza un istante iniettato si guarda l'orologio, e una scadenza del passato e' passata", () => {
+    // `now` esiste per i test; in esercizio la policy legge l'ora da se'.
+    expect(motivo(inProva({ trialEndsAt: new Date('2020-01-01T00:00:00Z') }), 'use_app')).toBe(
+      'trial_expired',
+    );
+  });
+});

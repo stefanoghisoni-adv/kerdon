@@ -1,3 +1,4 @@
+import { isSelectablePlan } from '~/components/Billing/plan-access';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import { syncIsActive } from '~/lib/sync/sync-active';
 
@@ -68,6 +69,16 @@ export type DenialReason =
   | 'not_connected'
   /** Il piano del negozio non comprende questa funzione. */
   | 'plan_required'
+  /**
+   * La prova gratuita e' finita e non c'e' nessun abbonamento a sostenerla.
+   *
+   * Distinto da `not_authorized` di proposito: la colonna `authorization` e' un
+   * gesto dell'owner, questa e' una data che passa da sola. Chi risponde ha da
+   * dire due cose diverse — "ti abbiamo sospeso" e "la prova e' scaduta, scegli
+   * un piano" — e il secondo messaggio e' l'unica strada che il merchant ha per
+   * tornare operativo.
+   */
+  | 'trial_expired'
   /** Il permesso non e' stato concesso all'installazione (scope Shopify). */
   | 'scope_required';
 
@@ -75,6 +86,16 @@ export type DenialReason =
 export interface CapabilityPlan {
   customersSyncEnabled: boolean;
   productFeedsEnabled: boolean;
+  /**
+   * Il nome a listino, quando chi chiama ce l'ha.
+   *
+   * Serve a una domanda sola: se questo e' un piano che l'owner assegna a mano
+   * (lifetime) — quelli non si comprano, quindi non hanno una prova che possa
+   * scadere ne' un abbonamento che la sostituisca. Opzionale perche' chi
+   * costruisce il piano a mano in un test non deve nominarlo per forza: senza
+   * nome vale la regola normale, che e' quella prudente.
+   */
+  planName?: string | null;
 }
 
 /**
@@ -101,6 +122,38 @@ export interface ShopCapabilityFacts {
   scopes: string | null | undefined;
   /** Il piano del negozio. null = non trovato nel listino, e allora si nega. */
   plan: CapabilityPlan | null | undefined;
+  /**
+   * Colonna `is_in_trial`: il negozio sta usando una prova gratuita.
+   *
+   * Da sola non decide niente — dice solo che una prova e' in corso; quando
+   * finisce lo dice `trialEndsAt`.
+   */
+  isInTrial?: boolean | null | undefined;
+  /**
+   * Colonna `trial_ends_at`: l'istante in cui la prova finisce.
+   *
+   * E' l'istante AUTOREVOLE, quello scritto quando la prova e' partita. Non si
+   * ricalcola da `installedAt` piu' i giorni del piano: quel conto dava una
+   * seconda data, diversa da questa ogni volta che il listino cambiava o che il
+   * negozio ripartiva con un abbonamento, e le due si contraddicevano.
+   */
+  trialEndsAt?: Date | null | undefined;
+  /**
+   * Colonna `active_charge_id`: l'abbonamento che sostiene il piano di adesso.
+   *
+   * Valorizzato = il merchant paga, e la fine della prova non lo tocca. E' il
+   * caso della sottoscrizione a pagamento con i giorni di prova concessi da
+   * Shopify: quando quei giorni finiscono comincia l'addebito, non la
+   * sospensione. Senza questo fatto, il primo giorno di fatturazione di un
+   * cliente pagante spegnerebbe l'app.
+   */
+  activeChargeId?: string | null | undefined;
+  /**
+   * L'istante rispetto a cui si giudica la scadenza. Iniettabile: una policy che
+   * legge l'orologio da se' non si puo' provare al minuto prima e al minuto
+   * dopo, che sono le sole due prove che contano.
+   */
+  now?: Date | null | undefined;
 }
 
 export interface CapabilityDecision {
@@ -128,6 +181,53 @@ function refused(denial: DenialReason): CapabilityDecision {
  */
 function enabled(value: string | null | undefined): boolean {
   return (value ?? '').trim().toUpperCase() === 'ENABLED';
+}
+
+/**
+ * La prova gratuita di questo negozio e' finita.
+ *
+ * Sta qui, dentro la policy, e non in un lavoro schedulato che sposta una
+ * colonna: finche' la scadenza era una scrittura, valeva solo per chi passava
+ * dal punto che la eseguiva — la dashboard. Il merchant che non riapriva l'app
+ * continuava a sincronizzare, a farsi servire il feed e a leggere i suoi dati
+ * per mesi dopo la fine della prova, perche' nessuno era passato a spegnerlo.
+ * Una regola che dipende da una scrittura andata a buon fine non e' una regola:
+ * e' una speranza con un effetto collaterale.
+ *
+ * Esportata perche' il riconciliatore — quello che porta le due colonne in
+ * PENDING — chieda la stessa cosa a cui rispondono i rifiuti, invece di
+ * ricalcolarla per conto suo. Era proprio da quel secondo conto che nascevano
+ * due date di scadenza diverse per lo stesso negozio.
+ */
+export function trialHasExpired(facts: ShopCapabilityFacts): boolean {
+  // Un abbonamento attivo vuol dire che il merchant paga, e chi paga non ha
+  // nessuna prova da veder scadere. E' il caso della sottoscrizione con i
+  // giorni di prova concessi da Shopify: alla fine di quei giorni comincia
+  // l'addebito, non la sospensione — senza questa riga il primo giorno di
+  // fatturazione di un cliente pagante gli spegnerebbe l'app.
+  if ((facts.activeChargeId ?? '').trim() !== '') return false;
+
+  // I piani che assegna l'owner (lifetime) non si comprano: non hanno un
+  // periodo di prova che li preceda ne' un abbonamento che possa sostituirlo.
+  // Farli scadere vorrebbe dire spegnere l'app a chi non ha nessun modo di
+  // riaccenderla, visto che la tab Piano a lui non risponde nemmeno.
+  if (facts.plan && !isSelectablePlan(facts.plan.planName)) return false;
+
+  // Nessuna prova in corso: un piano gratuito che una prova non ce l'ha, o un
+  // negozio la cui prova e' stata chiusa perche' e' passato a pagamento.
+  if (facts.isInTrial === false) return false;
+
+  // Senza una scadenza scritta non c'e' niente da far scadere. E' il caso dei
+  // piani senza prova a listino, e l'unico esito possibile: la data la si
+  // legge, non la si ricostruisce — un conto fatto qui su `installedAt` piu' i
+  // giorni del piano darebbe una seconda scadenza, diversa da quella vera ogni
+  // volta che il listino cambia.
+  const ends = facts.trialEndsAt;
+  if (!ends) return false;
+
+  // Il confine e' l'istante stesso: allo scoccare della scadenza la prova e'
+  // finita, non le manca ancora un millisecondo.
+  return (facts.now ?? new Date()).getTime() >= ends.getTime();
 }
 
 /** La prima ragione che c'e', o null se non ce n'e' nessuna. */
@@ -171,10 +271,18 @@ export function evaluateShopCapabilities(
     ? null
     : ('not_connected' as const);
 
+  // La scadenza della prova viene DOPO la colonna `authorization`, e l'ordine
+  // non e' indifferente: quando il riconciliatore ha gia' fatto il suo giro la
+  // colonna dice PENDING, ed e' quella la parola che il merchant si vede nel
+  // banner e nei messaggi. Questo motivo copre l'altro caso — quello che prima
+  // non copriva nessuno: la prova finita su un negozio ancora ENABLED, perche'
+  // nessuno e' passato a spostare la colonna.
+  const trialOver = trialHasExpired(facts) ? ('trial_expired' as const) : null;
+
   // L'uso dell'app non chiede un database collegato: e' proprio durante la
   // configurazione — quando il collegamento ancora non c'e' — che le schermate
   // che lo creano devono poter funzionare.
-  const useApp = firstDenial(installed, authorized);
+  const useApp = firstDenial(installed, authorized, trialOver);
 
   // Tutto cio' che scrive sul database del merchant ha bisogno, in piu', che
   // quel database ci sia e risponda.
@@ -205,10 +313,17 @@ export function evaluateShopCapabilities(
     // gia' sincronizzati — fermi, ma utilizzabili. Quel che vale per entrambe
     // e' il resto: un'app disinstallata non legge piu' niente, e senza progetto
     // collegato non c'e' niente da leggere.
+    //
+    // La prova scaduta invece li ferma tutti e due. E' quello che la prova
+    // concede — l'app per intero, per un tempo — e lasciare aperta la lettura
+    // significherebbe che il container nella vetrina del merchant continua a
+    // farsi servire i suoi clienti a tempo indeterminato senza che nessuno
+    // paghi.
     use_read_proxy: decide(
       firstDenial(
         installed,
         enabled(facts.trackingAuthorization) ? null : 'tracking_suspended',
+        trialOver,
         connected,
       ),
     ),

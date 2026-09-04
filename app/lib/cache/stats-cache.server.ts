@@ -134,3 +134,24 @@ export async function setCustomerStatsCache(
     console.error('[stats-cache] set clienti fallito (ignoro):', err);
   }
 }
+
+/**
+ * Butta via i conteggi in cache di un negozio.
+ *
+ * Serve quando i dati da cui quei numeri erano stati calcolati non esistono
+ * piu': scollegare il database — a maggior ragione eliminandone le tabelle —
+ * lascerebbe altrimenti in dashboard i prodotti pronti e i clienti di un
+ * database che non c'e' piu', per un giorno intero (e' il TTL). Non un errore
+ * visibile: dei numeri credibili e falsi, che e' peggio.
+ *
+ * Best effort come tutto il resto qui: se Redis non risponde, i numeri
+ * scadranno da soli e nel frattempo la pagina li ricalcola live.
+ */
+export async function clearShopStatsCache(shopId: string): Promise<void> {
+  try {
+    const redis = await getClient();
+    await withTimeout(redis.del(key(shopId), customerKey(shopId)), 0);
+  } catch (err) {
+    console.error('[stats-cache] pulizia fallita (ignoro):', err);
+  }
+}

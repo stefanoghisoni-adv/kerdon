@@ -15,6 +15,8 @@ import { shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { SYNC_ACTIVE_CONFIG_FILTER } from '~/lib/sync/sync-active';
 import { pruneAccessLog } from '~/lib/read-proxy/access-log.server';
+import { drainPendingCancellations } from '~/lib/billing/cancel-outbox.server';
+import { unauthenticated } from '~/shopify.server';
 import { pruneAnonymousUsers } from '~/lib/tracking/users.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import {
@@ -64,6 +66,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     anonymousUsersPruned: 0,
     complianceProcessed: 0,
     complianceFailed: 0,
+    /** Abbonamenti sostituiti che si e' finalmente riusciti a chiudere. */
+    subscriptionsCancelled: 0,
     expiredExportsPruned: 0,
     errors: [] as string[],
   };
@@ -89,6 +93,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('Cron compliance drain error:', message);
       results.errors.push(`compliance: ${message}`);
+    }
+  }
+
+  // Gli abbonamenti sostituiti che la callback non e' riuscita a chiudere.
+  //
+  // La chiusura vive nella callback, ma proprio quando fallisce li' non si
+  // conclude niente: qui si riprende quel che era rimasto segnato. Di norma non
+  // trova niente e costa una query; quando trova qualcosa, e' un merchant che
+  // altrimenti pagherebbe due abbonamenti.
+  if (!onlyShopId) {
+    try {
+      results.subscriptionsCancelled = await drainPendingCancellations(
+        async (shopDomain) => (await unauthenticated.admin(shopDomain)).admin,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Cron billing outbox error:', message);
+      results.errors.push(`billing outbox: ${message}`);
     }
   }
 

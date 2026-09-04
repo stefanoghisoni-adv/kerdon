@@ -10,7 +10,12 @@ vi.mock('~/db.server', () => ({
 }));
 vi.mock('~/utils/crypto.server', () => ({ decrypt: (v: string) => v.replace(/^enc\(|\)$/g, '') }));
 
-import { resolveShopReadContext, clearReadContextCache } from './context.server';
+import {
+  resolveShopReadContext,
+  clearReadContextCache,
+  invalidateReadContextForDomain,
+  invalidateReadContextForShop,
+} from './context.server';
 
 // `uninstalledAt` e `connectionVerifiedAt` non erano in questa riga finta
 // perche' finora nessuno li guardava: il gate leggeva la sola colonna del
@@ -19,6 +24,7 @@ import { resolveShopReadContext, clearReadContextCache } from './context.server'
 // invece di esserlo per omissione.
 const shopRow = (over: Record<string, unknown> = {}) => ({
   id: 's1',
+  shopDomain: 'x.myshopify.com',
   uninstalledAt: null,
   authorization: 'ENABLED',
   trackingAuthorization: 'ENABLED',
@@ -156,5 +162,81 @@ describe('resolveShopReadContext', () => {
     await resolveShopReadContext('spx_ignoto');
     await resolveShopReadContext('spx_ignoto');
     expect(findUnique).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('la cache non sopravvive ai fatti da cui la decisione e\' uscita', () => {
+  /**
+   * Nella cache non c'e' una copia dei dati: c'e' un `canReadData` deciso
+   * quando la riga e' entrata. Finche' non scadeva, un negozio appena sospeso
+   * continuava a farsi servire — trenta secondi su un endpoint pubblico.
+   */
+  beforeEach(() => {
+    findUnique.mockReset();
+    findPlanMock.mockReset();
+    findPlanMock.mockResolvedValue({});
+    clearReadContextCache();
+  });
+
+  /** Il valore del gate, per non dover restringere l'unione a ogni riga. */
+  async function puoLeggere(): Promise<boolean> {
+    const r = await resolveShopReadContext('spx_x');
+    return r.kind === 'ok' && r.ctx.canReadData;
+  }
+
+  it('senza invalidare, la risposta vecchia resta (ed e\' il problema)', async () => {
+    findUnique.mockResolvedValue(shopRow());
+    expect(await puoLeggere()).toBe(true);
+
+    findUnique.mockResolvedValue(shopRow({ trackingAuthorization: 'DISABLED' }));
+    expect(await puoLeggere()).toBe(true);
+    expect(findUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidando per id, la decisione si rifa\' da capo', async () => {
+    findUnique.mockResolvedValue(shopRow());
+    expect(await puoLeggere()).toBe(true);
+
+    invalidateReadContextForShop('s1');
+    findUnique.mockResolvedValue(shopRow({ trackingAuthorization: 'DISABLED' }));
+    expect(await puoLeggere()).toBe(false);
+  });
+
+  it('invalidando per dominio: e\' il caso della disinstallazione', async () => {
+    // Il webhook di Shopify porta il dominio e niente altro.
+    findUnique.mockResolvedValue(shopRow());
+    expect(await puoLeggere()).toBe(true);
+
+    invalidateReadContextForDomain('x.myshopify.com');
+    findUnique.mockResolvedValue(shopRow({ uninstalledAt: new Date() }));
+    expect(await puoLeggere()).toBe(false);
+  });
+
+  it('un altro negozio non viene toccato', async () => {
+    findUnique.mockResolvedValue(shopRow());
+    expect(await puoLeggere()).toBe(true);
+
+    invalidateReadContextForShop('un-altro-negozio');
+    findUnique.mockResolvedValue(shopRow({ trackingAuthorization: 'DISABLED' }));
+    expect(await puoLeggere()).toBe(true);
+  });
+
+  it('la riga non vive mai oltre la fine della prova', async () => {
+    // La scadenza e' l'unica che si sa in anticipo: nessuno deve venire ad
+    // avvisare, basta non tenere la risposta piu' a lungo di quanto vale.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-01T00:00:00Z'));
+    const fraCinqueSecondi = new Date(Date.now() + 5_000);
+
+    findUnique.mockResolvedValue(
+      shopRow({ isInTrial: true, trialEndsAt: fraCinqueSecondi, activeChargeId: null }),
+    );
+    expect(await puoLeggere()).toBe(true);
+
+    // Sei secondi: dentro i trenta della cache, ma oltre la prova.
+    vi.setSystemTime(new Date(Date.now() + 6_000));
+    expect(await puoLeggere()).toBe(false);
+    expect(findUnique).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 });

@@ -5,6 +5,7 @@ const updateManyShop = vi.fn();
 const deleteManySession = vi.fn();
 const deleteManyConfig = vi.fn();
 const deleteManyToken = vi.fn();
+const deleteMerchantData = vi.fn();
 
 vi.mock('~/lib/webhooks/verify.server', () => ({
   verifyWebhook: (...a: unknown[]) => verifyWebhook(...(a as [])),
@@ -16,6 +17,9 @@ vi.mock('~/db.server', () => ({
     supabaseConfig: { deleteMany: (...a: unknown[]) => deleteManyConfig(...a) },
     supabaseOAuthToken: { deleteMany: (...a: unknown[]) => deleteManyToken(...a) },
   },
+}));
+vi.mock('~/lib/supabase/delete-merchant-data.server', () => ({
+  deleteMerchantData: (...a: unknown[]) => deleteMerchantData(...a),
 }));
 
 import { action } from './webhooks.app.uninstalled';
@@ -81,6 +85,16 @@ describe('webhook app/uninstalled', () => {
 
     expect(deleteManyConfig).not.toHaveBeenCalled();
     expect(deleteManyToken).not.toHaveBeenCalled();
+  });
+
+  it('non passa dall eliminazione dei dati: quella e un gesto esplicito', async () => {
+    // `deleteMerchantData` esiste per una richiesta sola — "scollega ed
+    // elimina", scritta a mano nel modal con il nome del progetto — e da
+    // nessun'altra parte. Una disinstallazione non e' quella richiesta:
+    // reinstallando il merchant deve ritrovare tutto al suo posto.
+    await action({ request: req() } as never);
+
+    expect(deleteMerchantData).not.toHaveBeenCalled();
   });
 
   it('negozio sconosciuto → 200 lo stesso', async () => {

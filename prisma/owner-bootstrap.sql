@@ -468,6 +468,51 @@ ALTER TABLE "product_feeds" ADD CONSTRAINT "product_feeds_shop_id_fkey" FOREIGN 
 -- AddForeignKey
 ALTER TABLE "feed_field_mappings" ADD CONSTRAINT "feed_field_mappings_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- CreateTable
+CREATE TABLE "supabase_managed_resources" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "project_ref" TEXT NOT NULL,
+    "schema_name" TEXT NOT NULL DEFAULT 'public',
+    "resource_name" TEXT NOT NULL,
+    "resource_kind" TEXT NOT NULL DEFAULT 'table',
+    "created_by_coreward" BOOLEAN NOT NULL,
+    "schema_version" INTEGER NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "supabase_managed_resources_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "supabase_data_deletions" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "project_ref" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'processing',
+    "resources" TEXT[],
+    "remaining" TEXT[],
+    "last_error" TEXT,
+    "started_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "completed_at" TIMESTAMP(3),
+
+    CONSTRAINT "supabase_data_deletions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "supabase_managed_resources_shop_id_project_ref_idx" ON "supabase_managed_resources"("shop_id", "project_ref");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "supabase_managed_resources_shop_id_project_ref_schema_name__key" ON "supabase_managed_resources"("shop_id", "project_ref", "schema_name", "resource_name");
+
+-- CreateIndex
+CREATE INDEX "supabase_data_deletions_shop_id_started_at_idx" ON "supabase_data_deletions"("shop_id", "started_at" DESC);
+
+-- AddForeignKey
+ALTER TABLE "supabase_managed_resources" ADD CONSTRAINT "supabase_managed_resources_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "supabase_data_deletions" ADD CONSTRAINT "supabase_data_deletions_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 -- I piani: cinque righe copiate dal database owner in uso.
 --
 -- Non si generano dallo schema perche' non sono struttura, sono scelte:

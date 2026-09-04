@@ -161,6 +161,8 @@ model Shop {
   productFeeds             ProductFeed[]
   feedFieldMappings        FeedFieldMapping[]
   complianceRequests       ComplianceRequest[]
+  supabaseManagedResources SupabaseManagedResource[]
+  supabaseDataDeletions    SupabaseDataDeletion[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -645,4 +647,85 @@ model ComplianceRequest {
   @@index([status, receivedAt])
   @@index([shopDomain, receivedAt(sort: Desc)])
   @@map("compliance_requests")
+}
+
+/// Cosa, nel database del merchant, e' roba nostra.
+///
+/// Nasce da un guasto preciso: lo scollegamento con "elimina tabelle e dati"
+/// eseguiva `DROP TABLE` sui due nomi configurati (`products`, `customers`) e
+/// basta. Le tabelle che l'app crea pero' sono cinque — ci sono anche `users`,
+/// `orders` e `order_lines` — quindi la promessa fatta al merchant era falsa in
+/// un verso; e nell'altro era pericolosa, perche' un nome configurato non dice
+/// da nessuna parte che quella tabella l'abbiamo creata noi. Un negozio che
+/// aveva gia' la sua `products`, con dentro il suo catalogo, se la vedeva
+/// cancellare da un gesto che prometteva di togliere le NOSTRE tabelle.
+///
+/// Qui si scrive al collegamento, quando la risposta e' ancora conoscibile:
+/// prima di eseguire la DDL si guarda quali tabelle esistono gia', e quelle
+/// nascono con `createdByCoreWard = false`. Dopo non lo si potrebbe piu' dire —
+/// la DDL e' CREATE TABLE IF NOT EXISTS, e una tabella presente non racconta
+/// chi l'ha fatta.
+///
+/// Una riga per tabella e per progetto: ricollegare lo stesso negozio a un
+/// database diverso non eredita la proprieta' del precedente.
+model SupabaseManagedResource {
+  id     String @id @default(uuid())
+  shopId String @map("shop_id")
+  /// Il progetto Supabase a cui la riga si riferisce. Fa parte della chiave:
+  /// la stessa `products` su due progetti diversi sono due cose diverse.
+  projectRef String @map("project_ref")
+  schemaName String @default("public") @map("schema_name")
+  /// Nome della tabella cosi' com'e' nel database del merchant.
+  resourceName String @map("resource_name")
+  /// Per ora solo 'table'. C'e' come colonna e non come sottinteso perche' il
+  /// giorno in cui l'app creera' anche una vista o una funzione, l'ordine con
+  /// cui si eliminano non e' lo stesso.
+  resourceKind String @default("table") @map("resource_kind")
+  /// L'unica domanda che conta al momento dell'eliminazione. false = la tabella
+  /// c'era gia', e' del merchant, non si tocca.
+  createdByCoreWard Boolean @map("created_by_coreward")
+  /// Versione dello schema con cui la risorsa e' stata creata: dice quale DDL
+  /// l'ha fatta, senza doverlo dedurre dalla data.
+  schemaVersion Int      @map("schema_version")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, projectRef, schemaName, resourceName])
+  @@index([shopId, projectRef])
+  @@map("supabase_managed_resources")
+}
+
+/// Un tentativo di eliminare i dati dal database del merchant.
+///
+/// Esiste perche' l'eliminazione ha tre momenti che prima non erano distinti:
+/// e' cominciata, e' andata a buon fine, non e' riuscita. Il codice vecchio li
+/// confondeva tutti in uno — qualunque errore diventava un `console.warn`, e
+/// token e configurazione venivano cancellati lo stesso: da li' in poi l'app
+/// non aveva piu' le credenziali per finire il lavoro, e il merchant aveva
+/// letto "fatto".
+///
+/// Sopravvive alla configurazione, che a fine corsa viene cancellata: e' anche
+/// il solo posto dove resta scritto che quel database e' stato svuotato.
+model SupabaseDataDeletion {
+  id         String @id @default(uuid())
+  shopId     String @map("shop_id")
+  projectRef String @map("project_ref")
+  /// 'processing' | 'completed' | 'failed'. Finche' e' 'processing' il
+  /// collegamento e' spento (connection_verified_at azzerato), quindi ne'
+  /// sincronizzazioni ne' webhook scrivono mentre le tabelle spariscono.
+  status String @default("processing")
+  /// I nomi qualificati che il tentativo si prefiggeva di eliminare.
+  resources String[]
+  /// Quelli che dopo il COMMIT risultavano ancora li'. Non vuoto = la verifica
+  /// ha detto di no, e token e configurazione sono stati conservati.
+  remaining   String[]
+  lastError   String?   @map("last_error")
+  startedAt   DateTime  @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, startedAt(sort: Desc)])
+  @@map("supabase_data_deletions")
 }

@@ -23,6 +23,11 @@ import {
   tableCreationJobType,
 } from '~/lib/supabase/detect-created-tables';
 import { RELOAD_SCHEMA_SQL } from '~/lib/supabase/ensure-table.server';
+import { quoteLiteral } from '~/lib/supabase/identifiers';
+import {
+  recordProvisionedResources,
+  tablesToProbe,
+} from '~/lib/supabase/managed-resources.server';
 import { LATEST_SCHEMA_VERSION } from '~/lib/supabase/merchant-migrations';
 import { enqueueManualSync, triggerSyncDrain } from '~/lib/queue/trigger.server';
 
@@ -90,18 +95,37 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    // Quali tabelle esistono gia': serve a distinguere nel log "create entrambe"
-    // da "mancava solo clienti". La DDL usa CREATE TABLE IF NOT EXISTS e non
-    // riporta cosa ha creato, quindi il confronto va fatto prima.
-    // Best effort: se fallisce si perde solo il dettaglio del log.
+    // Quali tabelle esistono gia'. Serve a due cose diverse, e la seconda pesa
+    // molto di piu' della prima:
+    //
+    //  - distinguere nel log "create entrambe" da "mancava solo clienti";
+    //  - sapere quali tabelle sono del merchant. E' l'unico istante in cui la
+    //    domanda ha risposta: la DDL e' CREATE TABLE IF NOT EXISTS e dopo di
+    //    lei una tabella presente non racconta piu' chi l'ha creata. Da questa
+    //    risposta dipende cosa lo scollegamento con eliminazione potra'
+    //    cancellare — e soprattutto cosa non dovra' toccare mai.
+    //
+    // Si chiede di tutte e cinque le tabelle che l'app sa creare, non solo di
+    // quelle che la DDL creera' stavolta: un piano che oggi non prevede i
+    // clienti potrebbe prevederli domani, e a quel punto sapere se la sua
+    // `customers` c'era gia' non sarebbe piu' possibile.
+    const probed = tablesToProbe();
     let existingTables: string[] = [];
+    let probeOk = false;
     try {
       const rows = await runQueryRows<{ table_name: string }>(
         token,
         ref,
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('products', 'customers');",
+        // I nomi sono costanti nostre, non arrivano da nessun form: passano
+        // comunque da `quoteLiteral`, perche' la regola e' che nel SQL non
+        // entri niente che non sia passato di li'. Un'eccezione "tanto qui e'
+        // sicuro" e' come le eccezioni finiscono per diventare la regola.
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN (${probed
+          .map((t) => quoteLiteral(t))
+          .join(', ')});`,
       );
       existingTables = rows.map((r) => r.table_name).filter(Boolean);
+      probeOk = true;
     } catch (err) {
       console.warn(
         '[api.supabase.select-project] controllo tabelle preesistenti fallito:',
@@ -117,12 +141,42 @@ export async function action({ request }: ActionFunctionArgs) {
     // lavora su una copia in cache, e una sincronizzazione avviata subito dopo
     // il collegamento scriverebbe su tabelle che quella copia non conosce
     // ancora.
+    const includeOrders = hasOrdersAccess(shop.scopes);
     await runQuery(
       token,
       ref,
-      buildMerchantSchemaSQL(includeCustomers, hasOrdersAccess(shop.scopes)) +
-        RELOAD_SCHEMA_SQL,
+      buildMerchantSchemaSQL(includeCustomers, includeOrders) + RELOAD_SCHEMA_SQL,
     );
+
+    // Il registro di proprieta': quali di queste tabelle le abbiamo create noi.
+    //
+    // Si scrive solo se il controllo qui sopra e' riuscito. Senza la fotografia
+    // del prima non si sa chi ha creato cosa, e registrarle tutte come nostre
+    // sarebbe proprio la supposizione che ha portato a cancellare la `products`
+    // di un merchant che ce l'aveva gia' — un'assenza dal registro costa dello
+    // spazio inutilizzato, una riga sbagliata costa i suoi dati.
+    //
+    // Best effort: il collegamento e' gia' riuscito, e un errore qui non deve
+    // farlo fallire.
+    if (probeOk) {
+      const provisioned = ['products', 'users']
+        .concat(includeCustomers ? ['customers'] : [])
+        .concat(includeOrders ? ['orders', 'order_lines'] : []);
+      try {
+        await recordProvisionedResources({
+          shopId: shop.id,
+          projectRef: ref,
+          provisioned,
+          preExisting: existingTables,
+          schemaVersion: LATEST_SCHEMA_VERSION,
+        });
+      } catch (err) {
+        console.warn(
+          '[api.supabase.select-project] registro di proprieta non scritto:',
+          err instanceof Error ? err.message : 'errore sconosciuto',
+        );
+      }
+    }
 
     // Log dell'evento di creazione tabelle. Best effort come l'emissione del
     // token-proxy: a questo punto la DDL e' riuscita e un errore qui non deve

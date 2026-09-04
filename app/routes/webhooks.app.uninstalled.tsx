@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { verifyWebhook } from '~/lib/webhooks/verify.server';
 import { prisma } from '~/db.server';
+import { invalidateReadContextForDomain } from '~/lib/read-proxy/context.server';
 
 // Il merchant ha disinstallato l'app.
 //
@@ -40,6 +41,12 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     await prisma.session.deleteMany({ where: { shop: shopDomain } });
+
+    // Il proxy di lettura tiene in cache un "puo' leggere" deciso prima di
+    // adesso. Il token resta incollato nel container della vetrina anche dopo
+    // la disinstallazione, e finche' quella riga non scade continuerebbe a
+    // farsi servire i clienti di un negozio che con noi ha chiuso.
+    invalidateReadContextForDomain(shopDomain);
   } catch (e) {
     // 200 comunque: un errore qui farebbe ritentare Shopify a ripetizione, e la
     // prossima installazione rimette a posto lo stato da se' (afterAuth azzera

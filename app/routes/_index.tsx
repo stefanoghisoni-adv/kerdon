@@ -43,8 +43,9 @@ import { SupabaseProjectConnect } from '~/components/Dashboard/SupabaseProjectCo
 import { prisma } from '~/db.server';
 import { getOrCreateShop } from '~/utils/shop.server';
 import { normalizeAuthorization } from '~/utils/authorization.server';
-import { can } from '~/lib/authz/capabilities';
-import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
+import { denialOf, trialHasExpired } from '~/lib/authz/capabilities';
+import { capabilityFacts, shopCapabilities } from '~/lib/authz/shop-capabilities.server';
+import { invalidateReadContextForShop } from '~/lib/read-proxy/context.server';
 import { resolveSyncState } from '~/components/Dashboard/sync-state';
 import { latestBulkJob, lastSyncActivityAt } from '~/lib/sync/latest-jobs.server';
 import { enqueueManualSync, triggerSyncDrain } from '~/lib/queue/trigger.server';
@@ -207,22 +208,44 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const plan = plans.find((p) => samePlanName(p.planName, shop.currentPlan)) ?? null;
 
-    // Autorizzazione: se il trial (giorni definiti nel piano) è scaduto e il
-    // negozio è ancora ENABLED, lo portiamo automaticamente in PENDING (persistente).
+    // Prova finita: le due colonne passano a PENDING.
+    //
+    // Questa scrittura non e' piu' il cancello — il cancello e' la policy, che
+    // rifiuta a prova scaduta ovunque le si chieda un permesso, anche a chi
+    // l'app non la riapre mai. Qui si registra solo la conseguenza, perche' le
+    // colonne dicano quel che la policy sa gia': e' da quelle che nascono il
+    // banner e i messaggi, e un negozio fermo che si legge ENABLED non si
+    // spiega a nessuno.
+    //
+    // La domanda "e' scaduta?" non si ricalcola: si chiede a `trialHasExpired`
+    // con gli stessi fatti da cui escono i rifiuti. Il conto che stava qui —
+    // `installedAt` piu' i giorni del piano — era una seconda scadenza, che si
+    // spostava da sola ogni volta che il listino cambiava e non coincideva con
+    // la data scritta il giorno in cui la prova era davvero partita.
     let authorization = normalizeAuthorization(shop.authorization);
     let trackingAuthorization = normalizeAuthorization(shop.trackingAuthorization);
-    if (authorization === 'ENABLED' && shop.isInTrial && plan?.trialDays) {
-      const trialEnd = shop.installedAt.getTime() + plan.trialDays * 86_400_000;
-      if (Date.now() > trialEnd) {
+    if (trialHasExpired(capabilityFacts(shop, plan))) {
+      const data: { authorization?: 'PENDING'; trackingAuthorization?: 'PENDING' } = {};
+      if (authorization === 'ENABLED') {
         authorization = 'PENDING';
-        // Alla fine della prova si fermano entrambe: e' quello che il periodo di
-        // prova concede. Restano comunque due interruttori distinti, e l'owner
-        // puo' riaccendere il solo tracciamento senza riaprire l'app.
+        data.authorization = 'PENDING';
+      }
+      // Alla fine della prova si fermano entrambe: e' quello che il periodo di
+      // prova concede. Restano comunque due interruttori distinti, e l'owner
+      // puo' riaccendere il solo tracciamento senza riaprire l'app — per questo
+      // ognuna si sposta solo se e' ancora accesa, invece di riscriverle in
+      // blocco.
+      if (trackingAuthorization === 'ENABLED') {
         trackingAuthorization = 'PENDING';
-        await prisma.shop.update({
-          where: { id: shop.id },
-          data: { authorization: 'PENDING', trackingAuthorization: 'PENDING' },
-        });
+        data.trackingAuthorization = 'PENDING';
+      }
+      if (Object.keys(data).length > 0) {
+        await prisma.shop.update({ where: { id: shop.id }, data });
+        // Il contesto di lettura porta con se' un "puo' leggere" deciso al
+        // momento in cui e' entrato in cache: da qui in poi quella risposta e'
+        // vecchia, e finche' non scade il proxy continuerebbe a servire dati a
+        // un negozio appena sospeso.
+        invalidateReadContextForShop(shop.id);
       }
     }
 
@@ -429,11 +452,16 @@ export async function action({ request }: ActionFunctionArgs) {
     // Gate autorizzazione: nessuna azione se il negozio non è ENABLED (ban o
     // trial scaduto). Enforcement server-side: vale anche se l'utente riabilita
     // i pulsanti nell'HTML.
-    if (!can(await shopCapabilities(shop), 'use_app')) {
+    const denial = denialOf(await shopCapabilities(shop), 'use_app');
+    if (denial) {
+      const t = await dictionaryForShop(session.shop);
+      // Due rifiuti diversi, due frasi diverse: "sei sospeso" non dice al
+      // merchant che cosa puo' fare, "la prova e' finita" si'. E' l'unica
+      // strada che gli indichiamo per tornare operativo, quindi va nominata.
       return json(
         {
-          error: (await dictionaryForShop(session.shop)).errors.suspended,
-          code: 'not_authorized',
+          error: denial === 'trial_expired' ? t.errors.trialEnded : t.errors.suspended,
+          code: denial === 'trial_expired' ? 'trial_expired' : 'not_authorized',
         },
         { status: 403 },
       );

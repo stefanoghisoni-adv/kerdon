@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
+import { invalidateReadContextForShop } from '~/lib/read-proxy/context.server';
 
 // Il passaggio "abbonamento confermato -> piano scritto sullo shop" ha due
 // chiamanti diversi: la callback di ritorno da Shopify e il webhook
@@ -43,6 +44,18 @@ export interface ApplyPlanOptions {
   chargeId: string | null;
   /** Giorni di prova effettivi dell'abbonamento. Null o 0 = nessuna prova. */
   trialDays?: number | null;
+  /**
+   * Ogni quanto il merchant paga questo piano.
+   *
+   * Era scritto qui dentro, fisso su 'monthly', e nessuno poteva cambiarlo: un
+   * negozio che sottoscriveva un abbonamento annuale si ritrovava sulla riga
+   * "mensile", e da quella colonna si legge cosa raccontare al merchant del suo
+   * piano. Lo sa chi ha in mano l'abbonamento — la callback, che se lo fa dire
+   * da Shopify — quindi arriva da fuori. Omesso resta 'monthly', che e' il caso
+   * di gran lunga piu' comune e quello dei chiamanti che una cadenza non ce
+   * l'hanno (il webhook di stato, che porta solo il nome del piano).
+   */
+  billingCycle?: 'monthly' | 'yearly' | null;
   /** Istante di riferimento: iniettabile dai test. */
   now?: Date;
   /**
@@ -82,7 +95,7 @@ export async function applyPlanToShop(opts: ApplyPlanOptions): Promise<void> {
     currentPlan: opts.planName,
     activeChargeId: opts.chargeId,
     planStartedAt: now,
-    billingCycle: 'monthly',
+    billingCycle: opts.billingCycle ?? 'monthly',
     isInTrial: inTrial,
     trialEndsAt: inTrial ? new Date(now.getTime() + trialDays * DAY_MS) : null,
   };
@@ -106,4 +119,16 @@ export async function applyPlanToShop(opts: ApplyPlanOptions): Promise<void> {
   }
 
   await db.shop.update({ where: { id: opts.shopId }, data });
+
+  // Il proxy di lettura tiene in cache un "puo' leggere" deciso al momento in
+  // cui la riga e' entrata, e qui e' appena cambiato tutto quello da cui quella
+  // risposta usciva: piano, addebito, prova, e a volte le due autorizzazioni.
+  // Senza questa riga un merchant che ha appena pagato per riattivare le
+  // letture resterebbe bloccato per la durata della cache, ed e' il momento
+  // peggiore per farlo aspettare.
+  //
+  // Dentro la transazione, quando ce n'e' una: la finestra fra qui e il commit
+  // e' di microsecondi, e non lasciar dimenticare l'invalidazione a nessuno dei
+  // chiamanti vale piu' di quella finestra.
+  invalidateReadContextForShop(opts.shopId);
 }

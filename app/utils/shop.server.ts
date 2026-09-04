@@ -1,6 +1,8 @@
 import { prisma } from '~/db.server';
 import { encrypt } from '~/utils/crypto.server';
-import { freePlanName } from '~/lib/billing/find-plan.server';
+import { initialPlan } from '~/lib/billing/find-plan.server';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Sottoinsieme minimo della sessione Shopify che ci serve per materializzare
 // il record shop. Evita l'accoppiamento diretto col tipo Session di Shopify.
@@ -18,14 +20,28 @@ interface ShopSession {
 // indietro i negozi nuovi. Sul database owner c'e' anche una foreign key che
 // rifiuta un nome fuori dal listino.
 export async function shopCreateData(session: ShopSession) {
+  // Nome del piano e giorni di prova escono dalla stessa lettura del listino.
+  //
+  // I giorni erano scritti qui, sette, mentre il listino ne dichiarava
+  // quattordici: il negozio nasceva con una scadenza che non corrispondeva a
+  // quella promessa nelle card, e nessuno dei due numeri poteva dirsi quello
+  // giusto. La data scritta adesso e' quella AUTOREVOLE — da qui in avanti la
+  // prova si legge, non si ricalcola — quindi vale la pena che nasca dal
+  // listino e non da una costante.
+  const { planName, trialDays } = await initialPlan();
+  const now = new Date();
+  const inTrial = trialDays > 0;
+
   return {
     shopDomain: session.shop,
     accessToken: encrypt(session.accessToken ?? ''),
     scopes: session.scope ?? '',
-    currentPlan: await freePlanName(),
-    isInTrial: true,
-    trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    installedAt: new Date(),
+    currentPlan: planName,
+    // Un piano senza prova a listino non ne apre una da zero giorni: nasce gia'
+    // fuori dalla prova, con una scadenza che non c'e'.
+    isInTrial: inTrial,
+    trialEndsAt: inTrial ? new Date(now.getTime() + trialDays * DAY_MS) : null,
+    installedAt: now,
   };
 }
 

@@ -71,11 +71,40 @@ export async function findFreePlan(): Promise<Plan | null> {
 
 /** Il nome esatto del piano gratuito, per chi deve solo scriverlo su uno shop. */
 export async function freePlanName(): Promise<string> {
+  return (await initialPlan()).planName;
+}
+
+/** Con che piano e con quanti giorni di prova nasce un negozio nuovo. */
+export interface InitialPlan {
+  planName: string;
+  /** Giorni di prova a listino. 0 = nessuna prova. */
+  trialDays: number;
+}
+
+/**
+ * Il piano di partenza, nome e durata della prova nello STESSO sguardo al
+ * listino.
+ *
+ * Erano due cose lette in due modi: il nome dal listino, i giorni scritti a mano
+ * — sette — in chi creava il negozio. Il listino nel frattempo diceva
+ * quattordici, quindi ogni negozio nuovo nasceva con una scadenza che non
+ * corrispondeva a nessuna promessa fatta: ne' a quella delle card, ne' a quella
+ * su cui il codice diceva di basarsi. Due numeri per la stessa cosa sono un
+ * numero sbagliato, e non c'e' modo di sapere quale.
+ *
+ * Zero giorni e' una risposta valida — un piano gratuito che una prova non ce
+ * l'ha — e chi scrive la riga la sa distinguere: nessuna prova non e' una prova
+ * che scade subito.
+ */
+export async function initialPlan(): Promise<InitialPlan> {
   const plan = await findFreePlan();
-  if (plan) return plan.planName;
+  if (plan) return { planName: plan.planName, trialDays: plan.trialDays ?? 0 };
 
   console.error(
     `[plans] nessun piano gratuito nel listino: uso "${FALLBACK_FREE_PLAN_NAME}"`,
   );
-  return FALLBACK_FREE_PLAN_NAME;
+  // Senza listino non si inventa una prova: il negozio nasce senza, e la
+  // foreign key su `shops.current_plan` fermera' comunque l'installazione se
+  // anche il nome di ripiego non esiste.
+  return { planName: FALLBACK_FREE_PLAN_NAME, trialDays: 0 };
 }

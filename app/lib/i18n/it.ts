@@ -797,6 +797,15 @@ export const it = {
     deleteUnknown: "Questo database non risulta più nel tuo account Supabase.",
     deleteFailed: "Non è stato possibile eliminare il database. Riprova.",
     recheckFailed: "Ricontrollo non riuscito. Riprova.",
+    // Le tre risposte allo scollegamento con eliminazione. Nessuna dice "fatto":
+    // finche' le tabelle non risultano sparite davvero, il collegamento resta
+    // dov'e' — ed e' l'unico stato da cui si possa riprovare.
+    deleteDataFailed:
+      "Non è stato possibile eliminare le tabelle dal tuo database: il collegamento è rimasto attivo. Riprova tra poco.",
+    deleteDataBlocked:
+      "Non è stato possibile eliminare le tabelle dal tuo database. Il collegamento è rimasto attivo: scrivi al supporto prima di riprovare.",
+    deleteDataInProgress:
+      "L’eliminazione è già in corso su questo negozio. Attendi che finisca.",
   },
 
   // Il grafico dei prodotti sincronizzabili.

@@ -5,6 +5,10 @@ const findUniqueShop = vi.fn();
 const updateShop = vi.fn();
 const findPlanMock = vi.fn();
 const updateManyCharges = vi.fn();
+const findFirstCharge = vi.fn();
+const findManyCharges = vi.fn();
+const updateCharge = vi.fn();
+const upsertCharge = vi.fn();
 
 const getSubscription = vi.fn();
 const getActiveSubscriptions = vi.fn();
@@ -26,7 +30,13 @@ vi.mock('~/db.server', () => ({
       update: (...a: unknown[]) => updateShop(...a),
     },
     plan: { findFirst: (...a: unknown[]) => findPlanMock(...a) },
-    billingCharge: { updateMany: (...a: unknown[]) => updateManyCharges(...a) },
+    billingCharge: {
+      findFirst: (...a: unknown[]) => findFirstCharge(...a),
+      findMany: (...a: unknown[]) => findManyCharges(...a),
+      updateMany: (...a: unknown[]) => updateManyCharges(...a),
+      update: (...a: unknown[]) => updateCharge(...a),
+      upsert: (...a: unknown[]) => upsertCharge(...a),
+    },
     // Le scritture della callback vivono in una transazione: il finto
     // `$transaction` consegna un client che punta agli stessi spy, cosi' le
     // verifiche vedono cosa e' stato scritto senza dover sapere per quale
@@ -58,15 +68,43 @@ vi.mock('~/lib/billing/subscription.server', async () => {
 });
 
 import { loader } from './billing.callback';
+import { signBillingState } from '~/lib/billing/callback-state.server';
+
+// Il segreto con cui lo state si firma, dichiarato prima di tutto: gli state
+// dei casi in tabella si costruiscono mentre i test vengono raccolti, cioe'
+// prima che qualunque beforeEach abbia girato.
+process.env.SHOPIFY_API_SECRET = 'segreto-di-prova';
+
+const SHOP_DOMAIN = 'test-shop.myshopify.com';
+const NONCE = 'nonce-del-tentativo';
 
 const SHOP = {
   id: 'shop-1',
-  shopDomain: 'test-shop.myshopify.com',
+  shopDomain: SHOP_DOMAIN,
   currentPlan: 'Free',
   activeChargeId: null as string | null,
+  billingCycle: null as string | null,
+  setupCompletedAt: null as Date | null,
   authorization: 'ENABLED',
   trackingAuthorization: 'ENABLED',
 };
+
+/** La riga del tentativo: quella che `billing/subscribe` ha creato "pending". */
+function tentativo(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'charge-row-1',
+    shopId: 'shop-1',
+    shopifyChargeId: 1234n,
+    planType: 'Pro',
+    price: 29,
+    currency: 'USD',
+    billingCycle: 'monthly',
+    status: 'pending',
+    callbackNonce: NONCE,
+    callbackNonceUsedAt: null,
+    ...overrides,
+  };
+}
 
 function subscription(overrides: Record<string, unknown> = {}) {
   return {
@@ -77,11 +115,36 @@ function subscription(overrides: Record<string, unknown> = {}) {
     trialDays: 7,
     currentPeriodEnd: '2026-09-03T10:00:00Z',
     priceAmount: 29,
+    currency: 'USD',
+    interval: 'monthly',
     ...overrides,
   };
 }
 
-function call(query = '?charge_id=1234&shop=test-shop.myshopify.com') {
+/** Lo state firmato che `billing/subscribe` mette nella URL di ritorno. */
+function state(overrides: Partial<Parameters<typeof signBillingState>[0]> = {}): string {
+  return signBillingState({
+    nonce: NONCE,
+    shopDomain: SHOP_DOMAIN,
+    planName: 'Pro',
+    listPrice: 29,
+    currency: 'USD',
+    interval: 'monthly',
+    ...overrides,
+  });
+}
+
+function url(params: Record<string, string> = {}): string {
+  const query = new URLSearchParams({
+    charge_id: '1234',
+    shop: SHOP_DOMAIN,
+    state: state(),
+    ...params,
+  });
+  return `?${query.toString()}`;
+}
+
+function call(query = url()) {
   const request = new Request(`https://app.example.com/billing/callback${query}`);
   return loader({ request, params: {}, context: {} } as any) as Promise<Response>;
 }
@@ -91,16 +154,30 @@ function location(res: Response): URL {
   return new URL(res.headers.get('location') ?? '', 'https://app.example.com');
 }
 
-describe('/billing/callback', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    findUniqueShop.mockResolvedValue({ ...SHOP });
-    findPlanMock.mockResolvedValue({ planName: 'Pro', priceMonthly: 29, trialDays: 7 });
-    getActiveSubscriptions.mockResolvedValue([]);
-  });
+/** La `where` con cui il tentativo e' stato speso, se lo e' stato. */
+function claim(): Record<string, unknown> | null {
+  const chiamata = updateManyCharges.mock.calls.find(
+    (c) => (c[0] as any)?.data?.callbackNonceUsedAt != null,
+  );
+  return chiamata ? ((chiamata[0] as any).where as Record<string, unknown>) : null;
+}
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  process.env.SHOPIFY_API_SECRET = 'segreto-di-prova';
+  findUniqueShop.mockResolvedValue({ ...SHOP });
+  findPlanMock.mockResolvedValue({ planName: 'Pro', priceMonthly: 29, trialDays: 7 });
+  findFirstCharge.mockResolvedValue(tentativo());
+  // Il conteggio della compare-and-set: uno vuol dire "il tentativo era mio e
+  // l'ho appena speso io".
+  updateManyCharges.mockResolvedValue({ count: 1 });
+  findManyCharges.mockResolvedValue([]);
+  getActiveSubscriptions.mockResolvedValue([]);
+});
+
+describe('/billing/callback', () => {
   it('senza charge_id valido non interroga Shopify e torna con esito negativo', async () => {
-    const res = await call('?shop=test-shop.myshopify.com');
+    const res = await call(`?shop=${SHOP_DOMAIN}`);
     expect(getSubscription).not.toHaveBeenCalled();
     expect(updateShop).not.toHaveBeenCalled();
     expect(location(res).searchParams.get('billing')).toBe('ko');
@@ -134,7 +211,7 @@ describe('/billing/callback', () => {
   it('abbonamento sconosciuto a Shopify: nessuna attivazione', async () => {
     getSubscription.mockResolvedValue(null);
 
-    const res = await call('?charge_id=999999&shop=test-shop.myshopify.com');
+    const res = await call(url({ charge_id: '999999' }));
 
     expect(updateShop).not.toHaveBeenCalled();
     expect(location(res).searchParams.get('billing')).toBe('ko');
@@ -156,15 +233,17 @@ describe('/billing/callback', () => {
       subscription(),
       subscription({ gid: 'gid://shopify/AppSubscription/9876', name: 'Business' }),
     ]);
+    findManyCharges.mockResolvedValue([{ id: 'row-9876', shopifyChargeId: 9876n }]);
 
     const res = await call();
 
-    expect(updateManyCharges).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { shopId: 'shop-1', shopifyChargeId: 1234n },
-        data: expect.objectContaining({ status: 'active', trialDays: 7 }),
-      }),
-    );
+    expect(claim()).toMatchObject({
+      shopId: 'shop-1',
+      shopifyChargeId: 1234n,
+      status: 'pending',
+      callbackNonce: NONCE,
+      callbackNonceUsedAt: null,
+    });
     expect(updateShop).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'shop-1' },
@@ -182,13 +261,22 @@ describe('/billing/callback', () => {
       admin,
       'gid://shopify/AppSubscription/9876',
     );
-    expect(updateManyCharges).toHaveBeenCalledWith(
+    expect(updateCharge).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { shopId: 'shop-1', shopifyChargeId: 9876n },
+        where: { id: 'row-9876' },
         data: expect.objectContaining({ status: 'cancelled' }),
       }),
     );
     expect(location(res).searchParams.get('billing')).toBe('ok');
+  });
+
+  it('la conferma del piano viaggia con il piano, non in una scrittura a parte', async () => {
+    getSubscription.mockResolvedValue(subscription());
+
+    await call();
+
+    expect(updateShop).toHaveBeenCalledTimes(1);
+    expect(updateShop.mock.calls[0][0].data).toHaveProperty('planConfirmedAt');
   });
 
   it('si rientra dall admin, non dall indirizzo dell app', async () => {
@@ -198,13 +286,11 @@ describe('/billing/callback', () => {
     process.env.SHOPIFY_API_KEY = 'chiave-app';
     getSubscription.mockResolvedValue(subscription());
 
-    const url = location(
-      await call('?charge_id=1234&shop=test-shop.myshopify.com&return_to=dashboard'),
-    );
+    const res = await call(url({ return_to: 'dashboard' }));
 
-    expect(url.origin).toBe('https://admin.shopify.com');
-    expect(url.pathname).toBe('/store/test-shop/apps/chiave-app');
-    expect(url.searchParams.get('billing')).toBe('ok');
+    expect(location(res).origin).toBe('https://admin.shopify.com');
+    expect(location(res).pathname).toBe('/store/test-shop/apps/chiave-app');
+    expect(location(res).searchParams.get('billing')).toBe('ok');
     delete process.env.SHOPIFY_API_KEY;
   });
 
@@ -216,24 +302,25 @@ describe('/billing/callback', () => {
     process.env.SHOPIFY_API_KEY = 'chiave-app';
     getSubscription.mockResolvedValue(subscription());
 
-    const url = location(await call());
+    const res = await call();
 
-    expect(url.pathname).toBe('/store/test-shop/apps/chiave-app');
-    expect(url.searchParams.get('billing')).toBe('ok');
+    expect(location(res).pathname).toBe('/store/test-shop/apps/chiave-app');
+    expect(location(res).searchParams.get('billing')).toBe('ok');
     delete process.env.SHOPIFY_API_KEY;
   });
 
   it('senza la chiave dell app resta la via diretta, con il contesto embedded', async () => {
     getSubscription.mockResolvedValue(subscription());
 
-    const url = location(await call());
+    const res = await call();
+    const u = location(res);
 
-    expect(url.pathname).toBe('/');
-    expect(url.searchParams.get('shop')).toBe('test-shop.myshopify.com');
-    expect(url.searchParams.get('embedded')).toBe('1');
-    expect(
-      Buffer.from(url.searchParams.get('host') ?? '', 'base64').toString('utf8'),
-    ).toBe('admin.shopify.com/store/test-shop');
+    expect(u.pathname).toBe('/');
+    expect(u.searchParams.get('shop')).toBe(SHOP_DOMAIN);
+    expect(u.searchParams.get('embedded')).toBe('1');
+    expect(Buffer.from(u.searchParams.get('host') ?? '', 'base64').toString('utf8')).toBe(
+      'admin.shopify.com/store/test-shop',
+    );
   });
 
   it('un return_to inventato non sposta la destinazione', async () => {
@@ -241,24 +328,10 @@ describe('/billing/callback', () => {
     // querystring sarebbe un rimando aperto.
     getSubscription.mockResolvedValue(subscription());
 
-    const url = location(
-      await call('?charge_id=1234&shop=test-shop.myshopify.com&return_to=https://evil.example'),
-    );
+    const u = location(await call(url({ return_to: 'https://evil.example' })));
 
-    expect(url.pathname).toBe('/');
-    expect(url.origin).not.toBe('https://evil.example');
-  });
-
-  it('la chiusura del precedente non annulla l attivazione appena registrata', async () => {
-    getSubscription.mockResolvedValue(subscription());
-    getActiveSubscriptions.mockRejectedValue(new Error('rete'));
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const res = await call();
-
-    expect(updateShop).toHaveBeenCalled();
-    expect(location(res).searchParams.get('billing')).toBe('ok');
-    warnSpy.mockRestore();
+    expect(u.pathname).toBe('/');
+    expect(u.origin).not.toBe('https://evil.example');
   });
 
   it('guasto nella verifica: piano invariato ed esito negativo', async () => {
@@ -270,6 +343,259 @@ describe('/billing/callback', () => {
     expect(updateShop).not.toHaveBeenCalled();
     expect(location(res).searchParams.get('billing')).toBe('ko');
     errorSpy.mockRestore();
+  });
+});
+
+describe('il tentativo si spende una volta sola', () => {
+  /**
+   * Il buco da cui nasce tutto questo blocco: bastava un abbonamento attivo
+   * perche' il piano venisse riapplicato. Un F5 sulla pagina di ritorno
+   * riscriveva `planStartedAt` e `trialEndsAt` — cioe' allungava la prova — e
+   * rimandava a Shopify le cancellazioni dei vecchi abbonamenti.
+   */
+  beforeEach(() => {
+    getSubscription.mockResolvedValue(subscription());
+  });
+
+  it("verifica e spesa sono la stessa scrittura: le condizioni stanno nella where", async () => {
+    await call();
+
+    // Se fossero due passaggi — leggo, controllo, scrivo — due callback
+    // ravvicinate passerebbero tutte e due il controllo prima che una scriva.
+    expect(claim()).toEqual({
+      shopId: 'shop-1',
+      shopifyChargeId: 1234n,
+      status: 'pending',
+      callbackNonce: NONCE,
+      callbackNonceUsedAt: null,
+    });
+  });
+
+  it('tentativo gia speso e negozio gia sul piano: successo, ma nessuna scrittura', async () => {
+    // E' la ricarica della pagina. Il conteggio zero dice che qualcun altro ha
+    // gia' chiuso questo tentativo.
+    updateManyCharges.mockResolvedValue({ count: 0 });
+    findFirstCharge.mockResolvedValue(
+      tentativo({ status: 'active', callbackNonceUsedAt: new Date() }),
+    );
+    findUniqueShop.mockResolvedValue({
+      ...SHOP,
+      currentPlan: 'Pro',
+      activeChargeId: '1234',
+      billingCycle: 'monthly',
+    });
+
+    const res = await call();
+
+    expect(location(res).searchParams.get('billing')).toBe('ok');
+    // Niente timestamp riscritti: e' esattamente cosi' che una ricarica
+    // allungava il periodo di prova.
+    expect(updateShop).not.toHaveBeenCalled();
+    // E niente abbonamenti ri-cancellati su Shopify.
+    expect(cancelAppSubscription).not.toHaveBeenCalled();
+    expect(getActiveSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it('tentativo gia speso ma il negozio e su un altro addebito: non e andata', async () => {
+    // Qui non c'e' niente da confermare: rispondere "ok" direbbe al merchant
+    // che il piano e' cambiato quando non lo e'.
+    updateManyCharges.mockResolvedValue({ count: 0 });
+    findFirstCharge.mockResolvedValue(tentativo({ status: 'active' }));
+    findUniqueShop.mockResolvedValue({ ...SHOP, activeChargeId: '5555' });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await call();
+
+    expect(location(res).searchParams.get('billing')).toBe('ko');
+    expect(updateShop).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('la cadenza deve coincidere perche il replay valga', async () => {
+    updateManyCharges.mockResolvedValue({ count: 0 });
+    findFirstCharge.mockResolvedValue(tentativo({ status: 'active' }));
+    findUniqueShop.mockResolvedValue({
+      ...SHOP,
+      currentPlan: 'Pro',
+      activeChargeId: '1234',
+      billingCycle: 'yearly',
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await call();
+
+    expect(location(res).searchParams.get('billing')).toBe('ko');
+    warnSpy.mockRestore();
+  });
+});
+
+describe('lo state e la condizione di ogni attivazione nuova', () => {
+  beforeEach(() => {
+    getSubscription.mockResolvedValue(subscription());
+  });
+
+  /** I casi in cui la callback non riconosce il tentativo che dice di chiudere. */
+  const nonRiconosciuti: Array<[string, string]> = [
+    ['senza state', `?charge_id=1234&shop=${SHOP_DOMAIN}`],
+    ['con uno state che non abbiamo firmato noi', url({ state: 'roba.inventata' })],
+    [
+      'con uno state di un altro negozio',
+      url({ state: state({ shopDomain: 'altro-negozio.myshopify.com' }) }),
+    ],
+    ['con un piano diverso da quello confermato', url({ state: state({ planName: 'Business' }) })],
+    ['con un importo diverso da quello confermato', url({ state: state({ listPrice: 9 }) })],
+    ['con una valuta diversa da quella confermata', url({ state: state({ currency: 'GBP' }) })],
+    ['con una cadenza diversa da quella confermata', url({ state: state({ interval: 'yearly' }) })],
+    ['con un nonce che non e quello del tentativo', url({ state: state({ nonce: 'altro' }) })],
+  ];
+
+  for (const [caso, query] of nonRiconosciuti) {
+    it(`${caso}: nessuna attivazione`, async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const res = await call(query);
+
+      expect(updateShop).not.toHaveBeenCalled();
+      expect(claim()).toBeNull();
+      expect(location(res).searchParams.get('billing')).toBe('ko');
+      warnSpy.mockRestore();
+    });
+  }
+
+  it('senza riga di tentativo non si attiva niente', async () => {
+    // Un charge_id che Shopify conferma ma di cui qui non c'e' traccia: non e'
+    // un tentativo nostro da chiudere.
+    findFirstCharge.mockResolvedValue(null);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await call();
+
+    expect(updateShop).not.toHaveBeenCalled();
+    expect(location(res).searchParams.get('billing')).toBe('ko');
+    warnSpy.mockRestore();
+  });
+
+  it('una callback vecchia senza state conferma un piano gia applicato, e basta', async () => {
+    // Riconciliazione in sola lettura: risponde che e' andata perche' e'
+    // andata davvero, ma non riapplica niente.
+    findFirstCharge.mockResolvedValue(tentativo({ status: 'active' }));
+    findUniqueShop.mockResolvedValue({
+      ...SHOP,
+      currentPlan: 'Pro',
+      activeChargeId: '1234',
+      billingCycle: 'monthly',
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await call(`?charge_id=1234&shop=${SHOP_DOMAIN}`);
+
+    expect(location(res).searchParams.get('billing')).toBe('ok');
+    expect(updateShop).not.toHaveBeenCalled();
+    expect(claim()).toBeNull();
+    warnSpy.mockRestore();
+  });
+
+  it('il prezzo scontato del tentativo sta sotto il listino, e va bene cosi', async () => {
+    // Lo state porta il LISTINO (e' quello che Shopify rilegge), la riga porta
+    // la cifra che il merchant paga davvero. Confrontarle per uguaglianza
+    // farebbe suonare l'allarme a ogni negozio con un prezzo concordato.
+    findFirstCharge.mockResolvedValue(tentativo({ price: 19 }));
+
+    const res = await call();
+
+    expect(location(res).searchParams.get('billing')).toBe('ok');
+    expect(updateShop).toHaveBeenCalled();
+  });
+
+  it('un tentativo che costa piu del listino non e uno sconto', async () => {
+    findFirstCharge.mockResolvedValue(tentativo({ price: 39 }));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await call();
+
+    expect(updateShop).not.toHaveBeenCalled();
+    expect(location(res).searchParams.get('billing')).toBe('ko');
+    warnSpy.mockRestore();
+  });
+
+  it('lo state si verifica prima di toccare qualunque dato', async () => {
+    // Uno state di un altro negozio non deve nemmeno arrivare a spendere un
+    // tentativo: il controllo viene prima delle scritture, non in mezzo.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await call(url({ state: state({ shopDomain: 'altro.myshopify.com' }) }));
+
+    expect(claim()).toBeNull();
+    expect(updateShop).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
+describe('la cadenza arriva da Shopify, non da una costante', () => {
+  it('abbonamento annuale: annuale sul negozio e sulla riga dell addebito', async () => {
+    // Prima qui c'era 'monthly' scritto a mano: un abbonamento annuale
+    // risultava mensile sulla colonna da cui si racconta il piano al merchant.
+    getSubscription.mockResolvedValue(subscription({ interval: 'yearly', priceAmount: 290 }));
+    findFirstCharge.mockResolvedValue(tentativo({ billingCycle: 'yearly', price: 290 }));
+
+    const res = await call(url({ state: state({ interval: 'yearly', listPrice: 290 }) }));
+
+    expect(location(res).searchParams.get('billing')).toBe('ok');
+    expect(updateShop.mock.calls[0][0].data).toMatchObject({ billingCycle: 'yearly' });
+    const speso = updateManyCharges.mock.calls.find(
+      (c) => (c[0] as any)?.data?.callbackNonceUsedAt != null,
+    );
+    expect((speso?.[0] as any).data).toMatchObject({ billingCycle: 'yearly' });
+  });
+});
+
+describe('la chiusura dei vecchi abbonamenti non si perde per strada', () => {
+  beforeEach(() => {
+    getSubscription.mockResolvedValue(subscription());
+  });
+
+  it("l'intenzione si scrive nella transazione, prima di chiamare Shopify", async () => {
+    await call();
+
+    // Le righe degli abbonamenti precedenti passano a `superseded` dentro la
+    // stessa transazione che attiva il piano: da li' in poi il lavoro c'e'
+    // scritto, e un errore di rete non lo cancella.
+    expect(updateManyCharges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          shopId: 'shop-1',
+          status: { in: ['active', 'pending'] },
+          NOT: { shopifyChargeId: 1234n },
+        }),
+        data: { status: 'superseded' },
+      }),
+    );
+  });
+
+  it('la chiusura fallita lascia la riga in coda e non annulla l attivazione', async () => {
+    findManyCharges.mockResolvedValue([{ id: 'row-9876', shopifyChargeId: 9876n }]);
+    cancelAppSubscription.mockRejectedValue(new Error('rete'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await call();
+
+    // Il piano e' applicato...
+    expect(updateShop).toHaveBeenCalled();
+    expect(location(res).searchParams.get('billing')).toBe('ok');
+    // ...e la riga NON e' stata segnata come chiusa: resta li' per il giro dopo.
+    expect(updateCharge).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("l'elenco degli abbonamenti attivi non letto non annulla l attivazione", async () => {
+    getActiveSubscriptions.mockRejectedValue(new Error('rete'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await call();
+
+    expect(updateShop).toHaveBeenCalled();
+    expect(location(res).searchParams.get('billing')).toBe('ok');
+    warnSpy.mockRestore();
   });
 });
 
@@ -288,12 +614,11 @@ describe('il ritorno dal pagamento non passa da una sessione embedded', () => {
     // valore su cui si apre la sessione offline: se i due divergessero, si
     // attiverebbe un piano sul negozio sbagliato.
     getSubscription.mockResolvedValue(subscription());
-    updateShop.mockClear();
 
-    await call('?charge_id=1234&shop=test-shop.myshopify.com');
+    await call();
 
     expect(findUniqueShop).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { shopDomain: 'test-shop.myshopify.com' } }),
+      expect.objectContaining({ where: { shopDomain: SHOP_DOMAIN } }),
     );
   });
 });

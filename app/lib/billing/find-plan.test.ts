@@ -7,12 +7,12 @@ vi.mock('~/db.server', () => ({
   },
 }));
 
-import { findPlanByName, findFreePlan, freePlanName } from './find-plan.server';
+import { findPlanByName, findFreePlan, freePlanName, initialPlan } from './find-plan.server';
 import { prisma } from '~/db.server';
 
 /** Il listino: i piani da una parte, i prezzi in dollari dall'altra. */
 function listino(
-  plans: { planName: string }[],
+  plans: { planName: string; trialDays?: number | null }[],
   prices: { planName: string; priceMonthly: number; priceYearly: number }[],
 ) {
   (prisma.plan.findMany as any).mockResolvedValue(plans);
@@ -83,6 +83,33 @@ describe('freePlanName', () => {
 
     expect(await freePlanName()).toBe('Free');
     expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+});
+
+describe('initialPlan', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("porta i giorni di prova dal listino, dallo stesso sguardo del nome", () => {
+    // Il punto di questa funzione: nome e durata escono insieme. Erano due
+    // letture diverse — il nome dal listino, i giorni da una costante nel
+    // codice — e dicevano cose diverse.
+    listino([{ planName: 'Gratuito', trialDays: 14 }], [free('Gratuito')]);
+    return expect(initialPlan()).resolves.toEqual({ planName: 'Gratuito', trialDays: 14 });
+  });
+
+  it('piano senza prova a listino: zero giorni, non un valore di comodo', async () => {
+    listino([{ planName: 'Gratuito', trialDays: null }], [free('Gratuito')]);
+    expect(await initialPlan()).toEqual({ planName: 'Gratuito', trialDays: 0 });
+  });
+
+  it('listino senza piano gratuito: nessuna prova regalata al ripiego', async () => {
+    listino([], []);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await initialPlan()).toEqual({ planName: 'Free', trialDays: 0 });
     errorSpy.mockRestore();
   });
 });

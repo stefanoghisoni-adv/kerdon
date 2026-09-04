@@ -19,9 +19,9 @@ vi.mock('~/utils/crypto.server', () => ({
   decrypt: (v: string) => v,
 }));
 
-const freePlanName = vi.fn(async () => 'Free');
+const initialPlan = vi.fn(async () => ({ planName: 'Free', trialDays: 14 }));
 vi.mock('~/lib/billing/find-plan.server', () => ({
-  freePlanName: () => freePlanName(),
+  initialPlan: () => initialPlan(),
 }));
 
 import { getOrCreateShop, shopCreateData } from './shop.server';
@@ -36,11 +36,36 @@ describe('shopCreateData', () => {
     expect(data.trialEndsAt).toBeInstanceOf(Date);
   });
 
+  it('la prova dura quanto dice il listino, non quanto diceva il codice', async () => {
+    // Qui c'erano sette giorni scritti a mano mentre il listino ne dichiarava
+    // quattordici: il negozio nasceva con una scadenza che non corrispondeva a
+    // nessuna delle promesse fatte al merchant.
+    initialPlan.mockResolvedValueOnce({ planName: 'Free', trialDays: 14 });
+
+    const data = await shopCreateData({ shop: 'x.myshopify.com', accessToken: 'tok' });
+
+    const giorni =
+      ((data.trialEndsAt as Date).getTime() - data.installedAt.getTime()) / 86_400_000;
+    expect(giorni).toBe(14);
+  });
+
+  it('piano senza prova a listino: il negozio nasce gia\' fuori dalla prova', async () => {
+    // Zero giorni non e' una prova che scade subito: e' nessuna prova. La
+    // differenza conta, perche' una scadenza gia' passata spegnerebbe l'app
+    // all'installazione.
+    initialPlan.mockResolvedValueOnce({ planName: 'Free', trialDays: 0 });
+
+    const data = await shopCreateData({ shop: 'x.myshopify.com', accessToken: 'tok' });
+
+    expect(data.isInTrial).toBe(false);
+    expect(data.trialEndsAt).toBeNull();
+  });
+
   it('il piano iniziale viene dal listino, non da un nome scritto qui', async () => {
     // Se il piano gratuito si chiamasse "Gratuito", un negozio nuovo deve
     // atterrare li': un nome fisso nel codice sopravvivrebbe al rinomina e la
     // foreign key su current_plan lo rifiuterebbe.
-    freePlanName.mockResolvedValueOnce('Gratuito');
+    initialPlan.mockResolvedValueOnce({ planName: 'Gratuito', trialDays: 14 });
     const data = await shopCreateData({ shop: 'x.myshopify.com', accessToken: 'tok' });
     expect(data.currentPlan).toBe('Gratuito');
   });

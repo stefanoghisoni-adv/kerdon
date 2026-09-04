@@ -101,10 +101,13 @@ Questo passo va fatto una volta sola.
 ```bash
 export DATABASE_URL='postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres?schema=public'
 
-# Tutte le migrazioni tranne l'ultima, che sul database owner non e' mai passata.
+# Tutte le migrazioni tranne quelle che sul database owner non sono mai passate.
 for cartella in prisma/migrations/*/; do
   nome=$(basename "$cartella")
-  [ "$nome" = "20260904120000_row_level_security_everywhere" ] && continue
+  case "$nome" in
+    20260904120000_row_level_security_everywhere) continue ;;
+    20260904160000_supabase_managed_resources) continue ;;
+  esac
   npx prisma migrate resolve --applied "$nome"
 done
 ```
@@ -113,13 +116,25 @@ done
 `_prisma_migrations` e basta. Se il comando viene interrotto a meta' lo si
 rilancia: le cartelle gia' dichiarate danno un errore innocuo e si va avanti.
 
-L'esclusione riguarda `20260904120000_row_level_security_everywhere`, che e' la
-prima migrazione che passera' davvero da questo percorso. Attiva RLS su ogni
+Le esclusioni sono le due migrazioni che passeranno davvero da questo percorso,
+ed e' importante che restino fuori dal ciclo: dichiararle applicate senza
+eseguirle vorrebbe dire perderle per sempre, perche' da quel momento
+`migrate deploy` le salta.
+
+`20260904120000_row_level_security_everywhere` e' la prima. Attiva RLS su ogni
 tabella dello schema `public`: sul database owner alcune tabelle create dalle
 migrazioni ne sono rimaste senza — fra le altre `meta_connections`, che porta il
 token di accesso a Meta del negozio, e `product_feeds`, che porta il token con
 cui si scarica un feed senza autenticarsi. Senza RLS quelle righe sono leggibili
 da chiunque abbia la chiave pubblica del progetto.
+
+`20260904160000_supabase_managed_resources` e' la seconda, e va dopo: aggiunge
+`supabase_managed_resources` (il registro di quali tabelle, nel database di quale
+merchant, le ha create l'app) e `supabase_data_deletions` (l'esito di ogni
+tentativo di eliminarle). Nasce dallo scollegamento con eliminazione, che faceva
+`DROP` su due nomi soli — presi dalla configurazione, quindi anche su tabelle che
+erano del merchant — e cancellava comunque token e credenziali, pure quando il
+`DROP` era fallito. Nasce gia' con RLS attiva, come tutte.
 
 ### 4. Controllare che la linea di base sia giusta
 
@@ -127,9 +142,13 @@ da chiunque abbia la chiave pubblica del progetto.
 npx prisma migrate status
 ```
 
-Deve dire che c'e' **una sola** migrazione da applicare
-(`20260904120000_row_level_security_everywhere`). Se ne elenca di piu', qualcosa
-non e' stato dichiarato: rifare il passo 3 prima di andare avanti.
+Deve elencare **due** migrazioni da applicare, in questo ordine:
+
+1. `20260904120000_row_level_security_everywhere`
+2. `20260904160000_supabase_managed_resources`
+
+Se ne elenca altre, qualcosa non e' stato dichiarato: rifare il passo 3 prima di
+andare avanti.
 
 ### 5. Applicarla
 

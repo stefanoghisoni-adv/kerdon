@@ -33,6 +33,11 @@ const RIGA: CapabilityShopRow = {
   trackingAuthorization: 'ENABLED',
   scopes: 'read_products,read_orders,read_all_orders',
   currentPlan: 'pro',
+  // Prova finita e abbonamento attivo: e' il negozio che paga, quello a cui la
+  // scadenza della prova non toglie niente.
+  isInTrial: false,
+  trialEndsAt: null,
+  activeChargeId: '1234',
   supabaseConfig: { connectionVerifiedAt: new Date('2026-01-01T00:00:00Z') },
 };
 
@@ -154,8 +159,54 @@ describe('CAPABILITY_SHOP_SELECT — la select non deve restare indietro', () =>
    */
   it('chiede tutti i fatti che la policy legge dalla riga', () => {
     expect(Object.keys(CAPABILITY_SHOP_SELECT).sort()).toEqual(
-      ['authorization', 'currentPlan', 'scopes', 'supabaseConfig', 'trackingAuthorization', 'uninstalledAt'].sort(),
+      [
+        'authorization',
+        'currentPlan',
+        'scopes',
+        'supabaseConfig',
+        'trackingAuthorization',
+        'uninstalledAt',
+        // I tre fatti della prova: senza, la policy non farebbe scadere niente
+        // proprio per chi arriva da qui — i webhook, il feed, il proxy.
+        'isInTrial',
+        'trialEndsAt',
+        'activeChargeId',
+      ].sort(),
     );
     expect(CAPABILITY_SHOP_SELECT.supabaseConfig.select).toEqual({ connectionVerifiedAt: true });
+  });
+});
+
+describe('i fatti della prova arrivano dalla riga, non da un ricalcolo', () => {
+  /**
+   * La scadenza autorevole e' quella scritta il giorno in cui la prova e'
+   * partita. Prima veniva ricostruita da `installedAt` piu' i giorni del piano,
+   * e quel conto dava una seconda data — diversa da questa ogni volta che il
+   * listino cambiava.
+   */
+  const SCADENZA = new Date('2026-03-01T00:00:00.000Z');
+
+  const inProva: CapabilityShopRow = {
+    ...RIGA,
+    isInTrial: true,
+    trialEndsAt: SCADENZA,
+    activeChargeId: null,
+  };
+
+  it('prova finita: nega, e lo dice', () => {
+    const caps = shopCapabilitiesWithPlan(inProva, PIANO, SCADENZA);
+    expect(denialOf(caps, 'use_app')).toBe('trial_expired');
+    expect(denialOf(caps, 'use_read_proxy')).toBe('trial_expired');
+  });
+
+  it('un istante prima concede ancora tutto', () => {
+    const caps = shopCapabilitiesWithPlan(inProva, PIANO, new Date(SCADENZA.getTime() - 1));
+    for (const capability of CAPABILITIES) expect(can(caps, capability)).toBe(true);
+  });
+
+  it("l'istante si puo' iniettare anche passando dal listino", async () => {
+    findUniqueShop.mockResolvedValue(inProva);
+    const caps = await shopCapabilities(inProva, SCADENZA);
+    expect(denialOf(caps, 'sync_products')).toBe('trial_expired');
   });
 });

@@ -4,6 +4,7 @@ import {
   evaluateShopCapabilities,
   type CapabilityPlan,
   type ShopCapabilities,
+  type ShopCapabilityFacts,
 } from './capabilities';
 
 /**
@@ -29,16 +30,29 @@ export const CAPABILITY_SHOP_SELECT = {
   trackingAuthorization: true,
   scopes: true,
   currentPlan: true,
+  isInTrial: true,
+  trialEndsAt: true,
+  activeChargeId: true,
   supabaseConfig: { select: { connectionVerifiedAt: true } },
 } as const;
 
-/** La forma minima di riga shop che la policy sa leggere. */
+/**
+ * La forma minima di riga shop che la policy sa leggere.
+ *
+ * I tre campi della prova sono obbligatori, non facoltativi, e per un motivo
+ * preciso: chi carica il negozio con una `select` sua e li dimentica otterrebbe
+ * una policy che non fa mai scadere niente — cioe' esattamente il buco da cui
+ * si e' partiti, ma silenzioso. Cosi' invece non compila.
+ */
 export interface CapabilityShopRow {
   uninstalledAt: Date | null;
   authorization: string | null;
   trackingAuthorization: string | null;
   scopes: string | null;
   currentPlan: string | null;
+  isInTrial: boolean | null;
+  trialEndsAt: Date | null;
+  activeChargeId: string | null;
   supabaseConfig?: { connectionVerifiedAt: Date | null } | null;
 }
 
@@ -50,9 +64,10 @@ export interface CapabilityShopRow {
  */
 export async function shopCapabilities(
   shop: CapabilityShopRow | null | undefined,
+  now?: Date,
 ): Promise<ShopCapabilities> {
   if (!shop) return evaluateShopCapabilities(null);
-  return shopCapabilitiesWithPlan(shop, await findPlanByName(shop.currentPlan));
+  return shopCapabilitiesWithPlan(shop, await findPlanByName(shop.currentPlan), now);
 }
 
 /**
@@ -66,16 +81,37 @@ export async function shopCapabilities(
 export function shopCapabilitiesWithPlan(
   shop: CapabilityShopRow | null | undefined,
   plan: CapabilityPlan | null | undefined,
+  now?: Date,
 ): ShopCapabilities {
   if (!shop) return evaluateShopCapabilities(null);
-  return evaluateShopCapabilities({
+  return evaluateShopCapabilities(capabilityFacts(shop, plan, now));
+}
+
+/**
+ * I fatti di un negozio, nella forma che la policy legge.
+ *
+ * Sta a parte perche' non lo usa solo chi chiede un permesso: lo usa anche il
+ * riconciliatore, che deve poter chiedere "questa prova e' finita?" con gli
+ * stessi identici fatti da cui esce il rifiuto. Due modi di comporre quei fatti
+ * sono due risposte che prima o poi divergono.
+ */
+export function capabilityFacts(
+  shop: CapabilityShopRow,
+  plan: CapabilityPlan | null | undefined,
+  now?: Date,
+): ShopCapabilityFacts {
+  return {
     uninstalledAt: shop.uninstalledAt,
     authorization: shop.authorization,
     trackingAuthorization: shop.trackingAuthorization,
     connectionVerifiedAt: shop.supabaseConfig?.connectionVerifiedAt ?? null,
     scopes: shop.scopes,
     plan: plan ?? null,
-  });
+    isInTrial: shop.isInTrial,
+    trialEndsAt: shop.trialEndsAt,
+    activeChargeId: shop.activeChargeId,
+    now: now ?? null,
+  };
 }
 
 /** Le capacita' del negozio con questo dominio. Sconosciuto → tutto negato. */

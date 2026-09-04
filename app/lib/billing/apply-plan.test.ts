@@ -104,6 +104,27 @@ describe('applyPlanToShop', () => {
     expect(writtenData()).not.toHaveProperty('trackingAuthorization');
   });
 
+  it('la cadenza arriva da chi ha in mano l abbonamento, non da una costante', async () => {
+    // Era fissa su 'monthly': un abbonamento annuale finiva registrato come
+    // mensile sulla colonna da cui si racconta il piano al merchant.
+    await applyPlanToShop({
+      shopId: 'shop-1',
+      planName: 'Pro',
+      chargeId: '1234',
+      billingCycle: 'yearly',
+      now: NOW,
+    });
+
+    expect(writtenData()).toMatchObject({ billingCycle: 'yearly' });
+  });
+
+  it('senza cadenza indicata resta mensile, che e il caso comune', async () => {
+    // Il webhook di stato porta solo il nome del piano: non ha una cadenza da
+    // dichiarare, e non deve inventarsene una.
+    await applyPlanToShop({ shopId: 'shop-1', planName: 'Pro', chargeId: '1234', now: NOW });
+    expect(writtenData()).toMatchObject({ billingCycle: 'monthly' });
+  });
+
   it('non tocca lastSyncedPlan: e il confronto che innesca il recupero', async () => {
     await applyPlanToShop({ shopId: 'shop-1', planName: 'Pro', chargeId: '1234', now: NOW });
     expect(writtenData()).not.toHaveProperty('lastSyncedPlan');

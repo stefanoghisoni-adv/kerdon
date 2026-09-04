@@ -312,6 +312,30 @@ const USERS_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_users_anonymous_last_seen ON users(last_seen_at) WHERE shopify_customer_id IS NULL;`,
 ];
 
+/**
+ * Le tabelle che questa DDL crea, nell'ordine in cui nascono.
+ *
+ * Sta qui, accanto alle DDL, e non nel file che le elimina: l'elenco delle
+ * tabelle dell'app e' uno solo, e tenerne una seconda copia altrove vuol dire
+ * che prima o poi le due si scostano. E' gia' successo — lo scollegamento con
+ * "elimina tabelle e dati" ne conosceva due su cinque, e `users`, `orders` e
+ * `order_lines` restavano nel database del merchant dopo che l'app aveva
+ * dichiarato di averle tolte.
+ *
+ * I nomi sono letterali perche' e' letteralmente cio' che `buildTableSQL`
+ * scrive: i campi configurabili `tableNameProducts` / `tableNameCustomers`
+ * riguardano il percorso di lettura e scrittura della sync, non la DDL.
+ */
+export const MERCHANT_TABLE_NAMES = [
+  'products',
+  'users',
+  'customers',
+  'orders',
+  'order_lines',
+] as const;
+
+export type MerchantTableName = (typeof MERCHANT_TABLE_NAMES)[number];
+
 function columnCreateDef(col: Column): string {
   return `${col.name} ${col.type}${col.constraints ? ` ${col.constraints}` : ''}`;
 }

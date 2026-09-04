@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useFetcher, useRevalidator } from '@remix-run/react';
-import { BlockStack, Button, InlineStack, Modal, Text, TextField } from '@shopify/polaris';
+import { Banner, BlockStack, Button, InlineStack, Modal, Text, TextField } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
 import { matchesProjectName, projectConfirmationName } from './disconnect-confirm';
 import { CopyIconButton } from './CopyIconButton';
@@ -37,7 +37,7 @@ export function DisconnectSupabase({
 }: DisconnectSupabaseProps) {
   const t = useT();
   const revalidator = useRevalidator();
-  const fetcher = useFetcher<{ ok?: boolean }>();
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
 
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<DisconnectMode | null>(null);
@@ -70,6 +70,11 @@ export function DisconnectSupabase({
     },
     [fetcher],
   );
+
+  // Il messaggio di un tentativo andato male. Sta qui e non in un toast
+  // perche' il modal resta aperto apposta: l'eliminazione non e' avvenuta, il
+  // database e' ancora collegato, e il posto dove riprovare e' questo.
+  const failure = fetcher.data && fetcher.data.ok === false ? fetcher.data.error : null;
 
   useEffect(() => {
     if (!fetcher.data?.ok) return;
@@ -126,6 +131,11 @@ export function DisconnectSupabase({
         >
           <Modal.Section>
             <BlockStack gap="400">
+              {failure && (
+                <Banner tone="critical">
+                  <Text as="p">{failure}</Text>
+                </Banner>
+              )}
               <Text as="p">
                 {t.connect.database.disconnectBody.before}
                 <strong>{t.connect.database.disconnectBody.delete}</strong>
