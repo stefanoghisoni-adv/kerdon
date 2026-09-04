@@ -202,11 +202,47 @@ const ORDER_LINES_COLUMNS: Column[] = [
   // fuori dal conto, e la tab lo dichiara invece di stimare.
   { name: 'shopify_variant_id', type: 'BIGINT' },
   { name: 'title', type: 'TEXT' },
+  // La quantita' ORDINATA, che dopo un rimborso resta quella di allora. Si
+  // conserva come traccia — e' cio' che il merchant ritrova sulla sua fattura —
+  // ma non entra in nessun conto: per quello c'e' `current_quantity`.
   { name: 'quantity', type: 'INTEGER' },
-  // Prezzo unitario davvero pagato, sconti di riga gia' tolti: il margine si fa
-  // su quello che e' entrato in cassa, non sul listino.
+  // Prezzo unitario davvero pagato, sconti di riga gia' tolti.
+  //
+  // Non e' piu' la base del margine, e non lo era mai stato davvero: dentro ci
+  // sono anche allocazioni di sconto riferite a unita' poi rimborsate o
+  // rimosse. Resta perche' e' il numero che il merchant riconosce guardando una
+  // riga d'ordine, e perche' toglierlo cancellerebbe dati gia' scritti.
   { name: 'unit_price', type: 'NUMERIC(10, 2)' },
   { name: 'total_discount', type: 'NUMERIC(10, 2)' },
+  // Le unita' ancora in mano al cliente: `quantity` meno cio' che e' stato
+  // rimborsato o tolto dall'ordine. E' il solo numero per cui abbia senso
+  // moltiplicare un costo — la merce di cui il merchant ha sostenuto il costo
+  // e' quella che non e' tornata indietro.
+  //
+  // NOT NULL DEFAULT 0 anche nell'ALTER, e non e' un dettaglio: una colonna
+  // NULL entrerebbe nella formula facendo sparire in silenzio il contributo
+  // della riga. Postgres riempie le righe esistenti col default senza riscrivere
+  // la tabella, quindi l'aggiunta e' sicura anche su un negozio con anni di
+  // ordini dentro; a rimettere i valori veri ci pensa la migrazione 9.
+  { name: 'current_quantity', type: 'INTEGER NOT NULL DEFAULT 0' },
+  // Il netto della riga cosi' come lo dichiara Shopify: sconti di riga e
+  // d'ordine gia' tolti, tasse escluse, rimborsi compresi. NON si ricava
+  // moltiplicando `unit_price` per una quantita' — un prezzo unitario con
+  // dentro sconti d'ordine spalmati non torna mai esattamente al totale.
+  //
+  // NUMERIC(12, 2) e non (10, 2) come gli altri importi: qui c'e' un TOTALE di
+  // riga, non un prezzo unitario, e una riga d'ingrosso da mille pezzi supera
+  // il tetto di otto cifre intere che gli altri campi si possono permettere.
+  { name: 'line_net_total', type: 'NUMERIC(12, 2)' },
+  // La valuta di `line_net_total`, ripetuta sulla riga invece di darla per
+  // scontata dall'ordine: senza, sommare due valute diverse non produce un
+  // errore, produce un numero sbagliato che nessuno puo' notare.
+  { name: 'line_currency', type: 'TEXT' },
+  // Quando Shopify ha toccato l'ordine da cui questa riga viene. Diverso da
+  // `synced_at`, che dice quando l'abbiamo letta noi: serve a riconoscere una
+  // consegna vecchia arrivata dopo una nuova — due webhook per lo stesso ordine
+  // non arrivano necessariamente in ordine.
+  { name: 'source_updated_at', type: 'TIMESTAMP' },
   { name: 'synced_at', type: 'TIMESTAMP DEFAULT NOW()' },
 ];
 

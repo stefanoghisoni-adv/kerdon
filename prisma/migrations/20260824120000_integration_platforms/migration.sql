@@ -31,3 +31,6 @@ VALUES
   (gen_random_uuid()::text, 'email',       'Klaviyo',       'klaviyo',       10),
   (gen_random_uuid()::text, 'email',       'Mailchimp',     'mailchimp',     20)
 ON CONFLICT ("slug") DO NOTHING;
+
+-- RLS, come su tutte le altre. Mancava.
+ALTER TABLE "integration_platforms" ENABLE ROW LEVEL SECURITY;

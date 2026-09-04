@@ -1,7 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { countsAsSale, orderToRows, type ShopifyOrder } from './order-rows';
+import { countsAsSale, orderToRows, type ShopifyOrder, type ShopifyOrderLine } from './order-rows';
 
 const SYNCED = new Date('2026-08-24T10:00:00Z');
+
+/**
+ * Una riga come la consegna la rilettura GraphQL: i due campi canonici pieni.
+ *
+ * `quantity` e `unit_price` ci sono lo stesso — sono i numeri che il merchant
+ * riconosce guardando una riga d'ordine — ma nessun conto li tocca.
+ */
+const line = (over: Partial<ShopifyOrderLine> = {}): ShopifyOrderLine => ({
+  id: 900,
+  title: 'Maglia',
+  quantity: 2,
+  current_quantity: 2,
+  product_id: 10,
+  variant_id: 20,
+  unit_price: '19.95',
+  total_discount: '0.00',
+  line_net_total: '39.90',
+  line_currency: 'EUR',
+  ...over,
+});
 
 const order = (over: Partial<ShopifyOrder> = {}): ShopifyOrder => ({
   id: 111,
@@ -10,22 +30,13 @@ const order = (over: Partial<ShopifyOrder> = {}): ShopifyOrder => ({
   updated_at: '2026-08-01T09:05:00Z',
   cancelled_at: null,
   financial_status: 'paid',
-  total_price: '59.90',
+  total_price: '39.90',
   currency: 'EUR',
   customer_id: 55,
   customer_first_name: 'Anna',
   customer_last_name: 'Rossi',
-  lines: [
-    {
-      id: 900,
-      title: 'Maglia',
-      quantity: 2,
-      product_id: 10,
-      variant_id: 20,
-      unit_price: '19.95',
-      total_discount: '0.00',
-    },
-  ],
+  lines: [line()],
+  lines_complete: true,
   ...over,
 });
 
@@ -42,8 +53,9 @@ describe('orderToRows', () => {
 
   it('il denaro diventa numero', () => {
     const rows = orderToRows(order(), SYNCED)!;
-    expect(rows.order.total_price).toBe(59.9);
+    expect(rows.order.total_price).toBe(39.9);
     expect(rows.lines[0].unit_price).toBe(19.95);
+    expect(rows.lines[0].line_net_total).toBe(39.9);
   });
 
   it('un ordine senza id non si scrive: alla corsa dopo sarebbe un doppione', () => {
@@ -53,10 +65,7 @@ describe('orderToRows', () => {
   it('una riga senza id resta fuori, l ordine no', () => {
     const rows = orderToRows(
       order({
-        lines: [
-          { id: null, title: 'Ignota', quantity: 1, product_id: null, variant_id: null, unit_price: '5', total_discount: null },
-          { id: 901, title: 'Nota', quantity: 1, product_id: 10, variant_id: 21, unit_price: '5', total_discount: null },
-        ],
+        lines: [line({ id: null, title: 'Ignota' }), line({ id: 901, variant_id: 21 })],
       }),
       SYNCED,
     )!;
@@ -77,6 +86,155 @@ describe('orderToRows', () => {
     expect(Object.keys(rows.lines[0])).not.toContain('cost');
     expect(Object.keys(rows.lines[0])).not.toContain('profit');
   });
+
+  it('la riga si porta dietro quando Shopify ha toccato l ordine', () => {
+    // Diverso da `synced_at`, che dice quando l'abbiamo letta noi: serve a
+    // riconoscere una consegna vecchia arrivata dopo una nuova.
+    const rows = orderToRows(order(), SYNCED)!;
+    expect(rows.lines[0].source_updated_at).toBe('2026-08-01T09:05:00Z');
+    expect(rows.lines[0].synced_at).toBe('2026-08-24T10:00:00.000Z');
+  });
+});
+
+/**
+ * I casi per cui tutto questo esiste.
+ *
+ * L'ordine seguiva `currentTotalPriceSet`, che i rimborsi li riflette, mentre
+ * ogni riga conservava la quantita' ordinata e un prezzo unitario con dentro
+ * sconti riferiti anche a unita' rimborsate. Le metriche moltiplicavano quei
+ * due valori.
+ */
+describe('orderToRows — cosa resta al cliente dopo un rimborso', () => {
+  it('ordine non rimborsato: il totale coincide col netto delle sue righe', () => {
+    // Sconto di riga E sconto d'ordine, cioe' il caso in cui il prezzo unitario
+    // e' un'approssimazione: 100 di listino, 10 di sconto riga, 5 di sconto
+    // ordine spalmato. Il netto di riga e' quello canonico di Shopify, e la
+    // somma torna esattamente al totale dell'ordine — cosa che il prodotto
+    // prezzo x quantita' non garantisce.
+    const rows = orderToRows(
+      order({
+        total_price: '127.00',
+        lines: [
+          line({ id: 900, quantity: 3, current_quantity: 3, unit_price: '28.33', line_net_total: '85.00' }),
+          line({ id: 901, quantity: 1, current_quantity: 1, unit_price: '42.00', line_net_total: '42.00' }),
+        ],
+      }),
+      SYNCED,
+    )!;
+
+    const sommaRighe = rows.lines.reduce((t, l) => t + (l.line_net_total ?? 0), 0);
+    expect(sommaRighe).toBe(rows.order.total_price);
+    expect(sommaRighe).toBe(127);
+  });
+
+  it('rimborso parziale di quantita: la quantita ordinata resta, quella corrente scende', () => {
+    // Tre pezzi ordinati, uno reso. `quantity` non cambiera' mai piu' — e' cio'
+    // che il merchant legge sulla sua fattura — ma il conto guarda l'altra.
+    const rows = orderToRows(
+      order({
+        lines: [line({ quantity: 3, current_quantity: 2, line_net_total: '39.90' })],
+      }),
+      SYNCED,
+    )!;
+
+    expect(rows.lines[0].quantity).toBe(3);
+    expect(rows.lines[0].current_quantity).toBe(2);
+    expect(rows.lines[0].line_net_total).toBe(39.9);
+  });
+
+  it('rimborso monetario parziale: il netto segue il campo canonico, non prezzo per quantita', () => {
+    // Nessun pezzo tornato indietro (la quantita' corrente resta piena) ma
+    // parte del denaro si': e' il rimborso che il vecchio conto non poteva
+    // vedere in nessun modo, perche' guardava solo prezzo e quantita'.
+    const rows = orderToRows(
+      order({
+        financial_status: 'partially_refunded',
+        total_price: '25.00',
+        lines: [line({ quantity: 2, current_quantity: 2, unit_price: '19.95', line_net_total: '25.00' })],
+      }),
+      SYNCED,
+    )!;
+
+    expect(rows.lines[0].line_net_total).toBe(25);
+    // Prezzo per quantita' avrebbe detto 39.90: quasi il sessanta per cento in
+    // piu' di quanto il negozio ha davvero incassato.
+    expect(rows.lines[0].line_net_total).not.toBe(39.9);
+  });
+
+  it('rimborso totale di una riga: contributo a zero, e l ordine non e annullato', () => {
+    // Il caso che sfuggiva a tutti i controlli: `cancelled_at` resta null —
+    // l'ordine e' valido, magari le altre righe sono partite — ma quella riga
+    // non vale piu' niente. Il netto si azzera insieme alla quantita', perche'
+    // un netto pieno accanto a zero unita' e' proprio la contraddizione da cui
+    // nasce tutto questo.
+    const rows = orderToRows(
+      order({
+        cancelled_at: null,
+        financial_status: 'refunded',
+        total_price: '0.00',
+        lines: [line({ quantity: 2, current_quantity: 0, line_net_total: '39.90' })],
+      }),
+      SYNCED,
+    )!;
+
+    expect(rows.order.cancelled_at).toBeNull();
+    expect(rows.lines[0].current_quantity).toBe(0);
+    expect(rows.lines[0].line_net_total).toBe(0);
+  });
+
+  it('senza quantita corrente si ripiega su quella ordinata, non su zero', () => {
+    // Se Shopify non mandasse `currentQuantity` — un'API piu' vecchia di quella
+    // per cui questo codice e' scritto — il ripiego riproduce il comportamento
+    // di prima. Azzerare sarebbe l'errore piu' grosso dei due: farebbe sparire
+    // ogni riga invece di sovrastimarne qualcuna.
+    const rows = orderToRows(
+      order({ lines: [line({ quantity: 3, current_quantity: null })] }),
+      SYNCED,
+    )!;
+
+    expect(rows.lines[0].current_quantity).toBe(3);
+  });
+
+  it('una riga senza netto resta senza netto: non lo si ricostruisce moltiplicando', () => {
+    // Ricostruirlo da un prezzo unitario e' l'approssimazione da cui si sta
+    // scappando. Meglio una riga dichiarata non misurabile che un numero
+    // inventato sotto il nome del campo canonico.
+    const rows = orderToRows(
+      order({ lines: [line({ line_net_total: null, unit_price: '19.95', quantity: 2 })] }),
+      SYNCED,
+    )!;
+
+    expect(rows.lines[0].line_net_total).toBeNull();
+  });
+});
+
+describe('orderToRows — la valuta', () => {
+  it('la riga porta la sua valuta', () => {
+    const rows = orderToRows(order(), SYNCED)!;
+    expect(rows.lines[0].line_currency).toBe('EUR');
+  });
+
+  it('se la riga non la dichiara, vale quella dell ordine', () => {
+    const rows = orderToRows(
+      order({ currency: 'USD', lines: [line({ line_currency: null })] }),
+      SYNCED,
+    )!;
+    expect(rows.lines[0].line_currency).toBe('USD');
+  });
+
+  it('una riga in valuta diversa dall ordine si scrive com e, e si vede', () => {
+    // Non si corregge e non si nasconde: la riga conserva cio' che ha
+    // dichiarato, e a rifiutarsi di sommarla e' il conto (vedi
+    // `net-contribution`). Riscriverla con la valuta dell'ordine renderebbe il
+    // problema invisibile proprio a chi deve accorgersene.
+    const rows = orderToRows(
+      order({ currency: 'EUR', lines: [line({ line_currency: 'USD' })] }),
+      SYNCED,
+    )!;
+
+    expect(rows.order.currency).toBe('EUR');
+    expect(rows.lines[0].line_currency).toBe('USD');
+  });
 });
 
 describe('countsAsSale', () => {
@@ -85,6 +243,13 @@ describe('countsAsSale', () => {
   });
 
   it('gli altri si', () => {
+    expect(countsAsSale({ cancelled_at: null })).toBe(true);
+  });
+
+  it('un ordine rimborsato resta una vendita: a portarlo a zero sono le righe', () => {
+    // La differenza conta: l'annullato non e' mai partito, il rimborsato si' —
+    // e a dire quanto ne e' rimasto sono `current_quantity` e `line_net_total`,
+    // non un'esclusione in blocco che porterebbe via anche le righe partite.
     expect(countsAsSale({ cancelled_at: null })).toBe(true);
   });
 });

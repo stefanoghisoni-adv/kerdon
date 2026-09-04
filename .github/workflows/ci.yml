@@ -116,13 +116,102 @@ jobs:
       - name: Apply owner-bootstrap.sql to an empty database
         run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/owner-bootstrap.sql
 
+      # `migrate diff --exit-code` da solo non serve: su questo database la
+      # risposta e' sempre "si', c'e' differenza", perche' le due chiavi esterne
+      # sul nome del piano stanno nel database e non nello schema. Il passo era
+      # quindi rosso a ogni esecuzione — un cancello sempre rosso non e' un
+      # cancello. `expected-drift.ts` fa la domanda giusta: la differenza e' SOLO
+      # quella conosciuta? E in piu' verifica il rovescio, che il diff da solo
+      # non vede: che quelle due chiavi esterne ci siano ancora.
       - name: Compare the resulting database with the Prisma schema
-        run: |
-          npx prisma migrate diff \
-            --from-url "$DATABASE_URL" \
-            --to-schema-datamodel prisma/schema.prisma \
-            --exit-code
+        run: npx tsx prisma/expected-drift.ts
 
       # Le righe iniziali e RLS: quello che `migrate diff` non guarda.
       - name: Check seed rows and row level security
         run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql
+
+  # E da un database vuoto ci si arriva anche con Prisma?
+  #
+  # E' la domanda che il job `bootstrap` non fa: quello prova lo SCRIPT, questo
+  # prova le MIGRAZIONI. Finche' mancava una migrazione iniziale la risposta era
+  # no, e non c'era modo di portare il database owner allo schema nuovo se non
+  # incollando SQL a mano nell'editor di Supabase — cioe' senza revisione, senza
+  # una traccia di cosa fosse stato applicato e senza modo di rifarlo uguale.
+  #
+  # Tre cose, in ordine:
+  #   1. `migrate deploy` su un database vuoto arriva allo schema dichiarato;
+  #   2. il database che ne esce ha i dati iniziali, RLS ovunque e le due chiavi
+  #      esterne sul nome del piano;
+  #   3. la procedura di linea di base descritta in docs/database-migrations.md
+  #      funziona davvero: un database costruito con lo script e poi dichiarato
+  #      in linea non ha piu' niente da applicare.
+  migrations:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: coreward_migrazioni
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # Due indirizzi per lo stesso database, come nel job qui sopra: Prisma vuole
+    # `?schema=public`, psql quel parametro non lo conosce e rifiuta l'intero
+    # indirizzo con "invalid URI query parameter: schema".
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/coreward_migrazioni?schema=public
+      PSQL_URL: postgresql://ci:ci@localhost:5432/coreward_migrazioni
+      PSQL_ADMIN: postgresql://ci:ci@localhost:5432/postgres
+      BASE_DATABASE_URL: postgresql://ci:ci@localhost:5432/coreward_linea?schema=public
+      BASE_PSQL_URL: postgresql://ci:ci@localhost:5432/coreward_linea
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply every migration to an empty database
+        run: npx prisma migrate deploy
+
+      - name: Compare the resulting database with the Prisma schema
+        run: npx tsx prisma/expected-drift.ts
+
+      - name: Check seed rows, row level security and the plan foreign keys
+        run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql
+
+      # La prova della linea di base, che e' il passo che il proprietario dovra'
+      # eseguire una volta sola sul database di produzione. Qui si fa su un
+      # database costruito con lo script, che e' cio' che la produzione e':
+      # dopo `migrate resolve --applied` non deve restare niente da applicare.
+      # Se un giorno restasse qualcosa, vorrebbe dire che una migrazione nuova e'
+      # stata inserita PRIMA di una gia' dichiarata in linea, e su un database
+      # vero verrebbe saltata in silenzio.
+      - name: Rehearse the baseline procedure on a script-built database
+        run: |
+          psql "$PSQL_ADMIN" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE coreward_linea'
+          psql "$BASE_PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/owner-bootstrap.sql
+
+          for cartella in prisma/migrations/*/; do
+            DATABASE_URL="$BASE_DATABASE_URL" \
+              npx prisma migrate resolve --applied "$(basename "$cartella")"
+          done
+
+          DATABASE_URL="$BASE_DATABASE_URL" npx prisma migrate status
+
+          DATABASE_URL="$BASE_DATABASE_URL" npx prisma migrate deploy | tee applicate.txt
+          grep -q "No pending migrations to apply" applicate.txt

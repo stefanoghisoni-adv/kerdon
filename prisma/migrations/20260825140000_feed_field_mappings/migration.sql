@@ -26,3 +26,6 @@ BEGIN
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
+
+-- RLS, come su tutte le altre. Mancava.
+ALTER TABLE "feed_field_mappings" ENABLE ROW LEVEL SECURITY;

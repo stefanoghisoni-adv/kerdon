@@ -11,6 +11,7 @@ import { enrichVariantCosts } from '../stats/inventory-cost.server';
 import { filterEligibleProductRows } from '../eligibility/product-eligibility';
 import { sortByCreatedAtAsc } from '../sync/product-order';
 import { orderToRows } from '../customers/order-rows';
+import { deleteStaleLines } from '../customers/order-write.server';
 import { ensureOrdersTables } from '../supabase/ensure-orders-tables.server';
 import {
   createEventBuffer,
@@ -596,6 +597,17 @@ interface OrderSyncResult {
  * scrivono dopo l'ordine — se l'upsert dell'ordine fallisce, la corsa si ferma
  * li' e non restano righe orfane che nessuna query saprebbe raggruppare.
  *
+ * E POI SI TOGLIE CIO' CHE NON C'E' PIU'. Fino a ieri le righe d'ordine si
+ * aggiungevano soltanto: una riga tolta dall'ordine dal merchant, o annullata
+ * da un rimborso totale, restava li' a portare margine per merce che il cliente
+ * non ha. La corsa periodica e' il posto giusto per accorgersene, perche' e'
+ * l'unica che dell'ordine legge SEMPRE tutte le righe.
+ *
+ * La cancellazione riguarda i soli ordini di cui si conosce l'elenco completo,
+ * e su un elenco troncato non si tocca niente: "questa riga non l'ho vista" non
+ * vuol dire "questa riga non c'e' piu'", e su un ordine da mille righe le due
+ * cose si assomigliano parecchio.
+ *
  * Nessun conto di margine qui dentro: il profitto nasce quando lo si guarda,
  * incrociando queste righe con il costo che vive nei prodotti.
  */
@@ -617,11 +629,14 @@ async function syncOrders(
     if (!orders || orders.length === 0) break;
 
     const converted = orders
-      .map((order) => orderToRows(order))
-      .filter((rows): rows is NonNullable<typeof rows> => rows !== null);
+      .map((order) => ({ rows: orderToRows(order), complete: order.lines_complete === true }))
+      .filter(
+        (c): c is { rows: NonNullable<ReturnType<typeof orderToRows>>; complete: boolean } =>
+          c.rows !== null,
+      );
 
     if (converted.length > 0) {
-      const orderRows = converted.map((c) => c.order);
+      const orderRows = converted.map((c) => c.rows.order);
       const { error: ordersError } = await supabase
         .from('orders')
         .upsert(orderRows, { onConflict: 'shopify_order_id', ignoreDuplicates: false });
@@ -630,7 +645,7 @@ async function syncOrders(
         throw new Error(`Supabase order upsert failed: ${ordersError.message}`);
       }
 
-      const lineRows = converted.flatMap((c) => c.lines);
+      const lineRows = converted.flatMap((c) => c.rows.lines);
       // A blocchi come i clienti: un ordine da cento righe moltiplica in fretta,
       // e PostgREST ha un tetto a quante ne accetta in una volta.
       const chunkSize = 1000;
@@ -647,6 +662,8 @@ async function syncOrders(
         }
       }
 
+      await reconcileCompleteOrders(supabase, converted);
+
       // Solo il conteggio, come per i clienti: degli ordini non si tiene
       // nessuna riga di dettaglio sul database dell'applicazione.
       for (const _ of converted) events.count('order', 'updated');
@@ -657,6 +674,50 @@ async function syncOrders(
   } while (nextPageInfo);
 
   return { total, events };
+}
+
+/**
+ * Quanti identificativi di riga si e' disposti a spedire in una cancellazione.
+ *
+ * L'elenco delle righe da TENERE viaggia dentro l'URL della richiesta, e un URL
+ * ha un tetto: cinquanta ordini d'ingrosso da duecentocinquanta righe l'uno
+ * farebbero una richiesta che il server rifiuta in blocco, cioe' nessuna
+ * riconciliazione invece di una parziale. Si accumula fino a questa soglia e poi
+ * si manda: spezzare per ORDINI e' sicuro, spezzare l'elenco delle righe da
+ * tenere no — meta' elenco vorrebbe dire cancellare l'altra meta'.
+ */
+const RECONCILE_KEEP_LIMIT = 500;
+
+/**
+ * Toglie dagli ordini appena letti le righe che non hanno piu'.
+ *
+ * Solo quelli con l'elenco completo: gli altri restano com'erano, e a
+ * riprenderli sara' la corsa successiva o un elenco che arriva intero.
+ */
+async function reconcileCompleteOrders(
+  supabase: SupabaseClient,
+  converted: { rows: NonNullable<ReturnType<typeof orderToRows>>; complete: boolean }[],
+): Promise<void> {
+  let orderIds: number[] = [];
+  let keep: number[] = [];
+
+  const flush = async () => {
+    if (orderIds.length === 0) return;
+    await deleteStaleLines(supabase, orderIds, keep);
+    orderIds = [];
+    keep = [];
+  };
+
+  for (const c of converted) {
+    if (!c.complete) continue;
+
+    orderIds.push(c.rows.order.shopify_order_id);
+    for (const line of c.rows.lines) keep.push(line.shopify_line_id);
+
+    if (keep.length >= RECONCILE_KEEP_LIMIT) await flush();
+  }
+
+  await flush();
 }
 
 /**

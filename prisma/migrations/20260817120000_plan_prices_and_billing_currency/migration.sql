@@ -32,3 +32,10 @@ END $$;
 -- Valuta dell'addebito: un importo senza valuta non risponde alla domanda
 -- "quanto ho pagato". Le righe gia' scritte sono tutte in euro.
 ALTER TABLE "billing_charges" ADD COLUMN IF NOT EXISTS "currency" TEXT;
+
+-- RLS, come su tutte le altre: la Data API di Supabase pubblica lo schema
+-- public, e una tabella senza RLS e' leggibile con la sola chiave pubblica del
+-- progetto. Qui c'e' il listino, che non e' un segreto — ma la regola non ha
+-- eccezioni, altrimenti diventa una cosa da valutare ogni volta e prima o poi
+-- si valuta male. Mancava.
+ALTER TABLE "plan_prices" ENABLE ROW LEVEL SECURITY;

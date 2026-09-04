@@ -28,6 +28,17 @@ CREATE TABLE IF NOT EXISTS "partner_plan_prices" (
     CONSTRAINT "partner_plan_prices_pkey" PRIMARY KEY ("id")
 );
 
+-- La colonna, per il caso in cui la tabella ci fosse gia' senza.
+--
+-- Serve a chi arriva da `0_init`: li' `partner_plan_prices` nasce nella forma
+-- di oggi — con `partner_name`, perche' la migrazione successiva sostituisce
+-- l'id col nome — quindi il CREATE TABLE qui sopra non fa niente e l'indice e
+-- la foreign key qui sotto cercherebbero una colonna che non c'e'. Nullable e
+-- non NOT NULL: sul database owner la colonna e' gia' stata tolta e ci sono
+-- righe, e una colonna obbligatoria senza default non si aggiunge a una tabella
+-- piena.
+ALTER TABLE "partner_plan_prices" ADD COLUMN IF NOT EXISTS "partner_id" TEXT;
+
 -- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "partners_name_key" ON "partners"("name");
 

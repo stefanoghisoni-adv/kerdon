@@ -117,6 +117,44 @@ describe('tabelle degli ordini', () => {
   it('RLS accesa su entrambe, come per le altre tabelle', () => {
     expect(sql.match(/ENABLE ROW LEVEL SECURITY/g)).toHaveLength(2);
   });
+
+  it('la riga porta i due valori su cui si fa il margine', () => {
+    // `current_quantity` e `line_net_total` sono i due campi canonici: quanto
+    // e' rimasto al cliente e quanto e' entrato in cassa. Senza di loro il conto
+    // tornava a moltiplicare la quantita' ORDINATA per un prezzo unitario con
+    // dentro sconti riferiti anche a unita' rimborsate.
+    expect(sql).toContain('current_quantity INTEGER NOT NULL DEFAULT 0');
+    expect(sql).toContain('line_net_total NUMERIC(12, 2)');
+    expect(sql).toContain('line_currency TEXT');
+    expect(sql).toContain('source_updated_at TIMESTAMP');
+  });
+
+  it('le colonne nuove arrivano anche ai database gia esistenti', () => {
+    // La DDL e' additiva: senza queste ALTER, le colonne le avrebbero solo i
+    // progetti collegati da oggi in poi.
+    for (const column of [
+      'current_quantity',
+      'line_net_total',
+      'line_currency',
+      'source_updated_at',
+    ]) {
+      expect(sql).toContain(`ADD COLUMN IF NOT EXISTS ${column} `);
+    }
+  });
+
+  it('la quantita corrente non puo essere NULL, e non e pignoleria', () => {
+    // Una colonna NULL entrerebbe nella formula facendo sparire in silenzio il
+    // contributo della riga: il default a zero la rende scritta, non assente,
+    // e a rimettere i valori veri ci pensa la migrazione.
+    expect(sql).toContain('current_quantity INTEGER NOT NULL DEFAULT 0');
+  });
+
+  it('il netto di riga tiene piu cifre degli altri importi', () => {
+    // E' un TOTALE, non un prezzo unitario: una riga d'ingrosso da mille pezzi
+    // supera il tetto di otto cifre intere che gli altri campi si permettono.
+    expect(sql).toContain('line_net_total NUMERIC(12, 2)');
+    expect(sql).not.toContain('line_net_total NUMERIC(10, 2)');
+  });
 });
 
 describe('buildMerchantSchemaSQL', () => {

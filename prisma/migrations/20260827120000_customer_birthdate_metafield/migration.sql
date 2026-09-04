@@ -8,5 +8,8 @@
 -- Due colonne e non una stringa "custom.data_di_nascita": la query di Shopify
 -- vuole namespace e chiave separati. Divisi al salvataggio, chi legge trova due
 -- valori gia' buoni e una riga scritta male si scopre subito.
-ALTER TABLE "shops" ADD COLUMN "birthdate_metafield_namespace" TEXT;
-ALTER TABLE "shops" ADD COLUMN "birthdate_metafield_key" TEXT;
+--
+-- IF NOT EXISTS: dopo `0_init` le colonne ci sono gia'. Vedi la nota in
+-- 20260714165105_add_connection_verified_at.
+ALTER TABLE "shops" ADD COLUMN IF NOT EXISTS "birthdate_metafield_namespace" TEXT;
+ALTER TABLE "shops" ADD COLUMN IF NOT EXISTS "birthdate_metafield_key" TEXT;

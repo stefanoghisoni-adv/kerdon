@@ -31,3 +31,7 @@ BEGIN
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
+
+-- RLS, come su tutte le altre, e qui pesa: `token` e' la chiave con cui si
+-- scarica il feed di un negozio senza autenticarsi. Mancava.
+ALTER TABLE "product_feeds" ENABLE ROW LEVEL SECURITY;

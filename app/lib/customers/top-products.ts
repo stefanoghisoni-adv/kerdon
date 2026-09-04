@@ -1,4 +1,8 @@
 import { isCalendarDate } from './customers-query';
+import {
+  LINE_NET_CONTRIBUTION_OR_NULL,
+  ORDER_COUNTS_AS_SALE,
+} from './net-contribution';
 
 /**
  * I prodotti che hanno reso di piu', in un periodo.
@@ -19,6 +23,12 @@ import { isCalendarDate } from './customers-query';
  * Le righe senza costo restano fuori da tutti e quattro: profitto sconosciuto
  * non e' profitto zero, e metterlo a zero abbasserebbe una media che nessuno
  * sa calcolare.
+ *
+ * Il profitto di una riga lo definisce `net-contribution`, come per la tab
+ * Clienti e per le card della dashboard. Qui c'era la quinta copia della stessa
+ * moltiplicazione, ed era il posto in cui un errore si vedeva meno: un prodotto
+ * molto reso restava in cima alla classifica proprio perche' i resi non
+ * contavano.
  */
 
 export const METRICS = ['cm', 'aop', 'acp', 'ltp'] as const;
@@ -65,12 +75,11 @@ WITH l AS (
     p.shopify_product_id                     AS product_id,
     p.product_title                          AS product_title,
     p.variant_title                          AS variant_title,
-    CASE WHEN p.cost_per_item IS NOT NULL
-         THEN (l.unit_price - p.cost_per_item) * l.quantity END AS profit
+    ${LINE_NET_CONTRIBUTION_OR_NULL} AS profit
   FROM orders o
   JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
   LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
-  WHERE o.cancelled_at IS NULL
+  WHERE ${ORDER_COUNTS_AS_SALE}
     AND o.placed_at >= ${from}::date
     AND o.placed_at < (${to}::date + INTERVAL '1 day')
 ),

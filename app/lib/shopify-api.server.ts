@@ -6,6 +6,7 @@ import {
   supportedCapabilities,
   type MetafieldKey,
 } from '~/lib/customers/birthdate-metafield';
+import type { ShopifyOrder, ShopifyOrderLine } from '~/lib/customers/order-rows';
 
 /**
  * Le capability dei metafield che la versione dell'API in uso conosce.
@@ -188,14 +189,118 @@ const VARIANT_FIELDS = `
 
 const IMAGE_FIELDS = 'id url';
 
+// `currentQuantity` e `priceAfterAllDiscountsBeforeTaxesSet` sono i due campi
+// canonici, e sono qui per la stessa ragione: raccontano la riga com'e' ADESSO,
+// non com'era stata ordinata.
+//
+// `quantity` e' la quantita' ordinata e non cambia mai piu': dopo un reso resta
+// identica. `currentQuantity` scende, e a zero su una riga interamente
+// rimborsata o rimossa dall'ordine.
+//
+// `priceAfterAllDiscountsBeforeTaxesSet` e' il netto della riga gia' fatto —
+// sconti di riga e d'ordine tolti, tasse escluse. Prendere quello invece di
+// moltiplicare `discountedUnitPriceSet` per una quantita' non e' pignoleria:
+// uno sconto d'ordine viene spalmato sulle righe con arrotondamenti che il
+// prodotto non riproduce, e sulle unita' rimborsate viene spalmato lo stesso.
+//
+// `discountedUnitPriceSet` e `originalUnitPriceSet` restano: sono il prezzo che
+// il merchant riconosce guardando una riga, e la colonna `unit_price` li
+// contiene da sempre. Semplicemente non entrano piu' in nessun conto.
 const LINE_ITEM_FIELDS = `
-  id title quantity
+  id title quantity currentQuantity
   product { id }
   variant { id }
+  priceAfterAllDiscountsBeforeTaxesSet { shopMoney { amount currencyCode } }
   discountedUnitPriceSet { shopMoney { amount } }
   originalUnitPriceSet { shopMoney { amount } }
   totalDiscountSet { shopMoney { amount } }
 `;
+
+/** Una riga d'ordine come arriva da GraphQL, prima di diventare nostra. */
+interface GqlOrderLineItem {
+  id: string;
+  title: string | null;
+  quantity: number | null;
+  currentQuantity: number | null;
+  product: { id: string } | null;
+  variant: { id: string } | null;
+  priceAfterAllDiscountsBeforeTaxesSet: {
+    shopMoney: { amount: string; currencyCode: string };
+  } | null;
+  discountedUnitPriceSet: { shopMoney: { amount: string } } | null;
+  originalUnitPriceSet: { shopMoney: { amount: string } } | null;
+  totalDiscountSet: { shopMoney: { amount: string } } | null;
+}
+
+interface GqlOrder {
+  id: string;
+  name: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  cancelledAt: string | null;
+  displayFinancialStatus: string | null;
+  currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  customer: { id: string; firstName: string | null; lastName: string | null } | null;
+  lineItems: GqlConnection<GqlOrderLineItem>;
+}
+
+/**
+ * I campi di un ordine, con quante righe chiedergli nella prima pagina.
+ *
+ * Uno solo per l'elenco e per il singolo, perche' le due strade devono
+ * consegnare la stessa cosa: la corsa periodica e il webhook scrivono nelle
+ * stesse colonne, e un campo che arriva da una parte sola vuol dire una colonna
+ * che si riempie e si svuota a seconda di chi ha scritto per ultimo.
+ */
+function orderNodeFields(lineItemsFirst: number): string {
+  return `
+    id name createdAt updatedAt cancelledAt displayFinancialStatus
+    currentTotalPriceSet { shopMoney { amount currencyCode } }
+    customer { id firstName lastName }
+    lineItems(first: ${lineItemsFirst}) {
+      pageInfo { hasNextPage endCursor }
+      nodes { ${LINE_ITEM_FIELDS} }
+    }
+  `;
+}
+
+/**
+ * Da riga GraphQL a riga nostra.
+ *
+ * `currentQuantity` con `quantity` come ripiego: se Shopify non lo mandasse —
+ * una versione API piu' vecchia di quella per cui questo codice e' scritto — il
+ * ripiego riproduce il comportamento di prima invece di azzerare la riga, che
+ * sarebbe l'errore piu' grosso dei due.
+ *
+ * Il netto invece NON ha ripiego calcolato: se
+ * `priceAfterAllDiscountsBeforeTaxesSet` mancasse, la riga resta senza netto e
+ * il conto la dichiara non misurabile. Ricostruirlo moltiplicando un prezzo
+ * unitario e' proprio l'approssimazione da cui si sta scappando, e farlo di
+ * nascosto sotto il nome del campo canonico sarebbe peggio che non averlo.
+ *
+ * La valuta si prende dalla riga e, quando la riga non la dichiara, da quella
+ * dell'ordine: sono entrambe `shopMoney`, quindi coincidono — ed e' esattamente
+ * cio' che il conto verifica prima di sommare.
+ */
+function mapOrderLine(l: GqlOrderLineItem, orderCurrency: string | null): ShopifyOrderLine {
+  const net = l.priceAfterAllDiscountsBeforeTaxesSet?.shopMoney ?? null;
+
+  return {
+    id: gidToId(l.id),
+    title: l.title,
+    quantity: l.quantity ?? 0,
+    current_quantity: l.currentQuantity ?? l.quantity ?? 0,
+    product_id: l.product ? gidToId(l.product.id) : null,
+    variant_id: l.variant ? gidToId(l.variant.id) : null,
+    unit_price:
+      l.discountedUnitPriceSet?.shopMoney.amount ??
+      l.originalUnitPriceSet?.shopMoney.amount ??
+      null,
+    total_discount: l.totalDiscountSet?.shopMoney.amount ?? null,
+    line_net_total: net?.amount ?? null,
+    line_currency: net?.currencyCode ?? orderCurrency,
+  };
+}
 
 // Quante varianti (e quante immagini, e quante righe d'ordine) si chiedono nella
 // PRIMA pagina, dentro la query d'elenco.
@@ -1010,58 +1115,78 @@ export class ShopifyAPIClient {
   }
 
   /**
+   * Un ordine con TUTTE le sue righe, e il bit che dice se ci siamo riusciti.
+   *
+   * Le righe si esauriscono qui dentro: `lines_complete` a `true` e' l'unica
+   * cosa che autorizza chi scrive a cancellare per differenza, e va calcolata
+   * dove si conosce l'esito della paginazione — non dedotta piu' in la'.
+   */
+  private async mapOrderWithAllLines(o: GqlOrder): Promise<ShopifyOrder> {
+    // Un ordine da piu' di cento righe e' raro ma esiste (ingrosso, carrelli
+    // composti a mano), e le righe che restassero fuori sarebbero venduto che
+    // non entra nel margine: il profitto risulterebbe piu' alto del vero, cioe'
+    // l'errore che meno si nota.
+    const info = o.lineItems.pageInfo;
+    let lineNodes = o.lineItems.nodes ?? [];
+    let linesComplete = !!info && !info.hasNextPage;
+
+    if (info?.hasNextPage) {
+      const rest = await this.drainConnection<GqlOrderLineItem>({
+        parentGid: o.id,
+        parentType: 'Order',
+        field: 'lineItems',
+        nodeFields: LINE_ITEM_FIELDS,
+        after: info.endCursor,
+      });
+      lineNodes = [...lineNodes, ...rest.nodes];
+      linesComplete = rest.complete;
+    }
+
+    const currency = o.currentTotalPriceSet?.shopMoney.currencyCode ?? null;
+
+    return {
+      id: gidToId(o.id),
+      order_number: o.name,
+      placed_at: o.createdAt,
+      updated_at: o.updatedAt,
+      cancelled_at: o.cancelledAt,
+      financial_status: lower(o.displayFinancialStatus),
+      total_price: o.currentTotalPriceSet?.shopMoney.amount ?? null,
+      currency,
+      // null = acquisto senza account: l'ordine esiste, ma non appartiene a
+      // nessun cliente da mettere in elenco.
+      customer_id: o.customer ? gidToId(o.customer.id) : null,
+      customer_first_name: o.customer?.firstName ?? null,
+      customer_last_name: o.customer?.lastName ?? null,
+      lines: lineNodes.map((l) => mapOrderLine(l, currency)),
+      // Adesso serve davvero: le righe non si aggiungono piu' soltanto, chi
+      // scrive cancella quelle sparite — ma solo con questo bit a `true`.
+      lines_complete: linesComplete,
+    };
+  }
+
+  /**
    * Gli ordini, una pagina alla volta.
    *
    * Di un ordine si prende il minimo che serve al profitto: quando, di chi, e
    * cosa conteneva. Niente indirizzi, telefoni, note — sono dati personali che
    * non servono a nessun conto e che quindi non entrano.
-   *
-   * Il prezzo di riga e' quello scontato (`discountedUnitPriceSet`): il margine
-   * si fa su cio' che e' entrato in cassa, non sul listino. Se manca si ripiega
-   * sull'originale, che e' comunque meglio di una riga senza prezzo.
    */
   async getOrders(options: {
     limit?: number;
     pageInfo?: string;
     updatedAtMin?: string;
-  } = {}) {
+  } = {}): Promise<{ orders: ShopifyOrder[]; nextPageInfo: string | null }> {
     const data = await this.graphql<{
       orders: {
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
-        nodes: {
-          id: string;
-          name: string | null;
-          createdAt: string | null;
-          updatedAt: string | null;
-          cancelledAt: string | null;
-          displayFinancialStatus: string | null;
-          currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
-          customer: { id: string; firstName: string | null; lastName: string | null } | null;
-          lineItems: GqlConnection<{
-            id: string;
-            title: string | null;
-            quantity: number | null;
-            product: { id: string } | null;
-            variant: { id: string } | null;
-            discountedUnitPriceSet: { shopMoney: { amount: string } } | null;
-            originalUnitPriceSet: { shopMoney: { amount: string } } | null;
-            totalDiscountSet: { shopMoney: { amount: string } } | null;
-          }>;
-        }[];
+        nodes: GqlOrder[];
       };
     }>(
       `query Orders($first: Int!, $after: String, $query: String) {
         orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
           pageInfo { hasNextPage endCursor }
-          nodes {
-            id name createdAt updatedAt cancelledAt displayFinancialStatus
-            currentTotalPriceSet { shopMoney { amount currencyCode } }
-            customer { id firstName lastName }
-            lineItems(first: ${LINE_ITEMS_FIRST_IN_LIST}) {
-              pageInfo { hasNextPage endCursor }
-              nodes { ${LINE_ITEM_FIELDS} }
-            }
-          }
+          nodes { ${orderNodeFields(LINE_ITEMS_FIRST_IN_LIST)} }
         }
       }`,
       {
@@ -1077,65 +1202,44 @@ export class ShopifyAPIClient {
       },
     );
 
-    // Un ordine da piu' di cento righe e' raro ma esiste (ingrosso, carrelli
-    // composti a mano), e le righe che restassero fuori sarebbero venduto che
-    // non entra nel margine: il profitto risulterebbe piu' alto del vero, cioe'
-    // l'errore che meno si nota.
-    const orders = [];
+    const orders: ShopifyOrder[] = [];
     for (const o of data.orders.nodes) {
-      const info = o.lineItems.pageInfo;
-      let lineNodes = o.lineItems.nodes ?? [];
-      let linesComplete = !!info && !info.hasNextPage;
-
-      if (info?.hasNextPage) {
-        const rest = await this.drainConnection<(typeof lineNodes)[number]>({
-          parentGid: o.id,
-          parentType: 'Order',
-          field: 'lineItems',
-          nodeFields: LINE_ITEM_FIELDS,
-          after: info.endCursor,
-        });
-        lineNodes = [...lineNodes, ...rest.nodes];
-        linesComplete = rest.complete;
-      }
-
-      orders.push({
-        id: gidToId(o.id),
-        order_number: o.name,
-        placed_at: o.createdAt,
-        updated_at: o.updatedAt,
-        cancelled_at: o.cancelledAt,
-        financial_status: lower(o.displayFinancialStatus),
-        total_price: o.currentTotalPriceSet?.shopMoney.amount ?? null,
-        currency: o.currentTotalPriceSet?.shopMoney.currencyCode ?? null,
-        // null = acquisto senza account: l'ordine esiste, ma non appartiene a
-        // nessun cliente da mettere in elenco.
-        customer_id: o.customer ? gidToId(o.customer.id) : null,
-        customer_first_name: o.customer?.firstName ?? null,
-        customer_last_name: o.customer?.lastName ?? null,
-        lines: lineNodes.map((l) => ({
-          id: gidToId(l.id),
-          title: l.title,
-          quantity: l.quantity ?? 0,
-          product_id: l.product ? gidToId(l.product.id) : null,
-          variant_id: l.variant ? gidToId(l.variant.id) : null,
-          unit_price:
-            l.discountedUnitPriceSet?.shopMoney.amount ??
-            l.originalUnitPriceSet?.shopMoney.amount ??
-            null,
-          total_discount: l.totalDiscountSet?.shopMoney.amount ?? null,
-        })),
-        // Le righe d'ordine oggi si aggiungono soltanto, nessuno le cancella per
-        // differenza. Il bit viaggia comunque, cosi' chi un domani volesse
-        // riconciliarle trova gia' la sola cosa che glielo permette.
-        lines_complete: linesComplete,
-      });
+      orders.push(await this.mapOrderWithAllLines(o));
     }
 
     return {
       orders,
       nextPageInfo: data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null,
     };
+  }
+
+  /**
+   * Un ordine solo, letto per intero.
+   *
+   * Esiste per i webhook, che dell'ordine ci mandano una ricevuta e non una
+   * fotografia: il corpo REST porta `quantity` (quella ordinata, che dopo un
+   * reso non cambia) e nessuno dei due campi canonici — `currentQuantity` e il
+   * netto di riga — che sono proprio quelli su cui si fa il margine. Ricostruirli
+   * dal payload significherebbe indovinarli, ed e' quello che si faceva.
+   *
+   * `null` quando l'ordine non e' piu' leggibile: cancellato fra la notifica e
+   * la rilettura, oppure fuori dalla finestra che il negozio ci concede. Chi
+   * chiama non deve trattarlo come "ordine vuoto" — non si e' letto niente, e su
+   * un non-letto non si scrive e non si cancella.
+   *
+   * Qui l'ordine e' uno solo, quindi si chiede subito il massimo per pagina: le
+   * code partono solo oltre le 250 righe.
+   */
+  async getOrderById(orderId: number): Promise<ShopifyOrder | null> {
+    const data = await this.graphql<{ order: GqlOrder | null }>(
+      `query Order($id: ID!) {
+        order(id: $id) { ${orderNodeFields(NESTED_PAGE_SIZE)} }
+      }`,
+      { id: `gid://shopify/Order/${orderId}` },
+    );
+
+    if (!data.order) return null;
+    return this.mapOrderWithAllLines(data.order);
   }
 
   async getCustomersCount(): Promise<number> {

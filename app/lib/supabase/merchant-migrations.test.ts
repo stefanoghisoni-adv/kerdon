@@ -123,6 +123,59 @@ describe('formato dei campi che le piattaforme confrontano', () => {
   });
 });
 
+/**
+ * Il passo che riempie le colonne nuove sulle righe d'ordine.
+ *
+ * E' l'unico passo che non aggiunge niente allo schema, e senza di lui
+ * l'aggiornamento sarebbe un disastro silenzioso: il conto nuovo e'
+ * `line_net_total - costo * current_quantity`, e su una riga storica quei due
+ * valori sarebbero NULL e zero. Non profitto sbagliato di poco — profitto
+ * azzerato, su tutto lo storico, il giorno dell'aggiornamento.
+ */
+describe('lo storico delle righe d ordine', () => {
+  it('il passo gira DOPO la DDL, perche riempie colonne che la DDL aggiunge', () => {
+    // Prima della DDL quelle colonne non esistono ancora, e l'UPDATE
+    // fallirebbe portandosi dietro l'intero aggiornamento.
+    const sql = buildSchemaUpdateSQL(8, true, true)!;
+    expect(sql.indexOf('ADD COLUMN IF NOT EXISTS line_net_total')).toBeLessThan(
+      sql.indexOf('SET line_net_total = ROUND'),
+    );
+  });
+
+  it('riempie la quantita corrente con quella ordinata', () => {
+    const sql = buildSchemaUpdateSQL(8, true, true)!;
+    expect(sql).toContain('SET current_quantity = COALESCE(quantity, 0)');
+  });
+
+  it('quel che scrive e il VECCHIO conto, cioe i numeri di ieri', () => {
+    // Provvisorio e dichiarato tale: non corregge i rimborsi — quel dato sta su
+    // Shopify e non qui — ma non regala nemmeno un crollo a zero, che sarebbe
+    // piu' falso di cio' che sostituisce.
+    const sql = buildSchemaUpdateSQL(8, true, true)!;
+    expect(sql).toContain('SET line_net_total = ROUND(unit_price * COALESCE(quantity, 0), 2)');
+  });
+
+  it('non calpesta le righe gia rilette da Shopify', () => {
+    // Un merchant a meta' rilettura che ricevesse di nuovo questo SQL non deve
+    // tornare indietro: si tocca solo cio' che e' ancora vuoto.
+    const sql = buildSchemaUpdateSQL(8, true, true)!;
+    expect(sql).toContain('WHERE line_net_total IS NULL');
+  });
+
+  it('non prova a toccare una tabella che quel negozio non ha', () => {
+    // Gli ordini si sincronizzano solo per chi ha concesso il permesso: per gli
+    // altri `order_lines` non esiste, e un UPDATE nudo farebbe fallire tutto
+    // l'aggiornamento, colonne dei clienti comprese.
+    const sql = buildSchemaUpdateSQL(8, true, true)!;
+    expect(sql).toContain("to_regclass('public.order_lines') IS NULL");
+  });
+
+  it('la valuta di riga si prende dall ordine, che e l unica fonte che c e', () => {
+    const sql = buildSchemaUpdateSQL(8, true, true)!;
+    expect(sql).toContain('SET line_currency = o.currency');
+  });
+});
+
 describe('la versione 7 porta i browser conosciuti', () => {
   it('chi si era collegato prima riceve la tabella users', () => {
     // Senza il numero alzato, la DDL idempotente non viaggerebbe e i progetti

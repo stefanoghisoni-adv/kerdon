@@ -8,8 +8,23 @@
  * Il costo si legge dai prodotti al momento della lettura — e' la giuntura fra
  * `order_lines` e `products` — ed e' per questo che compilare un costo oggi
  * riscrive il profitto di ieri senza che nessuno ricalcoli niente.
+ *
+ * La formula del contributo netto non e' scritta qui e non lo e' piu' in nessuna
+ * di queste query: sta in `net-contribution`, in un posto solo, insieme al
+ * perche' non sia piu' `unit_price * quantity`. Quattro copie della stessa
+ * moltiplicazione — tante ce n'erano in questo file — sono quattro occasioni
+ * perche' una resti indietro, e ne basta una per mostrare al merchant due
+ * profitti diversi nella stessa schermata.
  */
 
+
+import {
+  COVERED_LINES,
+  NET_CONTRIBUTION_SUM,
+  NET_REVENUE_SUM,
+  ORDER_COUNTS_AS_SALE,
+  TOTAL_LINES,
+} from './net-contribution';
 
 /** Una data di calendario, come la scrive un selettore: 2026-08-01. */
 export function isCalendarDate(value: string): boolean {
@@ -45,7 +60,9 @@ export interface CustomersRangeInput {
  * I clienti con i loro numeri nel periodo scelto.
  *
  * Gli ordini annullati restano fuori dal conto ma non dal database: sono merce
- * mai partita o tornata indietro, non profitto.
+ * mai partita o tornata indietro, non profitto. Un ordine RIMBORSATO invece
+ * resta dentro: la vendita c'e' stata, e a portarla a zero sono la quantita'
+ * corrente e il netto di riga, non un'esclusione in blocco.
  *
  * `covered_lines` e `total_lines` viaggiano con il profitto perche' senza di
  * loro il numero mentirebbe per omissione: una riga il cui prodotto non ha
@@ -63,10 +80,9 @@ SELECT
   MAX(o.customer_first_name) AS first_name,
   MAX(o.customer_last_name) AS last_name,
   COUNT(DISTINCT o.shopify_order_id) AS orders,
-  COALESCE(SUM((l.unit_price - p.cost_per_item) * l.quantity)
-    FILTER (WHERE p.cost_per_item IS NOT NULL), 0) AS profit,
-  COUNT(l.shopify_line_id) FILTER (WHERE p.cost_per_item IS NOT NULL) AS covered_lines,
-  COUNT(l.shopify_line_id) AS total_lines,
+  ${NET_CONTRIBUTION_SUM} AS profit,
+  ${COVERED_LINES} AS covered_lines,
+  ${TOTAL_LINES} AS total_lines,
   -- La valuta con cui il negozio vende, non quella con cui paga noi: il
   -- profitto e' suo, e va scritto nei soldi che incassa.
   MAX(o.currency) AS currency,
@@ -83,7 +99,7 @@ FROM orders o
 JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
 LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
 LEFT JOIN customers c ON c.shopify_customer_id = o.shopify_customer_id
-WHERE o.cancelled_at IS NULL
+WHERE ${ORDER_COUNTS_AS_SALE}
   AND o.shopify_customer_id IS NOT NULL
   AND o.placed_at >= ${from}::date
   AND o.placed_at < (${to}::date + INTERVAL '1 day')
@@ -107,12 +123,11 @@ export function lifetimeProfitSQL(limit = 500): string {
 SELECT
   o.shopify_customer_id AS customer_id,
   COUNT(DISTINCT o.shopify_order_id) AS orders,
-  COALESCE(SUM((l.unit_price - p.cost_per_item) * l.quantity)
-    FILTER (WHERE p.cost_per_item IS NOT NULL), 0) AS profit
+  ${NET_CONTRIBUTION_SUM} AS profit
 FROM orders o
 JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
 LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
-WHERE o.cancelled_at IS NULL
+WHERE ${ORDER_COUNTS_AS_SALE}
   AND o.shopify_customer_id IS NOT NULL
 GROUP BY o.shopify_customer_id
 ORDER BY profit DESC
@@ -160,15 +175,14 @@ export function shopProfitSQL(input: { from: string; to: string }): string {
   return `
 SELECT
   COUNT(DISTINCT o.shopify_order_id) AS orders,
-  COALESCE(SUM((l.unit_price - p.cost_per_item) * l.quantity)
-    FILTER (WHERE p.cost_per_item IS NOT NULL), 0) AS profit,
-  COUNT(l.shopify_line_id) FILTER (WHERE p.cost_per_item IS NOT NULL) AS covered_lines,
-  COUNT(l.shopify_line_id) AS total_lines,
+  ${NET_CONTRIBUTION_SUM} AS profit,
+  ${COVERED_LINES} AS covered_lines,
+  ${TOTAL_LINES} AS total_lines,
   MAX(o.currency) AS currency
 FROM orders o
 JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
 LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
-WHERE o.cancelled_at IS NULL
+WHERE ${ORDER_COUNTS_AS_SALE}
   AND o.placed_at >= ${from}::date
   AND o.placed_at < (${to}::date + INTERVAL '1 day');`.trim();
 }
@@ -205,9 +219,8 @@ SELECT
   COUNT(DISTINCT o.shopify_order_id) AS orders,
   COUNT(DISTINCT o.shopify_customer_id) FILTER (WHERE o.shopify_customer_id IS NOT NULL)
     AS customers,
-  COALESCE(SUM(l.unit_price * l.quantity), 0) AS revenue,
-  COALESCE(SUM((l.unit_price - p.cost_per_item) * l.quantity)
-    FILTER (WHERE p.cost_per_item IS NOT NULL), 0) AS profit,
+  ${NET_REVENUE_SUM} AS revenue,
+  ${NET_CONTRIBUTION_SUM} AS profit,
   -- Su quante righe d'ordine il profitto si e' potuto calcolare davvero.
   --
   -- Il profitto qui sopra somma SOLO le righe il cui prodotto ha un costo noto,
@@ -216,11 +229,11 @@ SELECT
   -- profitto sale: nessun ordine e' cambiato, e' cambiato quanto se ne sa. Chi
   -- guarda il grafico vede le barre muoversi e non ha modo di capire perche',
   -- se questi due numeri non escono di qui.
-  COUNT(*) FILTER (WHERE p.cost_per_item IS NOT NULL) AS covered_lines,
-  COUNT(*) AS total_lines,
+  ${COVERED_LINES} AS covered_lines,
+  ${TOTAL_LINES} AS total_lines,
   MAX(o.currency) AS currency
 FROM orders o
 JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
 LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
-WHERE o.cancelled_at IS NULL ${window};`.trim();
+WHERE ${ORDER_COUNTS_AS_SALE} ${window};`.trim();
 }

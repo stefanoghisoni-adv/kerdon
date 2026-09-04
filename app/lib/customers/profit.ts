@@ -1,3 +1,5 @@
+import { netContribution } from './net-contribution';
+
 /**
  * Profitto per cliente: quanto resta dopo il costo della merce.
  *
@@ -15,9 +17,10 @@
  */
 
 export interface OrderLine {
-  quantity: number;
-  /** Prezzo unitario davvero pagato, al netto degli sconti di riga. */
-  unitPrice: number;
+  /** Le unita' ancora in mano al cliente: rimborsi e rimozioni gia' tolti. */
+  currentQuantity: number;
+  /** Il netto della riga come lo dichiara Shopify. null = non ancora letto. */
+  lineNetTotal: number | null;
   /** Costo unitario del prodotto, oggi. null = non ancora compilato. */
   unitCost: number | null;
 }
@@ -29,7 +32,7 @@ export interface Order {
 }
 
 export interface ProfitTotals {
-  /** Somma di (prezzo − costo) × quantita' sulle sole righe con un costo. */
+  /** Somma dei contributi netti sulle sole righe misurabili. */
   profit: number;
   /** Quante righe hanno concorso al totale. */
   coveredLines: number;
@@ -40,8 +43,8 @@ export interface ProfitTotals {
 /**
  * Il profitto di un elenco di righe.
  *
- * Le righe senza costo restano fuori dal totale invece di entrarci come costo
- * zero: un prodotto senza costo compilato non ha profitto "pari al prezzo", ha
+ * Le righe senza costo — e quelle senza netto, che sono le righe non ancora
+ * rilette da Shopify — restano fuori dal totale invece di entrarci come zero: un prodotto senza costo compilato non ha profitto "pari al prezzo", ha
  * profitto ignoto. Contarlo intero gonfierebbe il numero proprio nel caso in cui
  * il merchant si fida di meno — appena installata l'app, con i costi ancora da
  * riempire.
@@ -51,8 +54,12 @@ export function linesProfit(lines: OrderLine[]): ProfitTotals {
   let coveredLines = 0;
 
   for (const line of lines) {
-    if (line.unitCost == null) continue;
-    profit += (line.unitPrice - line.unitCost) * line.quantity;
+    // La stessa formula dell'SQL, presa dallo stesso posto: due definizioni
+    // dello stesso margine sono due margini, e il giorno in cui divergono lo
+    // scoprira' il merchant guardando due schermate.
+    const contribution = netContribution(line);
+    if (contribution === null) continue;
+    profit += contribution;
     coveredLines += 1;
   }
 

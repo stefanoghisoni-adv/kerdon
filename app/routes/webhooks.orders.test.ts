@@ -10,12 +10,16 @@ vi.mock('~/db.server', () => ({
   },
 }));
 
+// La rilettura canonica: il webhook dice QUALE ordine, l'API dice com'e'.
+// `vi.hoisted` perche' la fabbrica del mock viene issata sopra a tutto.
+const { getOrderById } = vi.hoisted(() => ({ getOrderById: vi.fn() }));
+vi.mock('~/lib/shopify-api.server', () => ({
+  ShopifyAPIClient: { forShop: vi.fn(async () => ({ getOrderById })) },
+}));
+
 // Il riconoscimento del visitatore: qui interessa che il webhook gli passi la
 // coppia giusta — id cliente e identificativo del browser — non cosa scrive.
 // Quello ha i suoi test, in lib/tracking/users.server.test.
-// `vi.hoisted` perche' la fabbrica del mock viene issata sopra a tutto: una
-// costante dichiarata qui sotto, al momento in cui la fabbrica gira, non
-// esisterebbe ancora.
 const { linkUserToCustomer } = vi.hoisted(() => ({
   linkUserToCustomer: vi.fn(async () => ({
     outcome: 'linked' as const,
@@ -31,6 +35,7 @@ vi.mock('~/lib/supabase/ensure-users-table.server', () => ({
 import { action } from './webhooks.orders';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
+import type { ShopifyOrder, ShopifyOrderLine } from '~/lib/customers/order-rows';
 
 function req(body: unknown) {
   return new Request('https://app/webhooks/orders', {
@@ -66,11 +71,13 @@ function mockShop(over: Record<string, unknown> = {}) {
 
 /**
  * Un client Supabase che raccoglie quel che gli si scrive, tabella per tabella,
- * e che sa anche fallire su richiesta.
+ * e che sa anche fallire su richiesta. La cancellazione per differenza si
+ * registra a parte: e' la sola operazione che puo' distruggere dati veri.
  */
 function mockSupabase(errors: Record<string, { message: string; code?: string }> = {}) {
   const writes: Record<string, any[]> = {};
   const tablesTouched: string[] = [];
+  const deletes: any[] = [];
 
   (createSupabaseClient as any).mockReturnValue({
     from: (table: string) => ({
@@ -80,50 +87,70 @@ function mockSupabase(errors: Record<string, { message: string; code?: string }>
         writes[table] = [...(writes[table] ?? []), ...rows];
         return { error: null };
       },
+      delete: () => {
+        const builder: any = {
+          eq: (_c: string, v: unknown) => builder,
+          in: (_c: string, v: unknown[]) => builder,
+          not: (_c: string, _o: string, list: string) => {
+            builder.keep = list;
+            return builder;
+          },
+          select: async () => {
+            deletes.push({ table, keep: builder.keep ?? null });
+            return { data: [], error: null };
+          },
+        };
+        return builder;
+      },
     }),
   });
 
-  return { writes, tablesTouched };
+  return { writes, tablesTouched, deletes };
 }
 
-/** Il corpo REST di `orders/create`, ridotto ai campi che il webhook guarda. */
-function orderPayload(over: Record<string, unknown> = {}) {
+/** La RICEVUTA: quel poco che si guarda ancora del corpo REST. */
+function receipt(over: Record<string, unknown> = {}) {
   return {
     id: 5001,
-    name: '#1042',
-    order_number: 1042,
-    created_at: '2026-08-27T09:12:00+02:00',
+    // Tutto il resto arriva nella busta ma non si legge piu': i prezzi e le
+    // quantita' del payload sono quelli che facevano sballare i margini.
+    total_price: '119.80',
+    line_items: [{ id: 9001, quantity: 2, price: '49.90' }],
+    customer: { id: 77, first_name: 'Anna' },
+    ...over,
+  };
+}
+
+const line = (over: Partial<ShopifyOrderLine> = {}): ShopifyOrderLine => ({
+  id: 9001,
+  title: 'Felpa',
+  quantity: 2,
+  current_quantity: 2,
+  product_id: 301,
+  variant_id: 401,
+  unit_price: '44.91',
+  total_discount: '0.00',
+  line_net_total: '89.82',
+  line_currency: 'EUR',
+  ...over,
+});
+
+/** L'ordine come lo consegna la rilettura GraphQL. */
+function canonicalOrder(over: Partial<ShopifyOrder> = {}): ShopifyOrder {
+  return {
+    id: 5001,
+    order_number: '#1042',
+    placed_at: '2026-08-27T09:12:00+02:00',
     updated_at: '2026-08-27T09:12:03+02:00',
     cancelled_at: null,
     financial_status: 'paid',
     total_price: '119.80',
-    current_total_price: '119.80',
     currency: 'EUR',
-    customer: { id: 77, first_name: 'Anna', last_name: 'Rossi' },
-    line_items: [
-      {
-        id: 9001,
-        title: 'Felpa',
-        name: 'Felpa - L',
-        quantity: 2,
-        product_id: 301,
-        variant_id: 401,
-        price: '49.90',
-        total_discount: '0.00',
-        discount_allocations: [{ amount: '9.98' }],
-      },
-      {
-        id: 9002,
-        title: 'Cappello',
-        name: 'Cappello - Unica',
-        quantity: 1,
-        product_id: 302,
-        variant_id: 402,
-        price: '19.90',
-        total_discount: '0.00',
-        discount_allocations: [],
-      },
-    ],
+    customer_id: 77,
+    customer_first_name: 'Anna',
+    customer_last_name: 'Rossi',
+    lines: [line(), line({ id: 9002, title: 'Cappello', variant_id: 402, quantity: 1, current_quantity: 1, unit_price: '19.90', line_net_total: '29.98' })],
+    lines_complete: true,
     ...over,
   };
 }
@@ -134,6 +161,7 @@ let errored: string[];
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getOrderById.mockResolvedValue(canonicalOrder());
   logged = [];
   warned = [];
   errored = [];
@@ -152,55 +180,126 @@ function lastTrace(lines: string[]): any {
   return line ? JSON.parse(line.slice('[webhook orders] '.length)) : null;
 }
 
-describe('webhook orders — l ordine arriva davvero su Supabase', () => {
-  it('scrive ordine e righe da un payload REST vero', async () => {
-    // QUESTO E' IL TEST CHE PRIMA FALLIVA. Il payload del webhook veniva passato
-    // grezzo a `orderToRows`, che si aspetta la forma normalizzata: `lines` era
-    // undefined, il TypeError finiva nel catch, e su Supabase non arrivava mai
-    // niente. `writes` restava vuoto e la risposta era 200 lo stesso.
+describe('webhook orders — il payload e un innesco, non una fonte', () => {
+  it('del corpo prende l id e poi rilegge l ordine dall API', async () => {
+    // E' IL PUNTO DI TUTTO IL CAMBIAMENTO. Il corpo REST non ha ne' la
+    // quantita' corrente ne' il netto di riga, cioe' i due soli valori su cui si
+    // puo' fare un margine che sopravviva a un rimborso: ricostruirli dal
+    // payload significava scrivere numeri gonfiati e lasciare che fosse la
+    // corsa periodica a correggerli, ore dopo.
     mockShop();
     const { writes } = mockSupabase();
 
-    const res = await action({ request: req(orderPayload()) } as any);
+    const res = await action({ request: req(receipt()) } as any);
 
     expect(res.status).toBe(200);
+    expect(getOrderById).toHaveBeenCalledWith(5001);
+
     expect(writes.orders).toHaveLength(1);
     expect(writes.orders[0]).toMatchObject({
       shopify_order_id: 5001,
       order_number: '#1042',
       shopify_customer_id: 77,
-      customer_first_name: 'Anna',
       currency: 'EUR',
       total_price: 119.8,
-      financial_status: 'paid',
-      cancelled_at: null,
-      placed_at: '2026-08-27T09:12:00+02:00',
     });
 
     expect(writes.order_lines).toHaveLength(2);
     expect(writes.order_lines[0]).toMatchObject({
       shopify_line_id: 9001,
-      shopify_order_id: 5001,
-      shopify_product_id: 301,
-      shopify_variant_id: 401,
-      title: 'Felpa',
+      current_quantity: 2,
+      line_net_total: 89.82,
+      line_currency: 'EUR',
+    });
+  });
+
+  it('i numeri scritti sono quelli riletti, non quelli della busta', async () => {
+    // La busta dice due pezzi a 49.90; l'ordine riletto dice che uno e' stato
+    // reso. Vince la rilettura, e la differenza e' esattamente il margine
+    // sovrastimato che nessuno vedeva.
+    mockShop();
+    const { writes } = mockSupabase();
+    getOrderById.mockResolvedValue(
+      canonicalOrder({
+        lines: [line({ quantity: 2, current_quantity: 1, line_net_total: '44.91' })],
+      }),
+    );
+
+    await action({ request: req(receipt()) } as any);
+
+    expect(writes.order_lines).toHaveLength(1);
+    expect(writes.order_lines[0]).toMatchObject({
       quantity: 2,
-      // 49.90 x 2 meno 9.98 di sconto, su due unita': il prezzo pagato.
-      unit_price: 44.91,
+      current_quantity: 1,
+      line_net_total: 44.91,
     });
-    expect(writes.order_lines[1]).toMatchObject({
-      shopify_line_id: 9002,
-      shopify_variant_id: 402,
-      quantity: 1,
-      unit_price: 19.9,
+  });
+
+  it('un rimborso rilegge l ordine, non il rimborso', async () => {
+    // La busta di `refunds/create` e' il RIMBORSO: l'id in cima e' il suo.
+    // Rileggendo quello si andrebbe a prendere un ordine che non esiste.
+    mockShop();
+    mockSupabase();
+
+    await action({ request: req({ id: 88001, order_id: 5001 }) } as any);
+
+    expect(getOrderById).toHaveBeenCalledWith(5001);
+  });
+
+  it('un ordine interamente rimborsato porta le sue righe a zero', async () => {
+    // `cancelled_at` resta null — l'ordine e' valido — ma non c'e' piu' niente
+    // in mano al cliente, e il contributo di quelle righe e' zero.
+    mockShop();
+    const { writes } = mockSupabase();
+    getOrderById.mockResolvedValue(
+      canonicalOrder({
+        financial_status: 'refunded',
+        total_price: '0.00',
+        lines: [line({ current_quantity: 0, line_net_total: '89.82' })],
+      }),
+    );
+
+    await action({ request: req(receipt()) } as any);
+
+    expect(writes.orders[0]).toMatchObject({ total_price: 0, cancelled_at: null });
+    expect(writes.order_lines[0]).toMatchObject({ current_quantity: 0, line_net_total: 0 });
+  });
+
+  it('un ordine annullato si scrive lo stesso, con la data di annullamento', async () => {
+    // Toglierlo vorrebbe dire un ordine che il merchant vede su Shopify e non
+    // trova nel suo database: a escluderlo dal profitto e' il conto.
+    mockShop();
+    const { writes } = mockSupabase();
+    getOrderById.mockResolvedValue(
+      canonicalOrder({ cancelled_at: '2026-08-27T11:00:00+02:00', financial_status: 'voided' }),
+    );
+
+    await action({ request: req(receipt()) } as any);
+
+    expect(writes.orders[0]).toMatchObject({
+      cancelled_at: '2026-08-27T11:00:00+02:00',
+      financial_status: 'voided',
     });
+    expect(writes.order_lines).toHaveLength(2);
+  });
+
+  it('un ordine senza righe scrive comunque l ordine', async () => {
+    mockShop();
+    const { writes, tablesTouched } = mockSupabase();
+    getOrderById.mockResolvedValue(canonicalOrder({ lines: [] }));
+
+    await action({ request: req(receipt()) } as any);
+
+    expect(writes.orders).toHaveLength(1);
+    expect(tablesTouched).toEqual(['orders']);
+    expect(lastTrace(logged)).toMatchObject({ status: 'completed', lines: 0 });
   });
 
   it('lascia una traccia leggibile anche quando e andato tutto bene', async () => {
     mockShop();
     mockSupabase();
 
-    await action({ request: req(orderPayload()) } as any);
+    await action({ request: req(receipt()) } as any);
 
     expect(lastTrace(logged)).toMatchObject({
       webhook: 'orders',
@@ -212,86 +311,77 @@ describe('webhook orders — l ordine arriva davvero su Supabase', () => {
     // Un successo non sporca il registro dei job: sarebbe una riga per vendita.
     expect(prisma.syncJob.create).not.toHaveBeenCalled();
   });
+});
 
-  it('un ordine senza righe scrive comunque l ordine', async () => {
+describe('webhook orders — cancellare per differenza, e quando non si puo', () => {
+  it('elenco completo: le righe sparite dall ordine si tolgono', async () => {
     mockShop();
-    const { writes, tablesTouched } = mockSupabase();
+    const { deletes } = mockSupabase();
 
-    await action({ request: req(orderPayload({ line_items: [] })) } as any);
+    await action({ request: req(receipt()) } as any);
 
-    expect(writes.orders).toHaveLength(1);
-    expect(writes.orders[0].shopify_order_id).toBe(5001);
-    // Nessuna riga da scrivere: la seconda tabella non si tocca nemmeno.
-    expect(tablesTouched).toEqual(['orders']);
-    expect(lastTrace(logged)).toMatchObject({ status: 'completed', lines: 0 });
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]).toMatchObject({ table: 'order_lines', keep: '(9001,9002)' });
   });
 
-  it('un ordine annullato si scrive lo stesso, con la data di annullamento', async () => {
-    // Non e' la sincronizzazione a escluderlo dal profitto: e' il conto, che
-    // guarda `cancelled_at`. Toglierlo qui vorrebbe dire un ordine che il
-    // merchant vede su Shopify e non trova nel suo database.
+  it('elenco incompleto: nessuna cancellazione, e la riparazione si registra', async () => {
+    // Su un elenco troncato "non l'ho vista" non e' "non c'e' piu'": cancellare
+    // li' vuol dire cancellare righe che esistono, e proprio negli ordini piu'
+    // grandi.
     mockShop();
-    const { writes } = mockSupabase();
+    const { writes, deletes } = mockSupabase();
+    getOrderById.mockResolvedValue(canonicalOrder({ lines_complete: false }));
 
-    await action({
-      request: req(
-        orderPayload({
-          cancelled_at: '2026-08-27T11:00:00+02:00',
-          financial_status: 'voided',
-          current_total_price: '0.00',
-        }),
-      ),
-    } as any);
+    const res = await action({ request: req(receipt()) } as any);
 
-    expect(writes.orders[0]).toMatchObject({
-      shopify_order_id: 5001,
-      cancelled_at: '2026-08-27T11:00:00+02:00',
-      financial_status: 'voided',
-      total_price: 0,
-    });
+    expect(res.status).toBe(200);
     expect(writes.order_lines).toHaveLength(2);
-  });
+    expect(deletes).toHaveLength(0);
+    expect(warned.some((w) => w.includes('troncato'))).toBe(true);
+    expect(lastTrace(logged)).toMatchObject({ status: 'completed', lines_complete: false });
 
-  it('un ordine interamente rimborsato porta il totale corrente, non quello originale', async () => {
-    mockShop();
-    const { writes } = mockSupabase();
-
-    await action({
-      request: req(
-        orderPayload({
-          financial_status: 'refunded',
-          total_price: '119.80',
-          current_total_price: '0.00',
-        }),
-      ),
-    } as any);
-
-    expect(writes.orders[0]).toMatchObject({ financial_status: 'refunded', total_price: 0 });
+    // La riparazione in sospeso e' l'elenco degli ordini di cui SAPPIAMO che i
+    // numeri sono provvisori: senza, l'unico modo di ritrovarli sarebbe
+    // rileggere tutto il negozio sperando che basti.
+    const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
+    expect(job).toMatchObject({ shopId: 'shop-1', jobType: 'order_repair_pending' });
+    expect(job.errors.order_repair.order).toBe(5001);
   });
 });
 
-describe('webhook orders — il corpo del webhook non e tutto l ordine', () => {
-  it('oltre le cento righe si scrive quel che c e, dichiarandolo incompleto', async () => {
+describe('webhook orders — la stessa busta due volte', () => {
+  it('ritentata, scrive le stesse righe e non ne aggiunge di nuove', async () => {
+    // Shopify riprova le consegne: il rimedio non e' un lucchetto, e' che
+    // ripetere non cambi il risultato. Sono upsert su chiavi univoche.
     mockShop();
     const { writes } = mockSupabase();
 
-    const line_items = Array.from({ length: 120 }, (_, i) => ({
-      id: 9000 + i,
-      title: `Riga ${i}`,
-      quantity: 1,
-      product_id: 300,
-      variant_id: 400 + i,
-      price: '1.00',
-    }));
+    await action({ request: req(receipt()) } as any);
+    const primo = JSON.stringify(writes.order_lines);
+    writes.order_lines = [];
+    writes.orders = [];
 
-    await action({ request: req(orderPayload({ line_items })) } as any);
+    await action({ request: req(receipt()) } as any);
 
-    // Le righe presenti si scrivono: un elenco monco non e' un motivo per non
-    // scrivere quel che si e' ricevuto.
-    expect(writes.order_lines).toHaveLength(120);
-    // Ma non lo si spaccia per completo, e lo si dice ad alta voce.
-    expect(lastTrace(logged)).toMatchObject({ status: 'completed', lines_complete: false });
-    expect(warned.some((w) => w.includes('troncato'))).toBe(true);
+    expect(JSON.stringify(writes.order_lines)).toBe(primo);
+    expect(writes.orders).toHaveLength(1);
+  });
+
+  it('due consegne in parallelo scrivono le stesse chiavi, non righe doppie', async () => {
+    mockShop();
+    const { writes } = mockSupabase();
+
+    await Promise.all([
+      action({ request: req(receipt()) } as any),
+      action({ request: req(receipt()) } as any),
+    ]);
+
+    // Due consegne, due upsert per riga: le chiavi restano due, e a fare da
+    // giudice e' `onConflict` sul database, non l'ordine di arrivo.
+    expect(new Set(writes.order_lines.map((l: any) => l.shopify_line_id))).toEqual(
+      new Set([9001, 9002]),
+    );
+    expect(new Set(writes.orders.map((o: any) => o.shopify_order_id))).toEqual(new Set([5001]));
   });
 });
 
@@ -300,18 +390,16 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
     mockShop();
     const { writes } = mockSupabase({ orders: { message: 'permission denied for table orders' } });
 
-    const res = await action({ request: req(orderPayload()) } as any);
+    const res = await action({ request: req(receipt()) } as any);
 
     // 500: la scrittura non e' riuscita, e con il 200 Shopify considerava la
     // consegna andata a buon fine — quell'ordine non tornava mai piu'.
     expect(res.status).toBe(500);
-    // Le righe non si scrivono senza l'ordine che le raggruppa.
     expect(writes.order_lines).toBeUndefined();
 
     expect(lastTrace(errored)).toMatchObject({ status: 'failed', order: 5001 });
     expect(errored.some((e) => e.includes('permission denied for table orders'))).toBe(true);
 
-    expect(prisma.syncJob.create).toHaveBeenCalledTimes(1);
     const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
     expect(job).toMatchObject({ shopId: 'shop-1', jobType: 'webhook', status: 'failed' });
     expect(job.errors.message).toContain('permission denied for table orders');
@@ -322,10 +410,8 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
     mockShop();
     const { writes } = mockSupabase({ order_lines: { message: 'value too long' } });
 
-    const res = await action({ request: req(orderPayload()) } as any);
+    const res = await action({ request: req(receipt()) } as any);
 
-    // Anche qui 500: l'ordine c'e' ma le sue righe no, e una consegna ripetuta
-    // riscrive lo stesso ordine e aggiunge le righe che mancavano.
     expect(res.status).toBe(500);
     expect(writes.orders).toHaveLength(1);
     expect(lastTrace(errored)).toMatchObject({ status: 'failed' });
@@ -345,20 +431,56 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
     expect(lastTrace(errored)).toMatchObject({ status: 'failed', order: null });
   });
 
+  it('rilettura non riuscita: si risponde 500, cosi Shopify riprova', async () => {
+    // Diverso da "ordine sparito": qui l'API non ha risposto, e non sappiamo
+    // niente. Su un non-letto non si scrive e non si cancella.
+    mockShop();
+    const { writes } = mockSupabase();
+    getOrderById.mockRejectedValue(new Error('Shopify API error: 503'));
+
+    const res = await action({ request: req(receipt()) } as any);
+
+    expect(res.status).toBe(500);
+    expect(writes.orders).toBeUndefined();
+    expect(lastTrace(errored)).toMatchObject({ status: 'failed' });
+  });
+
   it('database dell app irraggiungibile: si risponde 500, cosi Shopify riprova', async () => {
     (prisma.shop.findUnique as any).mockRejectedValue(new Error('connection refused'));
     mockSupabase();
 
-    const res = await action({ request: req(orderPayload()) } as any);
+    const res = await action({ request: req(receipt()) } as any);
 
-    // Un guasto passeggero deve costare un nuovo tentativo, non l'evento:
-    // con il 200 Shopify considerava consegnato e quell'ordine spariva.
     expect(res.status).toBe(500);
     expect(lastTrace(errored)).toMatchObject({ status: 'failed', detail: 'connection refused' });
   });
 });
 
 describe('webhook orders — quando non c e niente da fare', () => {
+  it('ordine non piu leggibile: non si scrive, ma l identificativo si conserva', async () => {
+    // Sparito fra la notifica e la rilettura, o fuori dalla finestra che il
+    // negozio ci concede. Della ricevuta resta l'unica cosa che ha — l'id —
+    // perche' quell'ordine sia ritrovabile invece di sparire in silenzio.
+    mockShop();
+    const { writes, deletes } = mockSupabase();
+    getOrderById.mockResolvedValue(null);
+
+    const res = await action({ request: req(receipt()) } as any);
+
+    expect(res.status).toBe(200);
+    expect(writes.orders).toBeUndefined();
+    expect(deletes).toHaveLength(0);
+    expect(lastTrace(logged)).toMatchObject({
+      status: 'skipped',
+      order: 5001,
+      detail: 'ordine non piu leggibile su Shopify',
+    });
+
+    const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
+    expect(job.jobType).toBe('order_repair_pending');
+    expect(job.errors.order_repair.order).toBe(5001);
+  });
+
   it('payload senza id: si acknowledgia senza cercare nemmeno il negozio', async () => {
     mockShop();
     mockSupabase();
@@ -367,15 +489,17 @@ describe('webhook orders — quando non c e niente da fare', () => {
 
     expect(res.status).toBe(200);
     expect(prisma.shop.findUnique).not.toHaveBeenCalled();
+    expect(getOrderById).not.toHaveBeenCalled();
     expect(lastTrace(logged)).toMatchObject({ status: 'skipped' });
   });
 
-  it('permesso sugli ordini non concesso: non si prova nemmeno a scrivere', async () => {
+  it('permesso sugli ordini non concesso: non si rilegge nemmeno', async () => {
     mockShop({ scopes: 'read_products' });
     mockSupabase();
 
-    await action({ request: req(orderPayload()) } as any);
+    await action({ request: req(receipt()) } as any);
 
+    expect(getOrderById).not.toHaveBeenCalled();
     expect(createSupabaseClient).not.toHaveBeenCalled();
     expect(lastTrace(logged)).toMatchObject({ status: 'skipped' });
   });
@@ -384,7 +508,7 @@ describe('webhook orders — quando non c e niente da fare', () => {
     mockShop({ supabaseConfig: null });
     mockSupabase();
 
-    await action({ request: req(orderPayload()) } as any);
+    await action({ request: req(receipt()) } as any);
 
     expect(createSupabaseClient).not.toHaveBeenCalled();
     expect(lastTrace(logged)).toMatchObject({ status: 'skipped' });
@@ -403,7 +527,7 @@ describe('webhook orders — quando non c e niente da fare', () => {
     mockShop({ authorization: 'DISABLED' });
     mockSupabase();
 
-    const res = await action({ request: req(orderPayload()) } as any);
+    const res = await action({ request: req(receipt()) } as any);
 
     expect(res.status).toBe(200);
     expect(createSupabaseClient).not.toHaveBeenCalled();
@@ -414,7 +538,7 @@ describe('webhook orders — quando non c e niente da fare', () => {
     mockShop({ uninstalledAt: new Date('2026-05-01T00:00:00Z') });
     mockSupabase();
 
-    await action({ request: req(orderPayload()) } as any);
+    await action({ request: req(receipt()) } as any);
 
     expect(createSupabaseClient).not.toHaveBeenCalled();
     expect(lastTrace(logged)).toMatchObject({ status: 'skipped' });
@@ -424,7 +548,7 @@ describe('webhook orders — quando non c e niente da fare', () => {
     mockShop({ authorization: 'DISABLD' });
     mockSupabase();
 
-    await action({ request: req(orderPayload()) } as any);
+    await action({ request: req(receipt()) } as any);
 
     expect(createSupabaseClient).not.toHaveBeenCalled();
   });
@@ -436,19 +560,19 @@ describe('webhook orders — quando non c e niente da fare', () => {
   it('il registro dice PERCHE l ordine e stato saltato', async () => {
     mockShop({ scopes: 'read_products' });
     mockSupabase();
-    await action({ request: req(orderPayload()) } as any);
+    await action({ request: req(receipt()) } as any);
     expect(lastTrace(logged)).toMatchObject({
       detail: 'permesso sugli ordini non concesso',
     });
 
     mockShop({ supabaseConfig: null });
-    await action({ request: req(orderPayload()) } as any);
+    await action({ request: req(receipt()) } as any);
     expect(lastTrace(logged)).toMatchObject({
       detail: 'nessun progetto collegato e verificato: non c e dove scrivere',
     });
 
     mockShop({ authorization: 'DISABLED' });
-    await action({ request: req(orderPayload()) } as any);
+    await action({ request: req(receipt()) } as any);
     expect(lastTrace(logged)).toMatchObject({
       detail: 'uso dell app sospeso: la sincronizzazione e ferma',
     });
@@ -461,13 +585,18 @@ describe('webhook orders — quando non c e niente da fare', () => {
  * E' il legame piu' forte che esista: nella stessa busta arrivano l'id del
  * cliente Shopify e l'identificativo del browser che ha riempito il carrello.
  * Non serve che il cliente abbia fatto login, basta che abbia comprato.
+ *
+ * E' anche l'unica cosa per cui la ricevuta resta insostituibile: gli attributi
+ * del carrello in GraphQL non ci sono, e la rilettura non li porterebbe.
  */
 describe('webhook orders — il browser che ha comprato', () => {
   const VISITATORE = 'corew_1700000000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
   /** L'attributo di carrello, com'e' scritto nel corpo REST del webhook. */
   function conAttributo(value: string, name = '_corew_external_id') {
-    return orderPayload({ note_attributes: [{ name: 'consegna', value: 'al piano' }, { name, value }] });
+    return receipt({
+      note_attributes: [{ name: 'consegna', value: 'al piano' }, { name, value }],
+    });
   }
 
   it('lega il browser al cliente leggendo l attributo di carrello', async () => {
@@ -509,7 +638,7 @@ describe('webhook orders — il browser che ha comprato', () => {
     mockShop();
     mockSupabase();
 
-    await action({ request: req(orderPayload()) } as any);
+    await action({ request: req(receipt()) } as any);
 
     expect(linkUserToCustomer).not.toHaveBeenCalled();
   });

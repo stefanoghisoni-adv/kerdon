@@ -1,13 +1,18 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { verifyWebhook } from '~/lib/webhooks/verify.server';
-import { orderToRows } from '~/lib/customers/order-rows';
 import {
-  webhookOrderToShopifyOrder,
+  customerIdFromReceipt,
+  orderIdFromReceipt,
   type WebhookOrderPayload,
 } from '~/lib/customers/order-webhook-payload';
+import {
+  applyOrderToMerchant,
+  OrderWriteError,
+} from '~/lib/customers/order-write.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
+import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import { denialOf, type DenialReason } from '~/lib/authz/capabilities';
 import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -16,38 +21,42 @@ import { linkUserToCustomer } from '~/lib/tracking/users.server';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 
 /**
- * Un ordine appena arrivato, scritto subito.
+ * Un ordine cambiato, riletto e riscritto subito.
  *
  * E' l'unica cosa che non aspetta la corsa periodica, e per una ragione sola:
  * un ordine e' il momento in cui i numeri del negozio cambiano davvero. Sapere
- * fra sei ore che si e' venduto qualcosa e' tardi per chi sta guardando come
- * gira una campagna — mentre un prodotto rinominato o un cliente che cambia
- * indirizzo possono benissimo aspettare il giro della notte.
+ * fra sei ore che si e' venduto — o che si e' rimborsato — e' tardi per chi sta
+ * guardando come gira una campagna, mentre un prodotto rinominato o un cliente
+ * che cambia indirizzo possono aspettare il giro della notte.
  *
- * Costa poco: un ordine e le sue righe, due scritture. Non e' una
- * sincronizzazione completa e non deve diventarlo — se il webhook si perde,
- * l'ordine lo recupera comunque la corsa periodica, che li rilegge tutti.
- * Questa e' una scorciatoia, non l'unica strada.
+ * IL PAYLOAD E' UN INNESCO, NON UNA FONTE. Del corpo si prende l'id dell'ordine
+ * (e gli attributi del carrello, che solo li' passano); tutto il resto si
+ * rilegge da GraphQL. Il perche' sta per esteso in
+ * lib/customers/order-webhook-payload, e in breve e' questo: il corpo REST non
+ * ha ne' la quantita' corrente ne' il netto di riga, cioe' i due soli valori su
+ * cui si puo' fare un margine che sopravviva a un rimborso. Ricostruirli dal
+ * payload voleva dire scrivere numeri gonfiati e lasciare che fosse la corsa
+ * periodica a correggerli di soppiatto, ore dopo.
  *
- * IL CORPO VA TRADOTTO PRIMA. Shopify manda l'ordine nei nomi della REST
- * (`line_items`, `created_at`, `price`), mentre da qui in giu' tutto e' scritto
- * per la forma normalizzata che produce `getOrders`. La traduzione, e il perche'
- * si traduce invece di rileggere l'ordine dall'API come fanno i prodotti, stanno
- * in lib/customers/order-webhook-payload.
+ * TRE TOPIC, UNA STRADA: `orders/create`, `orders/updated`, `refunds/create`.
+ * Il rimborso e' il caso che rende evidente perche' rileggere — e' l'evento in
+ * cui l'ordine cambia senza che nessuna riga nuova compaia — ma la strada e' la
+ * stessa: si guarda quale ordine, lo si rilegge, lo si riscrive. La
+ * cancellazione dell'ordine ha invece un handler suo, perche' li' non c'e'
+ * niente da rileggere (`webhooks.orders.delete`).
  *
  * QUANDO SI RISPONDE COSA. 200 vuol dire "non c'e' niente da riprovare": il
- * corpo illeggibile, l'ordine senza id, il negozio non collegato o sospeso.
- * 500 vuol dire "riprova": la scrittura non riuscita e tutto cio' che non
- * sappiamo gestire. La differenza non e' formale — un 200 su una scrittura
- * fallita e' un ordine che non torna mai piu', perche' Shopify considera la
- * consegna riuscita e non la ripete.
+ * corpo illeggibile, l'ordine senza id, il negozio non collegato o sospeso,
+ * l'ordine non piu' leggibile su Shopify. 500 vuol dire "riprova": la lettura o
+ * la scrittura non riuscite, e tutto cio' che non sappiamo gestire. La
+ * differenza non e' formale — un 200 su una scrittura fallita e' un ordine che
+ * non torna mai piu', perche' Shopify considera la consegna riuscita e non la
+ * ripete.
  *
  * LA TRACCIA. Comunque si risponda, non si tace: ogni esito lascia una riga
  * `[webhook orders]` nel log, e un fallimento lascia anche una riga nel
- * registro dei job. E' lo stesso doppio canale dei webhook GDPR, per lo
- * stesso motivo: il log si legge subito ma scorre via, il registro resta. Senza,
- * un handler che risponde sempre "va tutto bene" e' indistinguibile da uno che
- * non ha mai scritto niente — che e' esattamente com'e' stato per un po'.
+ * registro dei job. E' lo stesso doppio canale dei webhook GDPR, per lo stesso
+ * motivo: il log si legge subito ma scorre via, il registro resta.
  */
 
 /** Com'e' finita, in una forma sola per tutti e tre i canali. */
@@ -58,7 +67,9 @@ interface OrderWebhookOutcome {
   /** Cos'e' successo, in italiano leggibile: e' quello che si cerca nel log. */
   detail: string;
   lines?: number;
-  /** `false` = l'elenco delle righe era troncato. Vedi il mapper. */
+  /** Quante righe obsolete si sono tolte riconciliando. */
+  deleted?: number;
+  /** `false` = l'elenco delle righe era troncato. Vedi `order-write`. */
   linesComplete?: boolean;
 }
 
@@ -75,6 +86,7 @@ function logOrderWebhook(outcome: OrderWebhookOutcome): void {
     status: outcome.outcome,
     detail: outcome.detail,
     ...(outcome.lines !== undefined ? { lines: outcome.lines } : {}),
+    ...(outcome.deleted !== undefined ? { deleted: outcome.deleted } : {}),
     ...(outcome.linesComplete !== undefined ? { lines_complete: outcome.linesComplete } : {}),
     at: new Date().toISOString(),
   });
@@ -129,6 +141,42 @@ async function recordOrderWebhookFailure(
   }
 }
 
+/**
+ * Un ordine che va ripreso in mano, e non e' un fallimento.
+ *
+ * Due casi, diversi fra loro e con lo stesso rimedio. L'elenco delle righe era
+ * troncato: si e' scritto quel che c'era e non si e' cancellato niente, quindi
+ * puo' essere rimasta indietro una riga che l'ordine non ha piu'. Oppure
+ * l'ordine non si e' potuto rileggere affatto: allora dalla ricevuta si conserva
+ * l'unica cosa che ha, il suo identificativo.
+ *
+ * Va nel registro e non solo nel log per una ragione precisa: e' l'elenco degli
+ * ordini di cui SAPPIAMO che i numeri sono provvisori. Senza, l'unico modo di
+ * ritrovarli sarebbe rileggere tutto il negozio sperando che basti.
+ */
+async function recordOrderRepairPending(
+  shopId: string,
+  orderId: number | null,
+  reason: string,
+): Promise<void> {
+  try {
+    await prisma.syncJob.create({
+      data: {
+        shopId,
+        jobType: 'order_repair_pending',
+        status: 'completed',
+        completedAt: new Date(),
+        errors: { message: reason, order_repair: { order: orderId } },
+      },
+    });
+  } catch (error) {
+    console.error(
+      `[webhook orders] riparazione in sospeso non registrata per l ordine ${orderId}:`,
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+  }
+}
+
 /** I due canali insieme: e' cosi' che si chiude ogni strada di questo handler. */
 async function saveOrderWebhookOutcome(
   shopId: string | null,
@@ -149,6 +197,9 @@ async function saveOrderWebhookOutcome(
  * come la REST chiama gli attributi del carrello. Chi lo pianta e' il
  * tracciamento della vetrina, che l'identificativo ce l'ha gia' nel cookie
  * first-party.
+ *
+ * E' l'unica cosa per cui la ricevuta resta insostituibile: gli attributi del
+ * carrello in GraphQL non ci sono, e la rilettura canonica non li porterebbe.
  *
  * Si esce in silenzio in due casi, ed e' giusto cosi': un ordine senza account
  * cliente (acquisto come ospite) non ha nessuno a cui legare il browser, e un
@@ -215,11 +266,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ error: 'Missing shop domain' }, { status: 400 });
   }
 
-  // Da qui in giu' si risponde sempre 200, qualunque cosa vada storta. Un
-  // errore restituito a Shopify fa ritentare la consegna e, dopo abbastanza
-  // fallimenti, fa disattivare la sottoscrizione: un problema nostro finirebbe
-  // per spegnere il webhook di quel negozio. Rispondere 200 pero' non autorizza
-  // a non dire niente, ed e' il compito di `saveOrderWebhookOutcome`.
   let shopId: string | null = null;
   let orderId: number | null = null;
 
@@ -245,11 +291,12 @@ export async function action({ request }: ActionFunctionArgs) {
       });
       return json({ ok: true }, { status: 200 });
     }
-    const order = webhookOrderToShopifyOrder(payload);
 
-    // Senza id non c'e' ordine da riconoscere: alla corsa dopo ne nascerebbe un
-    // doppione, quindi si preferisce non scriverlo affatto.
-    if (!order) {
+    orderId = orderIdFromReceipt(payload);
+
+    // Senza id non c'e' un ordine da rileggere, e non esiste ripiego che non
+    // sia indovinare quale.
+    if (orderId === null) {
       await saveOrderWebhookOutcome(null, {
         shopDomain,
         orderId: null,
@@ -258,8 +305,6 @@ export async function action({ request }: ActionFunctionArgs) {
       });
       return json({ ok: true }, { status: 200 });
     }
-
-    orderId = order.id;
 
     const shop = await prisma.shop.findUnique({
       where: { shopDomain },
@@ -296,10 +341,63 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ ok: true }, { status: 200 });
     }
 
-    // Da qui in poi e' la stessa trasformazione della corsa periodica, sulla
-    // stessa forma: e' tutto il senso di aver tradotto il payload prima.
-    const rows = orderToRows(order);
-    if (!rows) {
+    // La rilettura canonica: l'ordine com'e' adesso, con tutte le sue righe,
+    // con la quantita' corrente e il netto di riga che il payload non ha.
+    const shopifyClient = await ShopifyAPIClient.forShop(shop.shopDomain);
+    const order = await shopifyClient.getOrderById(orderId);
+
+    if (!order) {
+      // Ordine sparito fra la notifica e la rilettura, o fuori dalla finestra
+      // che il negozio ci concede. Non si scrive e non si cancella: non abbiamo
+      // letto niente, e su un non-letto non si decide niente. Della ricevuta si
+      // conserva l'unica cosa che ha — l'identificativo — perche' quell'ordine
+      // resti ritrovabile invece di sparire in silenzio.
+      await recordOrderRepairPending(
+        shop.id,
+        orderId,
+        'ordine non piu leggibile su Shopify: nessuna scrittura, identificativo conservato',
+      );
+      await saveOrderWebhookOutcome(shopId, {
+        shopDomain,
+        orderId,
+        outcome: 'skipped',
+        detail: 'ordine non piu leggibile su Shopify',
+      });
+      return json({ ok: true }, { status: 200 });
+    }
+
+    const supabase = createSupabaseClient(shop.supabaseConfig);
+
+    let written;
+    try {
+      written = await applyOrderToMerchant({ supabase, order });
+    } catch (error) {
+      if (error instanceof OrderWriteError) {
+        await saveOrderWebhookOutcome(shopId, {
+          shopDomain,
+          orderId,
+          outcome: 'failed',
+          detail:
+            error.step === 'order'
+              ? `ordine non scritto: ${error.message}`
+              : `righe non scritte: ${error.message}`,
+          lines: order.lines.length,
+          linesComplete: order.lines_complete,
+        });
+        // 500: il database del merchant non ha accettato la scrittura, e quasi
+        // sempre e' passeggero. Rispondendo 200 diremmo a Shopify "ricevuto,
+        // tutto a posto" per un ordine che non c'e' — e quella consegna non si
+        // ripete piu'. La consegna ripetuta non fa danni: sono upsert sulle
+        // stesse chiavi.
+        return json(
+          { error: error.step === 'order' ? 'order_write_failed' : 'lines_write_failed' },
+          { status: 500 },
+        );
+      }
+      throw error;
+    }
+
+    if (!written) {
       await saveOrderWebhookOutcome(shopId, {
         shopDomain,
         orderId,
@@ -310,36 +408,18 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Un elenco troncato non e' un motivo per non scrivere: si scrive quel che
-    // c'e', e lo si dichiara per quello che e'. Le righe mancanti arrivano con
-    // la corsa periodica, che le rilegge tutte esaurendo la connessione.
-    if (order.lines_complete === false) {
+    // c'e', non si cancella niente, e si dichiara che qualcuno deve tornarci
+    // sopra. Le righe mancanti arrivano con la corsa periodica, che le rilegge
+    // tutte esaurendo la connessione.
+    if (written.repairPending) {
       console.warn(
-        `[webhook orders] elenco righe troncato per l ordine ${orderId} (${shopDomain}): scritte le prime ${rows.lines.length}, il resto arriva con la corsa periodica`,
+        `[webhook orders] elenco righe troncato per l ordine ${orderId} (${shopDomain}): scritte le prime ${written.lines}, nessuna cancellazione, il resto arriva con la corsa periodica`,
       );
-    }
-
-    const supabase = createSupabaseClient(shop.supabaseConfig);
-
-    // Prima l'ordine, poi le righe: al contrario, se l'ordine fallisse,
-    // resterebbero righe che nessuna query saprebbe raggruppare.
-    const { error: orderError } = await supabase
-      .from('orders')
-      .upsert([rows.order], { onConflict: 'shopify_order_id', ignoreDuplicates: false });
-
-    if (orderError) {
-      await saveOrderWebhookOutcome(shopId, {
-        shopDomain,
+      await recordOrderRepairPending(
+        shop.id,
         orderId,
-        outcome: 'failed',
-        detail: `ordine non scritto: ${orderError.message}`,
-        lines: rows.lines.length,
-        linesComplete: order.lines_complete,
-      });
-      // 500: il database del merchant non ha accettato la scrittura, e quasi
-      // sempre e' passeggero. Rispondendo 200 diremmo a Shopify "ricevuto,
-      // tutto a posto" per un ordine che non c'e' — e quella consegna non si
-      // ripete piu'.
-      return json({ error: 'order_write_failed' }, { status: 500 });
+        'elenco righe troncato: riconciliazione rimandata',
+      );
     }
 
     // Il legame piu' forte che esiste fra un browser e una persona, e arriva
@@ -348,50 +428,32 @@ export async function action({ request }: ActionFunctionArgs) {
     // il cliente abbia fatto login, non serve che si sia iscritto a niente,
     // basta che abbia comprato.
     //
+    // Il cliente si legge dalla RICEVUTA e non dall'ordine riletto, perche' e'
+    // dalla ricevuta che viene anche l'attributo del carrello: i due pezzi del
+    // legame devono venire dalla stessa busta, o si rischia di attaccare il
+    // browser di un ordine al cliente di un altro.
+    //
     // Dopo la scrittura dell'ordine e non prima: l'ordine e' cio' per cui
     // questo handler esiste, e una riga di `users` non deve poterlo rallentare
     // ne' farlo fallire. `linkVisitorToCustomer` non solleva mai.
-    await linkVisitorToCustomer(shop.id, supabase, payload, order.customer_id);
-
-    // Un ordine senza righe si scrive lo stesso: vale per i totali del negozio
-    // anche quando non ha nulla da raggruppargli sotto — un ordine di soli
-    // servizi, o uno le cui righe sono rimaste fuori perche' senza id.
-    if (rows.lines.length > 0) {
-      const { error: linesError } = await supabase
-        .from('order_lines')
-        .upsert(rows.lines, { onConflict: 'shopify_line_id', ignoreDuplicates: false });
-
-      if (linesError) {
-        await saveOrderWebhookOutcome(shopId, {
-          shopDomain,
-          orderId,
-          outcome: 'failed',
-          detail: `righe non scritte: ${linesError.message}`,
-          lines: rows.lines.length,
-          linesComplete: order.lines_complete,
-        });
-        // 500 come sopra. L'ordine e' gia' scritto, ma la consegna ripetuta non
-        // fa danni: sono due upsert sulla stessa chiave, che riscrivono lo
-        // stesso ordine e aggiungono le righe che mancavano.
-        return json({ error: 'lines_write_failed' }, { status: 500 });
-      }
-    }
+    await linkVisitorToCustomer(shop.id, supabase, payload, customerIdFromReceipt(payload));
 
     await saveOrderWebhookOutcome(shopId, {
       shopDomain,
       orderId,
       outcome: 'completed',
-      detail: 'ordine e righe scritti',
-      lines: rows.lines.length,
+      detail: 'ordine riletto e riscritto',
+      lines: written.lines,
+      deleted: written.deleted,
       linesComplete: order.lines_complete,
     });
 
     return json({ ok: true }, { status: 200 });
   } catch (error) {
     // Qui si finisce quando cade qualcosa che i passi sopra non sanno gestire:
-    // il corpo illeggibile, il database dell'app irraggiungibile, la chiave del
-    // progetto non decifrabile. Shopify si sente rispondere 200 lo stesso, ma la
-    // traccia deve restare: e' l'errore che per mesi non si e' visto.
+    // l'API di Shopify che non risponde, il database dell'app irraggiungibile,
+    // la chiave del progetto non decifrabile. La traccia deve restare: e'
+    // l'errore che per mesi non si e' visto.
     await saveOrderWebhookOutcome(shopId, {
       shopDomain,
       orderId,
@@ -400,12 +462,6 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     // 500, non 200: un guasto nostro non deve costare l'evento.
     //
-    // Qui si arriva per cio' che non sappiamo gestire — Supabase irraggiungibile,
-    // il database dell'app che non risponde, una chiave non decifrabile. Sono
-    // quasi sempre guasti passeggeri, e rispondendo 200 dicevamo a Shopify
-    // "ricevuto, tutto a posto": nessun nuovo tentativo, e quell'ordine o quel
-    // cliente non tornava mai piu'.
-    //
     // Il timore che aveva portato al 200 e' vero ma va misurato: Shopify
     // riprova con attese crescenti per circa quarantott'ore, e disattiva la
     // sottoscrizione solo se in tutto quel tempo non riceve MAI una risposta
@@ -413,8 +469,9 @@ export async function action({ request }: ActionFunctionArgs) {
     // fallimento lascia una traccia, quindi accorgersene e' possibile.
     //
     // I casi in cui davvero non c'e' niente da fare — payload senza id, negozio
-    // sconosciuto o non collegato, permessi mancanti — rispondono 200 piu'
-    // sopra, e non passano di qui: quelli riprovarli non servirebbe a niente.
+    // sconosciuto o non collegato, permessi mancanti, ordine non piu' leggibile
+    // — rispondono 200 piu' sopra, e non passano di qui: quelli riprovarli non
+    // servirebbe a niente.
     return json({ error: 'processing_failed' }, { status: 500 });
   }
 }

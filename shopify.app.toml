@@ -70,8 +70,17 @@ uri = "/webhooks/customers/delete"
 # Gli ordini sono l'unica cosa che non aspetta la corsa periodica: e' il momento
 # in cui i numeri del negozio cambiano davvero, e saperlo fra sei ore e' tardi
 # per chi sta guardando come gira una campagna.
-# Due topic perche' un ordine cambia anche dopo: pagato, evaso, annullato — e un
-# ordine annullato che resta a bilancio racconta un profitto che non c'e'.
+# Piu' topic perche' un ordine cambia anche dopo: pagato, evaso, annullato,
+# rimborsato — e un ordine annullato che resta a bilancio racconta un profitto
+# che non c'e'.
+#
+# `refunds/create` e' l'aggiunta che mancava, e mancava proprio dove faceva piu'
+# danno: un rimborso non crea ne' modifica righe, cambia solo quanto di quelle
+# righe e' rimasto al cliente. Senza questo topic il margine restava quello del
+# giorno dell'acquisto fino alla corsa periodica successiva.
+#
+# Tutti e tre allo stesso handler perche' fanno la stessa cosa: dicono QUALE
+# ordine e' cambiato, e l'ordine si rilegge.
 [[webhooks.subscriptions]]
 topics = ["orders/create"]
 uri = "/webhooks/orders"
@@ -79,6 +88,16 @@ uri = "/webhooks/orders"
 [[webhooks.subscriptions]]
 topics = ["orders/updated"]
 uri = "/webhooks/orders"
+
+[[webhooks.subscriptions]]
+topics = ["refunds/create"]
+uri = "/webhooks/orders"
+
+# La cancellazione ha un handler suo: non c'e' niente da rileggere, e dalla
+# ricevuta si prende il solo identificativo per togliere ordine e righe.
+[[webhooks.subscriptions]]
+topics = ["orders/delete"]
+uri = "/webhooks/orders/delete"
 
 [[webhooks.subscriptions]]
 topics = ["app_subscriptions/update"]

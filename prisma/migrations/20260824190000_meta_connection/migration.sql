@@ -29,3 +29,8 @@ BEGIN
       ON DELETE CASCADE ON UPDATE CASCADE;
   END IF;
 END $$;
+
+-- RLS, come su tutte le altre, e qui pesa: la riga porta il token di accesso
+-- a Meta del negozio. Senza, bastava la chiave pubblica del progetto — che sta
+-- nei browser e non e' un segreto — per leggerlo. Mancava.
+ALTER TABLE "meta_connections" ENABLE ROW LEVEL SECURITY;

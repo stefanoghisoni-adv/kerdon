@@ -9,10 +9,15 @@ import {
   type Order,
 } from './profit';
 
-const line = (unitPrice: number, unitCost: number | null, quantity = 1) => ({
-  unitPrice,
+/**
+ * Una riga come la scrive la sincronizzazione: il netto gia' fatto da Shopify e
+ * le unita' rimaste al cliente. Il prezzo unitario non compare nemmeno — non e'
+ * un ingrediente del margine, e passarglielo inviterebbe a rimoltiplicarlo.
+ */
+const line = (lineNetTotal: number | null, unitCost: number | null, currentQuantity = 1) => ({
+  lineNetTotal,
   unitCost,
-  quantity,
+  currentQuantity,
 });
 
 const order = (day: string, ...lines: ReturnType<typeof line>[]): Order => ({
@@ -21,8 +26,8 @@ const order = (day: string, ...lines: ReturnType<typeof line>[]): Order => ({
 });
 
 describe('linesProfit', () => {
-  it('somma prezzo meno costo, per quantita', () => {
-    expect(linesProfit([line(30, 10), line(20, 5, 2)])).toEqual({
+  it('netto della riga meno costo per le unita rimaste', () => {
+    expect(linesProfit([line(30, 10), line(40, 5, 2)])).toEqual({
       profit: 50,
       coveredLines: 2,
       totalLines: 2,
@@ -40,12 +45,41 @@ describe('linesProfit', () => {
     });
   });
 
-  it('un costo maggiore del prezzo fa profitto negativo, e si vede', () => {
+  it('una riga senza netto non e profitto zero: e profitto ignoto', () => {
+    // Sono le righe scritte prima che la colonna esistesse, in attesa di essere
+    // rilette da Shopify. Contarle come zero abbasserebbe il totale di quanto
+    // non si sa, che e' peggio che dichiararlo.
+    expect(linesProfit([line(30, 10), line(null, 7)])).toEqual({
+      profit: 20,
+      coveredLines: 1,
+      totalLines: 2,
+    });
+  });
+
+  it('una riga interamente rimborsata non porta ne profitto ne perdita', () => {
+    // Zero unita' rimaste al cliente vuol dire zero incassato e zero costo
+    // sostenuto: il contributo e' zero, non il margine del giorno dell'acquisto.
+    expect(linesProfit([line(0, 10, 0)])).toEqual({
+      profit: 0,
+      coveredLines: 1,
+      totalLines: 1,
+    });
+  });
+
+  it('un rimborso di meta quantita dimezza il costo, non solo l incasso', () => {
+    // Due pezzi a 20 l'uno, costo 5: 40 - 10 = 30. Rimborsato uno: il netto
+    // scende a 20 e il costo a 5, cioe' 15. Col vecchio conto — quantita'
+    // ordinata — sarebbe rimasto 30 di margine su merce tornata indietro.
+    expect(linesProfit([line(40, 5, 2)]).profit).toBe(30);
+    expect(linesProfit([line(20, 5, 1)]).profit).toBe(15);
+  });
+
+  it('un costo maggiore del netto fa profitto negativo, e si vede', () => {
     expect(linesProfit([line(10, 15)]).profit).toBe(-5);
   });
 
   it('niente code in virgola mobile', () => {
-    expect(linesProfit([line(19.99, 4.13, 3)]).profit).toBe(47.58);
+    expect(linesProfit([line(59.97, 4.13, 3)]).profit).toBe(47.58);
   });
 });
 

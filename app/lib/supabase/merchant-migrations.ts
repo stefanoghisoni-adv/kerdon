@@ -23,6 +23,20 @@ export interface MerchantMigration {
   version: number;
   description: string;
   sql: string;
+  /**
+   * Il passo va eseguito DOPO la DDL invece che prima.
+   *
+   * Prima e' il posto giusto per le rinomine: la DDL, trovando la colonna nuova
+   * gia' li' col nome nuovo, non la ricrea vuota accanto a quella piena. Ma un
+   * passo che riempie una colonna APPENA AGGIUNTA non puo' girare prima di chi
+   * la aggiunge — la colonna non esiste ancora, e l'UPDATE fallisce portandosi
+   * dietro l'intero aggiornamento.
+   *
+   * L'alternativa era ripetere le ADD COLUMN dentro al passo: un doppione da
+   * tenere allineato a mano a ogni modifica della DDL, che e' esattamente cio'
+   * che questo file evita altrove.
+   */
+  runAfterDDL?: boolean;
 }
 
 export const MERCHANT_MIGRATIONS: MerchantMigration[] = [
@@ -100,6 +114,64 @@ SET phone_number = NULL
 WHERE phone_number = '';
 `,
   },
+  {
+    version: 9,
+    description: 'Righe d ordine: quantita corrente e netto di riga sullo storico',
+    // Dopo la DDL: le due colonne che questo passo riempie e' la DDL ad
+    // aggiungerle, e prima di lei non esistono ancora.
+    runAfterDDL: true,
+    // Le due colonne le aggiunge la DDL; questo passo mette dentro un valore
+    // alle righe che c'erano gia', e senza di lui l'aggiornamento sarebbe un
+    // disastro silenzioso.
+    //
+    // Il conto nuovo e' `line_net_total - costo * current_quantity`. Su una riga
+    // storica `line_net_total` e' NULL e `current_quantity` e' 0 (il default):
+    // la riga smette di essere misurabile e sparisce dal profitto. Non
+    // sbagliato di poco — proprio azzerato, per tutto lo storico, il giorno
+    // dell'aggiornamento.
+    //
+    // Quello che si scrive qui e' PROVVISORIO e lo si dichiara: e'
+    // esattamente il vecchio conto (`unit_price * quantity`), cioe' i numeri
+    // che il merchant vedeva ieri. Non corregge i rimborsi — non c'e' da dove
+    // ricavarli, quel dato sta su Shopify e non qui — ma non regala nemmeno un
+    // crollo a zero che sarebbe piu' falso di cio' che sostituisce. I valori
+    // veri arrivano rileggendo gli ordini da Shopify (vedi
+    // `lib/sync/orders-backfill`), e la rilettura li sovrascrive.
+    //
+    // `WHERE line_net_total IS NULL` rende il passo idempotente e, soprattutto,
+    // gli impedisce di calpestare le righe gia' rilette: un merchant a meta'
+    // backfill che riceve di nuovo questo SQL non deve tornare indietro.
+    sql: `
+DO $$
+BEGIN
+  -- La tabella puo' non esistere: gli ordini si sincronizzano solo per chi ha
+  -- concesso il permesso, e per gli altri qui non c'e' niente da aggiornare.
+  IF to_regclass('public.order_lines') IS NULL THEN
+    RETURN;
+  END IF;
+
+  UPDATE public.order_lines
+  SET current_quantity = COALESCE(quantity, 0)
+  WHERE current_quantity = 0
+    AND COALESCE(quantity, 0) <> 0
+    AND line_net_total IS NULL;
+
+  UPDATE public.order_lines
+  SET line_net_total = ROUND(unit_price * COALESCE(quantity, 0), 2)
+  WHERE line_net_total IS NULL
+    AND unit_price IS NOT NULL;
+
+  -- La valuta della riga si prende dall'ordine: e' l'unica fonte che c'e', ed
+  -- e' quella giusta finche' l'ordine ne dichiara una sola.
+  UPDATE public.order_lines l
+  SET line_currency = o.currency
+  FROM public.orders o
+  WHERE o.shopify_order_id = l.shopify_order_id
+    AND l.line_currency IS NULL
+    AND o.currency IS NOT NULL;
+END $$;
+`,
+  },
 ];
 
 /**
@@ -148,8 +220,23 @@ WHERE phone_number = '';
  * ADD COLUMN IF NOT EXISTS e il tipo dichiarato e' TEXT, lo stesso che avrebbe
  * scelto chiunque per una citta'. La colonna esistente resta com'e', coi dati
  * dentro.
+ *
+ * La 9 porta quattro colonne sulle righe d'ordine — `current_quantity`,
+ * `line_net_total`, `line_currency`, `source_updated_at` — e con loro la fine
+ * di un errore che si vedeva solo dopo un rimborso: il totale dell'ordine
+ * seguiva `currentTotalPriceSet`, che i rimborsi li riflette, mentre ogni riga
+ * conservava la quantita' ordinata e un prezzo unitario con dentro allocazioni
+ * di sconto riferite anche a unita' rimborsate. Le metriche moltiplicavano quei
+ * due valori: ricavi e margini piu' alti del vero, in modo credibile.
+ *
+ * Qui il passo esplicito serve eccome, ed e' l'unica volta in cui non aggiunge
+ * niente allo schema: riempie le colonne appena create sulle righe che c'erano
+ * gia'. Senza, `line_net_total` resterebbe NULL su tutto lo storico e il
+ * profitto di ogni mese passato crollerebbe a zero il giorno
+ * dell'aggiornamento. Per questo gira DOPO la DDL (`runAfterDDL`) e non prima
+ * come gli altri: le colonne che riempie e' la DDL ad aggiungerle.
  */
-export const LATEST_SCHEMA_VERSION = 8;
+export const LATEST_SCHEMA_VERSION = 9;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {
@@ -169,8 +256,9 @@ export function pendingMigrations(
  * SQL completo dell'aggiornamento, o null se non c'e' nulla da fare.
  *
  * Ordine: prima i passi espliciti (rinomine), poi la DDL corrente che aggiunge
- * il mancante, infine la ricarica dello schema — senza quella l'API REST del
- * progetto continuerebbe a rispondere con le colonne di prima.
+ * il mancante, poi i passi che quelle colonne nuove le riempiono, infine la
+ * ricarica dello schema — senza quella l'API REST del progetto continuerebbe a
+ * rispondere con le colonne di prima.
  */
 export function buildSchemaUpdateSQL(
   currentVersion: number | null | undefined,
@@ -179,10 +267,11 @@ export function buildSchemaUpdateSQL(
 ): string | null {
   if (!needsSchemaUpdate(currentVersion)) return null;
 
-  const steps = pendingMigrations(currentVersion).map((m) => m.sql);
+  const pending = pendingMigrations(currentVersion);
   return [
-    ...steps,
+    ...pending.filter((m) => !m.runAfterDDL).map((m) => m.sql),
     buildMerchantSchemaSQL(includeCustomers, includeOrders),
+    ...pending.filter((m) => m.runAfterDDL).map((m) => m.sql),
     RELOAD_SCHEMA_SQL,
   ].join('\n');
 }

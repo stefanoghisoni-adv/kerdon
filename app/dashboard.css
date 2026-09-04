@@ -705,3 +705,19 @@
   white-space: normal;
   overflow-wrap: break-word;
 }
+
+/* Il tasto per copiare, tre pixel piu' in basso.
+
+   Sta accanto a un valore lungo scritto in corpo del testo, e la sua cornice —
+   anche alla misura piu' piccola — e' piu' alta della riga di lettere. Centrato
+   sul contenitore sembra salito, perche' l'occhio ne confronta il bordo con le
+   lettere e non con la riga intera. Tre pixel lo riportano sulla stessa linea
+   apparente del valore che copia.
+
+   `transform` e non un margine: sposta il disegno senza cambiare lo spazio che
+   il pulsante occupa, quindi non muove di mezzo pixel cio' che gli sta
+   accanto. */
+.copy-button {
+  display: inline-flex;
+  transform: translateY(3px);
+}

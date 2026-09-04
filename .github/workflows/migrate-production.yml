@@ -1,0 +1,157 @@
+name: Migrazione del database di produzione
+
+# Solo a mano, mai su push.
+#
+# Il deploy dell'app passa da Vercel a ogni commit su main, e li' gira
+# `prisma generate` e il build — non `prisma migrate deploy`, e non deve girarci.
+# Una migrazione che parte da sola insieme al codice sembra comoda finche' non
+# fallisce a meta': a quel punto e' cambiato lo schema, e' cambiato il codice, e
+# non e' chiaro cosa sia arrivato e cosa no. Qui invece: si decide di farlo, si
+# guarda cosa verrebbe applicato, si approva, e poi si applica.
+#
+# Il percorso completo, compreso come si stabilisce la linea di base la prima
+# volta e come si torna indietro, sta in docs/database-migrations.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      azione:
+        description: "Cosa fare"
+        type: choice
+        required: true
+        default: verifica
+        options:
+          - verifica   # solo guardare: cosa manca, e il database e' come dovrebbe
+          - applica    # applicare davvero le migrazioni in attesa
+      backup:
+        description: "Ho preso un backup del database (obbligatorio per 'applica')"
+        type: boolean
+        required: true
+        default: false
+
+# Una alla volta, e senza interrompere quella in corso: due `migrate deploy` in
+# parallelo sullo stesso database si contendono il lock di Prisma, e la seconda
+# fallisce a meta' invece di aspettare.
+concurrency:
+  group: migrate-production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+
+    # Il cancello vero.
+    #
+    # L'environment `production` va configurato su GitHub (Settings →
+    # Environments) con "Required reviewers": da li' in poi questo job si ferma
+    # e aspetta un'approvazione umana prima di collegarsi a qualsiasi cosa. I
+    # segreti stanno nell'environment, non nel repository, cosi' nessun altro
+    # workflow puo' leggerli.
+    environment: production
+
+    env:
+      # Due indirizzi per lo stesso database, e servono entrambi: Prisma vuole
+      # `?schema=public`, psql quel parametro non lo conosce e rifiuta l'intero
+      # indirizzo con "invalid URI query parameter: schema". E' una lezione gia'
+      # pagata in questo repository, nel job `bootstrap` della CI.
+      #
+      # Devono puntare alla connessione DIRETTA (porta 5432), non al pooler
+      # (6543): il pooler in modalita' transaction non esegue DDL, ed e' il
+      # motivo per cui finora le migrazioni si incollavano a mano nell'SQL
+      # editor di Supabase.
+      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      PSQL_URL: ${{ secrets.PRODUCTION_PSQL_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # I segreti ci sono davvero? Senza questo passo un segreto non
+      # configurato arriva a Prisma come stringa vuota, e il messaggio che ne
+      # esce parla di URL non valido invece che di segreto mancante.
+      #
+      # Nessuno dei due valori viene stampato: si stampa solo il verdetto.
+      - name: Check the secrets and refuse the pooler
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$PSQL_URL" ]; then
+            echo "Mancano PRODUCTION_DATABASE_URL o PRODUCTION_PSQL_URL"
+            echo "nell'environment 'production'."
+            exit 1
+          fi
+
+          case "$DATABASE_URL$PSQL_URL" in
+            *:6543*|*pgbouncer=true*)
+              echo "L'indirizzo punta al pooler in modalita' transaction."
+              echo "Il pooler non esegue DDL: serve la connessione diretta (5432)."
+              exit 1
+              ;;
+          esac
+
+          case "$DATABASE_URL" in
+            *schema=public*) ;;
+            *) echo "PRODUCTION_DATABASE_URL deve contenere ?schema=public (lo vuole Prisma)."; exit 1 ;;
+          esac
+
+          case "$PSQL_URL" in
+            *schema=*) echo "PRODUCTION_PSQL_URL non deve contenere schema=: psql lo rifiuta."; exit 1 ;;
+          esac
+
+          echo "Segreti presenti, connessione diretta."
+
+      # Cosa verrebbe applicato. Da leggere PRIMA di approvare l'esecuzione con
+      # `applica`: se l'elenco contiene qualcosa che non ci si aspetta, la
+      # risposta e' fermarsi, non riprovare.
+      - name: What would be applied
+        run: npx prisma migrate status
+
+      # Il database e' ancora quello che lo schema descrive?
+      #
+      # Si ferma su qualsiasi differenza che non sia gia' conosciuta: una colonna
+      # che nel database non c'e' piu', un tipo cambiato a mano, una tabella in
+      # piu'. Applicare migrazioni sopra una deriva sconosciuta e' il modo per
+      # trasformare un disallineamento in un guasto.
+      #
+      # Verifica anche il rovescio, che `migrate diff` da solo non vede: che le
+      # due chiavi esterne sul nome del piano — volute, e non modellate in
+      # schema.prisma — ci siano ancora.
+      - name: Refuse to proceed on unexpected drift
+        run: npx tsx prisma/expected-drift.ts
+
+      - name: Check seed rows, row level security and the plan foreign keys
+        run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql
+
+      # Il backup non lo puo' prendere questo workflow: sta dentro Supabase, e
+      # una migrazione sbagliata si torna indietro da li'. Quindi si chiede, e
+      # senza la spunta non si va avanti.
+      - name: Require the backup checkbox
+        if: inputs.azione == 'applica' && !inputs.backup
+        run: |
+          echo "Per applicare serve la spunta sul backup."
+          echo "Supabase → Database → Backups, poi si rilancia."
+          exit 1
+
+      - name: Apply the pending migrations
+        if: inputs.azione == 'applica' && inputs.backup
+        run: npx prisma migrate deploy
+
+      # Gli stessi due controlli di prima, sul database migrato. Sono qui perche'
+      # una migrazione puo' riuscire e lasciare comunque il database in uno stato
+      # sbagliato: una tabella nuova senza RLS — che su Supabase vuol dire
+      # leggibile con la sola chiave pubblica del progetto — oppure le due chiavi
+      # esterne sul nome del piano cancellate da un `migrate diff` applicato alla
+      # lettera. E' gia' successo con compliance_requests, che conteneva le
+      # esportazioni GDPR complete.
+      - name: Check the migrated database
+        if: inputs.azione == 'applica' && inputs.backup
+        run: |
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql
+          npx tsx prisma/expected-drift.ts
+          npx prisma migrate status

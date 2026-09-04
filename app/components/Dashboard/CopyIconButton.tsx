@@ -41,15 +41,23 @@ export function CopyIconButton({ value }: CopyIconButtonProps) {
     if (await copyToClipboard(value)) setCopied(true);
   }, [value]);
 
+  // I tre pixel valgono per tutti e due gli stati, spunta compresa: se
+  // scendesse solo il pulsante, a copia fatta la conferma salterebbe su di
+  // tre pixel e il movimento si vedrebbe.
   if (copied) {
     return (
-      <span aria-live="polite" aria-label={t.database.copied}>
+      <span
+        className="copy-button"
+        aria-live="polite"
+        aria-label={t.database.copied}
+      >
         <Icon source={CheckIcon} tone="success" />
       </span>
     );
   }
 
   return (
+    <span className="copy-button">
     <Tooltip content={t.database.copy}>
       <Button
         icon={DuplicateIcon}
@@ -62,5 +70,6 @@ export function CopyIconButton({ value }: CopyIconButtonProps) {
         accessibilityLabel={t.database.copy}
       />
     </Tooltip>
+    </span>
   );
 }
