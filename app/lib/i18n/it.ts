@@ -997,6 +997,8 @@ export const it = {
     },
   },
   dates: {
+    previousMonth: "Mese precedente",
+    nextMonth: "Mese successivo",
     apply: "Applica",
     /** Le etichette dei due campi: nascoste a schermo, lette da chi non vede. */
     start: "Data di inizio",

@@ -356,14 +356,22 @@ describe('webhook orders — la stessa busta due volte', () => {
     mockShop();
     const { writes } = mockSupabase();
 
+    // `synced_at` fuori dal confronto, ed e' il punto: dice QUANDO abbiamo
+    // scritto, non cosa. Fra due consegne cambia per forza, e confrontarlo
+    // faceva fallire il test quando i due giri cadevano in millisecondi
+    // diversi — un rosso intermittente su una proprieta' che nessuno voleva
+    // verificare.
+    const senzaOrario = (righe: any[]) =>
+      JSON.stringify(righe.map(({ synced_at: _scritta, ...resto }) => resto));
+
     await action({ request: req(receipt()) } as any);
-    const primo = JSON.stringify(writes.order_lines);
+    const primo = senzaOrario(writes.order_lines);
     writes.order_lines = [];
     writes.orders = [];
 
     await action({ request: req(receipt()) } as any);
 
-    expect(JSON.stringify(writes.order_lines)).toBe(primo);
+    expect(senzaOrario(writes.order_lines)).toBe(primo);
     expect(writes.orders).toHaveLength(1);
   });
 

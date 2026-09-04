@@ -92,6 +92,18 @@ const START_FIELD_ID = 'range-picker-start';
  * Niente si applica finche' non si preme Applica, e Applica e' spento finche'
  * non c'e' qualcosa da applicare.
  */
+/**
+ * Il mese spostato di `delta`, con l'anno che segue.
+ *
+ * Polaris conta i mesi da zero, quindi dicembre + 1 fa 12 e non esiste: il
+ * `Date` lo normalizza da se', ed e' il motivo per cui si passa da li' invece
+ * di fare il conto a mano.
+ */
+function shiftMonth(month: number, year: number, delta: number): { month: number; year: number } {
+  const next = new Date(year, month + delta, 1);
+  return { month: next.getMonth(), year: next.getFullYear() };
+}
+
 export function DateRangePicker({
   value,
   onChange,
@@ -318,6 +330,36 @@ export function DateRangePicker({
                 value={draft.to}
                 placeholder={placeholder}
                 onCommit={(next) => setDraft(orderRange(draft.from, notInTheFuture(next, todayIso)))}
+              />
+            </div>
+
+            {/* La navigazione fra i mesi, nostra.
+
+                Quella di Polaris e' un blocco in posizione assoluta ancorato
+                in alto: dentro due calendari affiancati cade sulla riga dei
+                giorni della settimana invece che su quella del titolo, e porta
+                due frecce lunghe dove nel resto dell'admin ci sono due
+                virgolette angolari. Il componente non espone nessuna prop per
+                cambiarle, ma il mese lo governiamo noi — `month`, `year` e
+                `onMonthChange` sono gia' nostri — quindi la barra la
+                disegniamo, e quella nativa si nasconde nel foglio di stile.
+
+                Un mese per volta, in tutti e due i sensi: i due calendari sono
+                sempre consecutivi, e farli scorrere di uno alla volta e' cio'
+                che permette di raggiungere un intervallo a cavallo di due mesi
+                senza saltarlo. */}
+            <div className="range-picker__months">
+              <Button
+                variant="tertiary"
+                icon={ChevronLeftIcon}
+                accessibilityLabel={t.dates.previousMonth}
+                onClick={() => setVisible(shiftMonth(month, year, -1))}
+              />
+              <Button
+                variant="tertiary"
+                icon={ChevronRightIcon}
+                accessibilityLabel={t.dates.nextMonth}
+                onClick={() => setVisible(shiftMonth(month, year, 1))}
               />
             </div>
 

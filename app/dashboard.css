@@ -192,6 +192,11 @@
 .range-picker__sidebar .Polaris-ActionList__Item {
   min-height: auto;
   padding-block: 0.375rem;
+  /* Della stessa misura dei numeri nel calendario accanto. A corpo pieno le
+     voci pesavano piu' dei giorni che servono a scegliere, e l'occhio partiva
+     dalla colonna sbagliata: qui si sceglie una scorciatoia, di la' si sceglie
+     una data, e la seconda e' l'operazione principale. */
+  font-size: 0.8125rem;
 }
 
 .range-picker__main {
@@ -720,4 +725,64 @@
 .copy-button {
   display: inline-flex;
   transform: translateY(3px);
+}
+
+/* La selezione dell'intervallo: una banda sola, non una fila di pillole.
+
+   Polaris mette il fondo dell'intervallo sul GIORNO, che qui e' un quadrato di
+   misura fissa piu' stretto della sua cella: fra un giorno e l'altro restava
+   il margine della colonna, e la banda si spezzava in tante pastiglie
+   arrotondate con dei buchi in mezzo — a schermo sembravano scintille.
+
+   Il fondo va sulla CELLA, che e' larga quanto la colonna e attaccata alla
+   successiva: cosi' i giorni compresi formano un rettangolo continuo, con i due
+   estremi squadrati come nel selettore dell'analytics di Shopify. */
+.range-picker__calendar .Polaris-DatePicker__DayCell--inRange {
+  background: var(--p-color-bg-surface-secondary);
+}
+
+.range-picker__calendar .Polaris-DatePicker__Day--inRange {
+  background: transparent;
+}
+
+/* Il primo e l'ultimo giorno restano due quadrati scuri sopra la banda: sono
+   gli estremi che si sono scelti, e devono leggersi come due punti fermi e non
+   come l'inizio di una sfumatura. */
+.range-picker__calendar .Polaris-DatePicker__Day--selected {
+  background: var(--p-color-bg-fill-brand-selected);
+  color: var(--p-color-text-brand-on-bg-fill);
+  border-radius: var(--p-border-radius-200);
+}
+
+/* La cella dei due estremi non porta banda: il quadrato scuro ce l'ha gia'
+   dentro, e il grigio dietro gli farebbe da alone. */
+.range-picker__calendar .Polaris-DatePicker__DayCell:has(.Polaris-DatePicker__Day--selected) {
+  background: transparent;
+}
+
+/* Le frecce dei mesi: le nostre, sulla riga del titolo.
+
+   Quella di Polaris e' un blocco in posizione assoluta ancorato in alto, che
+   dentro due calendari affiancati cade sulla riga dei giorni della settimana.
+   Si nasconde e si disegna la nostra, dove ci si aspetta di trovarla: agli
+   estremi della riga dei due mesi. */
+.range-picker__calendar .Polaris-DatePicker__Header {
+  display: none;
+}
+
+.range-picker__months {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  /* Sopra i titoli dei mesi, e sovrapposta a loro di quel tanto che basta a
+     stare sulla stessa riga: i titoli sono le didascalie delle due tabelle e
+     non si possono spostare, quindi si porta la barra da loro. */
+  margin-block-end: -1.75rem;
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.range-picker__months > * {
+  pointer-events: auto;
 }

@@ -830,6 +830,8 @@ export const en: typeof it = {
     },
   },
   dates: {
+    previousMonth: "Previous month",
+    nextMonth: "Next month",
     apply: "Apply",
     start: "Start date",
     end: "End date",
