@@ -760,6 +760,36 @@
 .range-picker__calendar .Polaris-DatePicker__Day--selected {
   background: var(--p-color-bg-fill-brand-selected);
   color: var(--p-color-text-brand-on-bg-fill);
+}
+
+/* Gli estremi con la punta: tondi verso fuori, squadrati verso la banda.
+
+   Un quadrato tondo su tutti e quattro gli angoli lascia due lune di grigio
+   fra se' e la banda, e i due estremi si leggono come due pastiglie staccate
+   invece che come le punte di un intervallo unico. Squadrandoli dal lato che
+   guarda dentro, il grigio ci si appoggia contro senza stacco.
+
+   Il raggio va scritto qui e non lasciato a Polaris: la sua regola per il
+   primo giorno vale solo con la classe `--hasRange`, e quella per l'ultimo
+   arrotonda a destra ANCHE quando inizio e fine sono lo stesso giorno. */
+.range-picker__calendar
+  .Polaris-DatePicker__Day--firstInRange:not(.Polaris-DatePicker__Day--lastInRange) {
+  border-radius: var(--p-border-radius-200) 0 0 var(--p-border-radius-200);
+}
+
+.range-picker__calendar
+  .Polaris-DatePicker__Day--lastInRange:not(.Polaris-DatePicker__Day--firstInRange) {
+  border-radius: 0 var(--p-border-radius-200) var(--p-border-radius-200) 0;
+}
+
+/* Un giorno solo non ha un dentro e un fuori: e' inizio e fine insieme, e
+   resta tondo da tutte le parti. */
+.range-picker__calendar
+  .Polaris-DatePicker__Day--firstInRange.Polaris-DatePicker__Day--lastInRange,
+.range-picker__calendar
+  .Polaris-DatePicker__Day--selected:not(.Polaris-DatePicker__Day--firstInRange):not(
+    .Polaris-DatePicker__Day--lastInRange
+  ) {
   border-radius: var(--p-border-radius-200);
 }
 
@@ -818,33 +848,6 @@
 
 .range-picker__months > * {
   pointer-events: auto;
-}
-
-/* Gli estremi con la punta.
-
-   Nel selettore di Shopify il quadrato scuro non galleggia sulla banda: la
-   banda gli si infila sotto, e nell'angolo dove le due forme si incontrano
-   resta uno spicchio grigio con l'angolo vivo. E' quel dettaglio a far leggere
-   i due estremi come le PUNTE di un intervallo invece che come due caselle
-   selezionate a caso dentro una fascia.
-
-   Si ottiene arrotondando la banda solo dal lato che guarda fuori
-   dall'intervallo, e lasciandola squadrata dal lato che tocca l'estremo: la
-   cella subito dopo l'inizio si arrotonda a sinistra, quella subito prima
-   della fine si arrotonda a destra. */
-.range-picker__calendar
-  .Polaris-DatePicker__DayCell:has(.Polaris-DatePicker__Day--firstInRange)
-  + .Polaris-DatePicker__DayCell--inRange {
-  border-start-start-radius: var(--p-border-radius-200);
-  border-end-start-radius: var(--p-border-radius-200);
-}
-
-.range-picker__calendar
-  .Polaris-DatePicker__DayCell--inRange:has(
-    + .Polaris-DatePicker__DayCell .Polaris-DatePicker__Day--lastInRange
-  ) {
-  border-start-end-radius: var(--p-border-radius-200);
-  border-end-end-radius: var(--p-border-radius-200);
 }
 
 /* A capo riga la banda si chiude comunque: l'ultima cella di una settimana e la
