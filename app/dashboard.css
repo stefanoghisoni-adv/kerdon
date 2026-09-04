@@ -769,8 +769,12 @@
   background: transparent;
 }
 
-/* Il calendario fa da riferimento alla barra delle frecce, che gli sta sopra
-   in posizione assoluta. */
+/* Il calendario fa da riferimento alla barra delle frecce, che gli sta dentro
+   in posizione assoluta.
+
+   Dentro, non accanto: da fratello della tendina, il riquadro delle frecce si
+   ancorava al primo antenato posizionato — il pannello del Popover — e le due
+   virgolette finivano agli angoli della tendina intera, lontanissime dai mesi. */
 .range-picker__calendar {
   position: relative;
 }
@@ -789,6 +793,13 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  /* Alta quanto la didascalia, non quanto i pulsanti.
+
+     Il riquadro parte dal bordo alto del calendario, e la didascalia e' la
+     prima riga: dandogli l'altezza di quella riga i due pulsanti, piu' alti,
+     debordano di sopra e di sotto in parti uguali — cioe' restano centrati
+     sul titolo invece di appoggiarglisi sopra. */
+  block-size: 1.5rem;
   /* Sulla riga dei titoli, non sopra.
 
      I titoli sono le didascalie delle due tabelle e non si possono spostare:

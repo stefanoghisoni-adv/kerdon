@@ -333,37 +333,37 @@ export function DateRangePicker({
               />
             </div>
 
-            {/* La navigazione fra i mesi, nostra.
-
-                Quella di Polaris e' un blocco in posizione assoluta ancorato
-                in alto: dentro due calendari affiancati cade sulla riga dei
-                giorni della settimana invece che su quella del titolo, e porta
-                due frecce lunghe dove nel resto dell'admin ci sono due
-                virgolette angolari. Il componente non espone nessuna prop per
-                cambiarle, ma il mese lo governiamo noi — `month`, `year` e
-                `onMonthChange` sono gia' nostri — quindi la barra la
-                disegniamo, e quella nativa si nasconde nel foglio di stile.
-
-                Un mese per volta, in tutti e due i sensi: i due calendari sono
-                sempre consecutivi, e farli scorrere di uno alla volta e' cio'
-                che permette di raggiungere un intervallo a cavallo di due mesi
-                senza saltarlo. */}
-            <div className="range-picker__months">
-              <Button
-                variant="tertiary"
-                icon={ChevronLeftIcon}
-                accessibilityLabel={t.dates.previousMonth}
-                onClick={() => setVisible(shiftMonth(month, year, -1))}
-              />
-              <Button
-                variant="tertiary"
-                icon={ChevronRightIcon}
-                accessibilityLabel={t.dates.nextMonth}
-                onClick={() => setVisible(shiftMonth(month, year, 1))}
-              />
-            </div>
-
             <div className="range-picker__calendar">
+              {/* La navigazione fra i mesi, nostra.
+
+                  Quella di Polaris e' un blocco in posizione assoluta ancorato
+                  in alto: dentro due calendari affiancati cade sulla riga dei
+                  giorni della settimana invece che su quella del titolo, e porta
+                  due frecce lunghe dove nel resto dell'admin ci sono due
+                  virgolette angolari. Il componente non espone nessuna prop per
+                  cambiarle, ma il mese lo governiamo noi — `month`, `year` e
+                  `onMonthChange` sono gia' nostri — quindi la barra la
+                  disegniamo, e quella nativa si nasconde nel foglio di stile.
+
+                  Un mese per volta, in tutti e due i sensi: i due calendari sono
+                  sempre consecutivi, e farli scorrere di uno alla volta e' cio'
+                  che permette di raggiungere un intervallo a cavallo di due mesi
+                  senza saltarlo. */}
+              <div className="range-picker__months">
+                <Button
+                  variant="tertiary"
+                  icon={ChevronLeftIcon}
+                  accessibilityLabel={t.dates.previousMonth}
+                  onClick={() => setVisible(shiftMonth(month, year, -1))}
+                />
+                <Button
+                  variant="tertiary"
+                  icon={ChevronRightIcon}
+                  accessibilityLabel={t.dates.nextMonth}
+                  onClick={() => setVisible(shiftMonth(month, year, 1))}
+                />
+              </div>
+
               <DatePicker
                 month={month}
                 year={year}
