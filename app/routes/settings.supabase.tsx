@@ -21,6 +21,7 @@ import { getReadProxyTokenForDisplay } from '~/lib/read-proxy/token.server';
 import { AccountCard } from '~/components/Dashboard/AccountCard';
 import { DatabaseCard, TrackingCredentialsCard } from '~/components/Dashboard/DatabaseCard';
 import { DataRequestsCard } from '~/components/Dashboard/DataRequestsCard';
+import { PrivacyModal } from '~/components/Dashboard/PrivacyModal';
 import { firstPlanWithCustomersSync, firstPlanWithFeeds } from '~/components/Dashboard/account-format';
 import { samePlanName } from '~/lib/billing/plan-name';
 import { can } from '~/lib/authz/capabilities';
@@ -221,6 +222,7 @@ export default function SupabaseSettings() {
   // Il modulo di creazione di un database e' aperto: lo dice il componente che
   // lo ospita, perche' lo stato e' suo ma la riga da nascondere e' qui.
   const [creatingDatabase, setCreatingDatabase] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
 
   const [planLimit, setPlanLimit] = useState<{
     planLabel: string | null;
@@ -251,7 +253,20 @@ export default function SupabaseSettings() {
   }, [localeFetcher.state, localeFetcher.data]);
 
   return (
-    <Page fullWidth title={t.settings.title} backAction={{ url: '/' }}>
+    <Page
+      fullWidth
+      title={t.settings.title}
+      backAction={{ url: '/' }}
+      // Sulla riga del titolo e a destra, che e' dove Polaris mette le azioni
+      // di pagina: non c'e' niente da posizionare a mano.
+      //
+      // Sempre attivo. Il diritto di avere una copia dei propri dati non ha
+      // un'attesa da rispettare — i trenta giorni di cui parla Shopify sono il
+      // tempo che il MERCHANT ha per rispondere a un suo cliente, non un
+      // periodo in cui lui non puo' chiedere i propri.
+      secondaryActions={[{ content: t.privacy.action, onAction: () => setPrivacyOpen(true) }]}
+    >
+      <PrivacyModal open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">

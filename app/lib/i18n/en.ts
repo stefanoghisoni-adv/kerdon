@@ -63,6 +63,16 @@ export const en: typeof it = {
     upgradeTo: (planName: string) => `Upgrade to ${planName}`,
   },
 
+  privacy: {
+    action: "Privacy",
+    title: "Download your data",
+    intro:
+      "We'll prepare a copy of everything we keep about your store: who you are, your plan and subscriptions, how you're set up, what we've synced, and who has read your customers' data through us.",
+    notIncluded:
+      "Products, customers and orders aren't in the file: those live in the database you connected and are already yours. Access credentials are deliberately left out.",
+    confirm: "Download",
+    cancel: "Cancel",
+  },
   dataRequests: {
     title: "Data copies to hand over",
     intro:

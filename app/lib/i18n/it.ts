@@ -68,6 +68,16 @@ export const it = {
     upgradeTo: (planName: string) => `Aggiorna a ${planName}`,
   },
 
+  privacy: {
+    action: "Privacy",
+    title: "Scarica i tuoi dati",
+    intro:
+      "Prepariamo una copia di tutto quello che conserviamo sul tuo negozio: chi sei, il piano e gli abbonamenti, come sei configurato, cosa abbiamo sincronizzato e chi ha letto i dati dei tuoi clienti passando da noi.",
+    notIncluded:
+      "Prodotti, clienti e ordini non sono nel file: quelli stanno nel database che hai collegato e sono già tuoi. Le credenziali di accesso restano fuori di proposito.",
+    confirm: "Scarica",
+    cancel: "Annulla",
+  },
   dataRequests: {
     title: "Copie dei dati da consegnare",
     intro:
