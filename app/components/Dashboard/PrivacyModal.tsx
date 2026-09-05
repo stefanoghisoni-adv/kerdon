@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Banner, BlockStack, Modal, Text } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
-import { filenameFromDisposition } from '~/lib/privacy/download-filename';
+import { downloadFile } from '~/lib/privacy/download-file';
 
 interface Props {
   open: boolean;
@@ -17,18 +17,10 @@ interface Props {
  * dentro e cosa no — chi lo scarica sapendo che i dati dei suoi clienti NON ci
  * sono non torna a cercarli li'.
  *
- * PERCHE' UNA FETCH E NON UN LINK. Dentro l'admin di Shopify l'app vive in un
- * iframe e si autentica con il gettone di sessione, non con un cookie. Un <a>
- * verso una rotta protetta e' una navigazione: il gettone non c'e', la rotta
- * risponde 302 verso l'accesso, e l'iframe resta bianco — che e' esattamente
- * quello che succedeva. La fetch invece porta il gettone (la libreria di
- * Shopify la equipaggia da se', ed e' come parlano tutte le altre schede), e il
- * file si salva da un blob.
- *
- * Il tipo della risposta si controlla prima di salvare: se un giorno quella
- * rotta tornasse a rispondere con un redirect, la fetch lo seguirebbe fino alla
- * pagina di accesso e salverebbe HTML con il nome di un JSON. Meglio un errore
- * detto che un file inutile sul disco di qualcuno.
+ * Il file NON si scarica con un link: dentro l'admin l'app si autentica con il
+ * gettone di sessione, e una navigazione verso una rotta protetta finisce sulla
+ * pagina di accesso. Il perche' per esteso sta in `lib/privacy/download-file`,
+ * che e' anche il posto da cui passa il pulsante delle richieste dei clienti.
  */
 export function PrivacyModal({ open, onClose }: Props) {
   const t = useT();
@@ -44,27 +36,7 @@ export function PrivacyModal({ open, onClose }: Props) {
     setScaricando(true);
     setErrore(false);
     try {
-      const risposta = await fetch('/privacy/my-data');
-      const tipo = risposta.headers.get('Content-Type') ?? '';
-      if (!risposta.ok || !tipo.includes('application/json')) {
-        throw new Error(`risposta inattesa: ${risposta.status} ${tipo}`);
-      }
-
-      const blob = await risposta.blob();
-      const nome =
-        filenameFromDisposition(risposta.headers.get('Content-Disposition')) ?? 'coreward.json';
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = nome;
-      // Attaccato e poi tolto: senza essere nel documento, qualche browser
-      // ignora il clic e non succede niente — e non succede in silenzio.
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
+      await downloadFile('/privacy/my-data', 'coreward.json');
       chiudi();
     } catch (err) {
       console.error('[privacy] copia dei dati non scaricata:', err);

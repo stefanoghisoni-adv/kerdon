@@ -1,5 +1,7 @@
-import { BlockStack, Box, Button, Card, InlineStack, Text } from '@shopify/polaris';
+import { useState } from 'react';
+import { Banner, BlockStack, Box, Button, Card, InlineStack, Text } from '@shopify/polaris';
 import { useT, useLocale } from '~/lib/i18n/context';
+import { downloadFile } from '~/lib/privacy/download-file';
 
 export interface DataRequest {
   id: string;
@@ -34,6 +36,24 @@ interface Props {
 export function DataRequestsCard({ requests }: Props) {
   const t = useT();
   const locale = useLocale();
+  // Quale riga sta preparando il file, e quale non ce l'ha fatta. Per riga e
+  // non per card: le pratiche possono essere piu' d'una, e un caricamento che
+  // le accende tutte non dice quale si sta scaricando.
+  const [inCorso, setInCorso] = useState<string | null>(null);
+  const [fallita, setFallita] = useState<string | null>(null);
+
+  async function scarica(id: string) {
+    setInCorso(id);
+    setFallita(null);
+    try {
+      await downloadFile(`/privacy/export/${id}`, 'coreward-data-request.json');
+    } catch (err) {
+      console.error('[dataRequests] esportazione non scaricata:', err);
+      setFallita(id);
+    } finally {
+      setInCorso(null);
+    }
+  }
 
   if (requests.length === 0) return null;
 
@@ -69,8 +89,19 @@ export function DataRequestsCard({ requests }: Props) {
                   {t.dataRequests.expires(giorno(r.expiresAt))}
                   {r.ref ? ` · ${r.ref}` : ''}
                 </Text>
+                {fallita === r.id && (
+                  <Banner tone="critical">{t.dataRequests.error}</Banner>
+                )}
               </BlockStack>
-              <Button url={`/privacy/export/${r.id}`} download variant="primary">
+              {/* Una fetch e non un link: dentro l'admin l'app si autentica
+                  con il gettone di sessione, e un <a> verso questa rotta
+                  finirebbe sulla pagina di accesso invece che sul file. */}
+              <Button
+                variant="primary"
+                loading={inCorso === r.id}
+                disabled={inCorso !== null && inCorso !== r.id}
+                onClick={() => scarica(r.id)}
+              >
                 {t.dataRequests.download}
               </Button>
             </InlineStack>

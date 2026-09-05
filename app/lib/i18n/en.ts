@@ -80,6 +80,7 @@ export const en: typeof it = {
       "A customer asked for a copy of their data. Download it and send it to them: you have thirty days from the request.",
     received: (data: string) => `Requested on ${data}`,
     expires: (data: string) => `Available until ${data}`,
+    error: "We couldn't prepare the file. Please try again shortly.",
     download: "Download",
   },
   database: {

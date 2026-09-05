@@ -85,6 +85,7 @@ export const it = {
       "Un cliente ha chiesto una copia dei suoi dati. Scaricala e inviagliela: hai trenta giorni di tempo dalla richiesta.",
     received: (data: string) => `Richiesta del ${data}`,
     expires: (data: string) => `Disponibile fino al ${data}`,
+    error: "Non siamo riusciti a preparare il file. Riprova fra poco.",
     download: "Scarica",
   },
   database: {
