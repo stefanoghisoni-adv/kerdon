@@ -47,6 +47,11 @@ export function SyncLog({ jobs, customersEnabled, timeZone }: SyncLogProps) {
       <Text as="span" tone="critical">
         {failure}
       </Text>
+    ) : job.status === 'completed_with_repairs' ? (
+      // La riga parziale ha qualcosa da aggiungere allo stato, e quel qualcosa
+      // e' cosa succede adesso: senza, "Parziale" resterebbe una parola sola
+      // accanto a una data, e chi la legge non saprebbe se deve fare qualcosa.
+      <Text as="span">{t.logs.partialNote}</Text>
     ) : creation ? (
       <Text as="span">{creation}</Text>
     ) : (

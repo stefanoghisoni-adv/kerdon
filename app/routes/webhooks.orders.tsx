@@ -409,18 +409,19 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ ok: true }, { status: 200 });
     }
 
-    // Un elenco troncato non e' un motivo per non scrivere: si scrive quel che
-    // c'e', non si cancella niente, e si dichiara che qualcuno deve tornarci
-    // sopra. Le righe mancanti arrivano con la corsa periodica, che le rilegge
-    // tutte esaurendo la connessione.
+    // Riconciliazione non finita: o l'elenco delle righe era troncato, o la
+    // cancellazione di quelle obsolete non e' riuscita. Nessuno dei due e' un
+    // motivo per non scrivere: si scrive quel che c'e', non si cancella niente
+    // alla cieca, e si dichiara che qualcuno deve tornarci sopra. Ci torna la
+    // corsa periodica, che dell'ordine rilegge sempre tutte le righe.
     if (written.repairPending) {
       console.warn(
-        `[webhook orders] elenco righe troncato per l ordine ${orderId} (${shopDomain}): scritte le prime ${written.lines}, nessuna cancellazione, il resto arriva con la corsa periodica`,
+        `[webhook orders] riconciliazione non conclusa per l ordine ${orderId} (${shopDomain}): scritte le prime ${written.lines}, nessuna cancellazione a rischio, ci torna la corsa periodica`,
       );
       await recordOrderRepairPending(
         shop.id,
         orderId,
-        'elenco righe troncato: riconciliazione rimandata',
+        'riconciliazione delle righe rimandata',
       );
     }
 

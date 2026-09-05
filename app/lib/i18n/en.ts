@@ -90,7 +90,14 @@ export const en: typeof it = {
   logs: {
     title: "Logs",
     nextSync: (countdown: string) => `Next sync in ${countdown}`,
-    status: { completed: "Completed", failed: "Failed", running: "Running" },
+    status: {
+      completed: "Completed",
+      partial: "Partial",
+      failed: "Failed",
+      running: "Running",
+    },
+    partialNote:
+      "Some of your data has not arrived yet. We will try again at the next sync.",
     tableCreated: "Database tables created",
     unknownError: "Unknown error",
     missingCustomersTable: "No customers table was found",
@@ -397,6 +404,7 @@ export const en: typeof it = {
       run: {
         done: "Sync completed",
         running: "Sync",
+        partial: "Partial sync",
       },
     },
     soldWithoutCost: {

@@ -108,6 +108,7 @@ for cartella in prisma/migrations/*/; do
     20260904120000_row_level_security_everywhere) continue ;;
     20260904160000_supabase_managed_resources) continue ;;
     20260905120000_sync_request_queue) continue ;;
+    20260905190000_sync_repairs) continue ;;
   esac
   npx prisma migrate resolve --applied "$nome"
 done
@@ -146,17 +147,33 @@ sta in `docs/architecture/queue-adr.md`; la procedura per accendere il
 consumatore nuovo, in "Cambiare il consumatore della coda" piu' sotto. Nasce
 gia' con RLS attiva, come tutte.
 
+`20260905190000_sync_repairs` e' la quarta e va per ultima: porta la tabella
+`sync_repairs` (le risorse che una corsa non e' riuscita a scrivere) e due
+colonne su `sync_jobs`, `watermark_at` e `repairs_opened`.
+
+Nasce da un guasto che non lasciava traccia. Nei processor una quantita' di
+errori veniva registrata e ignorata, e la corsa si dichiarava `completed` lo
+stesso; il confine incrementale della corsa successiva si calcolava dall'ultima
+corsa completata, quindi passava sopra le risorse che nessuno era riuscito a
+scrivere. Se su Shopify quelle risorse non venivano piu' toccate non tornavano
+nel delta mai piu': il difetto diventava permanente e nessun registro sapeva
+dire quale riga fosse rimasta indietro.
+
+Va dopo `sync_request_queue` solo perche' e' piu' recente: non dipende da
+quella. Nasce gia' con RLS attiva, come tutte.
+
 ### 4. Controllare che la linea di base sia giusta
 
 ```bash
 npx prisma migrate status
 ```
 
-Deve elencare **tre** migrazioni da applicare, in questo ordine:
+Deve elencare **quattro** migrazioni da applicare, in questo ordine:
 
 1. `20260904120000_row_level_security_everywhere`
 2. `20260904160000_supabase_managed_resources`
 3. `20260905120000_sync_request_queue`
+4. `20260905190000_sync_repairs`
 
 Se ne elenca altre, qualcosa non e' stato dichiarato: rifare il passo 3 prima di
 andare avanti.

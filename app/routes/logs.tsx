@@ -45,7 +45,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Quando ripartira' la sincronizzazione. Si calcola qui, sull'ultima corsa
   // completata: e' la stessa regola che applica il cron, non una stima a parte.
   const lastCheck = jobs.find(
-    (job) => job.jobType === 'periodic_check' && job.status === 'completed' && job.completedAt,
+    (job) =>
+      job.jobType === 'periodic_check' &&
+      (job.status === 'completed' || job.status === 'completed_with_repairs') &&
+      job.completedAt,
   );
 
   return json({

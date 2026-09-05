@@ -48,6 +48,16 @@ describe('syncStatusBadge', () => {
   it('completed', () => expect(syncStatusBadge('completed', itDict)).toEqual({ tone: 'success', label: 'Completata' }));
   it('failed', () => expect(syncStatusBadge('failed', itDict)).toEqual({ tone: 'critical', label: 'Fallita' }));
   it('running', () => expect(syncStatusBadge('running', itDict)).toEqual({ tone: 'info', label: 'In corso' }));
+
+  it('una corsa che ha lasciato indietro qualcosa non si legge "Completata"', () => {
+    // E' il difetto che si e' smesso di raccontare: la corsa ignorava una
+    // manciata di errori e si dichiarava conclusa, e il merchant leggeva un
+    // successo mentre un suo prodotto restava fuori.
+    expect(syncStatusBadge('completed_with_repairs', itDict)).toEqual({
+      tone: 'attention',
+      label: 'Parziale',
+    });
+  });
 });
 
 describe('formatDateTime', () => {

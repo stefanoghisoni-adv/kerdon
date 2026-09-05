@@ -1,4 +1,4 @@
-export type SyncState = 'idle' | 'in_progress' | 'completed' | 'failed';
+export type SyncState = 'idle' | 'in_progress' | 'completed' | 'partial' | 'failed';
 
 interface JobLike {
   status: string;
@@ -36,6 +36,10 @@ export function resolveSyncState(
 
   if (latestBulk.status === 'running') return 'in_progress';
   if (latestBulk.status === 'completed') return 'completed';
+  // Finita, ma con qualcosa rimasto indietro. E' uno stato definitivo come gli
+  // altri due — chi aspetta puo' smettere di aspettare — e va tenuto distinto
+  // da 'completed' perche' i dati del merchant non sono ancora tutti li'.
+  if (latestBulk.status === 'completed_with_repairs') return 'partial';
   if (latestBulk.status === 'failed') return 'failed';
   return 'idle';
 }

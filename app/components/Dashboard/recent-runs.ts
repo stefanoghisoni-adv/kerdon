@@ -56,9 +56,12 @@ export function recentRunLabel(jobType: string, status: string, t: Dictionary): 
   const creation = tableCreationMessage(jobType, t);
   if (creation) return creation;
 
-  return status === 'completed'
-    ? t.dashboard.recentRuns.run.done
-    : t.dashboard.recentRuns.run.running;
+  if (status === 'completed') return t.dashboard.recentRuns.run.done;
+  // Parziale ha un titolo suo: "Sincronizzazione" e basta si legge come una
+  // corsa ancora in viaggio, e questa invece e' finita lasciando indietro
+  // qualcosa. Il badge accanto dice lo stato, il titolo dice cos'e' successo.
+  if (status === 'completed_with_repairs') return t.dashboard.recentRuns.run.partial;
+  return t.dashboard.recentRuns.run.running;
 }
 
 /**

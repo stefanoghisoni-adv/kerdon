@@ -387,7 +387,7 @@ describe('Shopify API Client (GraphQL)', () => {
 
     const result = await client().setCustomerBirthdates([{ customerId: 7, date: '1985-04-23' }]);
 
-    expect(result).toEqual({ written: 1, errors: [] });
+    expect(result).toEqual({ written: 1, errors: [], failed: [] });
     const body = sentBody();
     expect(body.variables.metafields).toEqual([
       {
@@ -426,12 +426,43 @@ describe('Shopify API Client (GraphQL)', () => {
 
     const result = await client().setCustomerBirthdates([{ customerId: 7, date: '1985-04-23' }]);
 
-    expect(result).toEqual({ written: 0, errors: ['Owner does not exist'] });
+    expect(result).toEqual({
+      written: 0,
+      errors: ['Owner does not exist'],
+      // Con il nome di chi: senza, chi chiama sa che qualcosa e' stato
+      // rifiutato ma non cosa, quindi non puo' segnarselo e non puo'
+      // ritentarlo. E ritentare "al giro dopo" non succede: la corsa
+      // successiva legge il delta, e un cliente la cui scrittura NON e' andata
+      // non risulta cambiato.
+      failed: [{ customerId: 7, reason: 'Owner does not exist' }],
+    });
+  });
+
+  it('il rifiuto porta l\'indice, e l\'indice dice quale cliente', async () => {
+    // `metafieldsSet` risponde con `field: ["metafields","1","value"]`: quel
+    // numero e' la posizione nel lotto mandato. E' l'unico modo di attribuire
+    // il rifiuto, e senza attribuzione si finisce per ritentare tutti o
+    // nessuno.
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({
+        metafieldsSet: {
+          metafields: [{ id: 'x' }],
+          userErrors: [{ field: ['metafields', '1', 'value'], message: 'Value is invalid' }],
+        },
+      }),
+    );
+
+    const result = await client().setCustomerBirthdates([
+      { customerId: 7, date: '1985-04-23' },
+      { customerId: 8, date: 'non-una-data' },
+    ]);
+
+    expect(result.failed).toEqual([{ customerId: 8, reason: 'Value is invalid' }]);
   });
 
   it('senza nessuno da riscrivere non si chiama Shopify', async () => {
     const result = await client().setCustomerBirthdates([]);
-    expect(result).toEqual({ written: 0, errors: [] });
+    expect(result).toEqual({ written: 0, errors: [], failed: [] });
     expect((global.fetch as any).mock.calls).toHaveLength(0);
   });
 

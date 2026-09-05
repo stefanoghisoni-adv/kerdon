@@ -12,6 +12,13 @@ export interface ShopifyProduct {
   // sincronizzati (dal piu' vecchio) e quindi chi entra sotto il tetto del piano.
   // Opzionale perche' con `fields` ristretti Shopify non la restituisce.
   created_at?: string | null;
+  /**
+   * Ultima modifica su Shopify. Serve al confine incrementale: quando la
+   * scrittura di questo prodotto non riesce, e' fin qui che il confine viene
+   * tenuto indietro, ed e' cosi' che la corsa successiva lo ritrova nel delta.
+   * Opzionale perche' un prodotto costruito a mano non ce l'ha.
+   */
+  updated_at?: string | null;
   variants: ShopifyVariant[];
   images?: ShopifyImage[];
   /**

@@ -20,6 +20,15 @@ describe('resolveSyncState', () => {
     );
   });
 
+  it('partial se la corsa ha lasciato indietro qualcosa', () => {
+    // Uno stato definitivo come 'completed' — chi aspetta puo' smettere di
+    // aspettare — ma tenuto distinto, perche' i dati del merchant non sono
+    // ancora tutti li'.
+    expect(
+      resolveSyncState({ status: 'completed_with_repairs', startedAt: after }, connectedAt),
+    ).toBe('partial');
+  });
+
   it('in_progress se la corsa e running dopo la connessione', () => {
     expect(resolveSyncState({ status: 'running', startedAt: after }, connectedAt)).toBe(
       'in_progress',

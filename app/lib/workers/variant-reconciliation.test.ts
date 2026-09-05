@@ -27,6 +27,23 @@ vi.mock('../../db.server', () => ({
       deleteMany: vi.fn(async () => ({ count: 0 })),
     },
     plan: { findFirst: vi.fn() },
+    // Il registro delle riparazioni: la corsa lo legge all'inizio e lo riscrive
+    // alla fine, nella stessa transazione del confine incrementale. Qui e'
+    // vuoto e non oppone resistenza; cosa ci finisca dentro lo provano i test
+    // dedicati (sync-repairs.test.ts).
+    syncRepair: {
+      findMany: vi.fn(async () => []),
+      upsert: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+      groupBy: vi.fn(async () => []),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+    },
+    // La chiusura della corsa e' una transazione sola: o ci sono confine e
+    // riparazioni, o non c'e' nessuno dei due.
+    $transaction: vi.fn(async (ops: unknown) =>
+      Array.isArray(ops) ? Promise.all(ops) : ops,
+    ),
   },
 }));
 

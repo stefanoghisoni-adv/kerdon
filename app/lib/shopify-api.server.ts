@@ -93,6 +93,7 @@ interface GqlProduct {
   tags?: string[];
   publishedAt?: string | null;
   createdAt?: string | null;
+  updatedAt?: string | null;
   images?: GqlConnection<{ id: string; url: string }>;
   variants?: GqlConnection<GqlVariant>;
 }
@@ -165,6 +166,12 @@ function mapProduct(p: GqlProduct, completeness: ConnectionCompleteness) {
     // questo, e l'ordine decide quali entrano sotto il tetto del piano. Se
     // mancasse, il taglio cadrebbe su prodotti diversi a ogni sincronizzazione.
     created_at: p.createdAt ?? null,
+    // Quando Shopify l'ha modificato l'ultima volta. Non e' decorativo: e' il
+    // punto fino a cui il confine incrementale viene tenuto indietro quando la
+    // scrittura di questo prodotto non riesce, ed e' cosi' che la corsa dopo se
+    // lo ritrova davanti invece di scavalcarlo. Senza, l'unica alternativa
+    // sarebbe non far avanzare il confine affatto.
+    updated_at: p.updatedAt ?? null,
     images: (p.images?.nodes ?? []).map((img) => ({ id: gidToId(img.id), src: img.url })),
     variants: (p.variants?.nodes ?? []).map((v) => mapVariant(v, id)),
     // I due bit che dicono se gli elenchi qui sopra sono TUTTO quello che
@@ -361,6 +368,20 @@ export function resolveApiVersion(configured: string | undefined): string {
  * fosse un 429 o un 403 avrebbe dovuto leggere una sottostringa del messaggio:
  * una regola che si rompe la prima volta che Shopify cambia una parola.
  */
+/**
+ * L'indice del cliente dentro il lotto, letto dal percorso del rifiuto.
+ *
+ * `metafieldsSet` risponde con `field: ["metafields", "3", "value"]`: quel 3 e'
+ * la posizione nell'elenco mandato. Restituisce `null` quando il percorso non
+ * lo contiene — un rifiuto che riguarda l'intera chiamata, non una riga.
+ */
+function indiceDelRifiuto(field: string[] | null | undefined): number | null {
+  for (const pezzo of field ?? []) {
+    if (/^\d+$/.test(pezzo)) return Number(pezzo);
+  }
+  return null;
+}
+
 export class ShopifyRequestError extends Error {
   constructor(
     message: string,
@@ -733,6 +754,11 @@ export class ShopifyAPIClient {
       wants('tags') ? 'tags' : '',
       wants('published_at') ? 'publishedAt' : '',
       'createdAt',
+      // Sempre, come `createdAt`, e per un motivo dello stesso peso: e' fin qui
+      // che il confine incrementale viene tenuto indietro se la scrittura di
+      // questo prodotto non riesce. Senza, l'unico modo di non perdere il
+      // prodotto sarebbe non far avanzare il confine per niente.
+      'updatedAt',
       // Il `pageInfo` non e' un extra: e' cio' che distingue "il prodotto ha
       // dieci immagini" da "gliene abbiamo chieste dieci". Senza, la risposta e'
       // la stessa in entrambi i casi.
@@ -784,7 +810,7 @@ export class ShopifyAPIClient {
     const data = await this.graphql<{ product: GqlProduct | null }>(
       `query Product($id: ID!) {
         product(id: $id) {
-          id title descriptionHtml vendor productType handle status tags publishedAt createdAt
+          id title descriptionHtml vendor productType handle status tags publishedAt createdAt updatedAt
           images(first: ${NESTED_PAGE_SIZE}) { pageInfo { hasNextPage endCursor } nodes { ${IMAGE_FIELDS} } }
           variants(first: ${NESTED_PAGE_SIZE}) { pageInfo { hasNextPage endCursor } nodes { ${VARIANT_FIELDS} } }
         }
@@ -1200,14 +1226,27 @@ export class ShopifyAPIClient {
    * Gli errori non si alzano, si restituiscono. Un cliente rifiutato — sparito
    * nel frattempo, valore non gradito alla definizione — non deve far fallire
    * la sincronizzazione dei clienti, che di suo aveva gia' scritto tutto quello
-   * che doveva: la riscrittura e' un di piu' che al giro dopo si ritenta.
+   * che doveva.
+   *
+   * Ma si restituiscono CON IL NOME DI CHI: `failed` dice quali clienti non
+   * sono stati scritti. Prima tornavano solo i messaggi, e chi chiamava sapeva
+   * che qualcosa era stato rifiutato senza sapere cosa — quindi non poteva
+   * segnarselo, quindi non poteva ritentarlo. E ritentare al giro dopo non
+   * succedeva: la corsa successiva legge il delta, e un cliente la cui
+   * scrittura NON e' andata non risulta cambiato, quindi nel delta non
+   * ricompare.
    */
   async setCustomerBirthdates(
     entries: readonly { customerId: number; date: string }[],
     field: { namespace: string; key: string; type: string } = BIRTHDATE_METAFIELD,
-  ): Promise<{ written: number; errors: string[] }> {
+  ): Promise<{
+    written: number;
+    errors: string[];
+    failed: { customerId: number; reason: string }[];
+  }> {
     let written = 0;
     const errors: string[] = [];
+    const failed: { customerId: number; reason: string }[] = [];
     // Il tetto e' di Shopify, non nostro: oltre i 25 la mutation viene
     // rifiutata per intero, quindi le pagine da 250 clienti vanno spezzate qui
     // e non a monte.
@@ -1243,11 +1282,26 @@ export class ShopifyAPIClient {
       // Ignorarlo farebbe risultare scritto cio' che non lo e'.
       for (const error of data.metafieldsSet?.userErrors ?? []) {
         errors.push(error.message);
+
+        // A quale cliente si riferisce. `field` di `metafieldsSet` porta il
+        // percorso dentro l'elenco mandato — ["metafields","3","value"] — e
+        // quel 3 e' l'indice nel lotto. Senza questa lettura si saprebbe che
+        // qualcosa e' stato rifiutato ma non cosa, e un rifiuto che non si sa
+        // attribuire non si puo' ritentare.
+        const indice = indiceDelRifiuto(error.field);
+        if (indice !== null && batch[indice]) {
+          failed.push({ customerId: batch[indice].customerId, reason: error.message });
+        } else {
+          // Rifiuto senza indice: riguarda il lotto intero, e allora vale per
+          // tutti. Meglio ritentare qualcuno che era passato che perdere
+          // qualcuno che non lo era.
+          for (const entry of batch) failed.push({ customerId: entry.customerId, reason: error.message });
+        }
       }
       written += data.metafieldsSet?.metafields?.length ?? 0;
     }
 
-    return { written, errors };
+    return { written, errors, failed };
   }
 
   /**

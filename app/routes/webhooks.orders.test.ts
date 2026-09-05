@@ -337,7 +337,7 @@ describe('webhook orders — cancellare per differenza, e quando non si puo', ()
     expect(res.status).toBe(200);
     expect(writes.order_lines).toHaveLength(2);
     expect(deletes).toHaveLength(0);
-    expect(warned.some((w) => w.includes('troncato'))).toBe(true);
+    expect(warned.some((w) => w.includes('riconciliazione non conclusa'))).toBe(true);
     expect(lastTrace(logged)).toMatchObject({ status: 'completed', lines_complete: false });
 
     // La riparazione in sospeso e' l'elenco degli ordini di cui SAPPIAMO che i

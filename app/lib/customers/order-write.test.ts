@@ -248,10 +248,15 @@ describe('applyOrderToMerchant — riconciliazione', () => {
     expect(db.tables.orders.size).toBe(1);
   });
 
-  it('una cancellazione non riuscita non fa fallire la scrittura', async () => {
-    // Ordine e righe correnti sono gia' scritti e sono la parte che conta: una
-    // riga obsoleta rimasta indietro la toglie il tentativo dopo. Farlo fallire
-    // qui vorrebbe dire far ripetere una consegna gia' andata quasi tutta bene.
+  it('una cancellazione non riuscita non fa fallire la scrittura, ma si vede', async () => {
+    // Ordine e righe correnti sono gia' scritti e sono la parte che conta:
+    // farlo fallire qui vorrebbe dire far ripetere una consegna gia' andata
+    // quasi tutta bene.
+    //
+    // Ma `repairPending` deve dirlo. Prima tornava `false` — indistinguibile da
+    // "non c'era niente da togliere" — e chi chiamava non aveva modo di sapere
+    // che qualcosa era rimasto indietro: "la toglie il tentativo dopo" era una
+    // speranza senza nessuno che la mantenesse.
     const db = fakeSupabase({ failOn: 'delete' });
 
     const result = await applyOrderToMerchant({
@@ -260,7 +265,7 @@ describe('applyOrderToMerchant — riconciliazione', () => {
       syncedAt: SYNCED,
     });
 
-    expect(result).toMatchObject({ lines: 1, deleted: 0, repairPending: false });
+    expect(result).toMatchObject({ lines: 1, deleted: 0, repairPending: true });
     expect(db.tables.orders.size).toBe(1);
   });
 

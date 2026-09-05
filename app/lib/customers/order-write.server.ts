@@ -105,13 +105,20 @@ export async function applyOrderToMerchant(opts: {
     return { lines: rows.lines.length, deleted: 0, repairPending: true };
   }
 
-  const deleted = await deleteStaleLines(
+  const stale = await deleteStaleLines(
     opts.supabase,
     [rows.order.shopify_order_id],
     rows.lines.map((line) => line.shopify_line_id),
   );
 
-  return { lines: rows.lines.length, deleted, repairPending: false };
+  // Righe obsolete rimaste: l'ordine e' scritto, ma la riconciliazione non e'
+  // finita. Chi chiama lo sa dal segnale che gia' esiste per gli elenchi
+  // troncati, ed e' la stessa cosa — qualcosa da rifare su questo ordine.
+  return {
+    lines: rows.lines.length,
+    deleted: stale.deleted,
+    repairPending: stale.error !== null,
+  };
 }
 
 /**
@@ -137,13 +144,19 @@ export async function applyOrderToMerchant(opts: {
  * scritti e sono la parte che conta, mentre una riga obsoleta rimasta indietro
  * la toglie il tentativo dopo. Farlo fallire qui vorrebbe dire far ripetere a
  * Shopify una consegna gia' andata a buon fine per il 90%.
+ *
+ * Ma si RESTITUISCE, e prima non era cosi': l'errore finiva in un avviso e la
+ * funzione tornava zero, indistinguibile da "non c'era niente da togliere".
+ * Chi chiama non aveva modo di sapere che qualcosa era rimasto indietro, quindi
+ * non poteva segnarselo, quindi "la toglie il tentativo dopo" era una speranza
+ * senza nessuno che la mantenesse.
  */
 export async function deleteStaleLines(
   supabase: SupabaseClient,
   orderIds: number[],
   keep: number[],
-): Promise<number> {
-  if (orderIds.length === 0) return 0;
+): Promise<{ deleted: number; error: string | null }> {
+  if (orderIds.length === 0) return { deleted: 0, error: null };
 
   const query = supabase.from('order_lines').delete().in('shopify_order_id', orderIds);
 
@@ -156,8 +169,8 @@ export async function deleteStaleLines(
     console.warn(
       `[order-write] righe obsolete non rimosse (${orderIds.length} ordini): ${error.message}`,
     );
-    return 0;
+    return { deleted: 0, error: error.message ?? 'cancellazione non riuscita' };
   }
 
-  return Array.isArray(data) ? data.length : 0;
+  return { deleted: Array.isArray(data) ? data.length : 0, error: null };
 }

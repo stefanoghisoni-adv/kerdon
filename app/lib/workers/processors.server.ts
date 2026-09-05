@@ -40,6 +40,23 @@ import {
   type BirthdateWriteTarget,
 } from '~/lib/customers/birthdate-writeback';
 import { hasCustomerWriteAccess } from '~/lib/sync/customers-write-access';
+import { redactError } from '~/lib/queue/queue-model';
+import { repairSpecOf, type FailureSiteName } from '~/lib/sync/failure-taxonomy';
+import {
+  createRepairLedger,
+  MAX_REPAIRS_PER_RUN,
+  type RepairLedger,
+} from '~/lib/sync/repair-ledger';
+import {
+  commitSyncRun,
+  failRepairAttempt,
+  loadOpenRepairs,
+  loadWatermark,
+  pushableRepairs,
+  resolveRepair,
+  type StoredRepair,
+} from '~/lib/sync/repair-outbox.server';
+import { deltaFloor } from '~/lib/sync/watermark';
 
 // Solo la parte di chi riporta l'avanzamento che i processor usano davvero.
 // Tipandola cosi' il bulk sync puo' girare anche senza nessuno che lo ascolti
@@ -64,6 +81,75 @@ interface ProgressReporter {
 export interface LeaseGuard {
   /** Lancia se il lucchetto non e' piu' nostro. */
   assertHeld(): Promise<void>;
+}
+
+/**
+ * Registra un guasto riparabile.
+ *
+ * PERCHE' PASSA DA QUI E NON DA UN `console.warn`. Perche' un avviso non e' una
+ * traccia: la corsa proseguiva, si dichiarava completata, e il confine
+ * incrementale della corsa successiva scavalcava la risorsa che nessuno era
+ * riuscito a scrivere. Se su Shopify quella risorsa non veniva piu' toccata,
+ * non veniva riletta mai piu' — e l'unico modo di saperlo era leggere i log, se
+ * qualcuno li leggeva.
+ *
+ * Il nome del punto di guasto arriva dalla tassonomia, che decide anche se la
+ * riparazione tornera' dal delta o andra' rispinta. Un punto che non e'
+ * dichiarato riparabile non puo' finire qui: e' un errore di programmazione, e
+ * lancia.
+ */
+function segnalaRiparazione(
+  ledger: RepairLedger,
+  site: FailureSiteName,
+  opts: {
+    resourceId: string | number;
+    sourceUpdatedAt?: string | Date | null;
+    details?: Record<string, unknown>;
+    error: unknown;
+  },
+): void {
+  const spec = repairSpecOf(site);
+  if (!spec) {
+    throw new Error(`Il punto di guasto ${site} non e' riparabile: non puo' aprire una riparazione`);
+  }
+
+  ledger.open({
+    resourceType: spec.resourceType,
+    resourceId: String(opts.resourceId),
+    operation: spec.operation,
+    recoveredByDelta: spec.recoveredByDelta,
+    sourceUpdatedAt: aData(opts.sourceUpdatedAt),
+    details: opts.details,
+    reason: redactError(opts.error),
+  });
+}
+
+/** La risorsa e' tornata a posto: se aveva una riparazione aperta, si chiude. */
+function chiudiRiparazione(
+  ledger: RepairLedger,
+  site: FailureSiteName,
+  resourceId: string | number,
+): void {
+  const spec = repairSpecOf(site);
+  if (!spec) return;
+  ledger.resolve({
+    resourceType: spec.resourceType,
+    resourceId: String(resourceId),
+    operation: spec.operation,
+  });
+}
+
+/**
+ * Una data leggibile, o niente.
+ *
+ * `null` non e' un ripiego neutro: senza data di modifica il confine si tiene
+ * indietro fino all'inizio della corsa, che e' piu' prudente e piu' caro. Vale
+ * la pena provare a leggerla.
+ */
+function aData(valore: string | Date | null | undefined): Date | null {
+  if (!valore) return null;
+  const data = valore instanceof Date ? valore : new Date(valore);
+  return Number.isNaN(data.getTime()) ? null : data;
 }
 
 /**
@@ -301,17 +387,27 @@ async function resolveBirthdateTarget(
  * niente ed e' testabile da solo; qui restano la chiamata e cio' che si fa
  * quando va storta.
  *
- * E va storta senza fermare niente: i clienti sono gia' scritti sul database
- * del merchant, e il valore che non e' arrivato a Shopify e' ancora dov'era.
- * Alla corsa successiva Shopify sara' ancora vuoto e si ritenta. Far fallire la
- * sincronizzazione dei clienti per una riscrittura che e' un di piu' vorrebbe
- * dire perdere il molto per il poco.
+ * E va storta senza fermare la replica: i clienti sono gia' scritti sul
+ * database del merchant, e quello e' il compito principale della corsa. Ma non
+ * va nemmeno storta in silenzio, ed e' qui che il comportamento e' cambiato.
+ *
+ * "Alla corsa successiva Shopify sara' ancora vuoto e si ritenta" era falso, e
+ * lo era nel modo piu' difficile da vedere. La corsa successiva legge il DELTA:
+ * chiede a Shopify chi e' cambiato. Un cliente la cui riscrittura e' fallita su
+ * Shopify non e' cambiato — non e' cambiato proprio perche' la scrittura non e'
+ * andata — quindi nel delta non ricompare, e nessuno ritenta niente. La data
+ * restava sul database del merchant e non arrivava mai al negozio.
+ *
+ * Per questo la riscrittura ha un magazzino d'uscita suo: ogni cliente rifiutato
+ * o non consegnato lascia una riga durevole, e la corsa dopo la rispinge prima
+ * di fare qualunque altra cosa.
  */
 async function writeBackBirthdates(
   shopifyClient: ShopifyAPIClient,
   target: BirthdateWriteTarget,
   optedIn: readonly ShopifyCustomer[],
   stored: ReadonlyMap<number, string | null> | null,
+  ledger: RepairLedger,
 ): Promise<void> {
   const { writes, invalid } = planBirthdateWriteback(optedIn, stored);
 
@@ -326,19 +422,127 @@ async function writeBackBirthdates(
 
   if (writes.length === 0) return;
 
+  const perCliente = new Map(writes.map((w) => [w.customerId, w.date]));
+
   try {
-    const { written, errors } = await shopifyClient.setCustomerBirthdates(writes, target);
-    if (errors.length > 0) {
+    const esito = await shopifyClient.setCustomerBirthdates(writes, target);
+    const rifiutati = esito.failed ?? [];
+
+    if (esito.errors.length > 0 && rifiutati.length === 0) {
+      // Rifiuti senza nome: non si sa quali siano passati, quindi si segnano
+      // tutti. Ritentare qualcuno che era gia' a posto costa una scrittura
+      // identica; darne per scritto uno che non lo era costa la sua data.
+      for (const write of writes) {
+        rifiutati.push({ customerId: write.customerId, reason: esito.errors[0] });
+      }
+    }
+
+    for (const rifiuto of rifiutati) {
+      segnalaRiparazione(ledger, 'customer.birthdate-writeback', {
+        resourceId: rifiuto.customerId,
+        details: { date: perCliente.get(rifiuto.customerId) ?? null },
+        error: rifiuto.reason,
+      });
+    }
+
+    // Chi e' passato non ha piu' niente in sospeso: se aveva una riparazione
+    // aperta da una corsa precedente, si chiude qui.
+    for (const write of writes) {
+      if (rifiutati.some((r) => r.customerId === write.customerId)) continue;
+      chiudiRiparazione(ledger, 'customer.birthdate-writeback', write.customerId);
+    }
+
+    if (esito.errors.length > 0) {
       console.warn(
-        `[data di nascita] Shopify ha rifiutato ${errors.length} scritture: ${errors.slice(0, 3).join('; ')}`,
+        `[data di nascita] Shopify ha rifiutato ${esito.errors.length} scritture: ${esito.errors.slice(0, 3).join('; ')}`,
       );
     }
-    console.log(`[data di nascita] ${written} riportate su Shopify dal database del merchant`);
+    console.log(`[data di nascita] ${esito.written} riportate su Shopify dal database del merchant`);
   } catch (error) {
+    // La chiamata non e' partita affatto: nessuno di questi e' stato scritto.
+    for (const write of writes) {
+      segnalaRiparazione(ledger, 'customer.birthdate-writeback', {
+        resourceId: write.customerId,
+        details: { date: write.date },
+        error,
+      });
+    }
     console.warn(
       '[data di nascita] riscrittura su Shopify non riuscita:',
       error instanceof Error ? error.message : error,
     );
+  }
+}
+
+/**
+ * Rispinge verso Shopify le date di nascita rimaste in sospeso.
+ *
+ * Sta all'inizio della sincronizzazione dei clienti, prima di leggere qualunque
+ * pagina, perche' e' l'unico momento in cui queste righe hanno una possibilita':
+ * nessun delta le riportera' mai — su Shopify non e' cambiato niente da
+ * segnalare, ed e' proprio per questo che erano rimaste indietro.
+ *
+ * La data non si prende da quella salvata nella riparazione ma si RILEGGE dal
+ * database del merchant: fra il guasto e adesso il merchant puo' averla
+ * corretta, e rispingere il valore vecchio sarebbe riscrivergli addosso una
+ * cosa che aveva gia' cambiato. Se la data non c'e' piu', la riparazione non ha
+ * piu' oggetto e si chiude.
+ */
+async function pushBirthdateRepairs(opts: {
+  repairs: readonly StoredRepair[];
+  shopId: string;
+  shopifyClient: ShopifyAPIClient;
+  supabase: SupabaseClient;
+  tableName: string;
+  target: BirthdateWriteTarget | null;
+  now: Date;
+}): Promise<void> {
+  const daSpingere = opts.repairs.filter((r) => r.operation === 'birthdate_writeback');
+  if (daSpingere.length === 0) return;
+
+  // Senza un posto dove scrivere non si consuma un tentativo: non e' la
+  // riparazione ad aver fallito, e' il permesso a non esserci (piu'). Restano
+  // in attesa, e la corsa che ritrovera' il permesso le trovera' intatte.
+  if (!opts.target) return;
+
+  const ids = daSpingere
+    .map((r) => Number(r.resourceId))
+    .filter((id) => Number.isFinite(id));
+
+  const attuali = await fetchExistingCustomers(opts.supabase, opts.tableName, ids);
+  // Senza risposta dal database del merchant non si indovina: si riprova alla
+  // corsa dopo, senza contare il tentativo contro la riparazione.
+  if (!attuali) return;
+
+  for (const riparazione of daSpingere) {
+    const customerId = Number(riparazione.resourceId);
+    const data = attuali.get(customerId) ?? null;
+
+    if (!data) {
+      // Niente piu' da riportare: la riga sul database del merchant non ha piu'
+      // una data, o il cliente non c'e' piu'. Il lavoro e' finito, non fallito.
+      await resolveRepair(riparazione.id, opts.now);
+      continue;
+    }
+
+    try {
+      const esito = await opts.shopifyClient.setCustomerBirthdates(
+        [{ customerId, date: data }],
+        opts.target,
+      );
+      if ((esito.failed ?? []).length > 0 || esito.errors.length > 0) {
+        await failRepairAttempt(
+          riparazione,
+          esito.errors[0] ?? 'scrittura rifiutata da Shopify',
+          opts.shopId,
+          opts.now,
+        );
+        continue;
+      }
+      await resolveRepair(riparazione.id, opts.now);
+    } catch (error) {
+      await failRepairAttempt(riparazione, error, opts.shopId, opts.now);
+    }
   }
 }
 
@@ -415,6 +619,13 @@ async function syncCustomers(
    * volta per corsa.
    */
   birthdateTarget?: BirthdateWriteTarget | null,
+  /**
+   * Il registro delle riparazioni della corsa. Obbligatorio: e' l'unico posto
+   * dove un guasto su un cliente puo' sopravvivere alla corsa, e senza di lui
+   * l'unica alternativa sarebbe l'avviso nel log — cioe' quello che c'era
+   * prima, che non riparava niente.
+   */
+  ledger: RepairLedger = createRepairLedger(),
 ): Promise<CustomerSyncResult> {
   let total = 0;
   let nextPageInfo: string | null = null;
@@ -455,6 +666,10 @@ async function syncCustomers(
       });
 
       if (error) {
+        // 'customer.upsert' e' CRITICO nella tassonomia, e la conseguenza e'
+        // questa: si lancia, la corsa fallisce e il confine incrementale resta
+        // dov'era. Un blocco sono fino a mille persone, e trasformarle in
+        // altrettante righe di riparazione costerebbe piu' che rifare la corsa.
         throw new Error(`Supabase customer upsert failed: ${error.message}`);
       }
     }
@@ -471,7 +686,7 @@ async function syncCustomers(
     // che fallisse a meta' non deve lasciare indietro la scrittura sul database
     // del merchant, che e' il compito principale di questa corsa.
     if (birthdateTarget) {
-      await writeBackBirthdates(shopifyClient, birthdateTarget, optedIn, alreadyPresent);
+      await writeBackBirthdates(shopifyClient, birthdateTarget, optedIn, alreadyPresent, ledger);
     }
 
     // Dopo l'upsert: un upsert fallito lancia, e non ha aggiunto nessuno.
@@ -503,7 +718,22 @@ async function syncCustomers(
       );
 
       if (revokeError) {
-        // Non fatale: gli opt-in sono gia' scritti, la corsa successiva ritenta.
+        // Era "non fatale" con un avviso, ed era il punto peggiore di tutti:
+        // da questa colonna dipende il rifiuto di servire i dati di quella
+        // persona, quindi un fallimento silenzioso lasciava leggibile un
+        // cliente che aveva detto di no. E "la corsa successiva ritenta" era
+        // falso: la corsa successiva legge il delta, e il confine avanzava
+        // sopra questi clienti come sopra tutti gli altri.
+        //
+        // Adesso ognuno lascia una riga, e finche' quelle righe esistono il
+        // confine non le scavalca: la corsa dopo se li ritrova davanti.
+        for (const customer of revoked) {
+          segnalaRiparazione(ledger, 'customer.consent-revoke', {
+            resourceId: customer.id,
+            sourceUpdatedAt: customer.updated_at ?? null,
+            error: revokeError.message ?? 'marcatura del consenso non riuscita',
+          });
+        }
         console.warn('Marcatura dei consensi revocati fallita:', revokeError.message);
       } else {
         // Sospesi sono solo quelli che la update ha davvero toccato: chi non era
@@ -516,6 +746,10 @@ async function syncCustomers(
         );
 
         for (const customer of revoked) {
+          // Chiusa comunque, anche per chi la update non ha toccato: quel
+          // cliente non era mai stato sincronizzato, quindi non c'e' niente da
+          // marcare e niente da riparare.
+          chiudiRiparazione(ledger, 'customer.consent-revoke', customer.id);
           if (!suspendedIds.has(customer.id)) continue;
           events.count('customer', 'suspended');
         }
@@ -560,6 +794,11 @@ async function syncCustomersIfEnabled(opts: {
     birthdateMetafieldNamespace?: string | null;
     birthdateMetafieldKey?: string | null;
   } | null;
+  /** Il registro delle riparazioni della corsa. */
+  ledger: RepairLedger;
+  /** Le riparazioni gia' aperte: qui dentro si rispingono quelle sulla data. */
+  openRepairs: readonly StoredRepair[];
+  now: Date;
 }): Promise<CustomerSyncResult> {
   if (!opts.customersSyncEnabled) return { total: 0, events: createEventBuffer() };
 
@@ -592,6 +831,20 @@ async function syncCustomersIfEnabled(opts: {
     hasCustomerWriteAccess(opts.shop?.scopes),
   );
 
+  // Prima di leggere qualunque pagina: le date rimaste in sospeso verso
+  // Shopify. Sta qui e non altrove perche' e' l'unico punto in cui si hanno
+  // insieme il permesso, il tipo del campo e la tabella da cui rileggere il
+  // valore — e perche' nessun delta le riportera' mai da solo.
+  await pushBirthdateRepairs({
+    repairs: opts.openRepairs,
+    shopId: opts.shopId,
+    shopifyClient: opts.shopifyClient,
+    supabase: opts.supabase,
+    tableName: opts.config.tableNameCustomers,
+    target: birthdateTarget,
+    now: opts.now,
+  });
+
   return syncCustomers(
     opts.shopifyClient,
     opts.supabase,
@@ -599,6 +852,7 @@ async function syncCustomersIfEnabled(opts: {
     updatedAtMin,
     birthdateMetafield,
     birthdateTarget,
+    opts.ledger,
   );
 }
 
@@ -632,6 +886,7 @@ async function syncOrders(
   shopifyClient: ShopifyAPIClient,
   supabase: SupabaseClient,
   updatedAtMin?: string,
+  ledger: RepairLedger = createRepairLedger(),
 ): Promise<OrderSyncResult> {
   let total = 0;
   let nextPageInfo: string | null = null;
@@ -659,6 +914,9 @@ async function syncOrders(
         .upsert(orderRows, { onConflict: 'shopify_order_id', ignoreDuplicates: false });
 
       if (ordersError) {
+        // 'order.upsert' e' CRITICO: si lancia, la corsa fallisce e il confine
+        // resta dov'era. Una pagina sono cinquanta ordini, e riscriverli tutti
+        // alla corsa dopo costa meno che tenerne il conto uno per uno.
         throw new Error(`Supabase order upsert failed: ${ordersError.message}`);
       }
 
@@ -675,11 +933,14 @@ async function syncOrders(
           });
 
         if (linesError) {
+          // 'order.line-upsert', critico: un ordine con meta' righe scritte
+          // porta un margine sbagliato, e sbagliato per difetto — cioe'
+          // nell'unico verso che nessuno nota.
           throw new Error(`Supabase order line upsert failed: ${linesError.message}`);
         }
       }
 
-      await reconcileCompleteOrders(supabase, converted);
+      await reconcileCompleteOrders(supabase, converted, ledger);
 
       // Solo il conteggio, come per i clienti: degli ordini non si tiene
       // nessuna riga di dettaglio sul database dell'applicazione.
@@ -714,15 +975,37 @@ const RECONCILE_KEEP_LIMIT = 500;
 async function reconcileCompleteOrders(
   supabase: SupabaseClient,
   converted: { rows: NonNullable<ReturnType<typeof orderToRows>>; complete: boolean }[],
+  ledger: RepairLedger,
 ): Promise<void> {
   let orderIds: number[] = [];
   let keep: number[] = [];
+  let lotto: { id: number; updatedAt: string | null; lines: number[] }[] = [];
 
   const flush = async () => {
     if (orderIds.length === 0) return;
-    await deleteStaleLines(supabase, orderIds, keep);
+    const esito = await deleteStaleLines(supabase, orderIds, keep);
+
+    for (const ordine of lotto) {
+      if (esito.error) {
+        // L'elenco delle righe da tenere si conserva: e' l'unica traccia di
+        // cosa era rimasto indietro. Non e' pero' con quell'elenco che si
+        // ripara — rigiocarlo piu' tardi cancellerebbe righe tornate
+        // legittime — ma rileggendo l'ordine, che il confine tenuto indietro
+        // rimette nel delta della corsa successiva.
+        segnalaRiparazione(ledger, 'order.stale-lines', {
+          resourceId: ordine.id,
+          sourceUpdatedAt: ordine.updatedAt,
+          details: { ids: ordine.lines },
+          error: esito.error,
+        });
+      } else {
+        chiudiRiparazione(ledger, 'order.stale-lines', ordine.id);
+      }
+    }
+
     orderIds = [];
     keep = [];
+    lotto = [];
   };
 
   for (const c of converted) {
@@ -730,6 +1013,11 @@ async function reconcileCompleteOrders(
 
     orderIds.push(c.rows.order.shopify_order_id);
     for (const line of c.rows.lines) keep.push(line.shopify_line_id);
+    lotto.push({
+      id: c.rows.order.shopify_order_id,
+      updatedAt: c.rows.order.updated_at,
+      lines: c.rows.lines.map((line) => line.shopify_line_id),
+    });
 
     if (keep.length >= RECONCILE_KEEP_LIMIT) await flush();
   }
@@ -753,6 +1041,7 @@ async function syncOrdersIfEnabled(opts: {
   shopifyClient: ShopifyAPIClient;
   supabase: SupabaseClient;
   updatedAtMin?: string;
+  ledger: RepairLedger;
 }): Promise<OrderSyncResult> {
   if (!opts.ordersEnabled) return { total: 0, events: createEventBuffer() };
 
@@ -769,7 +1058,7 @@ async function syncOrdersIfEnabled(opts: {
   // che vende da anni — ed e' esattamente il caso in cui il lifetime serve.
   const updatedAtMin = tables.empty ? undefined : opts.updatedAtMin;
 
-  return syncOrders(opts.shopifyClient, opts.supabase, updatedAtMin);
+  return syncOrders(opts.shopifyClient, opts.supabase, updatedAtMin, opts.ledger);
 }
 
 /**
@@ -817,14 +1106,58 @@ async function fetchExistingProductIds(
  * - Non-variant rows: onConflict: 'shopify_product_id'
  */
 /**
- * Il margine che si toglie al confine incrementale.
+ * Rigioca la spazzata rimasta in sospeso.
  *
- * Non e' prudenza generica: `updated_at` lo scrive Shopify sui suoi server,
- * l'inizio della corsa lo scriviamo noi sui nostri, e due macchine diverse non
- * hanno mai esattamente la stessa ora. Senza margine, una modifica avvenuta a
- * cavallo del confine cadrebbe dalla parte sbagliata e non verrebbe raccolta.
+ * L'unica riparazione sui prodotti che il delta non riporta: la corsa
+ * incrementale non spazza, quindi una spazzata fallita resterebbe da fare per
+ * sempre. Si rigioca con il confine di ALLORA, conservato nella riparazione:
+ * cancella le righe non riscritte da quella corsa, e quel che e' stato scritto
+ * dopo non ci ricade sotto — quindi rieseguirla oggi e' corretto come lo era
+ * quel giorno.
+ *
+ * Il possesso si verifica come per la spazzata vera: e' la cancellazione piu'
+ * pericolosa dell'app, e se il negozio nel frattempo e' passato a un'altra
+ * corsa non e' piu' il nostro "adesso" quello che conta.
  */
-const CLOCK_SKEW_MARGIN_MS = 60_000;
+async function pushSweepRepairs(opts: {
+  repairs: readonly StoredRepair[];
+  shopId: string;
+  supabase: SupabaseClient;
+  tableName: string;
+  lease?: LeaseGuard;
+  now: Date;
+}): Promise<void> {
+  const daSpingere = opts.repairs.filter((r) => r.operation === 'sweep');
+
+  for (const riparazione of daSpingere) {
+    const before = riparazione.details?.before;
+    if (typeof before !== 'string') {
+      // Senza confine non si cancella niente: una spazzata senza soglia
+      // porterebbe via l'intero catalogo. Si chiude e si segnala col resto.
+      await failRepairAttempt(riparazione, 'spazzata senza istante di confine', opts.shopId, opts.now);
+      continue;
+    }
+
+    try {
+      await opts.lease?.assertHeld();
+      const { error } = await runReturningRows<RemovedProductRow>(
+        opts.supabase
+          .from(opts.tableName)
+          .delete()
+          .lt('synced_at', before) as unknown as ReturningBuilder,
+        REMOVED_PRODUCT_COLUMNS,
+      );
+
+      if (error) {
+        await failRepairAttempt(riparazione, error.message ?? 'spazzata non riuscita', opts.shopId, opts.now);
+        continue;
+      }
+      await resolveRepair(riparazione.id, opts.now);
+    } catch (error) {
+      await failRepairAttempt(riparazione, error, opts.shopId, opts.now);
+    }
+  }
+}
 
 export async function processPeriodicSyncCheck(
   shopId: string,
@@ -862,17 +1195,25 @@ export async function processPeriodicSyncCheck(
   const shopifyClient = await ShopifyAPIClient.forShop(shop.shopDomain);
   const supabase = createSupabaseClient(shop.supabaseConfig);
 
-  // Get last periodic sync timestamp
-  const lastSyncJob = await prisma.syncJob.findFirst({
-    where: {
-      shopId: shop.id,
-      jobType: 'periodic_check',
-      status: 'completed',
-    },
-    orderBy: {
-      completedAt: 'desc',
-    },
-  });
+  // L'istante d'inizio, uno solo per tutta la corsa.
+  //
+  // Da qui esce il confine che questa corsa avra' diritto di lasciare, e per
+  // questo va preso una volta e tenuto: con un `new Date()` sparso nel codice,
+  // "l'inizio" sarebbe stato un istante diverso in ogni punto in cui lo si
+  // chiedeva, e il confine avrebbe scavalcato tutto cio' che e' cambiato fra un
+  // punto e l'altro.
+  const runStartedAt = new Date();
+
+  // Il confine da cui rileggere: quello dell'ultima corsa che se l'e'
+  // guadagnato.
+  //
+  // Prima si cercava l'ultima corsa con stato `completed` e se ne prendeva
+  // `startedAt`. Ma `completed` lo diventava anche una corsa che aveva ignorato
+  // una manciata di errori, quindi il confine passava sopra risorse che nessuno
+  // era riuscito a scrivere — e quelle risorse, se su Shopify non le toccava
+  // piu' nessuno, non venivano rilette mai piu'. Adesso il confine e' una
+  // colonna sua, che si scrive solo quando ce n'e' il diritto.
+  const checkpoint = await loadWatermark(shop.id);
 
   // Il confine e' l'INIZIO della corsa precedente, non la sua fine.
   //
@@ -887,14 +1228,14 @@ export async function processPeriodicSyncCheck(
   // sovrapposizione vale quanto e' durata la corsa — ma non costa niente:
   // sono upsert, riscrivere la stessa riga con lo stesso contenuto e' un
   // aggiornamento a vuoto. Rileggere di piu' e' il prezzo di non perdere.
-  const previousRunStart = lastSyncJob?.startedAt;
-  const lastSyncTime = previousRunStart
-    ? // Un minuto di margine perche' i due orologi non sono lo stesso: il
-      // `updated_at` lo scrive Shopify sulle sue macchine, `startedAt` lo
-      // scriviamo noi sulle nostre, e qualche secondo di scarto fra i due
-      // basterebbe a far ricadere una modifica appena sotto il confine.
-      new Date(previousRunStart.getTime() - CLOCK_SKEW_MARGIN_MS)
-    : shop.supabaseConfig.updatedAt;
+  const lastSyncTime = deltaFloor(checkpoint, shop.supabaseConfig.updatedAt);
+
+  // Cosa e' rimasto indietro dalle corse precedenti. Si legge prima di
+  // cominciare, e serve a due cose che sembrano lontane e sono la stessa:
+  // rispingere le riparazioni che nessun delta riporterebbe, e sapere quali
+  // risorse questa corsa deve ritrovare per poterle dichiarare chiuse.
+  const openRepairs = await loadOpenRepairs(shop.id);
+  const ledger = createRepairLedger();
 
   // Create sync job
   const syncJob = await prisma.syncJob.create({
@@ -902,6 +1243,7 @@ export async function processPeriodicSyncCheck(
       shopId: shop.id,
       jobType: 'periodic_check',
       status: 'running',
+      startedAt: runStartedAt,
     },
   });
 
@@ -1020,6 +1362,11 @@ export async function processPeriodicSyncCheck(
         // destinate a duplicarsi. Vanno via comunque, elenco completo o no.
         const hasLegacyNullRows = (existingRows || []).some(row => row.shopify_variant_id == null);
 
+        // Se in questo giro una cancellazione e' fallita, il prodotto non e'
+        // "a posto" nemmeno quando l'upsert riesce: la riparazione appena
+        // aperta non deve essere richiusa qualche riga piu' sotto.
+        let cancellazioneRiuscita = true;
+
         if (orphanedVariantIds.length > 0) {
           // Come sopra: si cancella solo finche' il negozio e' nostro.
           await lease?.assertHeld();
@@ -1034,6 +1381,21 @@ export async function processPeriodicSyncCheck(
           );
 
           if (deleteError) {
+            // Era un avviso e si proseguiva. Adesso la cancellazione mancata
+            // lascia una riga durevole con dentro gli id: finche' esiste, il
+            // confine non scavalca questo prodotto, e la corsa dopo se lo
+            // ritrova nel delta con l'elenco delle varianti aggiornato.
+            //
+            // Si ripara rileggendo, non rigiocando questi id: fra oggi e il
+            // prossimo tentativo una di queste varianti puo' essere tornata
+            // legittima, e cancellarla allora sarebbe un danno vero.
+            cancellazioneRiuscita = false;
+            segnalaRiparazione(ledger, 'product.orphan-delete', {
+              resourceId: product.id,
+              sourceUpdatedAt: product.updated_at ?? null,
+              details: { ids: orphanedVariantIds },
+              error: deleteError.message ?? 'cancellazione delle varianti orfane non riuscita',
+            });
             console.warn(`Could not delete orphaned variants for product ${product.id}:`, deleteError);
           } else {
             collectRemovedProducts(collector, removedRows);
@@ -1052,6 +1414,13 @@ export async function processPeriodicSyncCheck(
           );
 
           if (deleteError) {
+            cancellazioneRiuscita = false;
+            segnalaRiparazione(ledger, 'product.orphan-delete', {
+              resourceId: product.id,
+              sourceUpdatedAt: product.updated_at ?? null,
+              details: { legacyNullVariant: true },
+              error: deleteError.message ?? 'cancellazione della riga senza variante non riuscita',
+            });
             console.warn(`Could not delete legacy null-variant row for product ${product.id}:`, deleteError);
           } else {
             collectRemovedProducts(collector, removedRows);
@@ -1074,9 +1443,26 @@ export async function processPeriodicSyncCheck(
           });
 
         if (error) {
+          // Il `continue` c'era gia'; quello che mancava e' la riga che lo
+          // rende accettabile. Senza, il prodotto usciva dalla finestra
+          // incrementale e — se su Shopify non lo toccava piu' nessuno — non
+          // veniva riletto mai piu': il difetto diventava permanente e nessuno
+          // sapeva quale prodotto fosse.
+          segnalaRiparazione(ledger, 'product.upsert', {
+            resourceId: product.id,
+            sourceUpdatedAt: product.updated_at ?? null,
+            error: error.message ?? 'scrittura del prodotto non riuscita',
+          });
           console.error(`Periodic sync upsert error for product ${product.id}:`, error);
           continue;
         }
+
+        // Scritto: se il prodotto era rimasto indietro in una corsa
+        // precedente, adesso e' a posto. Vale anche per la cancellazione,
+        // perche' ci si arriva solo se in questo giro non e' fallita: le righe
+        // obsolete che erano rimaste sono state ritrovate e tolte adesso.
+        chiudiRiparazione(ledger, 'product.upsert', product.id);
+        if (cancellazioneRiuscita) chiudiRiparazione(ledger, 'product.orphan-delete', product.id);
 
         collectAddedProducts(collector, addedRows);
 
@@ -1099,6 +1485,9 @@ export async function processPeriodicSyncCheck(
       supabase,
       updatedAtMin: lastSyncTime.toISOString(),
       shop,
+      ledger,
+      openRepairs,
+      now: runStartedAt,
     });
     const totalCustomers = customers.total;
     collector.absorb(customers.events);
@@ -1113,16 +1502,35 @@ export async function processPeriodicSyncCheck(
       shopifyClient,
       supabase,
       updatedAtMin: lastSyncTime.toISOString(),
+      ledger,
     });
     collector.absorb(orders.events);
 
-    // Mark completed
+    // Troppe riparazioni: non e' piu' "qualche risorsa e' andata storta", e'
+    // qualcosa di sistemico. Si fallisce, cosi' il confine resta dov'era e la
+    // corsa successiva ripassa su tutto invece di inseguire un elenco.
+    if (ledger.overflowed) {
+      throw new Error(
+        `Corsa interrotta: piu' di ${MAX_REPAIRS_PER_RUN} risorse non scritte per il negozio ${shop.id}`,
+      );
+    }
+
+    // La chiusura: riparazioni e confine, nello stesso commit.
+    //
+    // Non e' piu' una `update` che scrive 'completed' e basta. Il confine —
+    // `watermarkAt` — nasce qui e solo qui, e nasce insieme alle righe delle
+    // risorse rimaste indietro: se la scrittura di quelle righe non riesce, la
+    // transazione cade tutta e il confine non si muove. Un confine avanzato
+    // senza il suo registro e' il guasto da cui e' partito tutto.
     const eventCounters = await collector.flush(syncJob.id);
-    await prisma.syncJob.update({
-      where: { id: syncJob.id },
-      data: {
-        status: 'completed',
-        completedAt: new Date(),
+    const esito = await commitSyncRun({
+      shopId: shop.id,
+      syncJobId: syncJob.id,
+      runStartedAt,
+      deltaFloor: lastSyncTime,
+      ledger,
+      existing: openRepairs,
+      counters: {
         productsSynced: totalProducts,
         variantsSynced: totalVariants,
         customersSynced: totalCustomers,
@@ -1132,7 +1540,11 @@ export async function processPeriodicSyncCheck(
 
     await pruneOldEvents(shop.id);
 
-    console.log(`Periodic sync check completed: ${totalProducts} products checked, ${totalVariants} variants synced, ${totalCustomers} customers synced`);
+    console.log(
+      `Periodic sync check ${esito.status}: ${totalProducts} products checked, ` +
+        `${totalVariants} variants synced, ${totalCustomers} customers synced, ` +
+        `${esito.openRepairs} da rimettere a posto, confine a ${esito.watermarkAt.toISOString()}`,
+    );
 
   } catch (error) {
     // Anche una corsa interrotta ha fatto qualcosa prima di fermarsi: il
@@ -1206,12 +1618,29 @@ export async function processInitialBulkSync(
   const shopifyClient = await ShopifyAPIClient.forShop(shop.shopDomain);
   const supabase = createSupabaseClient(shop.supabaseConfig);
 
+  // L'istante d'inizio, uno solo per tutta la corsa.
+  //
+  // Serviva gia' alla spazzata di fine corsa ("via tutto cio' che non e' stato
+  // riscritto DOPO questo istante") ma nasceva dentro il `try`, dopo che la
+  // paginazione era gia' cominciata a prepararsi. Adesso e' anche il confine
+  // che questa corsa lascera' alla successiva, quindi va preso una volta sola e
+  // prima di qualunque lettura: con due istanti diversi, quel che e' cambiato
+  // fra l'uno e l'altro non apparterrebbe a nessuna delle due corse.
+  const runStartedAt = new Date();
+
+  // Cosa e' rimasto indietro dalle corse precedenti: si rispinge quel che
+  // nessun delta riporterebbe, e si chiude quel che questa corsa rimette a
+  // posto da sola.
+  const openRepairs = await loadOpenRepairs(shop.id);
+  const ledger = createRepairLedger();
+
   // Create sync job record
   const syncJob = await prisma.syncJob.create({
     data: {
       shopId: shop.id,
       jobType: 'initial_bulk',
       status: 'running',
+      startedAt: runStartedAt,
     },
   });
 
@@ -1248,8 +1677,21 @@ export async function processInitialBulkSync(
     // leggeva zero prodotti per l'intera durata) e non si distrugge nulla su un
     // progetto gia' popolato. Le righe non toccate da questa corsa vengono
     // spazzate alla fine confrontando `synced_at` con questo istante.
-    const runStartedAt = new Date().toISOString();
-    const syncStartedAtMs = Date.now();
+    const runStartedAtIso = runStartedAt.toISOString();
+    const syncStartedAtMs = runStartedAt.getTime();
+
+    // La spazzata rimasta in sospeso da una corsa precedente, prima di
+    // riscrivere qualunque cosa. Va spinta qui perche' nessun delta la
+    // riporterebbe: la corsa incrementale non spazza, e aspettarla sarebbe
+    // aspettare un evento che non accade.
+    await pushSweepRepairs({
+      repairs: openRepairs,
+      shopId: shop.id,
+      supabase,
+      tableName: shop.supabaseConfig.tableNameProducts,
+      lease,
+      now: runStartedAt,
+    });
 
     do {
       // Fetch products batch (250 per page)
@@ -1275,8 +1717,17 @@ export async function processInitialBulkSync(
       // Le righe la cui variante non c'era prima: si registrano dopo l'upsert,
       // perche' un upsert fallito non ha aggiunto niente.
       const addedRows: SupabaseProductRow[] = [];
+      // I conti di QUESTA pagina, tenuti da parte fino a scrittura avvenuta.
+      //
+      // Prima si sommavano ai totali mentre si costruiva l'elenco, cioe' prima
+      // di aver scritto una sola riga: un blocco che falliva lasciava sul
+      // registro della corsa un numero di prodotti che nessuno aveva
+      // sincronizzato. I contatori devono contare le operazioni commesse, non
+      // quelle tentate.
+      let pageProducts = 0;
+      let pageVariants = 0;
       for (const product of sortByCreatedAtAsc(products as ShopifyProduct[])) {
-        if (maxProducts != null && totalProducts >= maxProducts) break;
+        if (maxProducts != null && totalProducts + pageProducts >= maxProducts) break;
         // Si conta PRIMA di qualunque scarto: un prodotto le cui varianti sono
         // arrivate a meta' puo' benissimo sembrare senza righe idonee, e uscire
         // di scena qui sotto senza che nessuno sappia piu' che era monco. E'
@@ -1294,8 +1745,8 @@ export async function processInitialBulkSync(
           }
         }
         allRows.push(...eligibleRows);
-        totalProducts++;
-        totalVariants += eligibleRows.length;
+        pageProducts++;
+        pageVariants += eligibleRows.length;
       }
 
       // Ogni riga ha ora un shopify_variant_id reale (anche i prodotti a
@@ -1314,10 +1765,17 @@ export async function processInitialBulkSync(
             });
 
           if (error) {
+            // Critico: un blocco sono fino a mille righe, e trasformarle in
+            // altrettante riparazioni costerebbe piu' che rifare la corsa. Si
+            // lancia, e il confine non si muove.
             throw new Error(`Supabase products upsert failed: ${error.message}`);
           }
         }
       }
+
+      // Scritto: adesso i conti della pagina sono conti di righe commesse.
+      totalProducts += pageProducts;
+      totalVariants += pageVariants;
 
       collectAddedProducts(collector, addedRows);
 
@@ -1379,15 +1837,26 @@ export async function processInitialBulkSync(
         supabase
           .from(shop.supabaseConfig.tableNameProducts)
           .delete()
-          .lt('synced_at', runStartedAt) as unknown as ReturningBuilder,
+          .lt('synced_at', runStartedAtIso) as unknown as ReturningBuilder,
         REMOVED_PRODUCT_COLUMNS,
       );
 
       if (sweepError) {
-        // Non fatale: i prodotti idonei sono gia' stati scritti. Le righe obsolete
-        // verranno rimosse alla corsa successiva.
+        // "Le righe obsolete verranno rimosse alla corsa successiva" era una
+        // speranza senza nessuno che la mantenesse: la corsa successiva puo'
+        // benissimo essere una incrementale, che non spazza affatto. Adesso
+        // resta una riga durevole con dentro l'istante di confine, e la prossima
+        // corsa completa la rigioca prima di riscrivere qualunque cosa —
+        // rieseguirla con quel confine e' corretto, perche' quel che e' stato
+        // scritto dopo non ci ricade sotto.
+        segnalaRiparazione(ledger, 'product.sweep', {
+          resourceId: 'catalogue',
+          details: { before: runStartedAtIso },
+          error: sweepError.message ?? 'spazzata dei prodotti obsoleti non riuscita',
+        });
         console.warn('Spazzata dei prodotti obsoleti fallita:', sweepError);
       } else {
+        chiudiRiparazione(ledger, 'product.sweep', 'catalogue');
         collectRemovedProducts(collector, sweptRows);
       }
     }
@@ -1400,6 +1869,9 @@ export async function processInitialBulkSync(
       shopifyClient,
       supabase,
       shop,
+      ledger,
+      openRepairs,
+      now: runStartedAt,
     });
     const totalCustomers = customers.total;
     collector.absorb(customers.events);
@@ -1410,16 +1882,36 @@ export async function processInitialBulkSync(
       config: shop.supabaseConfig,
       shopifyClient,
       supabase,
+      ledger,
     });
     collector.absorb(orders.events);
 
-    // Mark sync job as completed
+    if (ledger.overflowed) {
+      throw new Error(
+        `Corsa interrotta: piu' di ${MAX_REPAIRS_PER_RUN} risorse non scritte per il negozio ${shop.id}`,
+      );
+    }
+
+    // La chiusura: riparazioni e confine, nello stesso commit. Il confine lo
+    // lascia anche la corsa completa, e non e' un di piu': una corsa completa
+    // ha letto tutto fino al proprio inizio, quindi e' un punto di partenza
+    // buono quanto quello di una incrementale. Senza, il primo controllo
+    // periodico dopo una sincronizzazione completa rileggeva da capo.
     const eventCounters = await collector.flush(syncJob.id);
-    await prisma.syncJob.update({
-      where: { id: syncJob.id },
-      data: {
-        status: 'completed',
-        completedAt: new Date(),
+    const esito = await commitSyncRun({
+      shopId: shop.id,
+      syncJobId: syncJob.id,
+      runStartedAt,
+      // Una corsa completa non ha un confine di partenza: ha letto tutto. Il
+      // punto in cui ci si ferma quando una risorsa non porta la sua data e'
+      // allora l'istante del collegamento, cioe' l'inizio della storia che
+      // questa app conosce di quel negozio.
+      deltaFloor: shop.supabaseConfig.updatedAt,
+      ledger,
+      existing: openRepairs,
+      counters: {
+        productsSynced: totalProducts,
+        variantsSynced: totalVariants,
         customersSynced: totalCustomers,
         ...eventCounters,
       },
@@ -1444,8 +1936,9 @@ export async function processInitialBulkSync(
     // cercato altrove; senza questa riga si finisce per ottimizzare la parte
     // sbagliata.
     console.log(
-      `Bulk sync completed in ${Date.now() - syncStartedAtMs}ms: ` +
-        `${totalProducts} products, ${totalVariants} variants, ${totalCustomers} customers`,
+      `Bulk sync ${esito.status} in ${Date.now() - syncStartedAtMs}ms: ` +
+        `${totalProducts} products, ${totalVariants} variants, ${totalCustomers} customers, ` +
+        `${esito.openRepairs} da rimettere a posto`,
     );
 
   } catch (error) {

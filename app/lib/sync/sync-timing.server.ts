@@ -28,6 +28,17 @@ export interface SyncRuns {
 const SYNC_JOB_TYPES = ['periodic_check', 'initial_bulk'];
 
 /**
+ * Gli stati che contano come "e' avvenuta".
+ *
+ * `completed_with_repairs` c'e' dentro, e la ragione e' che qui si risponde a
+ * "quando i tuoi dati si sono allineati l'ultima volta": una corsa che ha
+ * scritto quasi tutto si e' allineata, e dire "Mai" a chi ha appena visto
+ * riempirsi le sue tabelle sarebbe falso. Che sia rimasto qualcosa da rimettere
+ * a posto si legge dove si legge lo stato, non da questa data.
+ */
+const DONE_STATUSES = ['completed', 'completed_with_repairs'];
+
+/**
  * La lettura, da sola. Separata dal calcolo perche' non dipende dal piano: la
  * dashboard puo' cosi' avviarla insieme a tutte le altre, senza pagare un
  * round-trip in piu' solo per aspettare di sapere la cadenza.
@@ -35,12 +46,12 @@ const SYNC_JOB_TYPES = ['periodic_check', 'initial_bulk'];
 export async function loadSyncRuns(shopId: string): Promise<SyncRuns> {
   const [lastRun, lastPeriodic] = await Promise.all([
     prisma.syncJob.findFirst({
-      where: { shopId, jobType: { in: SYNC_JOB_TYPES }, status: 'completed' },
+      where: { shopId, jobType: { in: SYNC_JOB_TYPES }, status: { in: DONE_STATUSES } },
       orderBy: { completedAt: 'desc' },
       select: { completedAt: true },
     }),
     prisma.syncJob.findFirst({
-      where: { shopId, jobType: 'periodic_check', status: 'completed' },
+      where: { shopId, jobType: 'periodic_check', status: { in: DONE_STATUSES } },
       orderBy: { completedAt: 'desc' },
       select: { completedAt: true },
     }),

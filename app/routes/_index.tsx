@@ -886,7 +886,12 @@ export default function Dashboard() {
 
   // L'altra sponda del ponte: il database ha risposto, il ponte si abbassa.
   useEffect(() => {
-    if (syncState === 'in_progress' || syncState === 'completed' || syncState === 'failed') {
+    if (
+      syncState === 'in_progress' ||
+      syncState === 'completed' ||
+      syncState === 'partial' ||
+      syncState === 'failed'
+    ) {
       setJustQueued(false);
     }
   }, [syncState]);
@@ -901,7 +906,10 @@ export default function Dashboard() {
     return () => clearTimeout(id);
   }, [justQueued]);
 
-  const syncCompleted = syncState === 'completed';
+  // Anche "parziale" e' una corsa finita: il ponte dell'attesa si abbassa, e il
+  // pulsante torna premibile. Cosa e' rimasto indietro si legge nel registro,
+  // non tenendo la dashboard ad aspettare qualcosa che non arrivera'.
+  const syncCompleted = syncState === 'completed' || syncState === 'partial';
   const syncFailed = syncState === 'failed';
   const submitting = syncFetcher.state !== 'idle';
   // `justQueued` copre il tratto cieco fra "messo in coda" e "il database dice

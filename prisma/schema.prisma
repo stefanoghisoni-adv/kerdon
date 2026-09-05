@@ -164,6 +164,7 @@ model Shop {
   supabaseManagedResources SupabaseManagedResource[]
   supabaseDataDeletions    SupabaseDataDeletion[]
   syncRequests             SyncRequest[]
+  syncRepairs              SyncRepair[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -405,12 +406,33 @@ model SyncJob {
   customersSuspended Int       @default(0) @map("customers_suspended")
   errors             Json?
 
+  /// Fin dove questa corsa ha diritto di dire di essere arrivata.
+  ///
+  /// Distinto da `startedAt`, e la distinzione e' tutto il punto: prima il
+  /// confine incrementale era `startedAt` dell'ultima corsa con stato
+  /// `completed`, e `completed` lo diventava anche una corsa che aveva ignorato
+  /// una manciata di errori. Il confine scavalcava le risorse che nessuno era
+  /// riuscito a scrivere e quelle risorse, se su Shopify nessuno le toccava
+  /// piu', non venivano rilette mai piu'.
+  ///
+  /// Si scrive solo quando ogni lavoro critico e' riuscito oppure e' passato,
+  /// nello stesso commit, a una riga di `sync_repairs`. Nullo su una corsa
+  /// fallita: quella non ha spostato niente.
+  watermarkAt DateTime? @map("watermark_at")
+
+  /// Quante riparazioni questa corsa ha lasciato aperte. Zero e' `completed`;
+  /// piu' di zero e' `completed_with_repairs`, che nell'interfaccia si legge
+  /// come parziale finche' l'ultima non si chiude.
+  repairsOpened Int @default(0) @map("repairs_opened")
+
   shop   Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
   events SyncJobEvent[]
 
   @@index([shopId])
   @@index([status])
   @@index([startedAt(sort: Desc)])
+  /// La lettura del confine a ogni corsa: l'ultima che se l'e' guadagnato.
+  @@index([shopId, watermarkAt(sort: Desc)])
   @@map("sync_jobs")
 }
 
@@ -861,4 +883,101 @@ model ShopLock {
   /// nel momento peggiore. Le righe scadute le toglie il cron.
   @@index([expiresAt])
   @@map("shop_locks")
+}
+
+/// Il lavoro di riparazione: una risorsa che la corsa non e' riuscita a
+/// scrivere, e che non deve poter sparire.
+///
+/// PERCHE' ESISTE. Nei processor una quantita' di errori veniva registrata e
+/// ignorata, e la corsa si dichiarava completata lo stesso. Il confine
+/// incrementale della corsa successiva si calcolava dall'ultima corsa
+/// completata: la risorsa saltata usciva dalla finestra e — se su Shopify
+/// nessuno la toccava piu' — non veniva riletta mai piu'. Il difetto non si
+/// vedeva il giorno stesso, diventava permanente, e nessun registro sapeva
+/// dire quale riga fosse rimasta indietro.
+///
+/// PERCHE' UNA TABELLA E NON UN TIPO NUOVO NELLA CODA. `sync_requests` e' una
+/// coda di lavori, e ogni suo item costa una presa, un lease e un battito: una
+/// corsa che ne apre duecento vorrebbe dire duecento prese. In piu' la sua
+/// `dedup_key` e' unica per sempre, anche sulle righe concluse, quindi un
+/// secondo guasto sulla stessa risorsa a distanza di settimane verrebbe
+/// scambiato per un doppione e scartato. Qui la chiave e' la risorsa stessa e
+/// la riga si riapre: e' un registro di cose da rimettere a posto, non una
+/// fila di lavori da chiamare.
+///
+/// CHI LE RIPARA. Due strade, e la differenza sta in `recovered_by_delta`. Le
+/// riparazioni che il delta riporta da solo (un prodotto, un cliente, un
+/// ordine) tengono indietro il confine fino alla loro data di modifica: la
+/// corsa dopo se le ritrova davanti senza che nessuno vada a ripescarle. Quelle
+/// che il delta non puo' riportare — la data di nascita che va VERSO Shopify,
+/// dove non e' cambiato niente da segnalare; la spazzata delle righe non piu'
+/// riscritte, che la corsa incrementale non fa — vengono rispinte all'inizio
+/// della corsa successiva, che e' il momento in cui il negozio e' gia' aperto e
+/// il lucchetto e' gia' nostro.
+model SyncRepair {
+  id String @id @default(uuid())
+
+  shopId String @map("shop_id")
+
+  /// 'product' | 'customer' | 'order'.
+  resourceType String @map("resource_type")
+
+  /// L'id su Shopify, come testo: gli id di Shopify non stanno in un intero, e
+  /// la spazzata non ne ha uno (vale la sentinella 'catalogue').
+  resourceId String @map("resource_id")
+
+  /// 'upsert' | 'delete' | 'sweep' | 'consent_revoke' | 'birthdate_writeback'.
+  operation String
+
+  /// Quando la risorsa e' cambiata su Shopify. E' il dato da cui dipende tutto:
+  /// e' fin qui che il confine incrementale viene tenuto indietro, ed e' cosi'
+  /// che la corsa dopo ritrova la risorsa nel delta. Nullo quando Shopify non
+  /// l'ha detto: allora si torna all'inizio della corsa, che e' la scelta
+  /// prudente.
+  sourceUpdatedAt DateTime? @map("source_updated_at")
+
+  /// Se il delta della corsa successiva ci ripassa da solo. Falso vuol dire che
+  /// la riparazione va spinta: aspettare sarebbe aspettare un evento che non
+  /// puo' accadere.
+  recoveredByDelta Boolean @default(true) @map("recovered_by_delta")
+
+  /// 'pending' | 'done' | 'dead_letter'.
+  status String @default("pending")
+
+  attempts Int @default(0)
+
+  /// Prima di questo istante non si ritenta. E' il distanziamento fra un
+  /// tentativo e l'altro: senza, una riparazione impossibile verrebbe ritentata
+  /// a ogni corsa contro un servizio che sta ancora male.
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+
+  /// Cosa serve a ripetere l'operazione, o a capirla guardandola dopo: per una
+  /// cancellazione l'elenco degli id, per una spazzata il suo istante di
+  /// confine. L'elenco si conserva anche quando la riparazione passera' dal
+  /// delta — e' l'unica traccia di cosa era rimasto indietro.
+  details Json?
+
+  /// L'ultimo errore, redatto: questa colonna la si legge in un log, e un
+  /// messaggio d'errore e' il posto piu' facile del mondo dove far uscire un
+  /// segreto senza accorgersene.
+  lastError String? @map("last_error")
+
+  /// La corsa che ha trovato il guasto. Nessuna chiave esterna, di proposito:
+  /// la riparazione deve sopravvivere alla corsa che l'ha aperta, e una riga
+  /// che sparisce insieme al registro si porterebbe via un lavoro non fatto.
+  openedByJobId String? @map("opened_by_job_id")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  resolvedAt DateTime? @map("resolved_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  /// Una riga per risorsa e operazione, che si riapre invece di duplicarsi: due
+  /// corse che inciampano sullo stesso prodotto descrivono lo stesso lavoro da
+  /// fare, non due.
+  @@unique([shopId, resourceType, resourceId, operation])
+  @@index([shopId, status, nextAttemptAt])
+  @@index([openedByJobId])
+  @@map("sync_repairs")
 }

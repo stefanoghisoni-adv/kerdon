@@ -96,7 +96,21 @@ export const it = {
     title: "Logs",
     nextSync: (countdown: string) =>
       `Prossima sincronizzazione tra ${countdown}`,
-    status: { completed: "Completata", failed: "Fallita", running: "In corso" },
+    /**
+     * "Parziale" e' nuovo, e non e' una sfumatura di "Completata": dice che una
+     * parte dei dati non e' ancora arrivata. Resta finche' quello che manca non
+     * e' stato recuperato, e poi la riga diventa "Completata" da sola — senza
+     * che il merchant debba fare niente.
+     */
+    status: {
+      completed: "Completata",
+      partial: "Parziale",
+      failed: "Fallita",
+      running: "In corso",
+    },
+    /** Sotto la riga parziale: cosa vuol dire, e cosa succede adesso. */
+    partialNote:
+      "Una parte dei dati non è ancora arrivata. Ci riproviamo alla prossima sincronizzazione.",
     /**
      * Una frase sola per tutte e tre le creazioni di tabella, e senza
      * "riuscita": l'esito lo dice gia' il badge accanto, e ripeterlo a parole
@@ -437,6 +451,12 @@ export const it = {
          * sempre la stessa cosa, i suoi dati che si allineano.
          */
         running: "Sincronizzazione",
+        /**
+         * Corsa finita ma incompleta. Serve un titolo suo: "Sincronizzazione" e
+         * basta si legge come una corsa ancora in viaggio, mentre questa e'
+         * finita e ha lasciato indietro qualcosa.
+         */
+        partial: "Sincronizzazione parziale",
       },
     },
     soldWithoutCost: {

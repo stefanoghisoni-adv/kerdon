@@ -19,6 +19,15 @@ describe('recentRunLabel', () => {
     expect(recentRunLabel('periodic_check', 'running', itDict)).toBe('Sincronizzazione');
   });
 
+  it('una corsa parziale si chiama parziale, non "in corso"', () => {
+    // Distinta anche da "Sincronizzazione" e basta: quella si legge come una
+    // corsa ancora in viaggio, e questa invece e' finita lasciando indietro
+    // qualcosa. Sono due cose diverse e chi guarda deve poterle distinguere.
+    expect(recentRunLabel('periodic_check', 'completed_with_repairs', itDict)).toBe(
+      'Sincronizzazione parziale',
+    );
+  });
+
   it('per le creazioni di tabella riusa la frase del registro', () => {
     for (const type of ['table_create_products', 'table_create_customers', 'table_create_both']) {
       expect(recentRunLabel(type, 'completed', itDict)).toBe('Creazione tabelle nel database');

@@ -221,6 +221,8 @@ CREATE TABLE "sync_jobs" (
     "customers_updated" INTEGER NOT NULL DEFAULT 0,
     "customers_suspended" INTEGER NOT NULL DEFAULT 0,
     "errors" JSONB,
+    "watermark_at" TIMESTAMP(3),
+    "repairs_opened" INTEGER NOT NULL DEFAULT 0,
 
     CONSTRAINT "sync_jobs_pkey" PRIMARY KEY ("id")
 );
@@ -375,6 +377,9 @@ CREATE INDEX "sync_jobs_status_idx" ON "sync_jobs"("status");
 
 -- CreateIndex
 CREATE INDEX "sync_jobs_started_at_idx" ON "sync_jobs"("started_at" DESC);
+
+-- CreateIndex
+CREATE INDEX "sync_jobs_shop_id_watermark_at_idx" ON "sync_jobs"("shop_id", "watermark_at" DESC);
 
 -- CreateIndex
 CREATE UNIQUE INDEX "supabase_oauth_tokens_shop_id_key" ON "supabase_oauth_tokens"("shop_id");
@@ -565,6 +570,44 @@ ALTER TABLE "sync_requests" ADD CONSTRAINT "sync_requests_shop_id_fkey" FOREIGN 
 -- anche mentre il negozio viene cancellato (`shop/redact`), e una riga che
 -- sparisce a meta' di quel lavoro sarebbe il lucchetto che si apre da solo nel
 -- momento peggiore.
+
+-- CreateTable
+CREATE TABLE "sync_repairs" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "resource_type" TEXT NOT NULL,
+    "resource_id" TEXT NOT NULL,
+    "operation" TEXT NOT NULL,
+    "source_updated_at" TIMESTAMP(3),
+    "recovered_by_delta" BOOLEAN NOT NULL DEFAULT true,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "attempts" INTEGER NOT NULL DEFAULT 0,
+    "next_attempt_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "details" JSONB,
+    "last_error" TEXT,
+    "opened_by_job_id" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "resolved_at" TIMESTAMP(3),
+
+    CONSTRAINT "sync_repairs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "sync_repairs_shop_id_resource_type_resource_id_operation_key" ON "sync_repairs"("shop_id", "resource_type", "resource_id", "operation");
+
+-- CreateIndex
+CREATE INDEX "sync_repairs_shop_id_status_next_attempt_at_idx" ON "sync_repairs"("shop_id", "status", "next_attempt_at");
+
+-- CreateIndex
+CREATE INDEX "sync_repairs_opened_by_job_id_idx" ON "sync_repairs"("opened_by_job_id");
+
+-- AddForeignKey
+ALTER TABLE "sync_repairs" ADD CONSTRAINT "sync_repairs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Nessuna chiave esterna verso `sync_jobs`, di proposito: la riparazione deve
+-- sopravvivere alla corsa che l'ha aperta, e una riga che sparisce insieme al
+-- registro si porterebbe via un lavoro non fatto.
 
 -- I piani: cinque righe copiate dal database owner in uso.
 --

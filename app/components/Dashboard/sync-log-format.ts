@@ -71,12 +71,25 @@ export function hasSyncDetail(job: SyncJobCounters): boolean {
 }
 
 export interface StatusBadge {
-  tone: 'success' | 'critical' | 'info';
+  tone: 'success' | 'critical' | 'info' | 'attention';
   label: string;
 }
 
+/**
+ * Lo stato della corsa, come si legge.
+ *
+ * Tre stati diventano quattro, e il quarto e' quello che mancava: una
+ * sincronizzazione che ha scritto quasi tutto non e' "completata". Prima lo
+ * diventava — la corsa ignorava una manciata di errori e si dichiarava
+ * conclusa — e il merchant leggeva un successo mentre qualche suo prodotto
+ * restava indietro. "Parziale" resta finche' quello che manca non e' stato
+ * rimesso a posto, e allora diventa "Completata" da sola.
+ */
 export function syncStatusBadge(status: string, t: Dictionary): StatusBadge {
   if (status === 'completed') return { tone: 'success', label: t.logs.status.completed };
+  if (status === 'completed_with_repairs') {
+    return { tone: 'attention', label: t.logs.status.partial };
+  }
   if (status === 'failed') return { tone: 'critical', label: t.logs.status.failed };
   return { tone: 'info', label: t.logs.status.running };
 }

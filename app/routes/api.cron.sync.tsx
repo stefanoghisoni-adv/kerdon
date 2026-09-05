@@ -4,6 +4,7 @@ import { prisma } from '~/db.server';
 import { drainSyncRequests, type DrainResult } from '~/lib/queue/drain.server';
 import { pruneSyncRequests } from '~/lib/queue/queue-store.server';
 import { pruneExpiredShopLocks } from '~/lib/queue/shop-lock.server';
+import { pruneRepairs } from '~/lib/sync/repair-outbox.server';
 import {
   enqueueInitialBulkSync,
   enqueuePeriodicSyncCheck,
@@ -111,6 +112,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     planCatchUps: 0,
     completedRequestsPruned: 0,
     expiredLocksPruned: 0,
+    /**
+     * Riparazioni chiuse da piu' di una settimana, tolte di mezzo. Solo le
+     * chiuse: quelle in lettera morta restano, perche' sono l'unica traccia di
+     * una risorsa del merchant che non e' stata rimessa a posto.
+     */
+    repairsPruned: 0,
     snapshots: 0,
     accessLogPruned: 0,
     anonymousUsersPruned: 0,
@@ -248,8 +255,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
         continue;
       }
 
+      // Anche le corse parziali contano come "e' passato di qui": hanno letto
+      // Shopify e scritto quasi tutto, e rimetterle in coda un minuto dopo
+      // vorrebbe dire rifare il lavoro appena fatto per le poche risorse
+      // rimaste indietro — che hanno gia' il loro distanziamento.
       const lastCheck = await prisma.syncJob.findFirst({
-        where: { shopId: shop.id, jobType: 'periodic_check', status: 'completed' },
+        where: {
+          shopId: shop.id,
+          jobType: 'periodic_check',
+          status: { in: ['completed', 'completed_with_repairs'] },
+        },
         orderBy: { completedAt: 'desc' },
       });
 
@@ -307,6 +322,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     results.completedRequestsPruned = await pruneSyncRequests();
     results.expiredLocksPruned = await pruneExpiredShopLocks();
+    results.repairsPruned = await pruneRepairs();
   } catch (error) {
     results.errors.push(`potatura coda: ${error instanceof Error ? error.message : 'errore'}`);
   }
