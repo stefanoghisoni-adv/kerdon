@@ -1,9 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { creaFakeWebhookStore } from '~/lib/webhooks/inbox-fake-store';
 
-vi.mock('~/lib/webhooks/verify.server', () => ({ verifyWebhook: () => true }));
-vi.mock('~/lib/billing/apply-plan.server', () => ({
-  applyPlanToShop: vi.fn(),
+/**
+ * La rotta per intero: dalla firma all'effetto sul piano del negozio.
+ *
+ * COSA E' CAMBIATO RISPETTO A PRIMA. Ogni ramo di questa rotta finiva con un
+ * 200, compreso quello in cui non si era fatto niente perche' qualcosa era
+ * andato storto. Il caso peggiore era il listino senza piano gratuito: si
+ * scriveva "impossibile retrocedere", si rispondeva riuscito, e da li' in poi
+ * non ci tornava sopra nessuno — il negozio restava su un piano a pagamento
+ * senza abbonamento che lo sostenesse.
+ *
+ * Adesso il 200 dice solo "ricevuto". Cosa e' successo davvero si legge sullo
+ * stato della riga, ed e' li' che questi test guardano.
+ */
+
+const store = creaFakeWebhookStore();
+const verifyWebhook = vi.fn(() => true);
+const shopFindUnique = vi.fn();
+const chargeUpdateMany = vi.fn();
+
+vi.mock('~/lib/webhooks/verify.server', () => ({
+  verifyWebhook: (...a: unknown[]) => verifyWebhook(...(a as [])),
 }));
+vi.mock('~/lib/billing/apply-plan.server', () => ({ applyPlanToShop: vi.fn() }));
 // Le due ricerche di piano restano distinte di proposito: il piano
 // dell'abbonamento passa da findPlanByName (confronto per nome, insensibile a
 // maiuscole), quello gratuito da una query per prezzo. Mockarle insieme
@@ -14,338 +34,217 @@ vi.mock('~/lib/billing/find-plan.server', () => ({
 }));
 vi.mock('~/db.server', () => ({
   prisma: {
-    shop: { findUnique: vi.fn() },
-    billingCharge: { updateMany: vi.fn() },
+    get webhookEvent() {
+      return store;
+    },
+    shop: { findUnique: (...a: unknown[]) => shopFindUnique(...a) },
+    billingCharge: { updateMany: (...a: unknown[]) => chargeUpdateMany(...a) },
   },
 }));
 
 import { action } from './webhooks.app-subscriptions.update';
 import { applyPlanToShop } from '~/lib/billing/apply-plan.server';
 import { findFreePlan, findPlanByName } from '~/lib/billing/find-plan.server';
-import { prisma } from '~/db.server';
 
-function req(
-  payload: object,
-  shopDomain = 'test-shop.myshopify.com',
-): Request {
+const DOMINIO = 'test-shop.myshopify.com';
+
+function req(payload: object, over: { webhookId?: string } = {}): Request {
   return new Request('https://app/webhooks/app-subscriptions/update', {
     method: 'POST',
     headers: {
       'X-Shopify-Hmac-Sha256': 'valid-sig',
-      'X-Shopify-Shop-Domain': shopDomain,
+      'X-Shopify-Shop-Domain': DOMINIO,
+      'X-Shopify-Webhook-Id': over.webhookId ?? 'consegna-1',
     },
     body: JSON.stringify(payload),
   });
 }
 
+function abbonamento(status: string, name = 'pro') {
+  return {
+    app_subscription: {
+      admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
+      name,
+      status,
+    },
+  };
+}
+
+function negozio(over: Record<string, unknown> = {}) {
+  return {
+    id: 'shop-1',
+    shopDomain: DOMINIO,
+    currentPlan: 'pro',
+    activeChargeId: '123',
+    ...over,
+  };
+}
+
+const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
+
 describe('webhook app_subscriptions/update', () => {
   beforeEach(() => {
+    store.reset();
     vi.clearAllMocks();
+    verifyWebhook.mockReturnValue(true);
+    chargeUpdateMany.mockResolvedValue({ count: 1 });
+    shopFindUnique.mockResolvedValue(negozio());
   });
 
-  it('negozio sconosciuto → 200, nessuna azione', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue(null);
+  it('firma non valida → 401, nessuna riga', async () => {
+    verifyWebhook.mockReturnValue(false);
 
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
-        name: 'pro',
-        status: 'ACTIVE',
-      },
-    };
+    const res = await action({ request: req(abbonamento('ACTIVE')) } as never);
 
-    const res = await action({ request: req(payload) } as any);
+    expect(res.status).toBe(401);
+    expect(store.righe).toHaveLength(0);
+  });
+
+  it('la RICEVUTA non riesce → 5xx, perche Shopify deve ritentare', async () => {
+    const allarme = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(store, 'create').mockRejectedValueOnce(new Error('database irraggiungibile'));
+
+    const res = await action({ request: req(abbonamento('CANCELLED')) } as never);
+
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(applyPlanToShop).not.toHaveBeenCalled();
+    allarme.mockRestore();
+  });
+
+  it('l ELABORAZIONE non riesce dopo la ricevuta → 200, e il lavoro resta ritentabile', async () => {
+    // Due casi distinti e per questo due test: sopra Shopify deve ritentare,
+    // qui no — la riga c'e', e a riprendere il lavoro e' il drenaggio del cron.
+    shopFindUnique.mockRejectedValue(new Error('database irraggiungibile'));
+
+    const res = await action({ request: req(abbonamento('CANCELLED')) } as never);
+
+    expect(res.status).toBe(200);
+    expect(store.righe[0].status).toBe('queued');
+    expect(store.righe[0].attempts).toBe(1);
+    expect(store.righe[0].completedAt).toBeNull();
+  });
+
+  it('negozio sconosciuto → 200, nessuna azione, evento concluso', async () => {
+    shopFindUnique.mockResolvedValue(null);
+
+    const res = await action({ request: req(abbonamento('ACTIVE')) } as never);
 
     expect(res.status).toBe(200);
     expect(applyPlanToShop).not.toHaveBeenCalled();
+    expect(store.righe[0].status).toBe('completed');
   });
 
-  it('payload incompleto → 200, nessuna azione', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({ id: 'shop-1' });
+  it('ACTIVE con piano a listino → il piano viene applicato', async () => {
+    shopFindUnique.mockResolvedValue(negozio({ currentPlan: 'free', activeChargeId: null }));
+    mock(findPlanByName).mockResolvedValue({ planName: 'Pro', trialDays: 14 });
 
-    const res1 = await action({
-      request: req({ app_subscription: { status: 'ACTIVE' } }),
-    } as any);
-    const res2 = await action({
-      request: req({ app_subscription: { name: 'pro' } }),
-    } as any);
+    const res = await action({ request: req(abbonamento('ACTIVE')) } as never);
 
-    expect(res1.status).toBe(200);
-    expect(res2.status).toBe(200);
+    expect(res.status).toBe(200);
+    expect(applyPlanToShop).toHaveBeenCalledWith(
+      expect.objectContaining({ planName: 'Pro', chargeId: '123' }),
+    );
+    expect(store.righe[0].status).toBe('completed');
+  });
+
+  it('ACTIVE gia allineato → non riapplica, cosi la prova non riparte', async () => {
+    // Shopify puo' rimandare lo stesso ACTIVE piu' volte: riapplicare il piano
+    // ricalcolerebbe `trialEndsAt` da adesso, regalando giorni gratis a ogni
+    // consegna ripetuta.
+    shopFindUnique.mockResolvedValue(negozio({ currentPlan: 'Pro' }));
+    mock(findPlanByName).mockResolvedValue({ planName: 'Pro', trialDays: 14 });
+
+    await action({ request: req(abbonamento('ACTIVE')) } as never);
+
     expect(applyPlanToShop).not.toHaveBeenCalled();
   });
 
-  it('ACTIVE + piano nel listino → applica il piano', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({
-      id: 'shop-1',
-      activeChargeId: '999',
-    });
-    (findPlanByName as any).mockResolvedValue({
-      planName: 'pro',
-      trialDays: 7,
-    });
-    (prisma.billingCharge.updateMany as any).mockResolvedValue({});
+  it('PENDING → nessuna azione: l abbonamento non e ancora approvato', async () => {
+    await action({ request: req(abbonamento('PENDING')) } as never);
 
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
-        name: 'pro',
-        status: 'ACTIVE',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
-
-    expect(res.status).toBe(200);
-    expect(applyPlanToShop).toHaveBeenCalledWith({
-      shopId: 'shop-1',
-      planName: 'pro',
-      chargeId: '123',
-      trialDays: 7,
-    });
-    expect(prisma.billingCharge.updateMany).toHaveBeenCalledWith({
-      where: { shopId: 'shop-1', shopifyChargeId: 123n },
-      data: { status: 'active', activatedAt: expect.any(Date) },
-    });
+    expect(applyPlanToShop).not.toHaveBeenCalled();
+    expect(store.righe[0].status).toBe('completed');
   });
 
-  it('ACTIVE gia allineato → non riapplica (il periodo di prova non riparte)', async () => {
-    // Shopify puo' consegnare piu' volte lo stesso ACTIVE. Riapplicare il piano
-    // ricalcolerebbe trialEndsAt da adesso, regalando giorni di prova a ogni
-    // consegna. Il confronto sul nome non guarda le maiuscole: il listino puo'
-    // essere stato rinominato dopo l'attivazione.
-    (prisma.shop.findUnique as any).mockResolvedValue({
-      id: 'shop-1',
-      currentPlan: 'pro',
-      activeChargeId: '123',
+  for (const stato of ['CANCELLED', 'DECLINED', 'EXPIRED', 'FROZEN']) {
+    it(`${stato} sull abbonamento attivo → retrocessione al piano gratuito`, async () => {
+      mock(findFreePlan).mockResolvedValue({ planName: 'Free', trialDays: 14 });
+
+      const res = await action({ request: req(abbonamento(stato)) } as never);
+
+      expect(res.status).toBe(200);
+      expect(applyPlanToShop).toHaveBeenCalledWith(
+        expect.objectContaining({ planName: 'Free', chargeId: null, trialDays: null }),
+      );
+      expect(chargeUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
+      );
     });
-    (findPlanByName as any).mockResolvedValue({ planName: 'Pro', trialDays: 7 });
+  }
 
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
-        name: 'Pro',
-        status: 'ACTIVE',
-      },
-    };
+  it('CANCELLED di un abbonamento che non e l attivo → non retrocede nessuno', async () => {
+    // Durante un cambio di piano la callback cancella di proposito
+    // l'abbonamento precedente, e Shopify manda un CANCELLED per quello. Senza
+    // questo controllo, chi ha appena pagato un aggiornamento verrebbe
+    // retrocesso subito.
+    shopFindUnique.mockResolvedValue(negozio({ activeChargeId: '999' }));
 
-    const res = await action({ request: req(payload) } as any);
+    await action({ request: req(abbonamento('CANCELLED')) } as never);
 
-    expect(res.status).toBe(200);
+    expect(applyPlanToShop).not.toHaveBeenCalled();
+    expect(store.righe[0].status).toBe('completed');
+  });
+
+  it('retrocessione idempotente: la seconda consegna non fa niente', async () => {
+    mock(findFreePlan).mockResolvedValue({ planName: 'Free', trialDays: 14 });
+
+    await action({ request: req(abbonamento('CANCELLED'), { webhookId: 'c1' }) } as never);
+    // Dopo la prima, il negozio non ha piu' un addebito attivo.
+    shopFindUnique.mockResolvedValue(negozio({ currentPlan: 'Free', activeChargeId: null }));
+    mock(applyPlanToShop).mockClear();
+
+    await action({ request: req(abbonamento('CANCELLED'), { webhookId: 'c2' }) } as never);
+
     expect(applyPlanToShop).not.toHaveBeenCalled();
   });
 
-  it('ACTIVE + piano non nel listino → ignora', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({ id: 'shop-1' });
-    (findPlanByName as any).mockResolvedValue(null);
+  it('listino senza piano gratuito → lettera morta con allarme, NON completato', async () => {
+    // E' il caso che prima si dichiarava riuscito. Il 200 resta — la ricevuta
+    // c'e' — ma la riga dice che il lavoro non e' stato fatto, e c'e' un allarme
+    // nel log con il comando per riprenderlo.
+    mock(findFreePlan).mockResolvedValue(null);
+    const allarme = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
-        name: 'unknown-plan',
-        status: 'ACTIVE',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
+    const res = await action({ request: req(abbonamento('CANCELLED')) } as never);
 
     expect(res.status).toBe(200);
+    expect(store.righe[0].status).toBe('dead_letter');
+    expect(store.righe[0].status).not.toBe('completed');
     expect(applyPlanToShop).not.toHaveBeenCalled();
+    expect(allarme.mock.calls.some((c) => String(c[0]).includes('ALLARME'))).toBe(true);
+    allarme.mockRestore();
   });
 
-  it('PENDING → ignora', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({ id: 'shop-1' });
+  it('corpo senza i campi minimi → lettera morta, non cinque ritentativi', async () => {
+    const allarme = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
-        name: 'pro',
-        status: 'PENDING',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
+    const res = await action({ request: req({ app_subscription: {} }) } as never);
 
     expect(res.status).toBe(200);
-    expect(applyPlanToShop).not.toHaveBeenCalled();
+    expect(store.righe[0].status).toBe('dead_letter');
+    allarme.mockRestore();
   });
 
-  it('CANCELLED dell\'abbonamento NON attivo → ignora (cambio piano in corso)', async () => {
-    // Questo e' il test piu' critico: durante un cambio piano, la callback
-    // cancella l'abbonamento precedente. Shopify manda un CANCELLED per quello.
-    // Senza il confronto con activeChargeId, il merchant che ha appena pagato
-    // un upgrade verrebbe retrocesso al piano gratuito.
-    (prisma.shop.findUnique as any).mockResolvedValue({
-      id: 'shop-1',
-      activeChargeId: '999', // abbonamento attivo diverso
-    });
+  it('lo stesso webhook id due volte → un solo effetto', async () => {
+    mock(findFreePlan).mockResolvedValue({ planName: 'Free', trialDays: 14 });
 
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
-        name: 'basic',
-        status: 'CANCELLED',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
-
-    expect(res.status).toBe(200);
-    expect(applyPlanToShop).not.toHaveBeenCalled();
-    expect(findFreePlan).not.toHaveBeenCalled();
-  });
-
-  it('CANCELLED dell\'abbonamento attivo → riporta al piano gratuito', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({
-      id: 'shop-1',
-      activeChargeId: '123', // questo abbonamento e' quello attivo
-    });
-    (findFreePlan as any).mockResolvedValue({
-      planName: 'free',
-      priceMonthly: 0,
-    });
-    (prisma.billingCharge.updateMany as any).mockResolvedValue({});
-
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
-        name: 'pro',
-        status: 'CANCELLED',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
-
-    expect(res.status).toBe(200);
-    expect(findFreePlan).toHaveBeenCalled();
-    expect(applyPlanToShop).toHaveBeenCalledWith({
-      shopId: 'shop-1',
-      planName: 'free',
-      chargeId: null,
-      trialDays: null,
-    });
-    expect(prisma.billingCharge.updateMany).toHaveBeenCalledWith({
-      where: { shopId: 'shop-1', shopifyChargeId: 123n },
-      data: { status: 'cancelled', cancelledAt: expect.any(Date) },
-    });
-  });
-
-  it('EXPIRED dell\'abbonamento attivo → riporta al piano gratuito', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({
-      id: 'shop-1',
-      activeChargeId: '456',
-    });
-    (findFreePlan as any).mockResolvedValue({
-      planName: 'free',
-      priceMonthly: 0,
-    });
-    (prisma.billingCharge.updateMany as any).mockResolvedValue({});
-
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/456',
-        name: 'pro',
-        status: 'EXPIRED',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
-
-    expect(res.status).toBe(200);
-    expect(applyPlanToShop).toHaveBeenCalledWith({
-      shopId: 'shop-1',
-      planName: 'free',
-      chargeId: null,
-      trialDays: null,
-    });
-  });
-
-  it('DECLINED dell\'abbonamento attivo → riporta al piano gratuito', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({
-      id: 'shop-1',
-      activeChargeId: '789',
-    });
-    (findFreePlan as any).mockResolvedValue({
-      planName: 'free',
-      priceMonthly: 0,
-    });
-    (prisma.billingCharge.updateMany as any).mockResolvedValue({});
-
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/789',
-        name: 'pro',
-        status: 'DECLINED',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
-
-    expect(res.status).toBe(200);
-    expect(applyPlanToShop).toHaveBeenCalled();
-  });
-
-  it('FROZEN dell\'abbonamento attivo → riporta al piano gratuito', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({
-      id: 'shop-1',
-      activeChargeId: '321',
-    });
-    (findFreePlan as any).mockResolvedValue({
-      planName: 'free',
-      priceMonthly: 0,
-    });
-    (prisma.billingCharge.updateMany as any).mockResolvedValue({});
-
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/321',
-        name: 'pro',
-        status: 'FROZEN',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
-
-    expect(res.status).toBe(200);
-    expect(applyPlanToShop).toHaveBeenCalled();
-  });
-
-  it('nessun piano gratuito configurato → logga e ignora', async () => {
-    (prisma.shop.findUnique as any).mockResolvedValue({
-      id: 'shop-1',
-      activeChargeId: '555',
-    });
-    (findFreePlan as any).mockResolvedValue(null);
-
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/555',
-        name: 'pro',
-        status: 'CANCELLED',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
-
-    expect(res.status).toBe(200);
-    expect(applyPlanToShop).not.toHaveBeenCalled();
-  });
-
-  it('errore durante il processing → 200 comunque', async () => {
-    (prisma.shop.findUnique as any).mockRejectedValue(
-      new Error('Database error'),
+    await action({ request: req(abbonamento('CANCELLED'), { webhookId: 'c1' }) } as never);
+    const seconda = await action(
+      { request: req(abbonamento('CANCELLED'), { webhookId: 'c1' }) } as never,
     );
 
-    const payload = {
-      app_subscription: {
-        admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
-        name: 'pro',
-        status: 'ACTIVE',
-      },
-    };
-
-    const res = await action({ request: req(payload) } as any);
-
-    expect(res.status).toBe(200);
+    expect(seconda.status).toBe(200);
+    expect(store.righe).toHaveLength(1);
+    expect(applyPlanToShop).toHaveBeenCalledTimes(1);
   });
 });

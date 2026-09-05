@@ -123,6 +123,16 @@ model Shop {
   // garantisce che non riappaia dopo la chiusura dell'app.
   planBannerShownAt     DateTime?          @map("plan_banner_shown_at")
 
+  // Quando abbiamo chiesto a Shopify come stanno davvero le cose per questo
+  // negozio: se l'app risulta ancora installata e quale abbonamento e' attivo.
+  //
+  // Serve a far ruotare la riconciliazione. Un webhook amministrativo perso
+  // fuori dalla finestra dei ritentativi non torna piu': l'unico modo di
+  // accorgersene e' andare a guardare, e andare a guardare costa due chiamate a
+  // Shopify per negozio. Senza questa colonna il giro del cron ripasserebbe
+  // ogni volta dagli stessi primi negozi e agli ultimi non arriverebbe mai.
+  shopifyStateCheckedAt DateTime?          @map("shopify_state_checked_at")
+
   // Il metafield del cliente da cui leggere la data di nascita, scelto dal
   // merchant nella tab Clienti. Vuoto = nessuno, e la colonna `date_of_birth`
   // sul suo database resta com'e'.
@@ -165,6 +175,7 @@ model Shop {
   supabaseDataDeletions    SupabaseDataDeletion[]
   syncRequests             SyncRequest[]
   syncRepairs              SyncRepair[]
+  webhookEvents            WebhookEvent[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -980,4 +991,87 @@ model SyncRepair {
   @@index([shopId, status, nextAttemptAt])
   @@index([openedByJobId])
   @@map("sync_repairs")
+}
+
+/// La posta in arrivo dei webhook amministrativi: la ricevuta che si scrive
+/// PRIMA di rispondere 200, e il lavoro che ne segue.
+///
+/// PERCHE' UNA TABELLA E NON UN TIPO NUOVO IN `sync_requests`. Tre motivi, e
+/// ognuno da solo basterebbe.
+///
+/// Il primo e' la presa: la coda lavora ogni item dentro il lucchetto del suo
+/// negozio, e una disinstallazione che aspetta il lucchetto aspetta la fine di
+/// una sincronizzazione che dura minuti — proprio quella che sta scrivendo per
+/// conto di un negozio che ha appena chiuso. Le due cose devono poter accadere
+/// nell'ordine opposto.
+///
+/// Il secondo e' il negozio: `sync_requests.shop_id` punta a `shops`, e questi
+/// due webhook arrivano anche per installazioni mai completate e per negozi che
+/// non abbiamo mai avuto. Qui il negozio e' un dominio, e l'id si risolve
+/// quando si lavora — se si risolve.
+///
+/// Il terzo e' il corpo: la ricevuta deve conservare l'evento cosi' com'e'
+/// arrivato, perche' e' l'unica cosa da cui lo si puo' rifare. La coda porta di
+/// proposito il minimo per ritrovare un lavoro, mai il lavoro stesso.
+///
+/// E' lo stesso ragionamento che ha portato `sync_repairs` fuori dalla coda, e
+/// la stessa forma gia' usata da `compliance_requests`. Non e' un'infrastruttura
+/// nuova: e' la terza applicazione di quella che c'e'.
+model WebhookEvent {
+  id String @id @default(uuid())
+
+  /// L'id che Shopify da' alla consegna (header `X-Shopify-Webhook-Id`), o
+  /// l'impronta del corpo quando l'header manca. Unico: e' questo indice a
+  /// rendere la seconda consegna dello stesso evento una ricevuta invece di un
+  /// secondo effetto.
+  webhookId String @unique @map("webhook_id")
+
+  /// 'app/uninstalled' | 'app_subscriptions/update'.
+  topic String
+
+  /// Il negozio come lo dichiara Shopify. C'e' sempre — l'header e' il solo
+  /// dato che si legge prima della ricevuta — anche quando quel negozio da noi
+  /// non esiste.
+  shopDomain String @map("shop_domain")
+
+  /// Il riferimento interno del negozio, risolto in lavorazione e non alla
+  /// ricevuta: la ricevuta non deve dipendere da una lettura in piu'. Resta
+  /// nullo per un negozio che non abbiamo mai avuto.
+  shopId String? @map("shop_id")
+
+  /// Il corpo verificato, com'e' arrivato. Serve a rifare l'elaborazione tante
+  /// volte quante ne servono, e a capire dopo cos'era successo. Non contiene
+  /// dati personali: questi due topic parlano di un negozio e di un
+  /// abbonamento, non di una persona.
+  payload Json?
+
+  /// 'queued' | 'processing' | 'completed' | 'dead_letter'.
+  /// Non esiste 'failed', come nella coda: un tentativo andato male torna
+  /// 'queued' con `nextAttemptAt` in avanti, cosi' c'e' un posto solo da
+  /// guardare per sapere cosa e' pronto.
+  status String @default("queued")
+
+  attempts Int @default(0)
+
+  /// Prima di questo istante non si ritenta. E' il distanziamento.
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+
+  /// L'ultimo errore, redatto: questa colonna finisce in un log, e un messaggio
+  /// d'errore e' il posto piu' facile del mondo dove far uscire un segreto
+  /// senza accorgersene.
+  lastError String? @map("last_error")
+
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  /// Il negozio quando c'e'. `SetNull` e non `Cascade`, come per le richieste
+  /// di conformita': l'evento deve sopravvivere alla riga del negozio, perche'
+  /// e' anche la prova di cosa era arrivato per un negozio che non c'e' piu'.
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: SetNull)
+
+  /// Cosa c'e' da lavorare adesso: e' la query del drenaggio.
+  @@index([status, nextAttemptAt])
+  @@index([shopDomain, receivedAt(sort: Desc)])
+  @@map("webhook_events")
 }

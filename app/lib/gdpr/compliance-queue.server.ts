@@ -22,8 +22,8 @@
 // fallire li' vorrebbe dire far ritentare a Shopify una richiesta che abbiamo
 // gia' scritto, e cioe' rifiutare una richiesta gia' accettata.
 
-import { createHash } from 'crypto';
 import { prisma } from '~/db.server';
+import { deliveryId as deliveryIdOf } from '~/lib/webhooks/delivery-id.server';
 import { naturalDedupKey } from '~/lib/queue/queue-model';
 import { enqueueSyncRequest } from '~/lib/queue/queue-store.server';
 
@@ -47,14 +47,12 @@ export interface ComplianceDelivery {
 }
 
 /**
- * L'identita' della consegna.
+ * L'identita' della consegna, tipizzata sui topic di conformita'.
  *
- * Shopify la dichiara nell'header `X-Shopify-Webhook-Id`, e con quella la
- * deduplica e' esatta. Quando manca — un ritentativo che perde l'header, un
- * ambiente di prova — si ricava dal corpo: consegne identiche danno la stessa
- * impronta, e una richiesta ripetuta continua a essere riconosciuta. Il topic e
- * il negozio ci stanno dentro perche' due topic diversi non sono la stessa
- * richiesta nemmeno con lo stesso corpo.
+ * La regola sta in `webhooks/delivery-id.server` e vale per ogni posta in
+ * arrivo: l'header quando c'e', l'impronta del corpo quando manca. Qui resta
+ * solo il restringimento del tipo, cosi' chi chiama non puo' passare un topic
+ * che questa coda non lavora.
  */
 export function deliveryId(
   header: string | null | undefined,
@@ -62,8 +60,7 @@ export function deliveryId(
   shopDomain: string,
   body: string,
 ): string {
-  if (header && header.trim().length > 0) return header.trim();
-  return createHash('sha256').update(`${topic}:${shopDomain}:${body}`).digest('hex');
+  return deliveryIdOf(header, topic, shopDomain, body);
 }
 
 export interface EnqueueResult {

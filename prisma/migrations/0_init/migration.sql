@@ -82,6 +82,7 @@ CREATE TABLE "shops" (
     "primary_domain" TEXT,
     "last_synced_plan" TEXT,
     "plan_banner_shown_at" TIMESTAMP(3),
+    "shopify_state_checked_at" TIMESTAMP(3),
     "birthdate_metafield_namespace" TEXT,
     "birthdate_metafield_key" TEXT,
     "read_proxy_token_hash" TEXT,
@@ -608,6 +609,41 @@ ALTER TABLE "sync_repairs" ADD CONSTRAINT "sync_repairs_shop_id_fkey" FOREIGN KE
 -- Nessuna chiave esterna verso `sync_jobs`, di proposito: la riparazione deve
 -- sopravvivere alla corsa che l'ha aperta, e una riga che sparisce insieme al
 -- registro si porterebbe via un lavoro non fatto.
+
+-- CreateTable
+CREATE TABLE "webhook_events" (
+    "id" TEXT NOT NULL,
+    "webhook_id" TEXT NOT NULL,
+    "topic" TEXT NOT NULL,
+    "shop_domain" TEXT NOT NULL,
+    "shop_id" TEXT,
+    "payload" JSONB,
+    "status" TEXT NOT NULL DEFAULT 'queued',
+    "attempts" INTEGER NOT NULL DEFAULT 0,
+    "next_attempt_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "last_error" TEXT,
+    "received_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "started_at" TIMESTAMP(3),
+    "completed_at" TIMESTAMP(3),
+
+    CONSTRAINT "webhook_events_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "webhook_events_webhook_id_key" ON "webhook_events"("webhook_id");
+
+-- CreateIndex
+CREATE INDEX "webhook_events_status_next_attempt_at_idx" ON "webhook_events"("status", "next_attempt_at");
+
+-- CreateIndex
+CREATE INDEX "webhook_events_shop_domain_received_at_idx" ON "webhook_events"("shop_domain", "received_at" DESC);
+
+-- AddForeignKey
+ALTER TABLE "webhook_events" ADD CONSTRAINT "webhook_events_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- SET NULL e non CASCADE, come per `compliance_requests`: l'evento deve
+-- sopravvivere alla riga del negozio, perche' e' anche la prova di cosa era
+-- arrivato per un negozio che non c'e' piu'.
 
 -- I piani: cinque righe copiate dal database owner in uso.
 --

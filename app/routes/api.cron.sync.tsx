@@ -17,6 +17,9 @@ import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { SYNC_ACTIVE_CONFIG_FILTER } from '~/lib/sync/sync-active';
 import { pruneAccessLog } from '~/lib/read-proxy/access-log.server';
 import { drainPendingCancellations } from '~/lib/billing/cancel-outbox.server';
+import { drainWebhookEvents, pruneWebhookEvents } from '~/lib/webhooks/inbox.server';
+import { WEBHOOK_PROCESSORS } from '~/lib/webhooks/processors.server';
+import { reconcileShopStates } from '~/lib/webhooks/reconcile.server';
 import { unauthenticated } from '~/shopify.server';
 import { pruneAnonymousUsers } from '~/lib/tracking/users.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
@@ -125,6 +128,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     complianceFailed: 0,
     /** Abbonamenti sostituiti che si e' finalmente riusciti a chiudere. */
     subscriptionsCancelled: 0,
+    /** Webhook amministrativi ricevuti e finalmente applicati. */
+    webhooksProcessed: 0,
+    /** Ricevuti, non applicati, da ritentare al giro dopo. */
+    webhooksRetried: 0,
+    /** Fermi: nessuno ci riprova piu' da solo, e c'e' un allarme nel log. */
+    webhooksDeadLettered: 0,
+    webhookEventsPruned: 0,
+    /** Negozi a cui si e' chiesto a Shopify come stanno davvero le cose. */
+    shopsReconciled: 0,
+    /** Disinstallazioni scoperte guardando, perche' l'evento era andato perso. */
+    reconciledUninstalls: 0,
+    /** Piani retrocessi perche' su Shopify non c'era piu' niente di attivo. */
+    reconciledDowngrades: 0,
+    /** Abbonamenti attivi su Shopify di cui da noi non risultava niente. */
+    reconciledActivations: 0,
     expiredExportsPruned: 0,
     errors: [] as string[],
   };
@@ -168,6 +186,49 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('Cron billing outbox error:', message);
       results.errors.push(`billing outbox: ${message}`);
+    }
+  }
+
+  // I webhook amministrativi ricevuti e non ancora applicati.
+  //
+  // Fuori dal ciclo dei negozi e prima delle sincronizzazioni di proposito: qui
+  // dentro ci sono le disinstallazioni e le fini di abbonamento, cioe' proprio i
+  // fatti che decidono quali negozi vadano sincronizzati. Lavorarli dopo
+  // vorrebbe dire sincronizzare per un giro ancora un negozio che se n'e'
+  // andato.
+  if (!onlyShopId) {
+    try {
+      const eventi = await drainWebhookEvents(WEBHOOK_PROCESSORS);
+      results.webhooksProcessed = eventi.processed;
+      results.webhooksRetried = eventi.retried;
+      results.webhooksDeadLettered = eventi.deadLettered;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Cron webhook inbox error:', message);
+      results.errors.push(`webhook inbox: ${message}`);
+    }
+  }
+
+  // Cosa Shopify non ci ha mai detto.
+  //
+  // Il drenaggio qui sopra ripara gli eventi ricevuti; questo ripara quelli che
+  // non sono mai arrivati, perche' Shopify ritenta una consegna per una finestra
+  // limitata e oltre quella non torna piu'. Un pugno di negozi per giro, i piu'
+  // vecchi per ultimo controllo.
+  if (!onlyShopId) {
+    try {
+      const riconciliati = await reconcileShopStates(
+        async (shopDomain) => (await unauthenticated.admin(shopDomain)).admin,
+      );
+      results.shopsReconciled = riconciliati.checked;
+      results.reconciledUninstalls = riconciliati.uninstalled;
+      results.reconciledDowngrades = riconciliati.downgraded;
+      results.reconciledActivations = riconciliati.aligned;
+      results.errors.push(...riconciliati.errors.map((e) => `riconciliazione ${e}`));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Cron reconcile error:', message);
+      results.errors.push(`riconciliazione: ${message}`);
     }
   }
 
@@ -323,6 +384,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     results.completedRequestsPruned = await pruneSyncRequests();
     results.expiredLocksPruned = await pruneExpiredShopLocks();
     results.repairsPruned = await pruneRepairs();
+    results.webhookEventsPruned = await pruneWebhookEvents();
   } catch (error) {
     results.errors.push(`potatura coda: ${error instanceof Error ? error.message : 'errore'}`);
   }

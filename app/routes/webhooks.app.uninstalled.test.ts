@@ -1,21 +1,49 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { creaFakeWebhookStore } from '~/lib/webhooks/inbox-fake-store';
 
+/**
+ * La rotta per intero: dalla firma all'effetto sul negozio.
+ *
+ * COSA E' CAMBIATO RISPETTO A PRIMA. Questo file conteneva un test intitolato
+ * "errore durante la scrittura → 200 comunque", e quel test descriveva
+ * esattamente il difetto: il 200 e' la ricevuta di Shopify, e darlo senza aver
+ * scritto niente significava dire "consegnato" per un evento che nessuno
+ * avrebbe applicato e che nessuno avrebbe ritentato. Un negozio disinstallato
+ * mentre il database non rispondeva restava attivo nei registri per sempre.
+ *
+ * Adesso quel caso e' due casi, e restano due test distinti perche' sono
+ * davvero diversi:
+ *   - la RICEVUTA non riesce   → 5xx, cosi' Shopify ritenta
+ *   - l'ELABORAZIONE non riesce, dopo la ricevuta → 200, e il lavoro resta
+ *     ritentabile da noi
+ */
+
+const store = creaFakeWebhookStore();
 const verifyWebhook = vi.fn(() => true);
-const updateManyShop = vi.fn();
-const deleteManySession = vi.fn();
-const deleteManyConfig = vi.fn();
-const deleteManyToken = vi.fn();
+const shopFindUnique = vi.fn();
+const shopUpdateMany = vi.fn();
+const sessionDeleteMany = vi.fn();
+const configDeleteMany = vi.fn();
+const tokenDeleteMany = vi.fn();
 const deleteMerchantData = vi.fn();
+const transaction = vi.fn(async (operazioni: unknown[]) => Promise.all(operazioni as never[]));
 
 vi.mock('~/lib/webhooks/verify.server', () => ({
   verifyWebhook: (...a: unknown[]) => verifyWebhook(...(a as [])),
 }));
 vi.mock('~/db.server', () => ({
   prisma: {
-    shop: { updateMany: (...a: unknown[]) => updateManyShop(...a) },
-    session: { deleteMany: (...a: unknown[]) => deleteManySession(...a) },
-    supabaseConfig: { deleteMany: (...a: unknown[]) => deleteManyConfig(...a) },
-    supabaseOAuthToken: { deleteMany: (...a: unknown[]) => deleteManyToken(...a) },
+    get webhookEvent() {
+      return store;
+    },
+    shop: {
+      findUnique: (...a: unknown[]) => shopFindUnique(...a),
+      updateMany: (...a: unknown[]) => shopUpdateMany(...a),
+    },
+    session: { deleteMany: (...a: unknown[]) => sessionDeleteMany(...a) },
+    supabaseConfig: { deleteMany: (...a: unknown[]) => configDeleteMany(...a) },
+    supabaseOAuthToken: { deleteMany: (...a: unknown[]) => tokenDeleteMany(...a) },
+    $transaction: (...a: unknown[]) => transaction(...(a as [unknown[]])),
   },
 }));
 vi.mock('~/lib/supabase/delete-merchant-data.server', () => ({
@@ -24,9 +52,16 @@ vi.mock('~/lib/supabase/delete-merchant-data.server', () => ({
 
 import { action } from './webhooks.app.uninstalled';
 
-function req(shopDomain: string | null = 'test-shop.myshopify.com') {
-  const headers: Record<string, string> = { 'X-Shopify-Hmac-Sha256': 'valid-sig' };
-  if (shopDomain) headers['X-Shopify-Shop-Domain'] = shopDomain;
+const DOMINIO = 'test-shop.myshopify.com';
+
+function req(over: { shopDomain?: string | null; webhookId?: string } = {}) {
+  const headers: Record<string, string> = {
+    'X-Shopify-Hmac-Sha256': 'valid-sig',
+    'X-Shopify-Webhook-Id': over.webhookId ?? 'consegna-1',
+  };
+  const dominio = over.shopDomain === undefined ? DOMINIO : over.shopDomain;
+  if (dominio) headers['X-Shopify-Shop-Domain'] = dominio;
+
   return new Request('https://app/webhooks/app/uninstalled', {
     method: 'POST',
     headers,
@@ -36,10 +71,12 @@ function req(shopDomain: string | null = 'test-shop.myshopify.com') {
 
 describe('webhook app/uninstalled', () => {
   beforeEach(() => {
+    store.reset();
     vi.clearAllMocks();
     verifyWebhook.mockReturnValue(true);
-    updateManyShop.mockResolvedValue({ count: 1 });
-    deleteManySession.mockResolvedValue({ count: 1 });
+    shopFindUnique.mockResolvedValue({ id: 'shop-1' });
+    shopUpdateMany.mockResolvedValue({ count: 1 });
+    sessionDeleteMany.mockResolvedValue({ count: 1 });
   });
 
   it('firma non valida → 401, nessuna scrittura', async () => {
@@ -48,34 +85,43 @@ describe('webhook app/uninstalled', () => {
     const res = await action({ request: req() } as never);
 
     expect(res.status).toBe(401);
-    expect(updateManyShop).not.toHaveBeenCalled();
+    expect(store.righe).toHaveLength(0);
+    expect(shopUpdateMany).not.toHaveBeenCalled();
   });
 
   it('senza dominio del negozio → 400', async () => {
-    const res = await action({ request: req(null) } as never);
+    const res = await action({ request: req({ shopDomain: null }) } as never);
 
     expect(res.status).toBe(400);
-    expect(updateManyShop).not.toHaveBeenCalled();
+    expect(store.righe).toHaveLength(0);
   });
 
-  it('segna il negozio come disinstallato', async () => {
+  it('scrive la ricevuta prima di qualunque effetto', async () => {
+    // E' l'ordine che rende l'evento irreperdibile: da qui in poi, qualunque
+    // cosa accada, la riga c'e' e il drenaggio ci ripassa.
     const res = await action({ request: req() } as never);
 
     expect(res.status).toBe(200);
-    const arg = updateManyShop.mock.calls[0][0] as {
+    expect(store.righe).toHaveLength(1);
+    expect(store.righe[0].topic).toBe('app/uninstalled');
+    expect(store.righe[0].shopDomain).toBe(DOMINIO);
+  });
+
+  it('segna il negozio come disinstallato', async () => {
+    await action({ request: req() } as never);
+
+    const arg = shopUpdateMany.mock.calls[0][0] as {
       where: unknown;
       data: { uninstalledAt: Date };
     };
-    expect(arg.where).toEqual({ shopDomain: 'test-shop.myshopify.com' });
+    expect(arg.where).toEqual({ shopDomain: DOMINIO, uninstalledAt: null });
     expect(arg.data.uninstalledAt).toBeInstanceOf(Date);
   });
 
   it('cancella le sessioni: il token e gia morto lato Shopify', async () => {
     await action({ request: req() } as never);
 
-    expect(deleteManySession).toHaveBeenCalledWith({
-      where: { shop: 'test-shop.myshopify.com' },
-    });
+    expect(sessionDeleteMany).toHaveBeenCalledWith({ where: { shop: DOMINIO } });
   });
 
   it('NON tocca il collegamento al database ne i dati del merchant', async () => {
@@ -83,8 +129,8 @@ describe('webhook app/uninstalled', () => {
     // merchant ha raccolto. Le tabelle stanno nel suo progetto e restano sue.
     await action({ request: req() } as never);
 
-    expect(deleteManyConfig).not.toHaveBeenCalled();
-    expect(deleteManyToken).not.toHaveBeenCalled();
+    expect(configDeleteMany).not.toHaveBeenCalled();
+    expect(tokenDeleteMany).not.toHaveBeenCalled();
   });
 
   it('non passa dall eliminazione dei dati: quella e un gesto esplicito', async () => {
@@ -97,20 +143,78 @@ describe('webhook app/uninstalled', () => {
     expect(deleteMerchantData).not.toHaveBeenCalled();
   });
 
-  it('negozio sconosciuto → 200 lo stesso', async () => {
-    // updateMany su zero righe non lancia: il webhook non deve far ritentare
-    // Shopify per un negozio che non abbiamo mai avuto.
-    updateManyShop.mockResolvedValue({ count: 0 });
+  it('negozio sconosciuto → 200 lo stesso, evento concluso', async () => {
+    // Il webhook arriva anche per installazioni mai completate: updateMany su
+    // zero righe non lancia, e non c'e' niente da ritentare.
+    shopFindUnique.mockResolvedValue(null);
+    shopUpdateMany.mockResolvedValue({ count: 0 });
 
     expect((await action({ request: req() } as never)).status).toBe(200);
+    expect(store.righe[0].status).toBe('completed');
   });
 
-  it('errore durante la scrittura → 200 comunque', async () => {
-    updateManyShop.mockRejectedValue(new Error('database irraggiungibile'));
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('la RICEVUTA non riesce → 5xx, perche Shopify deve ritentare', async () => {
+    // Il test che stava qui diceva "200 comunque", ed era il difetto: senza
+    // riga e senza ritentativo, quell'evento non lo applicava piu' nessuno.
+    const allarme = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(store, 'create').mockRejectedValueOnce(new Error('database irraggiungibile'));
 
-    expect((await action({ request: req() } as never)).status).toBe(200);
-    expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
+    const res = await action({ request: req() } as never);
+
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(shopUpdateMany).not.toHaveBeenCalled();
+    expect(allarme).toHaveBeenCalled();
+    allarme.mockRestore();
+  });
+
+  it('l ELABORAZIONE non riesce dopo la ricevuta → 200, e il lavoro resta ritentabile', async () => {
+    // Caso diverso dal precedente, e per questo test distinto: la ricevuta e'
+    // gia' scritta, quindi far ritentare Shopify vorrebbe dire rifiutare un
+    // evento gia' accettato. Ma l'evento non e' concluso, e il cron ci ripassa.
+    const allarme = vi.spyOn(console, 'error').mockImplementation(() => {});
+    transaction.mockRejectedValueOnce(new Error('database irraggiungibile'));
+
+    const res = await action({ request: req() } as never);
+
+    expect(res.status).toBe(200);
+    expect(store.righe[0].status).toBe('queued');
+    expect(store.righe[0].completedAt).toBeNull();
+    allarme.mockRestore();
+  });
+
+  it('lo stesso webhook id due volte → un solo effetto', async () => {
+    await action({ request: req({ webhookId: 'consegna-1' }) } as never);
+    const seconda = await action({ request: req({ webhookId: 'consegna-1' }) } as never);
+
+    expect(seconda.status).toBe(200);
+    expect(store.righe).toHaveLength(1);
+    expect(shopUpdateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('la reinstallazione non passa di qui: si riabilita solo con un OAuth nuovo', async () => {
+    // Nessun ramo di questa rotta scrive `uninstalledAt: null`. A riaccendere un
+    // negozio e' `afterAuth`, cioe' un consenso nuovo del merchant — mai un
+    // record vecchio che ripassa.
+    await action({ request: req({ webhookId: 'vecchia-consegna' }) } as never);
+
+    // Il negozio nel frattempo ha reinstallato: la riga risulta di nuovo attiva.
+    shopUpdateMany.mockClear();
+
+    // Shopify riconsegna il vecchio evento di disinstallazione.
+    await action({ request: req({ webhookId: 'vecchia-consegna' }) } as never);
+
+    // Non lo tocca: quell'evento e' gia' concluso, e la presa lo riconosce.
+    expect(shopUpdateMany).not.toHaveBeenCalled();
+    expect(store.righe).toHaveLength(1);
+    expect(store.righe[0].status).toBe('completed');
+  });
+
+  it('nessuna scrittura di questa rotta riaccende un negozio', async () => {
+    await action({ request: req() } as never);
+
+    for (const chiamata of shopUpdateMany.mock.calls) {
+      const data = (chiamata[0] as { data: Record<string, unknown> }).data;
+      expect(data.uninstalledAt).not.toBeNull();
+    }
   });
 });
