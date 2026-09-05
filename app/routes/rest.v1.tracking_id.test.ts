@@ -24,6 +24,15 @@ vi.mock('~/lib/supabase/ensure-users-table.server', () => ({
   provisionUsersTable: vi.fn(async () => true),
 }));
 
+// La revoca durevole ha i suoi test in lib/consent/revocation-register.test:
+// qui interessa solo che questa rotta la faccia partire con il negozio e il
+// soggetto giusti, e che guardi l'esito invece di buttarlo via.
+const revokeTrackingIdentity = vi.fn<
+  (...args: never[]) => Promise<import('~/lib/consent/revoke-tracking.server').RevokeResult>
+>(async () => ({ outcome: 'applied', retriable: false }));
+vi.mock('~/lib/consent/revoke-tracking.server', () => ({ revokeTrackingIdentity }));
+
+
 // Il permesso del visitatore: default = concesso, i test lo modificano.
 const evaluateVisitorConsent = vi.fn();
 vi.mock('~/lib/tracking/consent', async () => {
@@ -55,6 +64,8 @@ beforeEach(() => {
   resolveShopReadContext.mockReset();
   recordUserSeen.mockClear();
   forgetVisitor.mockClear();
+  revokeTrackingIdentity.mockClear();
+  revokeTrackingIdentity.mockResolvedValue({ outcome: 'applied', retriable: false });
   evaluateVisitorConsent.mockReset();
   resolveShopReadContext.mockResolvedValue({
     kind: 'ok',
@@ -281,7 +292,7 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
     expect(JSON.parse(await res.text())).toEqual([]);
     expect(res.headers.get('Set-Cookie')).toContain('corew_eid=');
     expect(res.headers.get('Set-Cookie')).toContain('Max-Age=0');
-    expect(forgetVisitor).toHaveBeenCalledWith(expect.anything(), existing);
+    expect(revokeTrackingIdentity).toHaveBeenCalledWith({ shopId: 's1', externalId: existing });
   });
 
   it('revoca esplicita su marketing: cookie scaduto e riga cancellata', async () => {
@@ -295,7 +306,51 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
 
     const res = await call({ apikey: 'buono', Cookie: `corew_eid=${existing}` });
 
-    expect(forgetVisitor).toHaveBeenCalledWith(expect.anything(), existing);
+    expect(revokeTrackingIdentity).toHaveBeenCalledWith({ shopId: 's1', externalId: existing });
+  });
+
+  // Il caso dell'audit: la riga durevole non si e' potuta scrivere. Il cookie
+  // scade lo stesso — il tracciamento locale deve cessare subito — ma la
+  // risposta smette di essere un ok, perche' non se ne sta occupando nessuno.
+  it('revoca non presa in carico: 503, cookie comunque scaduto, nessun identificativo', async () => {
+    const existing = 'corew_1700000000000_abcdefghijklmnopqrstuvwxyz012345';
+    revokeTrackingIdentity.mockResolvedValue({ outcome: 'not_recorded', retriable: true });
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'denied', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+
+    const res = await call({ apikey: 'buono', Cookie: `corew_eid=${existing}` });
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get('Retry-After')).toBe('60');
+    expect(res.headers.get('Set-Cookie')).toContain('Max-Age=0');
+    // E soprattutto: non si rimette il cookie. Il riferimento sta nel registro,
+    // cifrato, non nel browser di chi ha appena revocato.
+    expect(res.headers.get('Set-Cookie')).not.toContain(existing);
+    expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
+  });
+
+  // La revoca scritta ma non ancora applicata NON e' un errore per chi chiama:
+  // la riga c'e', e il drenaggio la riprende.
+  it('revoca presa in carico ma non applicata: resta 200', async () => {
+    revokeTrackingIdentity.mockResolvedValue({ outcome: 'recorded', retriable: false });
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'denied', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+
+    const res = await call({
+      apikey: 'buono',
+      Cookie: 'corew_eid=corew_1700000000000_abcdefghijklmnopqrstuvwxyz012345',
+    });
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(await res.text())).toEqual([]);
   });
 
   it('segnale assente (unknown) vale come no, non come si', async () => {
@@ -313,7 +368,7 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
     expect(recordUserSeen).not.toHaveBeenCalled();
   });
 
-  it('revoca senza cookie esistente: nessun Set-Cookie, nessuna chiamata a forgetVisitor', async () => {
+  it('revoca senza cookie esistente: nessun Set-Cookie, nessuna revoca registrata', async () => {
     // La revoca si applica solo se c'era qualcosa da revocare.
     evaluateVisitorConsent.mockReturnValue({
       consent: { analytics: 'denied', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
@@ -325,7 +380,7 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
     const res = await call({ apikey: 'buono' });
 
     expect(res.headers.get('Set-Cookie')).toBeNull();
-    expect(forgetVisitor).not.toHaveBeenCalled();
+    expect(revokeTrackingIdentity).not.toHaveBeenCalled();
   });
 
   it('saleOfData viene sempre dichiarato nell header, consenso o no', async () => {

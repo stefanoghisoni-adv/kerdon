@@ -645,6 +645,48 @@ ALTER TABLE "webhook_events" ADD CONSTRAINT "webhook_events_shop_id_fkey" FOREIG
 -- sopravvivere alla riga del negozio, perche' e' anche la prova di cosa era
 -- arrivato per un negozio che non c'e' piu'.
 
+-- CreateTable
+CREATE TABLE "consent_revocations" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT,
+    "scope" TEXT NOT NULL,
+    "idempotency_key" TEXT NOT NULL,
+    "subject_cipher" TEXT,
+    "customer_cipher" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'queued',
+    "attempts" INTEGER NOT NULL DEFAULT 0,
+    "next_attempt_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lease_owner" TEXT,
+    "lease_expires_at" TIMESTAMP(3),
+    "steps" JSONB,
+    "last_error" TEXT,
+    "requested_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "started_at" TIMESTAMP(3),
+    "completed_at" TIMESTAMP(3),
+    "subject_purged_at" TIMESTAMP(3),
+
+    CONSTRAINT "consent_revocations_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "consent_revocations_idempotency_key_key" ON "consent_revocations"("idempotency_key");
+
+-- CreateIndex
+CREATE INDEX "consent_revocations_status_next_attempt_at_idx" ON "consent_revocations"("status", "next_attempt_at");
+
+-- CreateIndex
+CREATE INDEX "consent_revocations_shop_id_status_idx" ON "consent_revocations"("shop_id", "status");
+
+-- AddForeignKey
+ALTER TABLE "consent_revocations" ADD CONSTRAINT "consent_revocations_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- SET NULL e non CASCADE, come per `webhook_events`: la revoca deve
+-- sopravvivere alla riga del negozio, perche' e' la prova che una persona aveva
+-- chiesto di non essere piu' riconosciuta. Il soggetto sta cifrato in
+-- `subject_cipher` e si azzera appena il lavoro riesce: da li' in poi resta la
+-- sola prova HMAC in `idempotency_key`.
+
 -- I piani: cinque righe copiate dal database owner in uso.
 --
 -- Non si generano dallo schema perche' non sono struttura, sono scelte:

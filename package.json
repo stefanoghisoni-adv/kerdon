@@ -15,6 +15,7 @@
     "queue:replay": "tsx scripts/queue-replay.ts",
     "repairs:replay": "tsx scripts/repairs-replay.ts",
     "webhooks:replay": "tsx scripts/webhooks-replay.ts",
+    "consent:replay": "tsx scripts/consent-replay.ts",
     "worker:build": "node build-worker.mjs",
     "build:verified": "prisma generate && npm run typecheck && vitest run && npm run build"
   },

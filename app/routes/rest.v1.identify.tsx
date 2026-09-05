@@ -1,11 +1,11 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { isExternalId } from '~/lib/tracking/external-id';
 import {
-  forgetVisitor,
   identifyVisitor,
   supabaseFromReadContext,
   type IdentifyOutcome,
 } from '~/lib/tracking/users.server';
+import { revokeTrackingIdentity } from '~/lib/consent/revoke-tracking.server';
 import { evaluateVisitorConsent } from '~/lib/tracking/consent';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
@@ -95,8 +95,19 @@ export async function action({ request }: ActionFunctionArgs) {
   // che i due non restino legati.
   const consent = evaluateVisitorConsent(request, body as Record<string, unknown>);
   if (!consent.allowed) {
-    if (consent.withdrawn) await forgetVisitor(supabase, externalId);
+    // La revoca si scrive prima di dirsi applicata, come sulle altre rotte. Qui
+    // il corpo puo' portare anche l'email — che nel registro NON entra: il
+    // soggetto e' l'identificativo del browser, e conservare un secondo dato
+    // personale "per comodita'" sarebbe un secondo dato da cancellare.
+    const esito = consent.withdrawn
+      ? await revokeTrackingIdentity({ shopId: ctx.shopId, externalId })
+      : null;
+
     logIdentify(ctx.shopId, 'no_consent');
+
+    if (esito?.retriable) {
+      return json({ error: 'revoke_not_recorded' }, 503, { 'Retry-After': '60' });
+    }
     return json({ ok: true, outcome: 'no_consent' }, 200);
   }
 
@@ -145,10 +156,14 @@ interface IdentifyBody {
   device_type?: string | null;
 }
 
-function json(payload: unknown, status: number): Response {
+function json(
+  payload: unknown,
+  status: number,
+  extra: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra },
   });
 }
 

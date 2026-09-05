@@ -16,11 +16,8 @@ import {
   SALE_OF_DATA_HEADER,
   type ConsentDecision,
 } from '~/lib/tracking/consent';
-import {
-  forgetVisitor,
-  recordUserSeen,
-  supabaseFromReadContext,
-} from '~/lib/tracking/users.server';
+import { recordUserSeen, supabaseFromReadContext } from '~/lib/tracking/users.server';
+import { revokeTrackingIdentity } from '~/lib/consent/revoke-tracking.server';
 import { postgrestFilterValue } from '~/lib/tracking/users';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 
@@ -176,6 +173,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
  * Se il no e' esplicito — non un segnale che manca, ma una revoca — si disfa
  * anche quello che era stato raccolto prima: il cookie torna indietro scaduto e
  * la riga sparisce dal database. La politica sta in `forgetVisitor`.
+ *
+ * L'ORDINE CONTA, ed e' cambiato. Il cookie scade COMUNQUE, sempre e per primo:
+ * il tracciamento locale deve cessare nell'istante del no, e non c'e' nessun
+ * esito che giustifichi rimandare indietro alla persona l'identificativo che ha
+ * appena chiesto di non avere. Ma la revoca si SCRIVE prima di dichiararla
+ * applicata: se quella riga non si riesce a scriverla, l'unico riferimento da
+ * cui riprovare sarebbe sparito insieme al cookie, e non resterebbe niente. In
+ * quel caso — e solo in quello — si risponde 503, cosi' il container richiama e
+ * la revoca viene presa in carico davvero. Il cookie resta scaduto anche li'.
  */
 async function withoutIdentifier(
   ctx: ShopReadContext,
@@ -190,13 +196,17 @@ async function withoutIdentifier(
 
   if (consent.withdrawn && existing) {
     headers.append('Set-Cookie', expiredExternalIdCookie());
-    try {
-      await forgetVisitor(supabaseFromReadContext(ctx), existing);
-    } catch (error) {
-      console.warn(
-        '[rest/v1/tracking_id] revoca non applicata:',
-        error instanceof Error ? error.message : 'errore sconosciuto',
-      );
+
+    const esito = await revokeTrackingIdentity({ shopId: ctx.shopId, externalId: existing });
+    if (esito.retriable) {
+      // 503 e non 200: la revoca non e' nostra, e dire ok sarebbe dire che ce
+      // ne stiamo occupando quando non se ne occupa nessuno. `Retry-After`
+      // perche' il chiamante e' un container, non una persona.
+      headers.set('Retry-After', '60');
+      return new Response(JSON.stringify({ error: 'revoke_not_recorded' }), {
+        status: 503,
+        headers,
+      });
     }
   }
 

@@ -1,10 +1,7 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { isExternalId } from '~/lib/tracking/external-id';
-import {
-  forgetVisitor,
-  recordUserSeen,
-  supabaseFromReadContext,
-} from '~/lib/tracking/users.server';
+import { recordUserSeen, supabaseFromReadContext } from '~/lib/tracking/users.server';
+import { revokeTrackingIdentity } from '~/lib/consent/revoke-tracking.server';
 import { evaluateVisitorConsent } from '~/lib/tracking/consent';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
@@ -77,14 +74,28 @@ export async function action({ request }: ActionFunctionArgs) {
   // del visitatore, e non e' su di lui che ci si basa.
   const consent = evaluateVisitorConsent(request, body);
   if (!consent.allowed) {
-    if (consent.withdrawn) await forgetVisitor(supabase, externalId);
+    // Nessun cookie esce da questa rotta, ne' qui ne' altrove: e' il Writer del
+    // container a chiamarla, e l'identificativo lo porta gia' lui. Quello che
+    // cambia rispetto a prima e' che la revoca viene SCRITTA, e che il suo
+    // esito si guarda.
+    const esito = consent.withdrawn
+      ? await revokeTrackingIdentity({ shopId: ctx.shopId, externalId })
+      : null;
+
     console.log(
       `[rest/v1/users] ${JSON.stringify({
         shop: ctx.shopId,
-        outcome: 'no_consent',
+        outcome: esito ? `no_consent:${esito.outcome}` : 'no_consent',
         at: new Date().toISOString(),
       })}`,
     );
+
+    // 503 solo quando la revoca non e' stata presa in carico: e' l'unico caso
+    // in cui il ritentativo del container cambia qualcosa, perche' la riga
+    // durevole non c'e' e nessuno applichera' mai quella revoca.
+    if (esito?.retriable) {
+      return json({ error: 'revoke_not_recorded' }, 503, { 'Retry-After': '60' });
+    }
     return json({ ok: true }, 200);
   }
 
@@ -126,9 +137,13 @@ function asText(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-function json(payload: unknown, status: number): Response {
+function json(
+  payload: unknown,
+  status: number,
+  extra: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra },
   });
 }

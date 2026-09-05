@@ -131,7 +131,7 @@ model Shop {
   // accorgersene e' andare a guardare, e andare a guardare costa due chiamate a
   // Shopify per negozio. Senza questa colonna il giro del cron ripasserebbe
   // ogni volta dagli stessi primi negozi e agli ultimi non arriverebbe mai.
-  shopifyStateCheckedAt DateTime?          @map("shopify_state_checked_at")
+  shopifyStateCheckedAt DateTime? @map("shopify_state_checked_at")
 
   // Il metafield del cliente da cui leggere la data di nascita, scelto dal
   // merchant nella tab Clienti. Vuoto = nessuno, e la colonna `date_of_birth`
@@ -176,6 +176,7 @@ model Shop {
   syncRequests             SyncRequest[]
   syncRepairs              SyncRepair[]
   webhookEvents            WebhookEvent[]
+  consentRevocations       ConsentRevocation[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -1074,4 +1075,124 @@ model WebhookEvent {
   @@index([status, nextAttemptAt])
   @@index([shopDomain, receivedAt(sort: Desc)])
   @@map("webhook_events")
+}
+
+/// Il registro durevole delle revoche del tracciamento.
+///
+/// COSA C'ERA PRIMA. La revoca era best effort da capo a fondo. `forgetVisitor`
+/// scriveva un avviso nel log e restituiva 'failed'; le quattro rotte che la
+/// chiamano quel risultato non lo guardavano, e rispondevano 200. Il cookie
+/// `corew_eid` veniva fatto scadere comunque. Il risultato: l'unico riferimento
+/// da cui si sarebbe potuto riprovare — l'identificativo dentro il browser —
+/// spariva, mentre nel database del merchant restavano il legame
+/// browser-cliente e la riga del visitatore. E non tornava nessuno a
+/// riprenderli: il delta dei clienti puo' benissimo non rivedere piu' quel
+/// cliente, perche' `updated_at` non cambia una seconda volta.
+///
+/// PERCHE' UNA TABELLA E NON UN TIPO NUOVO IN `sync_requests`. Quattro motivi,
+/// e i primi due da soli basterebbero.
+///
+/// Il primo e' il segreto. Per riprovare serve l'identificativo del browser,
+/// che e' un dato personale: qui sta CIFRATO, con una chiave sua, e si cancella
+/// appena il lavoro riesce. `sync_requests.payload` e' un JSON in chiaro, non ha
+/// ritenzione propria e porta di proposito il minimo per ritrovare un lavoro,
+/// mai il lavoro stesso.
+///
+/// Il secondo e' la deduplica. Qui la chiave e' un HMAC del soggetto: due
+/// revoche identiche devono diventare un lavoro solo SENZA che l'identificativo
+/// finisca in chiaro dentro un indice unico, che e' esattamente cio' che
+/// succederebbe usando `sync_requests.dedup_key`.
+///
+/// Il terzo e' la presa: la coda lavora ogni item dentro il lucchetto del suo
+/// negozio, e una revoca che aspetta il lucchetto aspetta la fine di una
+/// sincronizzazione che dura minuti. Una persona che ha appena detto di no non
+/// aspetta la sincronizzazione di un catalogo.
+///
+/// Il quarto e' `sync_repairs`, che era l'altro candidato: quel registro e'
+/// drenato dalla corsa stessa e tiene indietro il confine incrementale finche'
+/// una risorsa non e' rimessa a posto. Una revoca non ha niente a che vedere
+/// con il confine, e trattenerlo per lei vorrebbe dire far rileggere a ogni
+/// corsa una finestra che non c'entra.
+///
+/// E' quindi la quarta applicazione della stessa forma — ricevuta durevole,
+/// tentativi, distanziamento, lettera morta, allarme, replay — non una quinta
+/// infrastruttura.
+model ConsentRevocation {
+  id String @id @default(uuid())
+
+  /// Il negozio nel cui database va applicata. Nullo quando quel negozio non
+  /// c'e' piu': la riga resta lo stesso, perche' e' anche la prova che una
+  /// revoca era stata presa in carico.
+  shopId String? @map("shop_id")
+
+  /// Cosa va disfatto. Elenco chiuso (vedi `REVOCATION_SCOPES`): uno scopo che
+  /// nessun processore sa lavorare non deve poter creare una riga che resta in
+  /// attesa per sempre.
+  scope String
+
+  /// L'identita' della revoca, e l'unica cosa su cui si deduplica: un HMAC di
+  /// negozio + scopo + soggetto. Chi apre la tabella non ci legge nessun
+  /// identificativo; chi arriva con una domanda precisa — "la revoca di questo
+  /// browser e' stata presa in carico?" — puo' ricalcolarlo e trovare la riga.
+  /// Verificabile senza essere leggibile, come le impronte GDPR.
+  idempotencyKey String @unique @map("idempotency_key")
+
+  /// Il soggetto in chiaro, cifrato. E' l'identificativo del browser, cioe' il
+  /// riferimento senza il quale il ritentativo non saprebbe piu' cosa
+  /// cancellare — proprio quello che il cookie scaduto porta via dal browser.
+  /// Si azzera appena il lavoro riesce: da li' in poi resta la sola prova HMAC.
+  subjectCipher String? @map("subject_cipher")
+
+  /// L'id del cliente Shopify, quando la revoca ne nomina uno. Cifrato per la
+  /// stessa ragione, e nullo quando non serve: il legame lo si ritrova
+  /// dall'identificativo del browser, e un dato in piu' conservato "per
+  /// comodita'" e' un dato in piu' da cancellare.
+  customerCipher String? @map("customer_cipher")
+
+  /// 'queued' | 'processing' | 'completed' | 'dead_letter'.
+  /// Non esiste 'failed', come nella coda e nella posta dei webhook: un
+  /// tentativo andato male torna 'queued' con `nextAttemptAt` in avanti.
+  status String @default("queued")
+
+  attempts Int @default(0)
+
+  /// Prima di questo istante non si ritenta. E' il distanziamento.
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+
+  /// Chi ha la riga in mano adesso, e fino a quando. L'identita' e' nuova a
+  /// ogni presa, quindi chi ha perso il possesso non puo' piu' chiudere il
+  /// lavoro di chi e' subentrato: e' lo stesso effetto del gettone della coda,
+  /// ottenuto senza un contatore in piu'.
+  leaseOwner     String?   @map("lease_owner")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+
+  /// L'esito passo per passo dell'ultimo tentativo, redatto. Serve a sapere
+  /// QUALE dei tre gesti non e' riuscito — slegare il cliente, azzerare i
+  /// rimandi, cancellare la riga — senza doverlo dedurre da un messaggio.
+  steps Json?
+
+  /// L'ultimo errore, redatto: questa colonna finisce in un log, e un messaggio
+  /// d'errore e' il posto piu' facile del mondo dove far uscire un dato
+  /// personale senza accorgersene.
+  lastError String? @map("last_error")
+
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  /// Quando il testo cifrato e' stato tolto di mezzo. Sulle riuscite e'
+  /// l'istante del completamento; sulle abbandonate e' la fine della ritenzione
+  /// breve, oltre la quale resta la sola prova.
+  subjectPurgedAt DateTime? @map("subject_purged_at")
+
+  /// `SetNull` e non `Cascade`, come per i webhook amministrativi: la revoca
+  /// deve sopravvivere alla riga del negozio, perche' e' la prova che una
+  /// persona aveva chiesto di non essere piu' riconosciuta.
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: SetNull)
+
+  /// Cosa c'e' da lavorare adesso: e' la query del drenaggio.
+  @@index([status, nextAttemptAt])
+  @@index([shopId, status])
+  @@map("consent_revocations")
 }

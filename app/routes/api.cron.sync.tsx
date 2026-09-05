@@ -18,6 +18,7 @@ import { SYNC_ACTIVE_CONFIG_FILTER } from '~/lib/sync/sync-active';
 import { pruneAccessLog } from '~/lib/read-proxy/access-log.server';
 import { drainPendingCancellations } from '~/lib/billing/cancel-outbox.server';
 import { drainWebhookEvents, pruneWebhookEvents } from '~/lib/webhooks/inbox.server';
+import { drainRevocations, pruneRevocations } from '~/lib/consent/revocation-register.server';
 import { WEBHOOK_PROCESSORS } from '~/lib/webhooks/processors.server';
 import { reconcileShopStates } from '~/lib/webhooks/reconcile.server';
 import { unauthenticated } from '~/shopify.server';
@@ -135,6 +136,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     /** Fermi: nessuno ci riprova piu' da solo, e c'e' un allarme nel log. */
     webhooksDeadLettered: 0,
     webhookEventsPruned: 0,
+    /** Revoche del tracciamento prese in carico e finalmente applicate. */
+    revocationsProcessed: 0,
+    /** Prese in carico, non applicate, da ritentare al giro dopo. */
+    revocationsRetried: 0,
+    /** Ferme: nessuno ci riprova piu' da solo, e c'e' un allarme nel log. */
+    revocationsDeadLettered: 0,
+    revocationsPruned: 0,
+    /** Soggetti cifrati tolti alle abbandonate a fine ritenzione. */
+    revocationSubjectsPurged: 0,
     /** Negozi a cui si e' chiesto a Shopify come stanno davvero le cose. */
     shopsReconciled: 0,
     /** Disinstallazioni scoperte guardando, perche' l'evento era andato perso. */
@@ -206,6 +216,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('Cron webhook inbox error:', message);
       results.errors.push(`webhook inbox: ${message}`);
+    }
+  }
+
+  // Le revoche del tracciamento prese in carico e non ancora applicate.
+  //
+  // Prima dei webhook amministrativi e prima delle sincronizzazioni, insieme
+  // alle richieste di conformita' e per lo stesso motivo: qui dentro c'e' il no
+  // di una persona vera, e non deve dipendere da quanto e' lungo il giro delle
+  // sincronizzazioni ne' da come e' andato. Di norma non trova niente — il
+  // primo tentativo e' sincrono, dentro la richiesta del visitatore — e quando
+  // trova qualcosa e' una revoca che nessun'altra strada riprenderebbe.
+  if (!onlyShopId) {
+    try {
+      const revoche = await drainRevocations();
+      results.revocationsProcessed = revoche.processed;
+      results.revocationsRetried = revoche.retried;
+      results.revocationsDeadLettered = revoche.deadLettered;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Cron consent revocation drain error:', message);
+      results.errors.push(`revoche: ${message}`);
     }
   }
 
@@ -385,6 +416,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     results.expiredLocksPruned = await pruneExpiredShopLocks();
     results.repairsPruned = await pruneRepairs();
     results.webhookEventsPruned = await pruneWebhookEvents();
+    const revoche = await pruneRevocations();
+    results.revocationsPruned = revoche.pruned;
+    results.revocationSubjectsPurged = revoche.subjectsPurged;
   } catch (error) {
     results.errors.push(`potatura coda: ${error instanceof Error ? error.message : 'errore'}`);
   }

@@ -33,11 +33,14 @@ vi.mock('~/lib/read-proxy/access-log.server', () => ({
 
 import { loader } from './rest.v1.$table';
 import * as consentModule from '~/lib/tracking/consent';
-import * as usersModule from '~/lib/tracking/users.server';
+import * as revokeModule from '~/lib/consent/revoke-tracking.server';
 
 // Spy sulle funzioni che vogliamo mockare.
 const evaluateVisitorConsentMock = vi.spyOn(consentModule, 'evaluateVisitorConsent');
-const forgetVisitorMock = vi.spyOn(usersModule, 'forgetVisitor');
+// La revoca durevole: qui interessa che il proxy la faccia partire con il
+// negozio e il soggetto giusti, e che guardi l'esito. Il registro ha i suoi
+// test in lib/consent/revocation-register.test.
+const revokeMock = vi.spyOn(revokeModule, 'revokeTrackingIdentity');
 
 /** Il consenso completo: analytics e marketing concessi. */
 const consentGranted = (): VisitorConsent => ({
@@ -69,7 +72,8 @@ describe('proxy loader', () => {
     forwardRead.mockReset();
     logCustomerDataAccess.mockClear();
     evaluateVisitorConsentMock.mockReset();
-    forgetVisitorMock.mockClear();
+    revokeMock.mockClear();
+    revokeMock.mockResolvedValue({ outcome: 'applied', retriable: false });
     // Di default: consenso completo.
     evaluateVisitorConsentMock.mockReturnValue({
       consent: consentGranted(),
@@ -424,7 +428,7 @@ describe('identificativo esterno — consenso del visitatore', () => {
     forwardRead.mockReset();
     logCustomerDataAccess.mockClear();
     evaluateVisitorConsentMock.mockReset();
-    forgetVisitorMock.mockClear();
+    revokeMock.mockClear();
     // Default: segnale assente (i test lo cambiano dove serve).
     evaluateVisitorConsentMock.mockReturnValue({
       consent: { analytics: 'unknown', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
@@ -511,7 +515,52 @@ describe('identificativo esterno — consenso del visitatore', () => {
     expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
     expect(res.headers.get('Set-Cookie')).toContain('corew_eid=');
     expect(res.headers.get('Set-Cookie')).toContain('Max-Age=0');
-    expect(forgetVisitorMock).toHaveBeenCalledWith(expect.anything(), existingId);
+    expect(revokeMock).toHaveBeenCalledWith({ shopId: 's1', externalId: existingId });
+  });
+
+  it('revoca non presa in carico: 503, cookie comunque scaduto e non rimesso', async () => {
+    const existingId = 'corew_1234567890_abcdefghijklmnopqrstuvwxyz123456';
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+    revokeMock.mockResolvedValue({ outcome: 'not_recorded', retriable: true });
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: { analytics: 'denied', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+
+    const res = await call({ authorization: 'Bearer spx_x', cookie: `corew_eid=${existingId}` });
+
+    // La lettura era andata bene, ma un 200 chiuderebbe per sempre una revoca
+    // che non e' scritta da nessuna parte, con il cookie gia' scaduto.
+    expect(res.status).toBe(503);
+    expect(res.headers.get('Retry-After')).toBe('60');
+    expect(res.headers.get('Set-Cookie')).toContain('Max-Age=0');
+    expect(res.headers.get('Set-Cookie')).not.toContain(existingId);
+    expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
+  });
+
+  // La regola trasversale, verificata qui perche' questo e' l'endpoint che la
+  // vetrina chiama a ogni pagina: senza permesso non esce un identificativo,
+  // ne' nuovo ne' rinnovato.
+  it('senza permesso non si conia e non si rinnova nessun corew_eid', async () => {
+    const existingId = 'corew_1234567890_abcdefghijklmnopqrstuvwxyz123456';
+    resolveShopReadContext.mockResolvedValueOnce(okCtx());
+    forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
+    evaluateVisitorConsentMock.mockReturnValue({
+      consent: { analytics: 'unknown', marketing: 'unknown', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'none',
+      allowed: false,
+      withdrawn: false,
+    });
+
+    const res = await call({ authorization: 'Bearer spx_x', cookie: `corew_eid=${existingId}` });
+
+    expect(res.headers.get('Set-Cookie')).toBeNull();
+    expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
+    // Un segnale che manca non e' un no: non fa scattare nessuna revoca.
+    expect(revokeMock).not.toHaveBeenCalled();
   });
 
   it('saleOfData viene sempre dichiarato, consenso o no', async () => {

@@ -1,5 +1,12 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { ShopReadContext } from '~/lib/read-proxy/context.server';
+import { redactError } from '~/lib/queue/queue-model';
+import {
+  allStepsSettled,
+  type ForgetResult,
+  type RevocationStep,
+  type RevocationStepName,
+} from '~/lib/consent/revocation-model';
 import {
   USERS_TABLE,
   anonymousUserCutoff,
@@ -170,10 +177,16 @@ export async function recordUserSeen(
  * questo permesso — non li abbiamo raccolti noi in vetrina. La revoca toglie il
  * riconoscimento del browser, non riscrive la contabilita' del negozio.
  *
- * Best effort come tutto il resto del file, ma con una differenza: qui un
- * fallimento si vede nel log come `failed`, perche' una cancellazione che non
- * riesce e' l'unica cosa in questo file che non si ripara da sola alla visita
- * successiva.
+ * NON E' PIU' BEST EFFORT, ed e' l'unica cosa in questo file a non esserlo.
+ * Tutto il resto qui dentro si ripara da solo alla visita successiva; una
+ * cancellazione no. Restituisce quindi un esito PER PASSO — cosa e' andato,
+ * cosa non c'era da fare, cosa e' fallito e perche' — e chi chiama lo scrive
+ * sul registro durevole delle revoche, che e' quello che poi ritenta.
+ *
+ * Prima restituiva 'forgotten' o 'failed' e basta, e nessuna delle quattro
+ * rotte che la chiamano guardava quel valore: l'esito viveva in una riga di
+ * log, mentre il cookie — cioe' l'unico riferimento da cui riprovare — veniva
+ * fatto scadere lo stesso.
  *
  * E' anche la funzione da riusare se serve la stessa cancellazione altrove —
  * una richiesta di cancellazione GDPR fa esattamente questo, per lo stesso
@@ -182,36 +195,63 @@ export async function recordUserSeen(
 export async function forgetVisitor(
   supabase: SupabaseClient,
   externalId: string,
-): Promise<'forgotten' | 'failed'> {
-  let ok = true;
+): Promise<ForgetResult> {
+  const steps: RevocationStep[] = [];
 
-  const unlink = await supabase
-    .from('customers')
-    .update({ external_id: null })
-    .eq('external_id', externalId);
-  if (unlink.error && !isMissingTable(unlink.error)) {
-    console.warn(`[users] cliente non slegato: ${unlink.error.message ?? 'errore sconosciuto'}`);
-    ok = false;
+  steps.push(
+    esito(
+      'customer_unlink',
+      await supabase.from('customers').update({ external_id: null }).eq('external_id', externalId),
+    ),
+  );
+
+  steps.push(
+    esito(
+      'merge_pointers',
+      await supabase.from(USERS_TABLE).update({ merged_into: null }).eq('merged_into', externalId),
+    ),
+  );
+
+  steps.push(
+    esito(
+      'user_delete',
+      await supabase.from(USERS_TABLE).delete().eq('external_id', externalId),
+    ),
+  );
+
+  const outcome = allStepsSettled(steps) ? 'forgotten' : 'failed';
+
+  // Il log resta, ma non e' piu' l'unico posto dove l'esito finisce: chi chiama
+  // riceve i passi e li scrive sul registro durevole. Prima questa riga era
+  // tutto quello che restava di una revoca non applicata.
+  for (const passo of steps) {
+    if (passo.outcome !== 'failed') continue;
+    console.warn(`[users] revoca, passo ${passo.step} non riuscito: ${passo.detail}`);
   }
 
-  const pointers = await supabase
-    .from(USERS_TABLE)
-    .update({ merged_into: null })
-    .eq('merged_into', externalId);
-  if (pointers.error && !isMissingTable(pointers.error)) {
-    console.warn(`[users] rimandi non azzerati: ${pointers.error.message ?? 'errore sconosciuto'}`);
-    ok = false;
-  }
+  return { outcome, steps };
+}
 
-  const removed = await supabase.from(USERS_TABLE).delete().eq('external_id', externalId);
-  if (removed.error && !isMissingTable(removed.error)) {
-    console.warn(
-      `[users] browser non dimenticato: ${removed.error.message ?? 'errore sconosciuto'}`,
-    );
-    ok = false;
+/**
+ * Da una risposta di PostgREST al passo corrispondente.
+ *
+ * LA DISTINZIONE CHE QUESTA FUNZIONE ESISTE PER TENERE: "tabella assente" e'
+ * `skipped`, non successo e non fallimento. Un negozio collegato prima della
+ * DDL del grafo non ha `users`, e un piano che non sincronizza i clienti non ha
+ * `customers`: li' non c'e' niente da cancellare, e chiamarlo errore vorrebbe
+ * dire mandare in lettera morta una revoca gia' soddisfatta. Un errore vero
+ * invece non diventa mai successo — che e' esattamente quello che succedeva
+ * prima, con un avviso nel log e un `return 'forgotten'` piu' in basso.
+ */
+function esito(step: RevocationStepName, risposta: WithError): RevocationStep {
+  if (!risposta.error) return { step, outcome: 'done' };
+  if (isMissingTable(risposta.error)) {
+    return { step, outcome: 'skipped', detail: 'tabella assente' };
   }
-
-  return ok ? 'forgotten' : 'failed';
+  // Redatto: questo dettaglio finisce su una colonna del registro e da li' in
+  // un log. PostgREST riporta volentieri il filtro della query, e il filtro qui
+  // e' l'identificativo del browser di una persona.
+  return { step, outcome: 'failed', detail: redactError(risposta.error.message ?? undefined) };
 }
 
 export interface LinkResult {

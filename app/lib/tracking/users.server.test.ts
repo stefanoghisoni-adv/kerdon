@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  forgetVisitor,
   identifyVisitor,
   linkUserToCustomer,
   pruneAnonymousUsers,
@@ -127,6 +128,13 @@ class FakeQuery implements PromiseLike<{ data: Row[] | null; error: unknown }> {
     }
 
     this.db.calls.push(`${this.table}.${this.op}`);
+
+    // Il guasto iniettato: serve a provare che un errore VERO non diventa mai
+    // successo, che e' la meta' che prima mancava. `PGRST205` (tabella assente)
+    // continua ad arrivare dal ramo qui sopra, e le due strade devono restare
+    // distinguibili.
+    const guasto = this.db.fails[`${this.table}.${this.op}`];
+    if (guasto) return { data: null, error: guasto };
     const matches = (row: Row) => this.filters.every((f) => f(row));
 
     if (this.op === 'upsert') {
@@ -159,6 +167,8 @@ class FakeQuery implements PromiseLike<{ data: Row[] | null; error: unknown }> {
 
 class FakeDb {
   readonly calls: string[] = [];
+  /** I guasti da far rispondere, per `tabella.operazione`. */
+  readonly fails: Record<string, { code?: string; message: string }> = {};
   now: () => string = () => new Date().toISOString();
 
   constructor(public tables: Record<string, Row[]>) {}
@@ -540,5 +550,99 @@ describe('pruneAnonymousUsers', () => {
     const store = new FakeDb({});
     expect(await pruneAnonymousUsers(store.client())).toBe(0);
     expect(warned).toHaveLength(0);
+  });
+});
+
+describe('forgetVisitor', () => {
+  const passo = (esito: Awaited<ReturnType<typeof forgetVisitor>>, nome: string) =>
+    esito.steps.find((s) => s.step === nome);
+
+  it('i tre gesti, e la revoca si dichiara applicata', async () => {
+    const store = db(
+      [{ external_id: TELEFONO, merged_into: null }, { external_id: PORTATILE, merged_into: TELEFONO }],
+      [{ shopify_customer_id: 7, external_id: TELEFONO }],
+    );
+
+    const esito = await forgetVisitor(store.client(), TELEFONO);
+
+    expect(esito.outcome).toBe('forgotten');
+    expect(esito.steps.map((s) => s.outcome)).toEqual(['done', 'done', 'done']);
+    expect(store.tables.customers[0].external_id).toBeNull();
+    expect(store.tables.users.find((r) => r.external_id === PORTATILE)?.merged_into).toBeNull();
+    expect(store.tables.users.find((r) => r.external_id === TELEFONO)).toBeUndefined();
+  });
+
+  // I tre casi dell'audit, uno per gesto. Prima ognuno di questi finiva in una
+  // riga di log e la funzione tornava comunque un valore che nessuno guardava.
+  it.each([
+    ['customers.update', 'customer_unlink'],
+    ['users.update', 'merge_pointers'],
+    ['users.delete', 'user_delete'],
+  ] as const)('%s in errore: il passo e failed, e la revoca non e applicata', async (dove, passoAtteso) => {
+    const store = db([{ external_id: TELEFONO, merged_into: null }], [
+      { shopify_customer_id: 7, external_id: TELEFONO },
+    ]);
+    store.fails[dove] = { code: '57014', message: 'statement timeout' };
+
+    const esito = await forgetVisitor(store.client(), TELEFONO);
+
+    expect(esito.outcome).toBe('failed');
+    expect(passo(esito, passoAtteso)?.outcome).toBe('failed');
+    expect(passo(esito, passoAtteso)?.detail).toContain('timeout');
+  });
+
+  // Il dettaglio finisce su una colonna del registro e da li' in un log:
+  // PostgREST riporta volentieri il filtro della query, e il filtro qui e'
+  // l'identificativo del browser di una persona.
+  it('il dettaglio dell errore e redatto', async () => {
+    const store = db([{ external_id: TELEFONO }]);
+    store.fails['users.delete'] = {
+      message: `connessione a postgresql://utente:parolasegreta@db.abc.supabase.co rifiutata per anna@example.com`,
+    };
+
+    const esito = await forgetVisitor(store.client(), TELEFONO);
+    const dettaglio = passo(esito, 'user_delete')?.detail ?? '';
+
+    expect(dettaglio).not.toContain('parolasegreta');
+    expect(dettaglio).not.toContain('anna@example.com');
+  });
+
+  // Un negozio collegato prima della DDL del grafo non ha `users`; un piano che
+  // non sincronizza i clienti non ha `customers`. Li' non c'e' niente da
+  // cancellare, e chiamarlo errore vorrebbe dire mandare in lettera morta una
+  // revoca gia' soddisfatta.
+  it('tabella clienti assente: skipped, non failed', async () => {
+    const store = new FakeDb({ users: [{ external_id: TELEFONO }] });
+
+    const esito = await forgetVisitor(store.client(), TELEFONO);
+
+    expect(esito.outcome).toBe('forgotten');
+    expect(passo(esito, 'customer_unlink')?.outcome).toBe('skipped');
+    expect(passo(esito, 'customer_unlink')?.detail).toBe('tabella assente');
+    expect(passo(esito, 'user_delete')?.outcome).toBe('done');
+  });
+
+  it('nessuna tabella: tutto skipped, e la revoca resta applicata', async () => {
+    const store = new FakeDb({});
+
+    const esito = await forgetVisitor(store.client(), TELEFONO);
+
+    expect(esito.outcome).toBe('forgotten');
+    expect(esito.steps.map((s) => s.outcome)).toEqual(['skipped', 'skipped', 'skipped']);
+  });
+
+  // L'ordine e' parte del rimedio: si slega il cliente e si sciolgono i rimandi
+  // PRIMA di cancellare la riga, cosi' un ritentativo ricomincia da un grafo
+  // ancora intero.
+  it('un gesto fallito non impedisce agli altri di riuscire', async () => {
+    const store = db([{ external_id: TELEFONO }], [{ shopify_customer_id: 7, external_id: TELEFONO }]);
+    store.fails['customers.update'] = { message: 'permission denied' };
+
+    const esito = await forgetVisitor(store.client(), TELEFONO);
+
+    expect(esito.outcome).toBe('failed');
+    // La riga del visitatore se n'e' andata lo stesso: il ritentativo dovra'
+    // solo rifare il gesto mancante.
+    expect(store.tables.users).toHaveLength(0);
   });
 });

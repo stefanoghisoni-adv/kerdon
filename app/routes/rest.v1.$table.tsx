@@ -12,7 +12,7 @@ import {
   type ShopReadContext,
 } from '~/lib/read-proxy/context.server';
 import { evaluateVisitorConsent, SALE_OF_DATA_HEADER } from '~/lib/tracking/consent';
-import { forgetVisitor, supabaseFromReadContext } from '~/lib/tracking/users.server';
+import { revokeTrackingIdentity } from '~/lib/consent/revoke-tracking.server';
 import {
   allowedReadTables,
   allowedEmbedTables,
@@ -192,7 +192,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // niente di tutto questo: non e' un no, e non basta a cancellare.
     if (consent.withdrawn && existing) {
       result.response.headers.append('Set-Cookie', expiredExternalIdCookie());
-      if (result.ctx) await forgetRevoked(result.ctx, existing);
+      if (result.ctx) {
+        const esito = await revokeTrackingIdentity({
+          shopId: result.ctx.shopId,
+          externalId: existing,
+        });
+        // La revoca non presa in carico e' l'unico caso in cui questa risposta
+        // cambia. La lettura era andata bene, ma rispondere 200 vorrebbe dire
+        // dire ok a una revoca che non e' scritta da nessuna parte — mentre il
+        // cookie, gia' scaduto qui sopra, si e' portato via l'unico riferimento
+        // da cui riprovare. 503 e il tag richiama; la lettura e' un GET, quindi
+        // rifarla non costa altro che una chiamata.
+        if (esito.retriable) return revokeUnavailable(result.response);
+      }
     }
     return result.response;
   }
@@ -218,26 +230,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 }
 
 /**
- * La revoca, applicata da qui.
+ * La risposta quando la revoca non e' stata presa in carico.
  *
- * Il proxy non scrive mai niente nel database del merchant, e questa e' l'unica
- * eccezione: e' una cancellazione, non una raccolta. Sta qui e non solo sulla
- * rotta dell'identita' perche' un visitatore che revoca puo' benissimo non
- * passare piu' da quella — i tag chiamano il proxy a ogni pagina — e la revoca
- * deve valere dal primo momento in cui la sentiamo, non dalla prossima volta
- * che il container si ricorda di chiedere un identificativo.
+ * QUI C'ERA SCRITTO IL CONTRARIO, e vale la pena lasciarlo detto: "non puo' far
+ * fallire la risposta, la lettura era gia' andata come doveva andare". Il
+ * ragionamento pesava il fastidio del merchant contro un errore nostro, e
+ * dimenticava il terzo interessato — la persona che aveva appena revocato. Con
+ * il cookie gia' scaduto e nessuna riga scritta, un 200 chiudeva la faccenda
+ * per sempre: nessuno avrebbe piu' saputo che c'era una revoca da applicare.
  *
- * Non puo' far fallire la risposta: la lettura era gia' andata come doveva
- * andare, e un errore qui la trasformerebbe in un guasto per il merchant senza
- * togliere niente a nessuno.
+ * Il 503 invece la fa richiamare. La lettura e' un GET, rifarla non costa altro
+ * che una chiamata, e nel frattempo nessun dato di quella persona e' uscito —
+ * il permesso non c'era, quindi il tracciamento a valle non riceve niente
+ * comunque.
+ *
+ * Si tengono gli header della risposta originale, cookie scaduto compreso: il
+ * ritentativo non deve rimettere in circolo l'identificativo.
  */
-async function forgetRevoked(ctx: ShopReadContext, externalId: string): Promise<void> {
-  try {
-    await forgetVisitor(supabaseFromReadContext(ctx), externalId);
-  } catch (error) {
-    console.warn(
-      '[rest/v1] revoca non applicata:',
-      error instanceof Error ? error.message : 'errore sconosciuto',
-    );
-  }
+function revokeUnavailable(original: Response): Response {
+  const headers = new Headers(original.headers);
+  headers.set('Content-Type', 'application/json');
+  headers.set('Retry-After', '60');
+  return new Response(JSON.stringify({ error: 'revoke_not_recorded' }), {
+    status: 503,
+    headers,
+  });
 }

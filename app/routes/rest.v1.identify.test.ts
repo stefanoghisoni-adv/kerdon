@@ -18,6 +18,15 @@ vi.mock('~/lib/supabase/ensure-users-table.server', () => ({
   provisionUsersTable: vi.fn(async () => true),
 }));
 
+// La revoca durevole ha i suoi test in lib/consent/revocation-register.test:
+// qui interessa solo che questa rotta la faccia partire con il negozio e il
+// soggetto giusti, e che guardi l'esito invece di buttarlo via.
+const revokeTrackingIdentity = vi.fn<
+  (...args: never[]) => Promise<import('~/lib/consent/revoke-tracking.server').RevokeResult>
+>(async () => ({ outcome: 'applied', retriable: false }));
+vi.mock('~/lib/consent/revoke-tracking.server', () => ({ revokeTrackingIdentity }));
+
+
 // Il consenso del visitatore.
 const evaluateVisitorConsent = vi.fn();
 vi.mock('~/lib/tracking/consent', async () => {
@@ -263,7 +272,33 @@ describe('/rest/v1/identify — consenso del visitatore', () => {
 
     expect(res.status).toBe(200);
     expect(identifyVisitor).not.toHaveBeenCalled();
-    expect(forgetVisitor).toHaveBeenCalledWith(expect.anything(), VISITATORE);
+    expect(revokeTrackingIdentity).toHaveBeenCalledWith({
+      shopId: 's1',
+      externalId: VISITATORE,
+    });
+  });
+
+  it('revoca non presa in carico: 503 con segnale di ritentativo, nessun cookie', async () => {
+    revokeTrackingIdentity.mockResolvedValue({ outcome: 'not_recorded', retriable: true });
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'denied', marketing: 'granted', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+
+    const res = await post({ external_id: VISITATORE, email: 'anna@example.com' });
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get('Retry-After')).toBe('60');
+    expect(res.headers.get('Set-Cookie')).toBeNull();
+    // Il registro riceve il solo identificativo del browser: l'email non e' il
+    // soggetto della revoca, e conservarla sarebbe un secondo dato personale da
+    // cancellare.
+    expect(revokeTrackingIdentity).toHaveBeenCalledWith({
+      shopId: 's1',
+      externalId: VISITATORE,
+    });
   });
 
   it('il consenso arriva dal corpo, non solo dalla query', async () => {
