@@ -11,22 +11,33 @@ unidirezionale, via webhook + polling periodico, con credenziali cifrate.
 - Remix + TypeScript, Shopify App Bridge + Polaris
 - `@shopify/shopify-app-remix` (embedded auth: token exchange)
 - Prisma (PostgreSQL) per i metadata dell'app
-- BullMQ (Redis/Upstash) come punto di accodamento dei job
+- Coda dei lavori su Postgres (`sync_requests`), con presa atomica
+- Redis/Upstash per la sola cache delle statistiche
 - Supabase JS client verso il DB del merchant
 - Crittografia AES-256-GCM per le credenziali
 
 ## Architettura sync (costo zero)
 
-Su Vercel Free non esistono processi long-running, quindi **non** gira un worker
-BullMQ persistente in produzione. La coda su Upstash resta il punto di
-accodamento dei job dalla UI ("Sync Now"); la route **`/api/cron/sync`**,
-invocata da cron, li drena e processa inline e calcola i negozi dovuti per il
-periodic check:
+Su Vercel Free non esistono processi long-running, quindi in produzione **non**
+gira nessun worker persistente. La coda dei lavori vive nel database owner
+(`sync_requests`) e la route **`/api/cron/sync`** ne e' il solo consumatore: a
+ogni giro prende un lotto — con una presa atomica, `FOR UPDATE SKIP LOCKED` —
+lo lavora, accoda i controlli periodici dovuti e drena di nuovo.
 
 - **Vercel Cron** — giro giornaliero di sicurezza (`vercel.json`)
 - **GitHub Actions** — giro ogni 30 minuti (`.github/workflows/sync-cron.yml`)
+- **l'app stessa**, subito dopo un gesto manuale (corsia veloce, `?shopId=`)
 
-Il worker long-running (`worker.ts`) resta solo per lo sviluppo locale.
+Un lavoro fallito non si perde mai: torna in coda con un'attesa crescente, e
+dopo cinque tentativi finisce in lettera morta con un allarme
+(`npm run queue:replay` per farlo ripartire). Ogni negozio ha un lucchetto —
+anch'esso una riga su Postgres, rinnovato da un battito — che nessuna
+sincronizzazione salta: se non si prende, il lavoro torna in coda.
+
+Perche' non su Redis: `docs/architecture/queue-adr.md`.
+
+Il worker long-running (`worker.ts`) resta solo per lo sviluppo locale, dove
+consuma la stessa coda in un ciclo.
 
 ## Sviluppo locale
 
@@ -47,7 +58,7 @@ npm run dev             # shopify app dev
 1. **Shopify Partner Account** — app registrata nel Partner Dashboard (API Key + Secret)
 2. **Vercel** (Free) — importa il repository GitHub (framework: Remix)
 3. **Supabase** (Free) — progetto per i metadata dell'app (`DATABASE_URL`, pooler in transaction mode)
-4. **Upstash** (Free) — Redis per la coda BullMQ (`REDIS_URL` in formato `rediss://`)
+4. **Upstash** (Free) — Redis per la cache delle statistiche (`REDIS_URL` in formato `rediss://`)
 5. **GitHub** — repository per CI e trigger cron
 
 ### Step 1 — App su Vercel
@@ -121,9 +132,10 @@ Non c'e' una migration iniziale nel repo (la piu' vecchia e' una ALTER), quindi
 
 - Vercel Cron Free: max 1 esecuzione/giorno → giro ogni 30 min via GitHub Actions
 - Durata funzioni Vercel Free: 60s (300s con Fluid Compute) → un bulk sync di
-  cataloghi molto grandi può ripartire su più giri cron (il job resta in coda)
+  cataloghi molto grandi si interrompe da solo un istante prima del tetto e
+  riparte al giro dopo (l'item torna in coda, senza consumare un tentativo)
 - Supabase Free: il progetto si sospende dopo ~7 giorni di inattività
-- Upstash Free: ~10k comandi/giorno
+- Upstash Free: ~10k comandi/giorno (solo cache: la coda non passa di li')
 
 ## Tracciamento: l'identificativo del visitatore
 

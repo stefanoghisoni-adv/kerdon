@@ -11,10 +11,11 @@ import { resolve } from 'node:path';
  * scritto in un altro modo. Un bundler quegli import li risolve come li risolve
  * Vite, e mette in un file solo cio' che al worker serve davvero.
  *
- * Restano fuori tre pacchetti, e per la stessa ragione: portano con se' del
- * binario. Il client Prisma ha il suo motore, `ioredis` e `bullmq` hanno
- * dipendenze native — impacchettarli darebbe un file che si costruisce e non
- * parte. Nell'immagine ci sono gia', installati da `npm ci`.
+ * Restano fuori due pacchetti, e per la stessa ragione: portano con se' del
+ * binario. Il client Prisma ha il suo motore e `ioredis` ha dipendenze native —
+ * impacchettarli darebbe un file che si costruisce e non parte. Nell'immagine
+ * ci sono gia', installati da `npm ci`. (`bullmq` era il terzo: la coda non
+ * passa piu' da li'.)
  */
 await build({
   entryPoints: ['worker.ts'],
@@ -30,7 +31,7 @@ await build({
   // codificato come URL, e in una cartella con uno spazio nel nome — questa —
   // esbuild si ritrova a cercare `Siti%20web`, che non esiste.
   alias: { '~': resolve('app') },
-  external: ['@prisma/client', 'ioredis', 'bullmq'],
+  external: ['@prisma/client', 'ioredis'],
   // Qualche pacchetto dentro il fascio e' scritto per CommonJS e chiama
   // `require` a runtime. In un file ESM quella funzione non esiste, e il
   // worker moriva all'avvio con "Dynamic require of node:buffer is not

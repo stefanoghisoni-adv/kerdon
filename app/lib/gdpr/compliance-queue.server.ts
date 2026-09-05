@@ -16,16 +16,16 @@
 // dopo: il cron ripassa e la trova. Se la scrittura non riesce si risponde 5xx,
 // cosi' Shopify ritenta — l'unica risposta onesta e' "non l'ho presa".
 //
-// La coda BullMQ che si aggiunge subito dopo NON e' la presa: e' la sveglia,
-// per non aspettare il giro del cron. Se Redis non risponde si tira dritto, e
-// vale la pena dirlo esplicitamente perche' l'istinto e' l'opposto — fallire
-// li' vorrebbe dire far ritentare a Shopify una richiesta che abbiamo gia'
-// scritto, e cioe' rifiutare una richiesta gia' accettata.
+// L'item di coda che si aggiunge subito dopo NON e' la presa: e' la sveglia,
+// per non aspettare il giro del cron. Se l'accodamento non riesce si tira
+// dritto, e vale la pena dirlo esplicitamente perche' l'istinto e' l'opposto —
+// fallire li' vorrebbe dire far ritentare a Shopify una richiesta che abbiamo
+// gia' scritto, e cioe' rifiutare una richiesta gia' accettata.
 
 import { createHash } from 'crypto';
 import { prisma } from '~/db.server';
-import { getSyncQueue } from '~/lib/queue/queues.server';
-import type { SyncJobData } from '~/lib/queue/queues.server';
+import { naturalDedupKey } from '~/lib/queue/queue-model';
+import { enqueueSyncRequest } from '~/lib/queue/queue-store.server';
 
 /** I tre webhook obbligatori, con il nome che Shopify da' a ognuno. */
 export type ComplianceTopic =
@@ -147,20 +147,27 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
- * La sveglia. Best-effort per costruzione: la richiesta e' gia' scritta, e un
- * Redis che non risponde deve al massimo ritardarla fino al giro del cron, mai
+ * La sveglia. Best-effort per costruzione: la richiesta e' gia' scritta, e una
+ * coda che non risponde deve al massimo ritardarla fino al giro del cron, mai
  * farla rifiutare.
  */
 async function wake(requestId: string): Promise<void> {
   try {
-    const queue = await getSyncQueue();
-    await queue.add(
-      'compliance-request',
-      { type: 'compliance-request', requestId } satisfies SyncJobData,
-      // jobId uguale all'id della richiesta: BullMQ scarta da solo un secondo
-      // job con lo stesso nome, che e' un terzo livello di deduplica gratis.
-      { jobId: `compliance-${requestId}` },
-    );
+    await enqueueSyncRequest({
+      type: 'compliance-request',
+      // Nessun negozio: `shop/redact` sta cancellando proprio quello, e legare
+      // l'item a una riga che sta per sparire vorrebbe dire perdere il lavoro
+      // insieme a lei.
+      shopId: null,
+      // Solo l'id della riga, mai il payload: quel corpo contiene l'id di una
+      // persona. Chi lavora l'item va a rileggersi la riga, e cosi' vede lo
+      // stato vero della richiesta invece di una fotografia scattata adesso.
+      payload: { requestId },
+      // La chiave naturale, senza finestra temporale: la stessa richiesta non
+      // deve produrre un secondo item nemmeno a distanza di giorni. E' un terzo
+      // livello di deduplica sopra i due che gia' ci sono sulla riga.
+      dedupKey: naturalDedupKey('compliance-request', requestId),
+    });
   } catch (error) {
     console.warn(
       `[gdpr] richiesta ${requestId} presa in carico ma non annunciata alla coda: ${

@@ -163,6 +163,7 @@ model Shop {
   complianceRequests       ComplianceRequest[]
   supabaseManagedResources SupabaseManagedResource[]
   supabaseDataDeletions    SupabaseDataDeletion[]
+  syncRequests             SyncRequest[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -669,25 +670,25 @@ model ComplianceRequest {
 /// Una riga per tabella e per progetto: ricollegare lo stesso negozio a un
 /// database diverso non eredita la proprieta' del precedente.
 model SupabaseManagedResource {
-  id     String @id @default(uuid())
-  shopId String @map("shop_id")
+  id                String   @id @default(uuid())
+  shopId            String   @map("shop_id")
   /// Il progetto Supabase a cui la riga si riferisce. Fa parte della chiave:
   /// la stessa `products` su due progetti diversi sono due cose diverse.
-  projectRef String @map("project_ref")
-  schemaName String @default("public") @map("schema_name")
+  projectRef        String   @map("project_ref")
+  schemaName        String   @default("public") @map("schema_name")
   /// Nome della tabella cosi' com'e' nel database del merchant.
-  resourceName String @map("resource_name")
+  resourceName      String   @map("resource_name")
   /// Per ora solo 'table'. C'e' come colonna e non come sottinteso perche' il
   /// giorno in cui l'app creera' anche una vista o una funzione, l'ordine con
   /// cui si eliminano non e' lo stesso.
-  resourceKind String @default("table") @map("resource_kind")
+  resourceKind      String   @default("table") @map("resource_kind")
   /// L'unica domanda che conta al momento dell'eliminazione. false = la tabella
   /// c'era gia', e' del merchant, non si tocca.
-  createdByCoreWard Boolean @map("created_by_coreward")
+  createdByCoreWard Boolean  @map("created_by_coreward")
   /// Versione dello schema con cui la risorsa e' stata creata: dice quale DDL
   /// l'ha fatta, senza doverlo dedurre dalla data.
-  schemaVersion Int      @map("schema_version")
-  createdAt     DateTime @default(now()) @map("created_at")
+  schemaVersion     Int      @map("schema_version")
+  createdAt         DateTime @default(now()) @map("created_at")
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -708,15 +709,15 @@ model SupabaseManagedResource {
 /// Sopravvive alla configurazione, che a fine corsa viene cancellata: e' anche
 /// il solo posto dove resta scritto che quel database e' stato svuotato.
 model SupabaseDataDeletion {
-  id         String @id @default(uuid())
-  shopId     String @map("shop_id")
-  projectRef String @map("project_ref")
+  id          String    @id @default(uuid())
+  shopId      String    @map("shop_id")
+  projectRef  String    @map("project_ref")
   /// 'processing' | 'completed' | 'failed'. Finche' e' 'processing' il
   /// collegamento e' spento (connection_verified_at azzerato), quindi ne'
   /// sincronizzazioni ne' webhook scrivono mentre le tabelle spariscono.
-  status String @default("processing")
+  status      String    @default("processing")
   /// I nomi qualificati che il tentativo si prefiggeva di eliminare.
-  resources String[]
+  resources   String[]
   /// Quelli che dopo il COMMIT risultavano ancora li'. Non vuoto = la verifica
   /// ha detto di no, e token e configurazione sono stati conservati.
   remaining   String[]
@@ -728,4 +729,136 @@ model SupabaseDataDeletion {
 
   @@index([shopId, startedAt(sort: Desc)])
   @@map("supabase_data_deletions")
+}
+
+/// Un lavoro in coda, su Postgres.
+///
+/// PERCHE' NON PIU' SU REDIS. La coda stava su BullMQ, ma su Vercel Free non
+/// gira nessun Worker: il cron leggeva i job in attesa con `getJobs()` e
+/// chiamava i processor direttamente. Nessuno prendeva possesso di niente,
+/// quindi due drenaggi simultanei vedevano lo stesso job e lo lavoravano tutti
+/// e due; su eccezione il job veniva RIMOSSO, quindi i tentativi e il backoff
+/// configurati su BullMQ non li applicava nessuno e un errore di rete perdeva
+/// il lavoro per sempre. Con la coda qui il possesso e' una riga aggiornata in
+/// modo atomico, e il resto — tentativi, attesa, lettera morta — sono colonne
+/// che sopravvivono alla morte dell'invocazione.
+///
+/// Il danno che tutto questo evita non e' un doppione innocuo: la corsa
+/// completa finisce spazzando dal database del merchant le righe con
+/// `synced_at` anteriore al proprio inizio. Due corse sovrapposte hanno due
+/// istanti d'inizio diversi, e la piu' vecchia porta via le righe che la piu'
+/// recente ha appena scritto. Non lascia errori: si vede dopo, come prodotti
+/// mancanti.
+model SyncRequest {
+  id String @id @default(uuid())
+
+  /// Il negozio a cui il lavoro appartiene. Nullo per i lavori che un negozio
+  /// non ce l'hanno: `shop/redact` sta cancellando proprio quello.
+  shopId String? @map("shop_id")
+
+  /// Uno dei tipi noti (vedi `SYNC_REQUEST_TYPES`). Un tipo sconosciuto viene
+  /// rifiutato all'accodamento con un allarme: prima restava in attesa per
+  /// sempre e nessuno se ne accorgeva.
+  type String
+
+  /// Il minimo indispensabile per ritrovare il lavoro, mai il lavoro stesso.
+  /// Per le richieste di conformita' e' il solo id della riga: il payload
+  /// contiene l'id di una persona, e una coda non e' il posto dove tenerlo —
+  /// chi lavora l'item va a rileggersi la riga, e cosi' vede lo stato vero
+  /// invece di una fotografia scattata all'accodamento.
+  payload Json?
+
+  /// L'identita' della richiesta ai fini della deduplica: tipo + negozio +
+  /// finestra temporale. Due clic ravvicinati sul pulsante, o il cron e un
+  /// gesto manuale che chiedono la stessa cosa, producono un item solo.
+  /// La finestra c'e' perche' una richiesta fatta piu' tardi e' una richiesta
+  /// diversa, e fonderla in quella di prima vorrebbe dire ignorarla.
+  dedupKey String @unique @map("dedup_key")
+
+  /// 'queued' | 'processing' | 'completed' | 'dead_letter'.
+  /// Non esiste 'failed': un tentativo andato male torna 'queued' con
+  /// `nextAttemptAt` in avanti, perche' cosi' c'e' un posto solo da guardare
+  /// per sapere cosa e' pronto. 'dead_letter' e' lo stato che smette di
+  /// riprovare da solo e chiede che qualcuno guardi.
+  status String @default("queued")
+
+  attempts Int @default(0)
+
+  /// Prima di questo istante l'item non si prende. E' il backoff.
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+
+  /// Chi possiede l'item adesso, e fino a quando. Solo il proprietario puo'
+  /// dichiararlo concluso o riprogrammarlo; un lease scaduto e' riprendibile da
+  /// chiunque, ed e' cosi' che un'invocazione morta a meta' non blocca la coda.
+  leaseOwner     String?   @map("lease_owner")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+
+  /// Cresce a ogni presa. Serve al deploy a meta' lavoro: il processo vecchio,
+  /// che si risveglia dopo aver perso il lease, presenta un gettone inferiore a
+  /// quello di chi e' subentrato e le sue scritture vengono rifiutate. Senza,
+  /// dichiarerebbe completato un lavoro che sta facendo qualcun altro.
+  ///
+  /// `Int` e non `BigInt`: e' un contatore per riga, e una riga vive ore.
+  fencingToken Int @default(0) @map("fencing_token")
+
+  /// L'ultimo errore, redatto: niente token, niente chiavi, niente indirizzi
+  /// email. Questa colonna la si legge in un log o in un pannello, e un
+  /// messaggio d'errore e' il posto piu' facile del mondo dove far uscire un
+  /// segreto senza accorgersene.
+  lastError String? @map("last_error")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([shopId, status])
+  @@map("sync_requests")
+}
+
+/// Il lucchetto per negozio, su Postgres.
+///
+/// Prima stava su Redis con una scadenza fissa di dieci minuti che nessuno
+/// rinnovava, e — la parte grave — se Redis non rispondeva la corsa proseguiva
+/// SENZA lucchetto: fail-open su operazioni che cancellano righe nel database
+/// del merchant. Qui il lucchetto e' una riga: se Postgres non risponde non la
+/// si prende, e chi non la prende non lavora. La sincronizzazione torna in
+/// coda, che e' un ritardo; l'alternativa era una cancellazione senza
+/// protezione, che e' una perdita di dati.
+///
+/// Sta su Postgres e non su un advisory lock perche' `DATABASE_URL` punta al
+/// pooler di Supabase in transaction mode: li' una sessione non e' di nessuno
+/// fra una query e l'altra, quindi `pg_advisory_lock` verrebbe preso su una
+/// connessione e rilasciato — o non rilasciato — su un'altra. Una riga con una
+/// scadenza non ha quel problema, e in piu' la si puo' guardare.
+model ShopLock {
+  shopId String @id @map("shop_id")
+
+  /// Chi lo possiede: identifica l'invocazione, non il negozio. Il rilascio e'
+  /// condizionato a questo, cosi' una corsa lenta il cui lucchetto e' scaduto
+  /// non rilascia quello di chi e' subentrato.
+  owner String
+
+  /// Cresce a ogni presa, e non riparte da zero al rilascio. E' quello che
+  /// ogni scrittura distruttiva verifica prima di partire: se il gettone non e'
+  /// piu' il nostro, il lucchetto e' di qualcun altro e non si cancella niente.
+  fencingToken Int @default(0) @map("fencing_token")
+
+  acquiredAt DateTime @default(now()) @map("acquired_at")
+
+  /// Rinnovata dal battito del cuore finche' il lavoro dura. Cosi' la scadenza
+  /// puo' essere breve — un'invocazione morta libera il negozio in un minuto
+  /// invece che in dieci — senza che un lavoro lungo si veda togliere il
+  /// lucchetto da sotto i piedi.
+  expiresAt DateTime @map("expires_at")
+
+  /// Nessuna chiave esterna verso `shops`, di proposito: il lucchetto serve
+  /// anche mentre il negozio viene cancellato (`shop/redact`), e una riga che
+  /// sparisce a meta' di quel lavoro sarebbe il lucchetto che si apre da solo
+  /// nel momento peggiore. Le righe scadute le toglie il cron.
+  @@index([expiresAt])
+  @@map("shop_locks")
 }

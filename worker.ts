@@ -1,83 +1,65 @@
-import { Worker } from 'bullmq';
-import { getRedisUrl } from './app/lib/queue/connection.server';
-import type { SyncJobData } from './app/lib/queue/queues.server';
-import {
-  processPeriodicSyncCheck,
-  processInitialBulkSync,
-  processManualSync,
-  processRetryWebhook,
-} from './app/lib/workers/processors.server';
-import { processComplianceRequest } from './app/lib/gdpr/process-compliance.server';
+// worker.ts
+//
+// Il consumatore della coda per lo sviluppo locale.
+//
+// In produzione questo processo non esiste: su Vercel Free non ci sono processi
+// long-running, e a drenare la coda e' la rotta `/api/cron/sync`. Qui serve
+// perche' in locale nessun cron chiama quella rotta ogni trenta minuti, e
+// aspettare a mano dopo ogni clic renderebbe impossibile lavorare.
+//
+// LA REGOLA CHE NON SI VIOLA: un consumatore alla volta. Prima erano due — un
+// Worker BullMQ qui e il cron che chiamava i processor direttamente — e la
+// coda non aveva nessuna presa, quindi potevano lavorare lo stesso job insieme.
+// Adesso il consumatore e' uno solo (`drainSyncRequests`) e la presa e'
+// atomica, ma la regola resta scritta: se questo processo gira e qualcuno
+// chiama anche `/api/cron/sync`, i due si spartiscono il lavoro senza
+// sovrapporsi — e va bene — mentre due implementazioni diverse dello stesso
+// drenaggio, no.
 
-console.log('Starting sync worker...');
+import { drainSyncRequests } from './app/lib/queue/drain.server';
 
-const redisUrl = getRedisUrl();
+/** Ogni quanto si guarda se c'e' qualcosa da fare. */
+const INTERVALLO_MS = 5_000;
 
-// Parse Redis URL to extract connection options for BullMQ
-const url = new URL(redisUrl);
-const connectionOptions = {
-  host: url.hostname,
-  port: parseInt(url.port || '6379', 10),
-  username: url.username || undefined,
-  password: url.password || undefined,
-  db: url.pathname ? parseInt(url.pathname.slice(1), 10) : 0,
-  lazyConnect: true,
-};
+console.log('Consumatore della coda avviato (sviluppo locale).');
 
-const worker = new Worker<SyncJobData>(
-  'sync-queue',
-  async (job) => {
-    console.log(`Processing job ${job.id}: ${job.data.type}`);
+const spegnimento = new AbortController();
 
-    switch (job.data.type) {
-      case 'periodic-sync-check':
-        await processPeriodicSyncCheck(job.data.shopId);
-        break;
+for (const segnale of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(segnale, () => {
+    if (spegnimento.signal.aborted) return;
+    console.log(`${segnale} ricevuto: si finisce il giro e si esce.`);
+    // Non si esce di colpo: il drenaggio in corso riceve il segnale, restituisce
+    // alla coda quello che non ha lavorato e rilascia il lucchetto. Uscire qui
+    // lascerebbe item 'processing' fermi fino alla scadenza del lease.
+    spegnimento.abort(new Error(`${segnale}`));
+  });
+}
 
-      case 'initial-bulk-sync':
-        await processInitialBulkSync(job.data.shopId, job);
-        break;
-
-      case 'manual-sync':
-        await processManualSync(job.data.shopId, job);
-        break;
-
-      case 'retry-failed-webhook':
-        await processRetryWebhook(job.data);
-        break;
-
-      // Il job e' solo la sveglia: la fonte di verita' e' la riga su Postgres,
-      // ed e' lei a decidere se c'e' ancora qualcosa da fare. Un job perso
-      // diventa quindi un ritardo, che il giro del cron recupera, e non una
-      // richiesta GDPR mai eseguita.
-      case 'compliance-request':
-        await processComplianceRequest(job.data.requestId);
-        break;
-
-      default:
-        throw new Error(`Unknown job type: ${(job.data as any).type}`);
+async function giro(): Promise<void> {
+  while (!spegnimento.signal.aborted) {
+    try {
+      const esito = await drainSyncRequests({ signal: spegnimento.signal });
+      if (esito.claimed > 0) {
+        console.log(
+          `Coda: presi ${esito.claimed}, conclusi ${esito.completed}, ` +
+            `rimessi in coda ${esito.retried}, in lettera morta ${esito.deadLettered}.`,
+        );
+        for (const errore of esito.errors) console.warn(`  ${errore}`);
+        // C'era lavoro: si riprova subito, senza aspettare. Con una coda piena
+        // aspettare cinque secondi fra un item e l'altro sarebbe l'unica cosa
+        // che rende lento lo sviluppo.
+        continue;
+      }
+    } catch (error) {
+      console.error('Errore nel drenaggio:', error);
     }
-  },
-  {
-    connection: connectionOptions as any,
-    concurrency: 5,
+
+    await new Promise((risolvi) => setTimeout(risolvi, INTERVALLO_MS));
   }
-);
+}
 
-worker.on('completed', (job) => {
-  console.log(`Job ${job.id} completed`);
-});
-
-worker.on('failed', (job, err) => {
-  console.error(`Job ${job?.id} failed:`, err);
-});
-
-worker.on('error', (err) => {
-  console.error('Worker error:', err);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, closing worker...');
-  await worker.close();
+void giro().then(() => {
+  console.log('Consumatore fermato.');
   process.exit(0);
 });

@@ -107,6 +107,7 @@ for cartella in prisma/migrations/*/; do
   case "$nome" in
     20260904120000_row_level_security_everywhere) continue ;;
     20260904160000_supabase_managed_resources) continue ;;
+    20260905120000_sync_request_queue) continue ;;
   esac
   npx prisma migrate resolve --applied "$nome"
 done
@@ -116,8 +117,8 @@ done
 `_prisma_migrations` e basta. Se il comando viene interrotto a meta' lo si
 rilancia: le cartelle gia' dichiarate danno un errore innocuo e si va avanti.
 
-Le esclusioni sono le due migrazioni che passeranno davvero da questo percorso,
-ed e' importante che restino fuori dal ciclo: dichiararle applicate senza
+Le esclusioni sono le migrazioni che passeranno davvero da questo percorso, ed
+e' importante che restino fuori dal ciclo: dichiararle applicate senza
 eseguirle vorrebbe dire perderle per sempre, perche' da quel momento
 `migrate deploy` le salta.
 
@@ -136,16 +137,26 @@ tentativo di eliminarle). Nasce dallo scollegamento con eliminazione, che faceva
 erano del merchant — e cancellava comunque token e credenziali, pure quando il
 `DROP` era fallito. Nasce gia' con RLS attiva, come tutte.
 
+`20260905120000_sync_request_queue` e' la terza, e va per ultima: porta
+`sync_requests` (la coda dei lavori) e `shop_locks` (il lucchetto per negozio).
+La coda stava su Redis e nessuno ne prendeva possesso — due drenaggi
+simultanei lavoravano lo stesso job, e su eccezione il job veniva rimosso, cosi'
+un errore di rete perdeva la sincronizzazione per sempre. Il perche' per esteso
+sta in `docs/architecture/queue-adr.md`; la procedura per accendere il
+consumatore nuovo, in "Cambiare il consumatore della coda" piu' sotto. Nasce
+gia' con RLS attiva, come tutte.
+
 ### 4. Controllare che la linea di base sia giusta
 
 ```bash
 npx prisma migrate status
 ```
 
-Deve elencare **due** migrazioni da applicare, in questo ordine:
+Deve elencare **tre** migrazioni da applicare, in questo ordine:
 
 1. `20260904120000_row_level_security_everywhere`
 2. `20260904160000_supabase_managed_resources`
+3. `20260905120000_sync_request_queue`
 
 Se ne elenca altre, qualcosa non e' stato dichiarato: rifare il passo 3 prima di
 andare avanti.
@@ -218,6 +229,146 @@ colonna che non c'e' piu'. Quando entrambe servono, sono due migrazioni in due
 momenti: `20260825160000_plan_prices_backfill_base` e
 `20260825170000_drop_plan_price_columns` sono l'esempio, e nei loro commenti c'e'
 scritto quale va prima e quale dopo.
+
+## Cambiare il consumatore della coda
+
+Vale per `20260905120000_sync_request_queue`, che porta `sync_requests` e
+`shop_locks`, e vale per qualunque cambio futuro di chi drena la coda. Il perche'
+della coda su Postgres sta in `docs/architecture/queue-adr.md`.
+
+**La regola che tiene insieme tutto: mai due consumatori accesi insieme.** Due
+implementazioni diverse del drenaggio hanno due prese che non si parlano, e
+finiscono per lavorare lo stesso item — che e' il guasto da cui la coda nuova
+nasce. Un consumatore solo puo' invece girare in piu' invocazioni
+contemporanee: la presa e' atomica.
+
+Oggi la coda vecchia e' di fatto vuota (l'app non e' pubblicata e l'unico
+negozio e' `coreward-demo`), quindi i passi 2 e 3 non troveranno quasi niente.
+Vanno fatti lo stesso: la procedura serve quando la coda **non** e' vuota, e
+provarla adesso costa cinque minuti.
+
+### 1. Applicare la migrazione, con il codice vecchio ancora in produzione
+
+E' additiva — due tabelle nuove — quindi si applica **prima** del deploy. Il
+codice vecchio non conosce quelle tabelle e non le tocca.
+
+### 2. Fermare l'accodamento e il drenaggio
+
+- Su GitHub: Actions → **sync-cron** → `Disable workflow`. E' il drenaggio ogni
+  trenta minuti.
+- Su Vercel: Project → Settings → Cron Jobs → disattivare `/api/cron/sync`. E'
+  il giro giornaliero.
+- Se in locale gira `npm run worker`, fermarlo.
+
+Da questo momento nessuno drena. I gesti manuali dei merchant continuano ad
+accodare su Redis: e' voluto, e li si migra al passo dopo.
+
+### 3. Migrare gli item pendenti, una volta sola
+
+Con il worker fermo e i cron spenti, si legge cosa era rimasto in coda su Redis
+e lo si riscrive in `sync_requests`. Serve `REDIS_URL` e `DATABASE_URL` in
+ambiente:
+
+```bash
+npx tsx -e "
+import IORedis from 'ioredis';
+import { PrismaClient } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+
+const redis = new IORedis(process.env.REDIS_URL!);
+const prisma = new PrismaClient();
+
+// I job in attesa della coda vecchia: BullMQ li tiene in due liste per nome.
+const ids = [
+  ...(await redis.lrange('bull:sync-queue:wait', 0, -1)),
+  ...(await redis.lrange('bull:sync-queue:delayed', 0, -1)),
+];
+
+let migrati = 0;
+for (const id of ids) {
+  const dati = await redis.hget(\`bull:sync-queue:\${id}\`, 'data');
+  if (!dati) continue;
+  const job = JSON.parse(dati);
+  const tipi = ['manual-sync', 'initial-bulk-sync', 'periodic-sync-check', 'compliance-request'];
+  if (!tipi.includes(job.type)) { console.warn('saltato, tipo ignoto:', job.type); continue; }
+
+  const esito = await prisma.syncRequest.createMany({
+    data: [{
+      id: randomUUID(),
+      shopId: job.shopId ?? null,
+      type: job.type,
+      payload: job.requestId ? { requestId: job.requestId } : undefined,
+      // La chiave di migrazione porta l'id vecchio: rieseguire questo comando
+      // non produce doppioni.
+      dedupKey: \`migrazione:\${job.type}:\${id}\`,
+      status: 'queued',
+    }],
+    skipDuplicates: true,
+  });
+  migrati += esito.count;
+}
+
+console.log('Migrati:', migrati, 'su', ids.length, 'trovati.');
+await redis.quit();
+await prisma.\$disconnect();
+"
+```
+
+Controllare il risultato prima di proseguire:
+
+```sql
+SELECT type, status, count(*) FROM sync_requests GROUP BY 1, 2;
+```
+
+### 4. Deployare il codice nuovo
+
+Push su `main`. Da questo istante l'accodamento scrive su `sync_requests` e la
+coda su Redis non riceve piu' niente.
+
+### 5. Riaccendere il consumatore, uno solo
+
+- Riabilitare **sync-cron** su GitHub.
+- Riabilitare il cron di Vercel.
+- Verificare che nessun altro drenaggio sia acceso: nessun worker, nessuno
+  script, nessuna rotta che chiami i processor direttamente.
+
+Un giro a vuoto per controllare:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" https://<app>/api/cron/sync
+```
+
+La risposta ha i conteggi: `drained`, `retried`, `deadLettered`,
+`skippedLocked`, `lockUnavailable`, `unknownType`. Un `unknownType` maggiore di
+zero vuol dire che qualcosa e' stato migrato con un tipo che il codice non
+conosce, e sta in lettera morta.
+
+### 6. Cosa guardare nei giorni dopo
+
+```sql
+-- Quel che e' fermo e chiede attenzione.
+SELECT id, type, shop_id, attempts, last_error, updated_at
+FROM sync_requests WHERE status = 'dead_letter' ORDER BY updated_at DESC;
+
+-- Lucchetti rimasti presi piu' del dovuto (dovrebbero essere sempre pochi
+-- secondi, e la potatura del cron toglie gli scaduti da oltre un'ora).
+SELECT * FROM shop_locks WHERE expires_at < now();
+```
+
+Per far ripartire quel che e' in lettera morta, dopo aver aggiustato la causa:
+
+```bash
+npm run queue:replay                  # elenca e basta
+npm run queue:replay -- <id> <id>     # rimette in coda quelli
+npm run queue:replay -- --tutti       # rimette in coda tutto
+```
+
+### Se qualcosa va storto
+
+La coda nuova non cancella mai un item fallito: torna in coda distanziato, e
+dopo cinque tentativi va in lettera morta. Quindi il modo di "tornare indietro"
+e' spegnere il cron, non svuotare la tabella — quello che c'e' dentro e' lavoro
+ancora da fare.
 
 ## Come si torna indietro
 

@@ -1,13 +1,13 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { prisma } from '~/db.server';
-import { getSyncQueue } from '~/lib/queue/queues.server';
+import { drainSyncRequests, type DrainResult } from '~/lib/queue/drain.server';
+import { pruneSyncRequests } from '~/lib/queue/queue-store.server';
+import { pruneExpiredShopLocks } from '~/lib/queue/shop-lock.server';
 import {
-  processPeriodicSyncCheck,
-  processInitialBulkSync,
-  processManualSync,
-} from '~/lib/workers/processors.server';
-import { withShopSyncLock } from '~/lib/queue/shop-lock.server';
+  enqueueInitialBulkSync,
+  enqueuePeriodicSyncCheck,
+} from '~/lib/queue/trigger.server';
 import { recordEligibilitySnapshotIfMissing } from '~/lib/stats/eligibility-snapshot.server';
 import { hasPlanChanged } from '~/components/Dashboard/plan-upgrade';
 import { can } from '~/lib/authz/capabilities';
@@ -21,25 +21,62 @@ import { pruneAnonymousUsers } from '~/lib/tracking/users.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import {
   drainComplianceRequests,
-  processComplianceRequest,
   pruneExpiredExports,
 } from '~/lib/gdpr/process-compliance.server';
 
 /**
- * Cron-triggered sync endpoint (replaces the long-running BullMQ worker on the
- * zero-cost stack: Vercel Free has no long-running processes).
+ * Il drenaggio della coda, innescato dal cron.
  *
- * Invoked in GET with `Authorization: Bearer CRON_SECRET` by:
- * - Vercel Cron (daily safety run, vercel.json)
- * - GitHub Actions (every 30 min, .github/workflows/sync-cron.yml)
+ * Su Vercel Free non esistono processi long-running: non gira nessun Worker, e
+ * questa rotta e' il solo consumatore della coda. Ci arriva un GET con
+ * `Authorization: Bearer CRON_SECRET` da:
+ * - Vercel Cron (giro giornaliero di sicurezza, vercel.json)
+ * - GitHub Actions (ogni 30 minuti, .github/workflows/sync-cron.yml)
+ * - l'app stessa, subito dopo un gesto manuale (corsia veloce, `?shopId=`)
  *
- * On each run it (1) drains jobs the UI enqueued into BullMQ (manual /
- * initial-bulk / periodic) and (2) runs periodic checks for shops whose plan
- * interval has elapsed. A single failing shop/job never aborts the whole run.
+ * A ogni giro: (1) si drena quel che e' in coda, (2) si accoda il lavoro
+ * periodico dei negozi la cui cadenza e' scaduta, (3) si drena di nuovo, cosi'
+ * quel che si e' appena accodato non aspetta il giro dopo. Un negozio che
+ * fallisce non ferma gli altri, e nessun fallimento cancella lavoro: l'item
+ * torna in coda distanziato.
+ *
+ * Cosa NON fa piu': leggere i job in attesa da BullMQ e chiamare i processor
+ * direttamente. Quel modello non prendeva possesso di niente — due drenaggi
+ * simultanei lavoravano lo stesso job — e su eccezione rimuoveva il job, quindi
+ * un errore di rete perdeva la sincronizzazione per sempre. Il perche' per
+ * esteso sta in docs/architecture/queue-adr.md.
  */
 // Distanza minima fra due tentativi di provvedere la tabella clienti quando il
 // piano la include ma non risulta ancora creata.
 const CUSTOMERS_RETRY_MS = 3_600_000;
+
+/**
+ * Somma l'esito di un drenaggio ai conteggi del giro.
+ *
+ * Serve perche' i drenaggi sono due — prima quel che era gia' in coda, poi quel
+ * che il giro stesso ha accodato — e i numeri della risposta devono
+ * raccontarli entrambi. Sommare a mano nei due punti era la strada per averne
+ * uno aggiornato e l'altro no.
+ */
+function assorbi(results: Conteggi, drain: DrainResult): void {
+  results.drained += drain.completed;
+  results.retried += drain.retried;
+  results.deadLettered += drain.deadLettered;
+  results.skippedLocked += drain.skippedLocked;
+  results.lockUnavailable += drain.lockUnavailable;
+  results.unknownType += drain.unknownType;
+  results.errors.push(...drain.errors);
+}
+
+interface Conteggi {
+  drained: number;
+  retried: number;
+  deadLettered: number;
+  skippedLocked: number;
+  lockUnavailable: number;
+  unknownType: number;
+  errors: string[];
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authHeader = request.headers.get('Authorization');
@@ -56,11 +93,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const onlyShopId = new URL(request.url).searchParams.get('shopId');
 
   const results = {
+    /** Lavori portati a termine. */
     drained: 0,
-    /** Job lasciati in coda perche' quel negozio era gia' in lavorazione. */
+    /** Falliti e rimessi in coda distanziati: rimandati, non persi. */
+    retried: 0,
+    /** Falliti troppe volte: fermi, segnalati, replicabili a mano. */
+    deadLettered: 0,
+    /** Restituiti alla coda perche' quel negozio era gia' in lavorazione. */
     skippedLocked: 0,
+    /** Restituiti alla coda perche' il lucchetto non era raggiungibile. */
+    lockUnavailable: 0,
+    /** Item con un tipo che nessuno sa lavorare: in lettera morta, non in attesa. */
+    unknownType: 0,
+    /** Lavori periodici accodati in questo giro. */
+    queued: 0,
     periodicChecks: 0,
     planCatchUps: 0,
+    completedRequestsPruned: 0,
+    expiredLocksPruned: 0,
     snapshots: 0,
     accessLogPruned: 0,
     anonymousUsersPruned: 0,
@@ -114,68 +164,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  // 1. Drain jobs enqueued from the UI (manual-sync, initial-bulk-sync, periodic-sync-check)
-  const syncQueue = await getSyncQueue();
-  const queued = await syncQueue.getJobs(['waiting', 'delayed'], 0, 20);
-  // In corsia veloce si guardano solo i job di quel negozio: gli altri li
-  // prende il giro completo, e intanto chi aspetta non paga il loro tempo.
-  const pendingJobs = onlyShopId
-    ? queued.filter((job) => job.data?.shopId === onlyShopId)
-    : queued;
-
-  for (const job of pendingJobs) {
-    try {
-      // Un negozio per volta. Questo non e' un Worker di BullMQ — legge i job in
-      // attesa e chiama i processor direttamente, senza prendere possesso di
-      // niente — quindi due invocazioni possono trovarsi davanti lo stesso
-      // lavoro. Da quando un gesto manuale innesca un drain immediato, e' un
-      // caso concreto e non piu' teorico.
-      //
-      // Il danno non sarebbe un doppione innocuo: la corsa completa finisce
-      // spazzando le righe con `synced_at` anteriore al proprio inizio, e due
-      // corse sovrapposte hanno due inizi diversi — la piu' vecchia porta via
-      // quello che la piu' recente ha appena scritto.
-      //
-      // Se il lucchetto e' occupato il job NON si rimuove: ci sta gia'
-      // lavorando qualcun altro, e toglierlo di mezzo qui vorrebbe dire
-      // cancellare il lavoro di un altro dalla coda.
-      let handled = true;
-      if (job.data.type === 'manual-sync') {
-        handled = await withShopSyncLock(job.data.shopId, () =>
-          processManualSync(job.data.shopId, job),
-        );
-      } else if (job.data.type === 'initial-bulk-sync') {
-        handled = await withShopSyncLock(job.data.shopId, () =>
-          processInitialBulkSync(job.data.shopId, job),
-        );
-      } else if (job.data.type === 'periodic-sync-check') {
-        handled = await withShopSyncLock(job.data.shopId, () =>
-          processPeriodicSyncCheck(job.data.shopId),
-        );
-      } else if (job.data.type === 'compliance-request') {
-        // Senza lucchetto di negozio: il lucchetto se lo prende, dove serve,
-        // process-compliance stesso — e shop/redact non ha nemmeno un negozio
-        // a cui legarlo, visto che sta per toglierlo.
-        await processComplianceRequest(job.data.requestId);
-        handled = true;
-      } else {
-        // Unknown/deferred job type (e.g. retry-failed-webhook): skip, leave queued
-        continue;
-      }
-      if (!handled) {
-        results.skippedLocked++;
-        continue;
-      }
-      await job.remove();
-      results.drained++;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`Cron drain error for job ${job.id}:`, error);
-      results.errors.push(`job ${job.id}: ${message}`);
-      // The processor already recorded a 'failed' SyncJob; drop the job and move on
-      await job.remove();
-    }
-  }
+  // 1. Si drena quel che e' in coda: gesti manuali, primi allineamenti,
+  //    controlli periodici, richieste di conformita'.
+  //
+  //    In corsia veloce si guarda solo la coda di quel negozio: gli altri li
+  //    prende il giro completo, e intanto chi aspetta non paga il loro tempo.
+  assorbi(results, await drainSyncRequests({ shopId: onlyShopId }));
 
   // 2. Periodic check for shops whose plan interval has elapsed
   //
@@ -243,14 +237,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // sospeso finirebbe qui a ogni giro solo per far lanciare il processor e
       // riempire di errori il log.
       if (can(caps, 'sync_products') && hasPlanChanged(shop.currentPlan, shop.lastSyncedPlan)) {
-        // Stesso lucchetto del drain: questo giro passa su TUTTI i negozi, e
-        // puo' incrociare una corsa avviata un istante prima dalla corsia
-        // veloce di un gesto manuale.
-        if (await withShopSyncLock(shop.id, () => processInitialBulkSync(shop.id))) {
-          results.planCatchUps++;
-        } else {
-          results.skippedLocked++;
-        }
+        // Si accoda, non si esegue qui. Prima si eseguiva inline, e un errore a
+        // meta' non lasciava niente da riprendere: il giro finiva, il recupero
+        // non era avvenuto e nessuna riga lo ricordava. Adesso e' un item con i
+        // suoi tentativi, e la deduplica per finestra fa si' che ripassare fra
+        // un minuto non ne produca un secondo.
+        await enqueueInitialBulkSync(shop.id);
+        results.planCatchUps++;
+        results.queued++;
         continue;
       }
 
@@ -287,18 +281,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
 
       if (due) {
-        if (await withShopSyncLock(shop.id, () => processPeriodicSyncCheck(shop.id))) {
-          results.periodicChecks++;
-        } else {
-          results.skippedLocked++;
-        }
+        await enqueuePeriodicSyncCheck(shop.id);
+        results.periodicChecks++;
+        results.queued++;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.error(`Cron periodic check error for shop ${shop.shopDomain}:`, error);
       results.errors.push(`shop ${shop.shopDomain}: ${message}`);
-      // Continue with the next shop: the processor already recorded a 'failed' SyncJob
+      // Si prosegue con il negozio successivo: quel che era da accodare per
+      // questo lo riprende il giro dopo.
     }
+  }
+
+  // 3. Il secondo drenaggio, per quel che si e' appena accodato.
+  //
+  // Senza, un controllo periodico dovuto adesso aspetterebbe il giro del cron
+  // seguente — fino a mezz'ora — solo perche' e' passato dalla coda invece di
+  // essere eseguito sul posto. Con, la coda resta l'unica strada e la latenza
+  // non cambia.
+  if (results.queued > 0) assorbi(results, await drainSyncRequests());
+
+  // Le pulizie della coda. Ultime di proposito: non le aspetta nessuno, e un
+  // loro errore non deve costare il lavoro appena fatto.
+  try {
+    results.completedRequestsPruned = await pruneSyncRequests();
+    results.expiredLocksPruned = await pruneExpiredShopLocks();
+  } catch (error) {
+    results.errors.push(`potatura coda: ${error instanceof Error ? error.message : 'errore'}`);
   }
 
   return json({ ok: true, ...results });

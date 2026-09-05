@@ -21,7 +21,7 @@
 import { prisma } from '~/db.server';
 import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { runQuery, runQueryRows } from '~/lib/supabase-management.server';
-import { withShopSyncLock } from '~/lib/queue/shop-lock.server';
+import { runWithShopLease, type ShopLease } from '~/lib/queue/shop-lock.server';
 import { clearShopStatsCache } from '~/lib/cache/stats-cache.server';
 import { InvalidIdentifierError } from './identifiers';
 import {
@@ -73,17 +73,22 @@ function names(resources: readonly ManagedResource[]): string[] {
  * deve poterci scrivere dentro, e una corsa gia' partita deve finire prima che
  * si cominci. Chi arriva secondo non fa niente e lo dice — non e' un errore,
  * e' qualcun altro che sta gia' facendo quella cosa.
+ *
+ * E se il lucchetto non si puo' nemmeno chiedere — il database owner non
+ * risponde — non si elimina niente. Prima si tirava dritto senza lucchetto, e
+ * questo e' il posto dove quella scelta costava di piu': qui si fa DROP TABLE
+ * sul database di un merchant.
  */
 export async function deleteMerchantData(
   shopId: string,
 ): Promise<DeleteMerchantDataResult> {
   let result: DeleteMerchantDataResult | null = null;
 
-  const acquired = await withShopSyncLock(shopId, async () => {
-    result = await runDeletion(shopId);
+  const esito = await runWithShopLease(shopId, async (lease) => {
+    result = await runDeletion(shopId, lease);
   });
 
-  if (!acquired) {
+  if (esito !== 'eseguito') {
     return {
       status: 'already_running',
       attempted: [],
@@ -105,7 +110,10 @@ export async function deleteMerchantData(
   );
 }
 
-async function runDeletion(shopId: string): Promise<DeleteMerchantDataResult> {
+async function runDeletion(
+  shopId: string,
+  lease?: ShopLease,
+): Promise<DeleteMerchantDataResult> {
   const shop = await prisma.shop.findUnique({
     where: { id: shopId },
     include: { supabaseConfig: true },
@@ -216,6 +224,12 @@ async function runDeletion(shopId: string): Promise<DeleteMerchantDataResult> {
   }
 
   try {
+    // L'ultimo controllo prima del DROP. Se il lucchetto nel frattempo e'
+    // passato a un'altra corsa — la nostra e' stata lenta, il lease e' scaduto
+    // — quella corsa sta scrivendo proprio nelle tabelle che stiamo per far
+    // cadere. Lanciare qui costa un'eliminazione rimandata; non lanciare costa
+    // una tabella che sparisce sotto una scrittura in corso.
+    await lease?.assertHeld();
     await runQuery(token, ref, dropSQL);
   } catch (err) {
     // La transazione si e' gia' annullata da sola: Postgres, dentro a un

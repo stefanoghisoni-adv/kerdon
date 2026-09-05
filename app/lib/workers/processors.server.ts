@@ -1,5 +1,4 @@
 // Processor implementations for background sync jobs
-import type { SyncJobData } from '../queue/queues.server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ShopifyAPIClient } from '../shopify-api.server';
 import { transformProduct } from '../transformers/product.server';
@@ -42,11 +41,29 @@ import {
 } from '~/lib/customers/birthdate-writeback';
 import { hasCustomerWriteAccess } from '~/lib/sync/customers-write-access';
 
-// Solo la parte del Job BullMQ che i processor usano davvero. Tipandola cosi'
-// il bulk sync puo' girare anche senza coda (allineamento automatico dal cron),
-// e un Job vero resta compatibile senza cast.
+// Solo la parte di chi riporta l'avanzamento che i processor usano davvero.
+// Tipandola cosi' il bulk sync puo' girare anche senza nessuno che lo ascolti
+// (allineamento automatico dal cron), e chi vuole ascoltarlo resta compatibile
+// senza cast.
 interface ProgressReporter {
   updateProgress(value: unknown): Promise<unknown> | unknown;
+}
+
+/**
+ * Il permesso di cancellare, e la prova che e' ancora valido.
+ *
+ * Lo passa il consumatore della coda, che tiene il lucchetto del negozio. Il
+ * caso che copre e' preciso: la nostra corsa e' stata lenta, il lucchetto e'
+ * scaduto, un'altra corsa e' partita e sta riscrivendo le righe — e noi
+ * stavamo per spazzare via proprio quello che lei ha appena scritto.
+ *
+ * Opzionale perche' non tutti i chiamanti ce l'hanno (un test, un richiamo a
+ * mano), e perche' l'alternativa sarebbe stata rendere obbligatorio un
+ * parametro in una firma usata da mezzo repository. Dove c'e', vale.
+ */
+export interface LeaseGuard {
+  /** Lancia se il lucchetto non e' piu' nostro. */
+  assertHeld(): Promise<void>;
 }
 
 /**
@@ -809,7 +826,10 @@ async function fetchExistingProductIds(
  */
 const CLOCK_SKEW_MARGIN_MS = 60_000;
 
-export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
+export async function processPeriodicSyncCheck(
+  shopId: string,
+  lease?: LeaseGuard,
+): Promise<void> {
   const shop = await prisma.shop.findUnique({
     where: { id: shopId },
     include: { supabaseConfig: true },
@@ -1001,6 +1021,9 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
         const hasLegacyNullRows = (existingRows || []).some(row => row.shopify_variant_id == null);
 
         if (orphanedVariantIds.length > 0) {
+          // Come sopra: si cancella solo finche' il negozio e' nostro.
+          await lease?.assertHeld();
+
           const { rows: removedRows, error: deleteError } = await runReturningRows<RemovedProductRow>(
             supabase
               .from(shop.supabaseConfig.tableNameProducts)
@@ -1017,6 +1040,8 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
           }
         }
         if (hasLegacyNullRows) {
+          await lease?.assertHeld();
+
           const { rows: removedRows, error: deleteError } = await runReturningRows<RemovedProductRow>(
             supabase
               .from(shop.supabaseConfig.tableNameProducts)
@@ -1144,8 +1169,11 @@ export async function processPeriodicSyncCheck(shopId: string): Promise<void> {
 export async function processInitialBulkSync(
   shopId: string,
   // Opzionale: l'allineamento automatico dopo un cambio di piano parte dal cron,
-  // senza un job BullMQ a cui riportare l'avanzamento.
+  // senza niente a cui riportare l'avanzamento.
   job?: ProgressReporter,
+  // Il possesso del negozio, quando chi chiama ce l'ha. Lo si interroga prima
+  // di ogni cancellazione.
+  lease?: LeaseGuard,
 ): Promise<void> {
   const shop = await prisma.shop.findUnique({
     where: { id: shopId },
@@ -1340,6 +1368,13 @@ export async function processInitialBulkSync(
         `Spazzata dei prodotti obsoleti saltata: ${productsWithIncompleteVariants} prodotti con elenco varianti incompleto in questa corsa`,
       );
     } else {
+      // L'ultimo controllo prima della cancellazione piu' pericolosa dell'app.
+      // Questa query toglie tutto quello che non e' stato riscritto adesso: se
+      // il lucchetto nel frattempo e' passato a un'altra corsa, "adesso" non e'
+      // piu' il nostro adesso, e porteremmo via il suo catalogo appena scritto.
+      // Lanciare qui e' il risultato voluto — il lavoro torna in coda intatto.
+      await lease?.assertHeld();
+
       const { rows: sweptRows, error: sweepError } = await runReturningRows<RemovedProductRow>(
         supabase
           .from(shop.supabaseConfig.tableNameProducts)
@@ -1440,9 +1475,13 @@ export async function processInitialBulkSync(
  * Process manual sync for a shop
  * Task 10: Reuses initial bulk sync logic
  */
-export async function processManualSync(shopId: string, job?: ProgressReporter): Promise<void> {
+export async function processManualSync(
+  shopId: string,
+  job?: ProgressReporter,
+  lease?: LeaseGuard,
+): Promise<void> {
   // Manual sync reuses the same logic as initial bulk sync
-  await processInitialBulkSync(shopId, job);
+  await processInitialBulkSync(shopId, job, lease);
 }
 
 /**
@@ -1452,6 +1491,11 @@ export async function processManualSync(shopId: string, job?: ProgressReporter):
  * type and worker branch exist so the retry pipeline can be wired up in a later
  * phase without reshaping the queue contract. Throws if invoked prematurely.
  */
-export async function processRetryWebhook(data: Extract<SyncJobData, { type: 'retry-failed-webhook' }>): Promise<void> {
+export async function processRetryWebhook(data: {
+  type: 'retry-failed-webhook';
+  syncJobId: string;
+  webhookPayload: unknown;
+  attempt: number;
+}): Promise<void> {
   throw new Error('processRetryWebhook not yet implemented');
 }

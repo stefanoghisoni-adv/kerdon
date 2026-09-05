@@ -1,17 +1,47 @@
 import { waitUntil } from '@vercel/functions';
-import { getSyncQueue } from './queues.server';
-import type { SyncJobData } from './queues.server';
+import { dedupKeyFor } from './queue-model';
+import { enqueueSyncRequest } from './queue-store.server';
 
-// Mette in coda una sync manuale (durabile su Redis). Se poi l'app va in timeout
-// o il browser viene chiuso, il job resta in coda e il cron lo drena comunque.
+/**
+ * Mette in coda una sincronizzazione manuale.
+ *
+ * Durabile su Postgres, non piu' su Redis: se l'app va in timeout o il browser
+ * viene chiuso, la riga resta e il cron la drena comunque. La differenza con
+ * prima non e' la durabilita' — anche Redis reggeva — ma il possesso: adesso
+ * chi la lavora la prende, e due drenaggi non possono farla due volte.
+ *
+ * La deduplica e' per negozio, tipo e finestra di un minuto. Due clic
+ * ravvicinati sul pulsante producono un item solo; un clic dieci minuti dopo ne
+ * produce uno nuovo, perche' e' una richiesta nuova — il merchant ha cambiato
+ * qualcosa su Shopify e sta chiedendo di rivederlo.
+ */
 export async function enqueueManualSync(shopId: string): Promise<void> {
-  const syncQueue = await getSyncQueue();
-  await syncQueue.add(
-    'manual-sync',
-    { type: 'manual-sync', shopId } satisfies SyncJobData,
-    // jobId univoco per non collassare due richieste manuali ravvicinate.
-    { jobId: `manual-sync-${shopId}-${Date.now()}` },
-  );
+  await enqueueSyncRequest({
+    type: 'manual-sync',
+    shopId,
+    dedupKey: dedupKeyFor('manual-sync', shopId, new Date()),
+  });
+}
+
+/**
+ * Mette in coda un allineamento completo (prima sincronizzazione, o recupero
+ * dopo un cambio di piano).
+ */
+export async function enqueueInitialBulkSync(shopId: string): Promise<void> {
+  await enqueueSyncRequest({
+    type: 'initial-bulk-sync',
+    shopId,
+    dedupKey: dedupKeyFor('initial-bulk-sync', shopId, new Date()),
+  });
+}
+
+/** Mette in coda il controllo periodico di un negozio. */
+export async function enqueuePeriodicSyncCheck(shopId: string): Promise<void> {
+  await enqueueSyncRequest({
+    type: 'periodic-sync-check',
+    shopId,
+    dedupKey: dedupKeyFor('periodic-sync-check', shopId, new Date()),
+  });
 }
 
 // Innesca SUBITO il drain della coda in un'invocazione separata (con un budget

@@ -14,7 +14,7 @@ vi.mock('~/db.server', () => ({
   },
 }));
 vi.mock('~/lib/supabase.server', () => ({ createSupabaseClient: vi.fn(() => ({})) }));
-vi.mock('~/lib/queue/shop-lock.server', () => ({ withShopSyncLock: vi.fn() }));
+vi.mock('~/lib/queue/shop-lock.server', () => ({ runWithShopLease: vi.fn() }));
 vi.mock('./customer-record.server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./customer-record.server')>();
   return {
@@ -38,7 +38,7 @@ import {
   pruneExpiredExports,
 } from './process-compliance.server';
 import { prisma } from '~/db.server';
-import { withShopSyncLock } from '~/lib/queue/shop-lock.server';
+import { runWithShopLease } from '~/lib/queue/shop-lock.server';
 import {
   collectCustomerData,
   eraseCustomerFromAppDatabase,
@@ -100,10 +100,12 @@ beforeEach(() => {
   (prisma.complianceRequest.update as any).mockResolvedValue({});
   (prisma.complianceRequest.deleteMany as any).mockResolvedValue({ count: 1 });
   (prisma.shop.findUnique as any).mockResolvedValue(shopWithConfig);
-  (withShopSyncLock as any).mockImplementation(async (_id: string, run: () => Promise<void>) => {
-    await run();
-    return true;
-  });
+  (runWithShopLease as any).mockImplementation(
+    async (_id: string, run: (lease: unknown) => Promise<void>) => {
+      await run({ shopId: _id, assertHeld: async () => undefined });
+      return 'eseguito';
+    },
+  );
   (eraseCustomerFromMerchant as any).mockResolvedValue([
     { table: 'customers', outcome: 'deleted', rows: 1 },
   ]);
@@ -174,11 +176,11 @@ describe('customers/redact', () => {
     // averlo cancellato.
     await processComplianceRequest('req-1');
 
-    expect(withShopSyncLock).toHaveBeenCalledWith('shop-1', expect.any(Function));
+    expect(runWithShopLease).toHaveBeenCalledWith('shop-1', expect.any(Function));
   });
 
   it('lucchetto occupato: non e un fallimento, si riprova', async () => {
-    (withShopSyncLock as any).mockResolvedValue(false);
+    (runWithShopLease as any).mockResolvedValue('occupato');
 
     const result = await processComplianceRequest('req-1');
 

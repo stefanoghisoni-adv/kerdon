@@ -513,6 +513,59 @@ ALTER TABLE "supabase_managed_resources" ADD CONSTRAINT "supabase_managed_resour
 -- AddForeignKey
 ALTER TABLE "supabase_data_deletions" ADD CONSTRAINT "supabase_data_deletions_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- CreateTable
+CREATE TABLE "sync_requests" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT,
+    "type" TEXT NOT NULL,
+    "payload" JSONB,
+    "dedup_key" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'queued',
+    "attempts" INTEGER NOT NULL DEFAULT 0,
+    "next_attempt_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lease_owner" TEXT,
+    "lease_expires_at" TIMESTAMP(3),
+    "fencing_token" INTEGER NOT NULL DEFAULT 0,
+    "last_error" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "started_at" TIMESTAMP(3),
+    "completed_at" TIMESTAMP(3),
+
+    CONSTRAINT "sync_requests_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "shop_locks" (
+    "shop_id" TEXT NOT NULL,
+    "owner" TEXT NOT NULL,
+    "fencing_token" INTEGER NOT NULL DEFAULT 0,
+    "acquired_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "shop_locks_pkey" PRIMARY KEY ("shop_id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "sync_requests_dedup_key_key" ON "sync_requests"("dedup_key");
+
+-- CreateIndex
+CREATE INDEX "sync_requests_status_next_attempt_at_idx" ON "sync_requests"("status", "next_attempt_at");
+
+-- CreateIndex
+CREATE INDEX "sync_requests_shop_id_status_idx" ON "sync_requests"("shop_id", "status");
+
+-- CreateIndex
+CREATE INDEX "shop_locks_expires_at_idx" ON "shop_locks"("expires_at");
+
+-- AddForeignKey
+ALTER TABLE "sync_requests" ADD CONSTRAINT "sync_requests_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Su `shop_locks` nessuna chiave esterna, di proposito: il lucchetto serve
+-- anche mentre il negozio viene cancellato (`shop/redact`), e una riga che
+-- sparisce a meta' di quel lavoro sarebbe il lucchetto che si apre da solo nel
+-- momento peggiore.
+
 -- I piani: cinque righe copiate dal database owner in uso.
 --
 -- Non si generano dallo schema perche' non sono struttura, sono scelte:

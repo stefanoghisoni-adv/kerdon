@@ -13,19 +13,22 @@ const runQuery = vi.fn();
 const runQueryRows = vi.fn();
 const clearShopStatsCache = vi.fn();
 
-// Il lucchetto vero e' Redis: qui si simula solo la domanda che conta — l'ho
-// preso o no?
+// Il lucchetto vero e' una riga su Postgres: qui si simula solo la domanda che
+// conta — l'ho preso o no? Il `lease` che si passa al lavoro e' quello che il
+// DROP interroga un istante prima di partire.
 let lockFree = true;
-const withShopSyncLock = vi.fn(async (_shopId: string, run: () => Promise<void>) => {
-  if (!lockFree) return false;
-  lockFree = false;
-  try {
-    await run();
-  } finally {
-    lockFree = true;
-  }
-  return true;
-});
+const runWithShopLease = vi.fn(
+  async (_shopId: string, run: (lease: unknown) => Promise<void>) => {
+    if (!lockFree) return 'occupato';
+    lockFree = false;
+    try {
+      await run({ shopId: _shopId, assertHeld: async () => undefined });
+    } finally {
+      lockFree = true;
+    }
+    return 'eseguito';
+  },
+);
 
 vi.mock('~/db.server', () => ({
   prisma: {
@@ -56,7 +59,8 @@ vi.mock('~/lib/supabase-management.server', () => ({
   runQueryRows: (...a: unknown[]) => runQueryRows(...a),
 }));
 vi.mock('~/lib/queue/shop-lock.server', () => ({
-  withShopSyncLock: (...a: [string, () => Promise<void>]) => withShopSyncLock(...a),
+  runWithShopLease: (...a: [string, (lease: unknown) => Promise<void>]) =>
+    runWithShopLease(...a),
 }));
 vi.mock('~/lib/cache/stats-cache.server', () => ({
   clearShopStatsCache: (...a: unknown[]) => clearShopStatsCache(...a),

@@ -3,12 +3,17 @@
 // La seconda meta' di una richiesta di conformita': quella che fa il lavoro,
 // dopo che il webhook ha gia' risposto ricevuto.
 //
-// Gira dove girano gia' le sincronizzazioni — la coda BullMQ drenata dal cron —
+// Gira dove girano gia' le sincronizzazioni — la coda drenata dal cron —
 // perche' una seconda infrastruttura per tre webhook sarebbe una seconda cosa
 // da tenere viva, da monitorare e da ricordarsi quando si rompe. La riga su
-// Postgres e' pero' la fonte di verita', non il job: il job e' una sveglia, e
-// una sveglia persa e' un ritardo, mentre una riga persa sarebbe una richiesta
-// GDPR mai eseguita.
+// Postgres e' pero' la fonte di verita', non l'item di coda: l'item e' una
+// sveglia, e una sveglia persa e' un ritardo, mentre una riga persa sarebbe una
+// richiesta GDPR mai eseguita.
+//
+// Per questo `drainComplianceRequests` continua a esistere accanto alla coda e
+// non e' un doppione: legge le righe, non la coda, ed e' l'unica strada che
+// funziona anche quando l'accodamento non e' mai avvenuto. Le due non si pestano
+// i piedi perche' la presa e' la stessa — la condizione sullo stato qui sotto.
 //
 // COME SI EVITANO I DOPPIONI. Non con un controllo prima, che due invocazioni
 // simultanee passerebbero tutte e due, ma con la presa: si aggiorna la riga da
@@ -27,7 +32,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
-import { withShopSyncLock } from '~/lib/queue/shop-lock.server';
+import { runWithShopLease } from '~/lib/queue/shop-lock.server';
 import type { GdprStep } from './steps';
 import { stepsFailed, failureMessage } from './steps';
 import {
@@ -269,12 +274,16 @@ async function redactCustomer(
 
   const steps: GdprStep[] = [];
 
-  const ran = await withShopSyncLock(shop.id, async () => {
+  const esitoLucchetto = await runWithShopLease(shop.id, async (lease) => {
     // Sotto lo stesso lucchetto della sincronizzazione, e non e' zelo: una
     // corsa avviata un istante prima sta riscrivendo proprio le righe che
     // stiamo togliendo, e riscriverebbe il cliente subito dopo la sua
     // cancellazione. Il lucchetto occupato non e' un errore — si riprova.
     if (shop.supabaseConfig) {
+      // E il possesso si verifica un istante prima di cancellare: se il lease
+      // e' scaduto mentre leggevamo, un'altra corsa sta gia' riscrivendo quel
+      // cliente e la nostra cancellazione arriverebbe fuori tempo.
+      await lease.assertHeld();
       const supabase = createSupabaseClient(shop.supabaseConfig);
       steps.push(
         ...(await eraseCustomerFromMerchant(
@@ -301,7 +310,7 @@ async function redactCustomer(
     );
   });
 
-  if (!ran) {
+  if (esitoLucchetto !== 'eseguito') {
     return {
       shopId: shop.id,
       steps: [
@@ -309,7 +318,10 @@ async function redactCustomer(
           table: 'richiesta',
           outcome: 'failed',
           rows: 0,
-          detail: 'negozio occupato da una sincronizzazione: si riprova',
+          detail:
+            esitoLucchetto === 'occupato'
+              ? 'negozio occupato da una sincronizzazione: si riprova'
+              : 'lucchetto del negozio non disponibile: si riprova',
         },
       ],
     };
