@@ -75,6 +75,7 @@ export const it = {
       "Prepariamo una copia di tutto quello che conserviamo sul tuo negozio: chi sei, il piano e gli abbonamenti, come sei configurato, cosa abbiamo sincronizzato e chi ha letto i dati dei tuoi clienti passando da noi.",
     notIncluded:
       "Prodotti, clienti e ordini non sono nel file: quelli stanno nel database che hai collegato e sono già tuoi. Le credenziali di accesso restano fuori di proposito.",
+    error: "Non siamo riusciti a preparare la copia. Riprova fra poco.",
     confirm: "Scarica",
     cancel: "Annulla",
   },

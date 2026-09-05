@@ -70,6 +70,7 @@ export const en: typeof it = {
       "We'll prepare a copy of everything we keep about your store: who you are, your plan and subscriptions, how you're set up, what we've synced, and who has read your customers' data through us.",
     notIncluded:
       "Products, customers and orders aren't in the file: those live in the database you connected and are already yours. Access credentials are deliberately left out.",
+    error: "We couldn't prepare your copy. Please try again shortly.",
     confirm: "Download",
     cancel: "Cancel",
   },
