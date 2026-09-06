@@ -10,7 +10,10 @@
 // passi con le righe toccate, salvato, si'.
 //
 // DOVE VIENE SCRITTA. Nella tabella dei job di sincronizzazione, con un
-// jobType che comincia per `gdpr_`. Non e' la sua casa ideale ed e' una scelta
+// jobType che comincia per `gdpr_`. Con un'eccezione, ed e' quella che qui
+// contava di piu': `shop/redact` riuscita non ha piu' nessun negozio a cui
+// legare una riga, quindi la sua prova sta in `shop_erasure_proofs` — un
+// registro senza chiavi esterne verso `shops`, che al negozio sopravvive. Non e' la sua casa ideale ed e' una scelta
 // consapevole: e' l'unico registro per negozio che gia' esiste, e' gia' escluso
 // dalle corse mostrate al merchant, e non richiede di aggiungere una tabella —
 // che vorrebbe dire una migrazione da applicare a mano prima del rilascio, e
@@ -135,6 +138,17 @@ export interface GdprOutcome {
  * fallita: e' lo stesso criterio con cui il webhook decide se rispondere 200 o
  * far ritentare Shopify, e le due cose devono dire la stessa cosa — una riga
  * "completed" accanto a una risposta 500 renderebbe il registro inservibile.
+ *
+ * SOLLEVA SE NON RIESCE A SCRIVERE, e prima non lo faceva: l'errore finiva in
+ * un `console.error` e la richiesta proseguiva fino a dichiararsi completata.
+ * Quel `catch` diceva, testualmente, "resta il log applicativo, che e'
+ * esattamente il motivo per cui i due canali esistono entrambi" — ma i due
+ * canali non sono equivalenti. Uno e' una riga in un registro che si conserva,
+ * l'altro e' testo in un log a ritenzione breve che nessuno indicizza. Una
+ * richiesta di cancellazione dichiarata eseguita la cui unica prova e' una riga
+ * di `console` e' una richiesta che, davanti a chi la chiede, non risulta
+ * eseguita affatto. Chi non riesce a scrivere la prova non chiude la pratica:
+ * ritenta.
  */
 export async function recordGdprOutcome(
   shopId: string,
@@ -142,35 +156,49 @@ export async function recordGdprOutcome(
 ): Promise<void> {
   const failed = stepsFailed(outcome.steps);
 
-  try {
-    await prisma.syncJob.create({
-      data: {
-        shopId,
-        jobType: outcome.jobType,
-        status: failed ? 'failed' : 'completed',
-        completedAt: new Date(),
-        productsSynced: 0,
-        variantsSynced: 0,
-        errors: {
-          // `message` e' il campo che il log del merchant sa gia' leggere:
-          // esiste solo quando c'e' davvero qualcosa da dire.
-          ...(failed ? { message: failureMessage(outcome.steps) } : {}),
-          gdpr: {
-            request: outcome.jobType,
-            ...(outcome.ref ? { customer_ref: outcome.ref } : {}),
-            steps: outcome.steps.map((step) => ({
-              table: step.table,
-              outcome: step.outcome,
-              rows: step.rows,
-              ...(step.detail ? { detail: step.detail } : {}),
-            })),
-          },
+  await prisma.syncJob.create({
+    data: {
+      shopId,
+      jobType: outcome.jobType,
+      status: failed ? 'failed' : 'completed',
+      completedAt: new Date(),
+      productsSynced: 0,
+      variantsSynced: 0,
+      errors: {
+        // `message` e' il campo che il log del merchant sa gia' leggere:
+        // esiste solo quando c'e' davvero qualcosa da dire.
+        ...(failed ? { message: failureMessage(outcome.steps) } : {}),
+        gdpr: {
+          request: outcome.jobType,
+          ...(outcome.ref ? { customer_ref: outcome.ref } : {}),
+          steps: outcome.steps.map((step) => ({
+            table: step.table,
+            outcome: step.outcome,
+            rows: step.rows,
+            ...(step.detail ? { detail: step.detail } : {}),
+          })),
         },
       },
-    });
+    },
+  });
+}
+
+/**
+ * La traccia scritta "se si puo'", per il solo percorso d'errore.
+ *
+ * Esiste per un caso e uno solo: si sta gia' registrando un fallimento, e
+ * sollevare qui coprirebbe l'errore vero con un secondo errore che non aggiunge
+ * niente. Ovunque altro si usa `recordGdprOutcome`, che solleva — perche' li'
+ * la traccia mancante e' la differenza fra una pratica chiusa e una da
+ * ritentare.
+ */
+export async function tryRecordGdprOutcome(
+  shopId: string,
+  outcome: GdprOutcome,
+): Promise<void> {
+  try {
+    await recordGdprOutcome(shopId, outcome);
   } catch (error) {
-    // Se nemmeno la traccia si riesce a scrivere resta il log applicativo, che
-    // e' esattamente il motivo per cui i due canali esistono entrambi.
     console.error(
       `[gdpr] traccia non salvata per ${outcome.shopDomain}:`,
       error instanceof Error ? error.message : 'errore sconosciuto',
@@ -182,10 +210,16 @@ export async function recordGdprOutcome(
  * La stessa traccia nel log applicativo, in una riga sola e sempre con la
  * stessa forma, cosi' da poterla ritrovare cercando `[gdpr]`.
  *
- * Non e' un doppione per abbondanza. Per shop/redact e' l'unica traccia
- * possibile: quella richiesta cancella il negozio, e con lui — in cascata —
- * qualunque riga di controllo che al negozio fosse legata. Una prova che si
- * autodistrugge insieme a cio' che deve provare non e' una prova.
+ * Non e' un doppione per abbondanza: e' il canale che si legge mentre una cosa
+ * succede, mentre la riga e' quello che si legge dopo, anche molto dopo.
+ *
+ * PER shop/redact NON E' PIU' L'UNICA TRACCIA, ed e' bene ricordarsi perche' lo
+ * era: quella richiesta cancella il negozio, e con lui — in cascata — ogni riga
+ * di controllo che al negozio fosse legata. Il rimedio di allora fu affidarsi a
+ * questo `console`, che pero' non e' una prova: e' testo in un log a ritenzione
+ * breve. Adesso la prova sta in `shop_erasure_proofs`, che al negozio
+ * sopravvive perche' non ha nessun legame con lui, e questa riga torna a essere
+ * quello che deve essere — un di piu', mai un sostituto.
  */
 export function logGdprOutcome(outcome: GdprOutcome): void {
   const failed = stepsFailed(outcome.steps);
@@ -202,11 +236,32 @@ export function logGdprOutcome(outcome: GdprOutcome): void {
   else console.log(`[gdpr] ${line}`);
 }
 
-/** Le due tracce insieme: e' sempre cosi' che si chiudono i tre handler. */
+/**
+ * Le due tracce insieme: e' sempre cosi' che si chiudono i tre handler.
+ *
+ * SOLLEVA se la traccia durevole non si scrive. Il `console` resta, e resta
+ * utile — ma e' un di piu', mai un sostituto: chi chiama non deve poter
+ * dichiarare eseguita una richiesta di cui non e' rimasta nessuna prova
+ * conservata.
+ *
+ * Con `shopId` a null non c'e' nessuna riga da scrivere qui, e non e' una
+ * scappatoia: e' il caso di `shop/redact` riuscita, dove il negozio non esiste
+ * piu' e la prova sta nel suo registro — `shop_erasure_proofs`, che al negozio
+ * sopravvive perche' non ha nessun legame con lui.
+ */
 export async function saveGdprOutcome(
   shopId: string | null,
   outcome: GdprOutcome,
 ): Promise<void> {
   logGdprOutcome(outcome);
   if (shopId) await recordGdprOutcome(shopId, outcome);
+}
+
+/** Come sopra, ma senza sollevare. Solo per il percorso d'errore. */
+export async function trySaveGdprOutcome(
+  shopId: string | null,
+  outcome: GdprOutcome,
+): Promise<void> {
+  logGdprOutcome(outcome);
+  if (shopId) await tryRecordGdprOutcome(shopId, outcome);
 }

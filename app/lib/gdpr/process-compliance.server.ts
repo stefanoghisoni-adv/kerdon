@@ -42,7 +42,7 @@ import {
   eraseCustomerFromMerchant,
 } from './customer-record.server';
 import { eraseShopRecord } from './shop-record.server';
-import { customerRef, saveGdprOutcome } from './audit.server';
+import { customerRef, saveGdprOutcome, trySaveGdprOutcome } from './audit.server';
 import type { GdprJobType } from './audit.server';
 
 /**
@@ -109,7 +109,9 @@ export async function processComplianceRequest(
     const outcome = await runTopic(request, now);
 
     if (stepsFailed(outcome.steps)) {
-      await saveGdprOutcome(outcome.shopId, {
+      // Stesso ragionamento del `catch` in fondo: si sta registrando un
+      // fallimento gia' deciso, e la richiesta resta ritentabile comunque.
+      await trySaveGdprOutcome(outcome.shopId, {
         jobType,
         shopDomain,
         ref: request.customerRef ?? undefined,
@@ -128,11 +130,14 @@ export async function processComplianceRequest(
 
     if (outcome.removeRow) {
       // shop/redact riuscita: del negozio non deve restare niente, e questa
-      // riga porta il suo dominio. La prova che la richiesta e' stata eseguita
-      // resta nel log applicativo, che e' la stessa scelta gia' fatta per la
-      // traccia di controllo di quel webhook e per lo stesso motivo — una prova
-      // che si autodistrugge insieme a cio' che deve provare non prova niente,
-      // e tenerla qui vorrebbe dire non aver cancellato il negozio.
+      // riga porta il suo dominio in chiaro — quindi se ne va anche lei.
+      //
+      // SI PUO' FARE SOLO PERCHE' LA PROVA E' GIA' SCRITTA. `eraseShopRecord`
+      // la scrive dentro la stessa transazione che cancella il negozio, e se
+      // non fosse riuscita non saremmo qui: `outcome.steps` direbbe fallito e
+      // la richiesta sarebbe tornata ritentabile senza toccare questa riga.
+      // Quel che resta e' la prova minimizzata — impronta del negozio,
+      // conteggi, istante — e nient'altro.
       await prisma.complianceRequest.deleteMany({ where: { shopDomain } });
       return 'done';
     }
@@ -163,7 +168,11 @@ export async function processComplianceRequest(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'errore sconosciuto';
     console.error(`[gdpr] ${request.topic} non riuscita per ${shopDomain}:`, message);
-    await saveGdprOutcome(request.shopId, {
+    // `trySave` e non `save`: si sta gia' registrando un fallimento, e una
+    // traccia che non si riesce a scrivere non deve coprire l'errore vero con
+    // un secondo errore. La richiesta torna comunque ritentabile qui sotto, che
+    // e' l'effetto che il lancio avrebbe avuto.
+    await trySaveGdprOutcome(request.shopId, {
       jobType,
       shopDomain,
       ref: request.customerRef ?? undefined,
@@ -184,12 +193,39 @@ interface TopicOutcome {
 }
 
 async function runTopic(
-  request: { id: string; topic: string; shopDomain: string; payload: unknown },
+  request: {
+    id: string;
+    webhookId: string;
+    topic: string;
+    shopDomain: string;
+    payload: unknown;
+  },
   now: Date,
 ): Promise<TopicOutcome> {
   if (request.topic === 'shop/redact') {
-    const { shopId, steps } = await eraseShopRecord(request.shopDomain);
-    return { shopId: stepsFailed(steps) ? shopId : null, steps, removeRow: !stepsFailed(steps) };
+    // Il lucchetto, la marcatura del ciclo di vita, la transazione e la prova
+    // stanno tutti dentro `eraseShopRecord`: qui resta solo la traduzione
+    // dell'esito in quel che il processore sa gia' leggere.
+    //
+    // L'id della consegna arriva fin qui perche' e' la chiave su cui la prova
+    // e' idempotente: e' cosi' che la seconda consegna della stessa richiesta
+    // trova la prova gia' scritta invece di ripartire da capo su un negozio che
+    // non esiste piu'.
+    const esito = await eraseShopRecord({
+      shopDomain: request.shopDomain,
+      webhookId: request.webhookId,
+      topic: request.topic,
+      now,
+    });
+
+    // Su un esito andato male lo `shopId` torna indietro valorizzato, ed e' il
+    // punto di tutta la revisione: la transazione annullata ha lasciato la riga
+    // `shops` dov'era, quindi il ritentativo — e la traccia di controllo — hanno
+    // ancora un negozio a cui legarsi. Prima, a quel punto, non l'avevano piu'.
+    if (esito.outcome === 'erased' || esito.outcome === 'already_erased') {
+      return { shopId: null, steps: esito.steps, removeRow: true };
+    }
+    return { shopId: esito.shopId, steps: esito.steps };
   }
 
   const customerId = customerIdOf(request.payload);

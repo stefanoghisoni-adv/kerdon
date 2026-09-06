@@ -25,6 +25,7 @@ import {
  * fatto alla policy si veda subito in ogni query.
  */
 export const CAPABILITY_SHOP_SELECT = {
+  lifecycleStatus: true,
   uninstalledAt: true,
   authorization: true,
   trackingAuthorization: true,
@@ -45,6 +46,12 @@ export const CAPABILITY_SHOP_SELECT = {
  * si e' partiti, ma silenzioso. Cosi' invece non compila.
  */
 export interface CapabilityShopRow {
+  /**
+   * Colonna `lifecycle_status`. Obbligatoria: un negozio la cui cancellazione
+   * e' cominciata non deve poter fare niente, e una `select` che la dimentica
+   * darebbe una policy che lo lascia lavorare. Cosi' non compila.
+   */
+  lifecycleStatus: string | null;
   uninstalledAt: Date | null;
   authorization: string | null;
   trackingAuthorization: string | null;
@@ -101,6 +108,7 @@ export function capabilityFacts(
   now?: Date,
 ): ShopCapabilityFacts {
   return {
+    lifecycleStatus: shop.lifecycleStatus,
     uninstalledAt: shop.uninstalledAt,
     authorization: shop.authorization,
     trackingAuthorization: shop.trackingAuthorization,

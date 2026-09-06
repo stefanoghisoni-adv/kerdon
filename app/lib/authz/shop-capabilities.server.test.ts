@@ -28,6 +28,7 @@ import {
  */
 
 const RIGA: CapabilityShopRow = {
+  lifecycleStatus: 'active',
   uninstalledAt: null,
   authorization: 'ENABLED',
   trackingAuthorization: 'ENABLED',
@@ -171,6 +172,10 @@ describe('CAPABILITY_SHOP_SELECT — la select non deve restare indietro', () =>
         'isInTrial',
         'trialEndsAt',
         'activeChargeId',
+        // Il ciclo di vita: senza, un negozio la cui cancellazione e' gia'
+        // cominciata continuerebbe a essere autorizzato a scrivere proprio da
+        // chi arriva da qui — le notifiche di Shopify e il proxy di lettura.
+        'lifecycleStatus',
       ].sort(),
     );
     expect(CAPABILITY_SHOP_SELECT.supabaseConfig.select).toEqual({ connectionVerifiedAt: true });

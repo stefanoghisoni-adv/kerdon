@@ -794,6 +794,9 @@ export const it = {
     suspended: "L’utilizzo dell’app è sospeso per questo negozio.",
     appDisabled:
       "L’utilizzo dell’app è stato disabilitato per questo negozio. Contatta il supporto.",
+    erasureInProgress:
+      "È in corso la cancellazione dei dati di questo negozio. Finché non è " +
+      "completata l’app non scrive più nulla.",
     trialEnded:
       "Il periodo di prova è terminato: le funzioni dell’app e le sincronizzazioni sono " +
       "sospese. Aggiorna il piano per riattivarle.",

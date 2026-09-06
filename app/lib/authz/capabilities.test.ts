@@ -21,6 +21,7 @@ import {
 
 /** Un negozio a posto: tutto acceso, cosi' ogni prova spegne una cosa sola. */
 const SANO: ShopCapabilityFacts = {
+  lifecycleStatus: 'active',
   uninstalledAt: null,
   authorization: 'ENABLED',
   trackingAuthorization: 'ENABLED',
@@ -79,6 +80,68 @@ describe('policy — negozio non identificato', () => {
 
   it("non fa eccezione per la lettura: e' proprio il caso in cui non si sa a chi si darebbero i dati", () => {
     expect(motivo(null, 'use_read_proxy')).toBe('unknown_shop');
+  });
+});
+
+/**
+ * IL MOTIVO CHE BATTE TUTTI GLI ALTRI.
+ *
+ * Un negozio la cui cancellazione e' cominciata non puo' fare NIENTE, nemmeno
+ * le cose che a un negozio sospeso restano concesse. Prima questa condizione
+ * non esisteva affatto: `shop/redact` cominciava a cancellare e nel frattempo
+ * il cron sincronizzava, le notifiche di Shopify scrivevano clienti e ordini, e
+ * il proxy serviva letture con la chiave di servizio ancora in cache. Ognuna di
+ * quelle scritture, presa da sola, era corretta. Insieme facevano una
+ * cancellazione che non cancellava.
+ */
+describe('policy — cancellazione del negozio in corso', () => {
+  const inCancellazione = con({ lifecycleStatus: 'erasing' });
+
+  it('nega tutto, senza eccezioni', () => {
+    expect(concesse(inCancellazione)).toEqual([]);
+  });
+
+  it('lo dice con un motivo suo, su ogni capacita\'', () => {
+    for (const capability of CAPABILITIES) {
+      expect(motivo(inCancellazione, capability)).toBe('erasing');
+    }
+  });
+
+  /**
+   * La lettura e' la capacita' che sopravvive a piu' cose: un negozio con l'app
+   * sospesa continua a poter leggere i dati gia' sincronizzati. Alla
+   * cancellazione no — e questo e' il caso che pesa di piu', perche' il proxy e'
+   * l'unica rotta pubblica e il token del merchant resta incollato nel suo
+   * container anche dopo che lui se n'e' andato.
+   */
+  it('nega anche la lettura, che sopravvive a tutto il resto', () => {
+    expect(motivo(inCancellazione, 'use_read_proxy')).toBe('erasing');
+  });
+
+  it('viene prima della disinstallazione, che e\' il motivo piu\' vicino', () => {
+    // Un negozio in cancellazione e' quasi sempre anche disinstallato:
+    // `shop/redact` arriva quarantotto ore dopo. Il motivo che si legge dev'essere
+    // il piu' definitivo dei due.
+    expect(
+      motivo(con({ lifecycleStatus: 'erasing', uninstalledAt: new Date() }), 'use_app'),
+    ).toBe('erasing');
+  });
+
+  it("un negozio 'active' non e\' toccato da questa regola", () => {
+    expect(concesse(con({ lifecycleStatus: 'active' }))).toEqual([...CAPABILITIES]);
+  });
+
+  /**
+   * In dubbio NON si nega, e qui e' l'eccezione alla regola generale della
+   * policy: un valore mai visto non e' 'erasing', e trattarlo come tale
+   * spegnerebbe ogni negozio la cui colonna fosse scritta male — un danno molto
+   * piu' grande di quello che si eviterebbe.
+   */
+  it('un valore sconosciuto non spegne il negozio', () => {
+    expect(concesse(con({ lifecycleStatus: 'qualcosa-di-mai-visto' }))).toEqual([
+      ...CAPABILITIES,
+    ]);
+    expect(concesse(con({ lifecycleStatus: null }))).toEqual([...CAPABILITIES]);
   });
 });
 

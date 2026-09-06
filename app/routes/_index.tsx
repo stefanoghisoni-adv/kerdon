@@ -455,13 +455,21 @@ export async function action({ request }: ActionFunctionArgs) {
     const denial = denialOf(await shopCapabilities(shop), 'use_app');
     if (denial) {
       const t = await dictionaryForShop(session.shop);
-      // Due rifiuti diversi, due frasi diverse: "sei sospeso" non dice al
-      // merchant che cosa puo' fare, "la prova e' finita" si'. E' l'unica
-      // strada che gli indichiamo per tornare operativo, quindi va nominata.
+      // Rifiuti diversi, frasi diverse: "sei sospeso" non dice al merchant che
+      // cosa puo' fare, "la prova e' finita" si' — ed e' l'unica strada che gli
+      // indichiamo per tornare operativo, quindi va nominata.
+      //
+      // La cancellazione in corso ha una frase sua e non ricade su "sospeso",
+      // che sarebbe falso in tutti e due i sensi: il negozio non e' sospeso, e
+      // non c'e' niente da riattivare — i suoi dati si stanno cancellando.
+      const messaggi: Partial<Record<typeof denial & string, string>> = {
+        trial_expired: t.errors.trialEnded,
+        erasing: t.errors.erasureInProgress,
+      };
       return json(
         {
-          error: denial === 'trial_expired' ? t.errors.trialEnded : t.errors.suspended,
-          code: denial === 'trial_expired' ? 'trial_expired' : 'not_authorized',
+          error: messaggi[denial] ?? t.errors.suspended,
+          code: denial === 'trial_expired' || denial === 'erasing' ? denial : 'not_authorized',
         },
         { status: 403 },
       );

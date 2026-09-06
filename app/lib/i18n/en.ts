@@ -679,6 +679,9 @@ export const en: typeof it = {
     suspended: "This store’s access to the app is suspended.",
     appDisabled:
       "This store’s access to the app has been disabled. Contact support.",
+    erasureInProgress:
+      "This store's data is being deleted. Until that finishes, the app no longer " +
+      "writes anything.",
     trialEnded:
       "Your trial has ended: the app’s features and syncs are suspended. Upgrade your plan to " +
       "turn them back on.",

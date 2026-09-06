@@ -27,7 +27,7 @@ vi.mock('./customer-record.server', async (importOriginal) => {
 vi.mock('./shop-record.server', () => ({ eraseShopRecord: vi.fn() }));
 vi.mock('./audit.server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./audit.server')>();
-  return { ...actual, saveGdprOutcome: vi.fn() };
+  return { ...actual, saveGdprOutcome: vi.fn(), trySaveGdprOutcome: vi.fn() };
 });
 
 import { Prisma } from '@prisma/client';
@@ -45,7 +45,7 @@ import {
   eraseCustomerFromMerchant,
 } from './customer-record.server';
 import { eraseShopRecord } from './shop-record.server';
-import { saveGdprOutcome } from './audit.server';
+import { saveGdprOutcome, trySaveGdprOutcome } from './audit.server';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -70,6 +70,7 @@ const OK = { count: 1 };
 function row(over: Record<string, unknown> = {}) {
   return {
     id: 'req-1',
+    webhookId: 'consegna-1',
     topic: 'customers/redact',
     shopDomain: SHOP,
     shopId: null,
@@ -117,9 +118,16 @@ beforeEach(() => {
     steps: [{ table: 'customers', outcome: 'read', rows: 1 }],
   });
   (eraseShopRecord as any).mockResolvedValue({
-    shopId: 'shop-1',
+    outcome: 'erased',
+    shopId: null,
+    proofId: 'prova-1',
     steps: [{ table: 'shops', outcome: 'deleted', rows: 1 }],
   });
+  // Dichiarata qui e non lasciata al default: `clearAllMocks` azzera le
+  // chiamate ma NON l'implementazione, quindi un test che la fa fallire se la
+  // porterebbe dietro in tutti quelli dopo.
+  (saveGdprOutcome as any).mockResolvedValue(undefined);
+  (trySaveGdprOutcome as any).mockResolvedValue(undefined);
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -212,7 +220,10 @@ describe('customers/redact', () => {
     const result = await processComplianceRequest('req-1');
 
     expect(result).toBe('failed');
-    const traccia = (saveGdprOutcome as any).mock.calls.at(-1)[1];
+    // La traccia di un fallimento passa da `trySave`: li' si sta gia'
+    // registrando un guasto, e una traccia che non si scrive non deve coprirlo
+    // con un secondo guasto. Il percorso della riuscita, invece, solleva.
+    const traccia = (trySaveGdprOutcome as any).mock.calls.at(-1)[1];
     expect(traccia.steps.some((s: any) => s.outcome === 'failed')).toBe(true);
   });
 });
@@ -279,7 +290,10 @@ describe('shop/redact', () => {
 
   it('riuscita: della richiesta stessa non resta traccia nel database', async () => {
     // La riga porta il dominio del negozio appena cancellato: tenerla vorrebbe
-    // dire non averlo cancellato. La prova resta nel log applicativo.
+    // dire non averlo cancellato. Si puo' togliere solo perche' la prova
+    // minimizzata e' gia' stata scritta dentro la transazione che ha cancellato
+    // il negozio — senza quella, questa riga sarebbe l'ultima cosa rimasta a
+    // dire che la richiesta e' arrivata.
     asShopRedact();
     const result = await processComplianceRequest('req-1');
 
@@ -289,9 +303,64 @@ describe('shop/redact', () => {
     });
   });
 
+  /**
+   * Occupato e lucchetto giu' sono due modi di dire "non si e' fatto niente":
+   * la riga resta, e resta anche il negozio. Prima questo caso non esisteva —
+   * `shop/redact` non prendeva nessun lucchetto, mentre `customers/redact` lo
+   * prendeva: la richiesta piu' distruttiva delle due era l'unica senza.
+   */
+  it.each([
+    ['busy', 'occupato'],
+    ['lock_unavailable', 'irraggiungibile'],
+  ])('lucchetto %s: la richiesta resta ritentabile', async (outcome) => {
+    asShopRedact();
+    (eraseShopRecord as any).mockResolvedValue({
+      outcome,
+      shopId: 'shop-1',
+      steps: [{ table: 'richiesta', outcome: 'failed', rows: 0, detail: 'si riprova' }],
+    });
+
+    expect(await processComplianceRequest('req-1')).toBe('failed');
+    expect(prisma.complianceRequest.deleteMany).not.toHaveBeenCalled();
+    expect(lastUpdate().status).toBe('failed');
+  });
+
+  /**
+   * La seconda consegna non ha piu' un negozio in cui riconoscersi: la prova e'
+   * l'unica cosa rimasta, e trovarla vale quanto aver fatto il lavoro.
+   */
+  it('seconda consegna: la prova gia scritta chiude la pratica', async () => {
+    asShopRedact();
+    (eraseShopRecord as any).mockResolvedValue({
+      outcome: 'already_erased',
+      shopId: null,
+      proofId: 'prova-1',
+      steps: [{ table: 'shop_erasure_proofs', outcome: 'skipped', rows: 0 }],
+    });
+
+    expect(await processComplianceRequest('req-1')).toBe('done');
+    expect(prisma.complianceRequest.deleteMany).toHaveBeenCalledWith({
+      where: { shopDomain: SHOP },
+    });
+  });
+
+  it('porta l id della consegna fino alla cancellazione', async () => {
+    asShopRedact();
+    await processComplianceRequest('req-1');
+
+    expect(eraseShopRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shopDomain: SHOP,
+        webhookId: 'consegna-1',
+        topic: 'shop/redact',
+      }),
+    );
+  });
+
   it('fallita: la riga resta, perche il negozio e ancora li', async () => {
     asShopRedact();
     (eraseShopRecord as any).mockResolvedValue({
+      outcome: 'failed',
       shopId: 'shop-1',
       steps: [{ table: 'sessions', outcome: 'failed', rows: 0, detail: 'timeout' }],
     });
@@ -329,6 +398,25 @@ describe('quando va male', () => {
 
     expect(lastUpdate().status).toBe('dead_letter');
     expect(errorSpy.mock.calls.flat().join(' ')).toContain('ALLARME');
+  });
+
+  /**
+   * LA PROVA E' UNA CONDIZIONE, NON UN DI PIU'.
+   *
+   * Prima l'errore di scrittura della traccia veniva inghiottito da un `catch`
+   * che scriveva un `console.error` e lasciava proseguire: la richiesta si
+   * dichiarava completata, e l'unica prova rimasta era testo in un log a
+   * ritenzione breve. Davanti a chi la chiede, quella richiesta non risulta
+   * eseguita affatto.
+   */
+  it('traccia non scritta: la richiesta NON si chiude', async () => {
+    (saveGdprOutcome as any).mockRejectedValue(new Error('registro non raggiungibile'));
+
+    const result = await processComplianceRequest('req-1');
+
+    expect(result).toBe('failed');
+    expect(lastUpdate().status).toBe('failed');
+    expect(lastUpdate().completedAt).toBeUndefined();
   });
 
   it('un errore inatteso non fa risultare la richiesta eseguita', async () => {

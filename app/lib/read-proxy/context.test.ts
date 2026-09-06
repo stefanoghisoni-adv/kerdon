@@ -95,6 +95,56 @@ describe('resolveShopReadContext', () => {
     expect((r as { ctx: { canReadData: boolean } }).ctx.canReadData).toBe(expected);
   });
 
+  /**
+   * LA CANCELLAZIONE BATTE ANCHE LA LETTURA, che e' la capacita' che sopravvive
+   * a tutto il resto.
+   *
+   * Il caso pesa piu' che altrove: questo e' l'unico endpoint pubblico
+   * dell'app, e il token di lettura resta incollato nel container server-side
+   * del merchant anche dopo che lui se n'e' andato. Finche' questa condizione
+   * non c'era, fra l'inizio di `shop/redact` e la sua fine il proxy continuava
+   * a servire i clienti di un negozio che stava sparendo — con la chiave di
+   * servizio ancora viva in cache.
+   */
+  it('negozio in cancellazione → le letture si fermano', async () => {
+    findUnique.mockResolvedValueOnce(shopRow({ lifecycleStatus: 'erasing' }));
+    findPlanMock.mockResolvedValueOnce({ customersSyncEnabled: true });
+
+    const r = await resolveShopReadContext('spx_erasing');
+
+    expect(r.kind).toBe('ok');
+    expect((r as { ctx: { canReadData: boolean } }).ctx.canReadData).toBe(false);
+  });
+
+  /**
+   * E si ferma anche su un negozio per il resto perfetto: autorizzazione
+   * accesa, tracciamento acceso, progetto collegato. E' l'unica condizione che
+   * non ha bisogno di nessun'altra per negare.
+   */
+  it('nemmeno un negozio per il resto in regola legge, se si sta cancellando', async () => {
+    findUnique.mockResolvedValueOnce(
+      shopRow({
+        lifecycleStatus: 'erasing',
+        authorization: 'ENABLED',
+        trackingAuthorization: 'ENABLED',
+      }),
+    );
+    findPlanMock.mockResolvedValueOnce({ customersSyncEnabled: true });
+
+    const r = await resolveShopReadContext('spx_erasing_sano');
+
+    expect((r as { ctx: { canReadData: boolean } }).ctx.canReadData).toBe(false);
+  });
+
+  it("un negozio 'active' non e' toccato da questa condizione", async () => {
+    findUnique.mockResolvedValueOnce(shopRow({ lifecycleStatus: 'active' }));
+    findPlanMock.mockResolvedValueOnce({ customersSyncEnabled: true });
+
+    const r = await resolveShopReadContext('spx_active');
+
+    expect((r as { ctx: { canReadData: boolean } }).ctx.canReadData).toBe(true);
+  });
+
   // Il senso dello sdoppiamento: chi ha l'app sospesa puo' continuare a
   // tracciare con i dati gia' sincronizzati, e chi ha l'app attiva puo' avere
   // il solo tracciamento fermo.

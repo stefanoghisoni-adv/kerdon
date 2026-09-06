@@ -1499,3 +1499,160 @@ describe('Initial bulk sync processor', () => {
     expect(progressCall).toBeDefined();
   });
 });
+
+/**
+ * LA CANCELLAZIONE DEL NEGOZIO, VISTA DA UNA CORSA.
+ *
+ * Sono le due meta' dello stesso problema, e prima non ne era coperta nessuna.
+ * `shop/redact` cancella un negozio, ma fra l'inizio e la fine di quella
+ * richiesta passa del tempo — e in quel tempo una corsa puo' PARTIRE oppure
+ * essere GIA' IN VOLO. La prima la ferma la policy, che nega ogni capacita' a
+ * un negozio 'erasing'; la seconda la ferma il gettone del ciclo di vita, che
+ * il lucchetto riverifica prima di ogni scrittura.
+ *
+ * Senza tutte e due, la cancellazione resta una promessa: si toglie il negozio
+ * mentre qualcun altro sta ancora riempiendo di dati il database del merchant,
+ * e quei dati non li tornera' a togliere nessuno — la riga da cui sapere che
+ * esistevano e' proprio quella che si e' appena cancellata.
+ */
+describe('una corsa e un negozio che si sta cancellando', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const negozio = (over: Record<string, unknown> = {}) => ({
+    id: 'shop-1',
+    shopDomain: 'test-shop.myshopify.com',
+    accessToken: 'encrypted-token',
+    authorization: 'ENABLED',
+    trackingAuthorization: 'ENABLED',
+    uninstalledAt: null,
+    currentPlan: 'pro',
+    lifecycleStatus: 'active',
+    erasureGeneration: 0,
+    supabaseConfig: {
+      connectionVerifiedAt: new Date(),
+      tableNameProducts: 'products',
+      tableNameCustomers: 'customers',
+      supabaseUrl: 'https://test.supabase.co',
+      supabasePublicKey: 'k',
+      supabaseServiceRoleKey: 's',
+    },
+    ...over,
+  });
+
+  /** Un catalogo minimo: basta a far arrivare la corsa fino a una scrittura. */
+  function unProdotto() {
+    vi.mocked(ShopifyAPIClient).mockImplementation(
+      () =>
+        ({
+          getProducts: vi
+            .fn()
+            .mockResolvedValue({ products: [{ id: 1, variants_complete: true }], nextPageInfo: null }),
+        }) as any,
+    );
+    vi.mocked(transformProduct).mockReturnValue([
+      { shopify_product_id: 1, shopify_variant_id: 10, product_title: 'Maglietta' },
+    ] as any);
+  }
+
+  /**
+   * LA CORSA CHE NON DEVE NEMMENO PARTIRE. Il negozio e' gia' marcato: la
+   * policy nega `sync_products` e la corsa si ferma prima di comporre il client
+   * del merchant. Non "scrive poco": non si collega affatto, che e' l'unica
+   * garanzia che non lasci niente dietro.
+   */
+  it('negozio gia in cancellazione: non si collega nemmeno al suo database', async () => {
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue(
+      negozio({ lifecycleStatus: 'erasing', erasureGeneration: 1 }) as any,
+    );
+    vi.mocked(prisma.plan.findFirst).mockResolvedValue({
+      maxProducts: null,
+      customersSyncEnabled: false,
+    } as any);
+
+    await expect(processInitialBulkSync('shop-1')).rejects.toThrow(/non autorizzato/);
+
+    expect(createSupabaseClient).not.toHaveBeenCalled();
+    // E nemmeno una riga di corsa: non c'e' niente da raccontare, perche' non
+    // e' stato fatto niente.
+    expect(prisma.syncJob.create).not.toHaveBeenCalled();
+  });
+
+  /**
+   * LA CORSA GIA' IN VOLO. Qui la policy non puo' fare niente: quando la corsa
+   * e' partita il negozio era 'active', e la sua decisione e' stata presa
+   * allora. L'unica cosa che le dice che il mondo e' cambiato sotto di lei e' la
+   * verifica del possesso, che adesso guarda anche il gettone del ciclo di vita
+   * — ed e' per questo che la si chiama prima di SCRIVERE, non solo prima di
+   * cancellare: una riga scritta in un negozio che sta sparendo e' un dato che
+   * nessuno tornera' a togliere.
+   */
+  it('cancellazione cominciata a meta corsa: la scrittura non parte', async () => {
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue(negozio() as any);
+    vi.mocked(prisma.plan.findFirst).mockResolvedValue({
+      maxProducts: null,
+      customersSyncEnabled: false,
+    } as any);
+    vi.mocked(prisma.syncJob.create).mockResolvedValue({ id: 'job-1' } as any);
+    vi.mocked(prisma.syncJob.update).mockResolvedValue({} as any);
+    vi.mocked(prisma.shop.update).mockResolvedValue({} as any);
+    unProdotto();
+
+    const upsert = vi.fn(async () => ({ error: null }));
+    vi.mocked(createSupabaseClient).mockReturnValue({
+      from: () => ({
+        select: emptyProductsSelect,
+        upsert,
+        delete: () => ({ lt: async () => ({ error: null }) }),
+      }),
+    } as any);
+
+    // Il lease dice di no: e' quello che il lucchetto fa quando si accorge che
+    // la generazione del negozio e' cambiata mentre lavoravamo.
+    const lease = {
+      assertHeld: vi
+        .fn()
+        .mockRejectedValue(new Error('Negozio shop-1 in cancellazione: gettone cambiato')),
+    };
+
+    await expect(processInitialBulkSync('shop-1', undefined, lease)).rejects.toThrow(
+      /cancellazione/i,
+    );
+
+    // La prova che conta: nel database del merchant non e' finito niente.
+    expect(upsert).not.toHaveBeenCalled();
+    expect(lease.assertHeld).toHaveBeenCalled();
+  });
+
+  /**
+   * E il contrario, perche' una guardia che nega sempre non e' una guardia: un
+   * lease che continua a dire di si' lascia scrivere come prima.
+   */
+  it('lease ancora valido: la corsa scrive normalmente', async () => {
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue(negozio() as any);
+    vi.mocked(prisma.plan.findFirst).mockResolvedValue({
+      maxProducts: null,
+      customersSyncEnabled: false,
+    } as any);
+    vi.mocked(prisma.syncJob.create).mockResolvedValue({ id: 'job-1' } as any);
+    vi.mocked(prisma.syncJob.update).mockResolvedValue({} as any);
+    vi.mocked(prisma.shop.update).mockResolvedValue({} as any);
+    unProdotto();
+
+    const upsert = vi.fn(async () => ({ error: null }));
+    vi.mocked(createSupabaseClient).mockReturnValue({
+      from: () => ({
+        select: emptyProductsSelect,
+        upsert,
+        delete: () => ({ lt: async () => ({ error: null }) }),
+      }),
+    } as any);
+
+    const lease = { assertHeld: vi.fn().mockResolvedValue(undefined) };
+
+    await processInitialBulkSync('shop-1', undefined, lease);
+
+    expect(upsert).toHaveBeenCalled();
+  });
+});

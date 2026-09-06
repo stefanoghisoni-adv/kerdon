@@ -79,7 +79,13 @@ interface ProgressReporter {
  * parametro in una firma usata da mezzo repository. Dove c'e', vale.
  */
 export interface LeaseGuard {
-  /** Lancia se il lucchetto non e' piu' nostro. */
+  /**
+   * Lancia se non si ha piu' titolo per scrivere: il lucchetto e' passato a
+   * qualcun altro, oppure il negozio e' entrato in cancellazione mentre
+   * lavoravamo. Il secondo caso e' quello che prima non fermava nessuno — una
+   * corsa avviata un minuto prima di `shop/redact` continuava a riempire di
+   * dati un negozio che aveva appena chiesto di essere dimenticato.
+   */
   assertHeld(): Promise<void>;
 }
 
@@ -626,6 +632,15 @@ async function syncCustomers(
    * prima, che non riparava niente.
    */
   ledger: RepairLedger = createRepairLedger(),
+  /**
+   * Il permesso di scrivere, riverificato prima di ogni blocco.
+   *
+   * Opzionale come altrove: non tutti i chiamanti ce l'hanno (un test, un
+   * richiamo a mano). Dove c'e', vale — ed e' quello che impedisce a una corsa
+   * partita prima di `shop/redact` di continuare a scrivere clienti dentro un
+   * negozio che si sta cancellando.
+   */
+  lease?: LeaseGuard,
 ): Promise<CustomerSyncResult> {
   let total = 0;
   let nextPageInfo: string | null = null;
@@ -660,6 +675,12 @@ async function syncCustomers(
     const chunkSize = 1000;
     for (let i = 0; i < rows.length; i += chunkSize) {
       const chunk = rows.slice(i, i + chunkSize);
+      // Prima di scrivere, e non solo prima di cancellare: una scrittura dentro
+      // un negozio in cancellazione e' altrettanto sbagliata di una
+      // cancellazione fuori tempo, e su una paginazione lunga il mondo puo'
+      // essere cambiato fra una pagina e l'altra. La verifica ha una finestra
+      // sua e non interroga il database a ogni blocco.
+      await lease?.assertHeld();
       const { error } = await supabase.from(tableName).upsert(chunk, {
         onConflict: 'shopify_customer_id',
         ignoreDuplicates: false,
@@ -798,6 +819,8 @@ async function syncCustomersIfEnabled(opts: {
   ledger: RepairLedger;
   /** Le riparazioni gia' aperte: qui dentro si rispingono quelle sulla data. */
   openRepairs: readonly StoredRepair[];
+  /** Il permesso di scrivere, riverificato prima di ogni blocco. */
+  lease?: LeaseGuard;
   now: Date;
 }): Promise<CustomerSyncResult> {
   if (!opts.customersSyncEnabled) return { total: 0, events: createEventBuffer() };
@@ -853,6 +876,7 @@ async function syncCustomersIfEnabled(opts: {
     birthdateMetafield,
     birthdateTarget,
     opts.ledger,
+    opts.lease,
   );
 }
 
@@ -887,6 +911,8 @@ async function syncOrders(
   supabase: SupabaseClient,
   updatedAtMin?: string,
   ledger: RepairLedger = createRepairLedger(),
+  /** Il permesso di scrivere, riverificato prima di ogni pagina. */
+  lease?: LeaseGuard,
 ): Promise<OrderSyncResult> {
   let total = 0;
   let nextPageInfo: string | null = null;
@@ -908,6 +934,10 @@ async function syncOrders(
       );
 
     if (converted.length > 0) {
+      // Come per i clienti: si riverifica prima di scrivere, non solo prima di
+      // cancellare. Una pagina di ordini scritta dentro un negozio in
+      // cancellazione e' un dato che nessuno andra' piu' a togliere.
+      await lease?.assertHeld();
       const orderRows = converted.map((c) => c.rows.order);
       const { error: ordersError } = await supabase
         .from('orders')
@@ -1042,6 +1072,8 @@ async function syncOrdersIfEnabled(opts: {
   supabase: SupabaseClient;
   updatedAtMin?: string;
   ledger: RepairLedger;
+  /** Il permesso di scrivere, riverificato prima di ogni pagina. */
+  lease?: LeaseGuard;
 }): Promise<OrderSyncResult> {
   if (!opts.ordersEnabled) return { total: 0, events: createEventBuffer() };
 
@@ -1058,7 +1090,7 @@ async function syncOrdersIfEnabled(opts: {
   // che vende da anni — ed e' esattamente il caso in cui il lifetime serve.
   const updatedAtMin = tables.empty ? undefined : opts.updatedAtMin;
 
-  return syncOrders(opts.shopifyClient, opts.supabase, updatedAtMin, opts.ledger);
+  return syncOrders(opts.shopifyClient, opts.supabase, updatedAtMin, opts.ledger, opts.lease);
 }
 
 /**
@@ -1434,6 +1466,13 @@ export async function processPeriodicSyncCheck(
         // sono".
         if (eligibleRows.length === 0) continue;
 
+        // Prima di scrivere, come per clienti e ordini: la corsa incrementale
+        // dura minuti, e in quei minuti puo' essere cominciata la cancellazione
+        // del negozio. Scrivere prodotti dentro un negozio che sta sparendo e'
+        // sbagliato quanto cancellarli fuori tempo — con l'aggravante che
+        // nessuno tornera' a toglierli.
+        await lease?.assertHeld();
+
         // Upsert delle sole righe idonee con la chiave univoca.
         const { error } = await supabase
           .from(shop.supabaseConfig.tableNameProducts)
@@ -1488,6 +1527,7 @@ export async function processPeriodicSyncCheck(
       ledger,
       openRepairs,
       now: runStartedAt,
+      lease,
     });
     const totalCustomers = customers.total;
     collector.absorb(customers.events);
@@ -1503,6 +1543,7 @@ export async function processPeriodicSyncCheck(
       supabase,
       updatedAtMin: lastSyncTime.toISOString(),
       ledger,
+      lease,
     });
     collector.absorb(orders.events);
 
@@ -1757,6 +1798,12 @@ export async function processInitialBulkSync(
         for (let i = 0; i < allRows.length; i += chunkSize) {
           const chunk = allRows.slice(i, i + chunkSize);
 
+          // La corsa iniziale e' la piu' lunga di tutte — un catalogo intero, a
+          // pagine — quindi e' anche quella con piu' tempo per veder cominciare
+          // una cancellazione sotto di se'. La verifica ha una finestra sua e
+          // non interroga il database a ogni blocco.
+          await lease?.assertHeld();
+
           const { error } = await supabase
             .from(shop.supabaseConfig.tableNameProducts)
             .upsert(chunk, {
@@ -1872,6 +1919,7 @@ export async function processInitialBulkSync(
       ledger,
       openRepairs,
       now: runStartedAt,
+      lease,
     });
     const totalCustomers = customers.total;
     collector.absorb(customers.events);
@@ -1883,6 +1931,7 @@ export async function processInitialBulkSync(
       shopifyClient,
       supabase,
       ledger,
+      lease,
     });
     collector.absorb(orders.events);
 

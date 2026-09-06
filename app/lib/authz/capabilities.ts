@@ -59,6 +59,18 @@ export type Capability = (typeof CAPABILITIES)[number];
 export type DenialReason =
   /** Non si e' potuto stabilire di che negozio si parla: in dubbio si nega. */
   | 'unknown_shop'
+  /**
+   * La cancellazione del negozio e' cominciata (`shop/redact`).
+   *
+   * Viene PRIMA di ogni altra ragione, disinstallazione compresa, perche' e' la
+   * piu' definitiva: gli altri motivi dicono "adesso no", questo dice "di
+   * questo negozio non deve restare niente". Scrivere una riga nel database di
+   * un merchant un istante dopo che la sua cancellazione e' cominciata e'
+   * esattamente il modo di non averlo mai cancellato — e la scrittura in
+   * questione arriverebbe da sola, senza nessun gesto suo, perche' le notifiche
+   * di Shopify e le corse del cron non aspettano.
+   */
+  | 'erasing'
   /** L'app e' stata disinstallata: non c'e' piu' nessun consenso da usare. */
   | 'uninstalled'
   /** La colonna `authorization` non e' ENABLED: uso dell'app sospeso. */
@@ -107,6 +119,15 @@ export interface CapabilityPlan {
  * quaranta colonne per provarne una.
  */
 export interface ShopCapabilityFacts {
+  /**
+   * Colonna `lifecycle_status`: 'active' oppure 'erasing'.
+   *
+   * Obbligatorio e non facoltativo, come i tre campi della prova e per la
+   * stessa ragione: chi carica il negozio con una `select` sua e lo dimentica
+   * otterrebbe una policy che lascia lavorare un negozio in cancellazione —
+   * cioe' il buco da cui si e' partiti, ma silenzioso. Cosi' invece non compila.
+   */
+  lifecycleStatus: string | null | undefined;
   /** Valorizzato = l'app e' stata disinstallata. */
   uninstalledAt: Date | null | undefined;
   /** Colonna `authorization`: l'uso dell'app. */
@@ -181,6 +202,22 @@ function refused(denial: DenialReason): CapabilityDecision {
  */
 function enabled(value: string | null | undefined): boolean {
   return (value ?? '').trim().toUpperCase() === 'ENABLED';
+}
+
+/**
+ * La cancellazione del negozio e' cominciata.
+ *
+ * Duplicato di proposito rispetto a `gdpr/erasure-guard.server`: questo modulo
+ * e' puro e non importa nessun `.server`, e' scritto cosi' apposta perche' la
+ * policy si possa provare senza database. Una stringa di sei lettere non vale
+ * un import che romperebbe quella proprieta'.
+ *
+ * In dubbio NON si nega, qui: un valore mai visto non e' 'erasing', e trattarlo
+ * come tale spegnerebbe ogni negozio la cui colonna fosse scritta male — che e'
+ * un danno molto piu' grande di quello che si evita.
+ */
+function isErasing(value: string | null | undefined): boolean {
+  return (value ?? '').trim() === 'erasing';
 }
 
 /**
@@ -261,6 +298,13 @@ export function evaluateShopCapabilities(
   facts: ShopCapabilityFacts | null | undefined,
 ): ShopCapabilities {
   if (!facts) return denyEverything('unknown_shop');
+
+  // La cancellazione batte tutto, e non ha nemmeno bisogno di comporsi con il
+  // resto: un negozio che sta sparendo non puo' fare NIENTE, nemmeno le cose
+  // che a un negozio sospeso restano concesse (leggere i dati gia'
+  // sincronizzati, per dire). E' l'unico motivo che nega anche `use_app`, il
+  // proxy di lettura e le notifiche in ingresso tutti insieme.
+  if (isErasing(facts.lifecycleStatus)) return denyEverything('erasing');
 
   // Le tre condizioni che vengono prima di ogni cosa, nell'ordine in cui
   // pesano: se l'app non e' piu' installata non c'e' nessun permesso da

@@ -37,6 +37,11 @@
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '~/db.server';
+import {
+  ShopErasureInProgressError,
+  isErasing,
+  readErasureState,
+} from '~/lib/gdpr/erasure-guard.server';
 import { HEARTBEAT_MS, LEASE_TTL_MS } from './queue-model';
 
 /** Il possesso del negozio, per chi ci sta lavorando dentro. */
@@ -45,18 +50,33 @@ export interface ShopLease {
   owner: string;
   fencingToken: number;
   /**
+   * Il gettone del ciclo di vita del negozio, letto quando il lucchetto e'
+   * stato preso. null quando la riga del negozio non c'era gia' allora.
+   *
+   * E' il gemello di `fencingToken` per un pericolo diverso: quello protegge
+   * dalle altre corse, questo dalla cancellazione del negozio. Chi lavora se lo
+   * porta dietro e lo riverifica prima di scrivere; se e' cambiato, la
+   * cancellazione e' cominciata dopo di lui.
+   */
+  erasureGeneration: number | null;
+  /**
    * Si spegne quando il lease e' perso o il tempo massimo e' scaduto. Chi fa un
    * lavoro lungo lo passa alle chiamate di rete, cosi' l'interruzione arriva
    * anche a meta' di una paginazione.
    */
   signal: AbortSignal;
   /**
-   * Lancia se il lucchetto non e' piu' nostro.
+   * Lancia se non si ha piu' titolo per scrivere.
    *
-   * Da chiamare prima di ogni cancellazione sul database del merchant. Il caso
-   * che copre e' preciso: la nostra corsa e' stata lenta, il lease e' scaduto,
-   * un'altra corsa e' partita e sta riscrivendo le righe — e noi stavamo per
-   * spazzare via tutto quello che lei ha appena scritto.
+   * Da chiamare prima di ogni cancellazione sul database del merchant. I due
+   * casi che copre, e sono due guasti diversi con lo stesso rimedio:
+   *
+   *  - il lucchetto non e' piu' nostro. La nostra corsa e' stata lenta, il
+   *    lease e' scaduto, un'altra corsa e' partita e sta riscrivendo le righe —
+   *    e noi stavamo per spazzare via tutto quello che lei ha appena scritto.
+   *  - il negozio e' entrato in cancellazione. `shop/redact` ha alzato il
+   *    gettone del ciclo di vita mentre lavoravamo, e le nostre scritture
+   *    andrebbero a riempire di dati un negozio che ha chiesto di sparire.
    */
   assertHeld(): Promise<void>;
 }
@@ -83,6 +103,16 @@ export interface ShopLeaseOptions {
   maxRunMs?: number;
   /** Un segnale esterno che deve poter interrompere il lavoro (SIGTERM). */
   signal?: AbortSignal;
+  /**
+   * Chi sta cancellando il negozio, e quindi ha il diritto di alzare il gettone
+   * del ciclo di vita.
+   *
+   * L'unico chiamante che la passa e' `shop/redact`. Senza, la verifica del
+   * possesso si accorgerebbe della cancellazione — la propria — e la
+   * fermerebbe; e su un ritentativo, dove il negozio e' gia' marcato dal
+   * tentativo precedente, non ripartirebbe nemmeno.
+   */
+  duringErasure?: boolean;
   now?: Date;
 }
 
@@ -148,6 +178,41 @@ export async function runWithShopLease(
   const fencingToken = righe[0]?.fencing_token;
   if (fencingToken === undefined) return 'occupato';
 
+  // Il gettone del ciclo di vita, letto DOPO aver preso il lucchetto e non
+  // prima: fra una lettura e la presa ci starebbe una cancellazione intera, e
+  // ci si porterebbe dietro un gettone gia' vecchio — cioe' si passerebbe la
+  // verifica proprio nel caso che la verifica esiste per fermare.
+  //
+  // Un negozio gia' sparito da' `null`, e allora la verifica non ha niente da
+  // confrontare: il lavoro fallira' da solo alla prima lettura che non trova
+  // nulla, e negargli il lucchetto qui vorrebbe dire trasformare in un guasto
+  // del lucchetto quello che e' un negozio inesistente.
+  let erasureGeneration: number | null = null;
+  if (!opts.duringErasure) {
+    try {
+      const stato = await readErasureState(shopId);
+      if (stato && isErasing(stato.lifecycleStatus)) {
+        // Fail-closed anche qui: un negozio la cui cancellazione e' gia'
+        // cominciata non va lavorato, e non e' un errore — e' il risultato
+        // voluto. Si rilascia subito quel che si era appena preso.
+        await release(shopId, owner, fencingToken);
+        return 'occupato';
+      }
+      erasureGeneration = stato?.erasureGeneration ?? null;
+    } catch (error) {
+      // Stessa regola del lucchetto: se non si riesce a sapere se il negozio e'
+      // in cancellazione, non si lavora. Sapere a meta' e proseguire e' il modo
+      // in cui si finisce a scrivere dentro un negozio gia' cancellato.
+      console.error(
+        `[sync-lock] ALLARME stato del negozio ${shopId} non leggibile, lavoro rimesso in coda: ${
+          error instanceof Error ? error.message : 'errore sconosciuto'
+        }`,
+      );
+      await release(shopId, owner, fencingToken);
+      return 'non-disponibile';
+    }
+  }
+
   const controller = new AbortController();
   const perso = { valore: false };
 
@@ -206,6 +271,7 @@ export async function runWithShopLease(
     shopId,
     owner,
     fencingToken,
+    erasureGeneration,
     signal: controller.signal,
     async assertHeld() {
       if (perso.valore || controller.signal.aborted) {
@@ -226,6 +292,26 @@ export async function runWithShopLease(
         arrendi('lucchetto perso: verifica prima di una scrittura distruttiva');
         throw new Error(`Lucchetto del negozio ${shopId} non piu' posseduto: scrittura annullata`);
       }
+
+      // E il negozio esiste ancora, e non e' entrato in cancellazione mentre
+      // lavoravamo. Il lucchetto da solo non lo direbbe: `shop/redact` prende
+      // lo stesso lucchetto, quindi finche' lo teniamo noi lui aspetta — ma
+      // basta che il nostro lease scada un istante, che lui passi e finisca,
+      // perche' noi ci si risvegli a scrivere dentro un negozio cancellato.
+      // `erasureGeneration` a null vuol dire che la riga del negozio non c'era
+      // gia' quando abbiamo preso il lucchetto: non c'e' nessun gettone da
+      // confrontare, e il lavoro fallira' da solo alla prima lettura a vuoto.
+      if (!opts.duringErasure && erasureGeneration !== null) {
+        const stato = await readErasureState(shopId);
+        if (!stato || isErasing(stato.lifecycleStatus) || stato.erasureGeneration !== erasureGeneration) {
+          arrendi('negozio in cancellazione: verifica prima di una scrittura');
+          throw new ShopErasureInProgressError(
+            shopId,
+            'gettone del ciclo di vita cambiato durante il lavoro: scrittura annullata',
+          );
+        }
+      }
+
       ultimaVerifica = adesso;
     },
   };

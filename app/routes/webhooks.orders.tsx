@@ -247,6 +247,7 @@ const ORDER_SKIP_DETAIL: Record<DenialReason, string> = {
   not_connected: 'nessun progetto collegato e verificato: non c e dove scrivere',
   scope_required: 'permesso sugli ordini non concesso',
   unknown_shop: 'negozio non riconosciuto',
+  erasing: 'cancellazione dei dati del negozio in corso: non si scrive piu nulla',
   uninstalled: 'app disinstallata: la sincronizzazione e ferma',
   not_authorized: 'uso dell app sospeso: la sincronizzazione e ferma',
   tracking_suspended: 'tracciamento sospeso',

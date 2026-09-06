@@ -123,6 +123,32 @@ model Shop {
   // garantisce che non riappaia dopo la chiusura dell'app.
   planBannerShownAt     DateTime?          @map("plan_banner_shown_at")
 
+  // Dove sta il negozio nel suo ciclo di vita: 'active' oppure 'erasing'.
+  //
+  // 'erasing' si scrive PRIMA di cominciare a cancellare, e in una scrittura
+  // sua che non fa parte della transazione: chi legge questa colonna deve
+  // vederla cambiata mentre la cancellazione e' ancora in corso, non alla fine.
+  // Da quel momento la policy delle capacita' nega tutto — sincronizzazioni,
+  // lettura dal proxy, notifiche in ingresso — perche' scrivere nel database
+  // di un merchant che ha chiesto di essere dimenticato, un istante dopo che la
+  // cancellazione e' cominciata, e' esattamente il modo di non averlo mai
+  // dimenticato.
+  //
+  // Se la transazione fallisce la colonna RESTA su 'erasing', ed e' voluto: il
+  // negozio e' in attesa di cancellazione, e riaprirlo al lavoro nel frattempo
+  // vorrebbe dire riscrivere quel che il ritentativo dovra' togliere.
+  lifecycleStatus       String             @default("active") @map("lifecycle_status")
+
+  // Cresce a ogni inizio di cancellazione, e non riparte mai da zero.
+  //
+  // E' il gettone del ciclo di vita, gemello di `shop_locks.fencing_token`: una
+  // corsa partita prima dell'inizio della cancellazione se lo porta dietro e lo
+  // riverifica un istante prima di ogni scrittura sul database del merchant. Se
+  // e' cambiato, quella corsa non ha piu' titolo per scrivere e si ferma —
+  // senza questo, una sincronizzazione lunga avviata un minuto prima
+  // continuerebbe a riempire di dati un negozio gia' cancellato.
+  erasureGeneration     Int                @default(0) @map("erasure_generation")
+
   // Quando abbiamo chiesto a Shopify come stanno davvero le cose per questo
   // negozio: se l'app risulta ancora installata e quale abbonamento e' attivo.
   //
@@ -1195,4 +1221,88 @@ model ConsentRevocation {
   @@index([status, nextAttemptAt])
   @@index([shopId, status])
   @@map("consent_revocations")
+}
+
+/// La prova che un negozio e' stato cancellato, e che al negozio sopravvive.
+///
+/// IL PARADOSSO DA CUI NASCE. `shop/redact` cancella la riga `shops`, e con lei
+/// — in cascata — il registro delle sincronizzazioni, che e' dove finiva la
+/// traccia di controllo. La prova di aver eseguito la richiesta si
+/// autodistruggeva insieme a cio' che doveva provare, e quel che restava era un
+/// `console.log`: una riga in un log a ritenzione breve, che nessuna autorita'
+/// accetterebbe come dimostrazione di aver cancellato qualcosa.
+///
+/// PERCHE' UNA TABELLA E NON UN TIPO NUOVO IN `sync_requests`. Un item di coda
+/// e' una sveglia, non una prova: si consuma, si pota, e la sua `dedup_key`
+/// porterebbe il dominio in chiaro dentro un indice unico. `compliance_requests`
+/// non poteva servire per la ragione opposta — quella riga porta il dominio in
+/// chiaro ed e' proprio quella che, a cancellazione riuscita, va tolta di mezzo.
+/// `sync_jobs` era la casa storica della traccia GDPR ed e' il guasto stesso:
+/// ha una chiave esterna in cascata verso `shops`. Serviva un registro senza
+/// nessun legame con il negozio, senza nessun dato personale dentro, e con una
+/// ritenzione sua. Questo.
+///
+/// COSA C'E' DENTRO, E NIENTE ALTRO: l'id della consegna, il topic, l'istante,
+/// l'esito, i conteggi per tabella, la versione della procedura e l'impronta
+/// del negozio. Nessun dominio, nessun id, nessuna email. Un registro di
+/// cancellazioni che conserva quello che ha cancellato e' il modo piu' elegante
+/// di non aver cancellato niente.
+model ShopErasureProof {
+  id String @id @default(uuid())
+
+  /// L'id che Shopify da' alla consegna (header X-Shopify-Webhook-Id). Unico:
+  /// e' su questo che la seconda consegna della stessa richiesta trova la prova
+  /// gia' scritta e si dichiara fatta, invece di andare a cercare un negozio
+  /// che non esiste piu' — o peggio, di ricrearlo.
+  webhookId String @unique @map("webhook_id")
+
+  /// Il topic della richiesta. Sempre 'shop/redact' oggi; c'e' come colonna
+  /// perche' il giorno in cui una seconda richiesta cancellera' un negozio,
+  /// leggere la prova non dovra' voler dire indovinare da dove veniva.
+  topic String
+
+  /// L'impronta del negozio: un HMAC del dominio con una chiave dedicata.
+  ///
+  /// A senso unico. Chi apre la tabella non ci legge nessun negozio; chi arriva
+  /// con una domanda precisa — "il negozio tal dei tali e' stato cancellato il
+  /// 14 marzo?" — puo' ricalcolarla e trovare la riga. Verificabile senza
+  /// essere leggibile, come le impronte del registro GDPR e come il soggetto
+  /// delle revoche di consenso.
+  ///
+  /// NON e' unica: lo stesso negozio puo' installare, disinstallare e chiedere
+  /// di nuovo la cancellazione, e ognuna di quelle richieste ha diritto alla
+  /// sua prova.
+  shopRef String @map("shop_ref")
+
+  /// Quale procedura ha prodotto questa prova. Serve a chi legge una riga
+  /// vecchia: i conteggi di oggi elencano cinque tabelle, quelli di domani
+  /// potrebbero elencarne sei, e senza un numero non si saprebbe se una tabella
+  /// mancante e' una che non c'era o una che nessuno ha cancellato.
+  procedureVersion Int @map("procedure_version")
+
+  /// 'completed' quando la transazione e' andata in fondo, 'skipped' quando non
+  /// c'era nessun negozio da cancellare. Un fallimento qui non si scrive: la
+  /// transazione che fallisce annulla anche questa riga, ed e' proprio cosi'
+  /// che si evita una prova di cancellazione senza cancellazione.
+  outcome String
+
+  /// Quante righe per tabella. E' il contenuto della prova: non "e' stato
+  /// fatto", ma cosa e' stato fatto.
+  counts Json
+
+  /// La generazione di cancellazione con cui la procedura ha lavorato. Dice a
+  /// chi legge che il negozio era stato chiuso alle scritture prima che si
+  /// cominciasse, e quale gettone le corse in volo avrebbero dovuto verificare.
+  erasureGeneration Int? @map("erasure_generation")
+
+  erasedAt DateTime @default(now()) @map("erased_at")
+
+  /// NESSUNA chiave esterna verso `shops`, e non e' una dimenticanza: e' il
+  /// punto di tutta la tabella. Nemmeno `SetNull` andrebbe bene — quella
+  /// vorrebbe dire una colonna con l'id del negozio, cioe' un riferimento in
+  /// piu' a una cosa che abbiamo appena finito di cancellare. Del negozio qui
+  /// resta solo l'impronta.
+  @@index([shopRef])
+  @@index([erasedAt])
+  @@map("shop_erasure_proofs")
 }

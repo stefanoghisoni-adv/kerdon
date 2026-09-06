@@ -82,6 +82,8 @@ CREATE TABLE "shops" (
     "primary_domain" TEXT,
     "last_synced_plan" TEXT,
     "plan_banner_shown_at" TIMESTAMP(3),
+    "lifecycle_status" TEXT NOT NULL DEFAULT 'active',
+    "erasure_generation" INTEGER NOT NULL DEFAULT 0,
     "shopify_state_checked_at" TIMESTAMP(3),
     "birthdate_metafield_namespace" TEXT,
     "birthdate_metafield_key" TEXT,
@@ -686,6 +688,38 @@ ALTER TABLE "consent_revocations" ADD CONSTRAINT "consent_revocations_shop_id_fk
 -- chiesto di non essere piu' riconosciuta. Il soggetto sta cifrato in
 -- `subject_cipher` e si azzera appena il lavoro riesce: da li' in poi resta la
 -- sola prova HMAC in `idempotency_key`.
+
+-- CreateTable
+CREATE TABLE "shop_erasure_proofs" (
+    "id" TEXT NOT NULL,
+    "webhook_id" TEXT NOT NULL,
+    "topic" TEXT NOT NULL,
+    "shop_ref" TEXT NOT NULL,
+    "procedure_version" INTEGER NOT NULL,
+    "outcome" TEXT NOT NULL,
+    "counts" JSONB NOT NULL,
+    "erasure_generation" INTEGER,
+    "erased_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "shop_erasure_proofs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "shop_erasure_proofs_webhook_id_key" ON "shop_erasure_proofs"("webhook_id");
+
+-- CreateIndex
+CREATE INDEX "shop_erasure_proofs_shop_ref_idx" ON "shop_erasure_proofs"("shop_ref");
+
+-- CreateIndex
+CREATE INDEX "shop_erasure_proofs_erased_at_idx" ON "shop_erasure_proofs"("erased_at");
+
+-- NESSUNA chiave esterna verso `shops`, e non e' una dimenticanza: e' il punto
+-- di tutta la tabella. `shop/redact` cancella la riga del negozio, e una prova
+-- legata a quella riga sparirebbe insieme a cio' che deve provare — era
+-- esattamente il guasto, visto che la traccia stava in `sync_jobs`, che cade in
+-- cascata. Nemmeno SET NULL andrebbe bene: vorrebbe dire una colonna con l'id
+-- del negozio, cioe' un riferimento in piu' a una cosa appena cancellata. Del
+-- negozio resta la sola impronta HMAC in `shop_ref`.
 
 -- I piani: cinque righe copiate dal database owner in uso.
 --

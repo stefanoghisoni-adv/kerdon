@@ -8,6 +8,10 @@ vi.mock('~/db.server', () => ({
       deleteMany: vi.fn(),
       findFirst: vi.fn(),
     },
+    // Il ciclo di vita del negozio: il lucchetto lo legge alla presa e prima di
+    // ogni scrittura distruttiva, perche' un lucchetto valido su un negozio in
+    // cancellazione non e' un titolo per scrivere.
+    shop: { findUnique: vi.fn() },
   },
 }));
 
@@ -47,6 +51,11 @@ beforeEach(() => {
   (prisma.shopLock.updateMany as any).mockResolvedValue({ count: 1 });
   (prisma.shopLock.deleteMany as any).mockResolvedValue({ count: 1 });
   (prisma.shopLock.findFirst as any).mockResolvedValue({ shopId: 'shop-1' });
+  // Un negozio vivo: nessuna cancellazione in corso, gettone fermo.
+  (prisma.shop.findUnique as any).mockResolvedValue({
+    lifecycleStatus: 'active',
+    erasureGeneration: 0,
+  });
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
 
@@ -286,6 +295,118 @@ describe('la verifica prima di cancellare', () => {
         { signal: fuori.signal },
       ),
     ).rejects.toThrow(/non piu' posseduto/);
+  });
+});
+
+/**
+ * IL SECONDO GETTONE, quello del ciclo di vita.
+ *
+ * `fencing_token` protegge da un'altra corsa; questo protegge da `shop/redact`.
+ * Sono due pericoli diversi con lo stesso rimedio, e il secondo prima non
+ * c'era: una sincronizzazione avviata un minuto prima della cancellazione
+ * proseguiva indisturbata e continuava a riempire di dati un negozio che aveva
+ * appena chiesto di essere dimenticato. Il lucchetto da solo non basta a
+ * fermarla — `shop/redact` prende lo stesso lucchetto, ma basta che il nostro
+ * lease scada un istante perche' lui passi e finisca mentre noi dormiamo.
+ */
+describe('il gettone del ciclo di vita', () => {
+  it('non lavora un negozio la cui cancellazione e\' gia\' cominciata', async () => {
+    (prisma.shop.findUnique as any).mockResolvedValue({
+      lifecycleStatus: 'erasing',
+      erasureGeneration: 3,
+    });
+
+    const lavoro = vi.fn(async () => undefined);
+    expect(await runWithShopLease('shop-1', lavoro)).toBe('occupato');
+    expect(lavoro).not.toHaveBeenCalled();
+    // E quel che si era appena preso si rilascia subito: tenerlo bloccherebbe
+    // la cancellazione stessa, che il lucchetto lo vuole.
+    expect(prisma.shopLock.deleteMany).toHaveBeenCalled();
+  });
+
+  /**
+   * Fail-closed anche qui, e per lo stesso motivo del lucchetto: se non si
+   * riesce a sapere se il negozio e' in cancellazione, non si lavora. Sapere a
+   * meta' e proseguire e' il modo in cui si finisce a scrivere dentro un
+   * negozio gia' cancellato.
+   */
+  it('stato del negozio illeggibile: non si lavora', async () => {
+    (prisma.shop.findUnique as any).mockRejectedValue(new Error('database giu'));
+
+    const lavoro = vi.fn(async () => undefined);
+    expect(await runWithShopLease('shop-1', lavoro)).toBe('non-disponibile');
+    expect(lavoro).not.toHaveBeenCalled();
+    expect(errorSpy.mock.calls.flat().join(' ')).toContain('ALLARME');
+  });
+
+  it('porta la generazione dentro il lease, per chi deve riverificarla', async () => {
+    (prisma.shop.findUnique as any).mockResolvedValue({
+      lifecycleStatus: 'active',
+      erasureGeneration: 9,
+    });
+
+    let visto: number | null | undefined;
+    await runWithShopLease('shop-1', async (lease) => {
+      visto = lease.erasureGeneration;
+    });
+
+    expect(visto).toBe(9);
+  });
+
+  /**
+   * IL CASO CHE QUESTO GETTONE ESISTE PER FERMARE. La corsa era gia' in volo,
+   * la cancellazione e' cominciata dopo di lei, e adesso la corsa sta per
+   * scrivere: il lucchetto le risulta ancora suo, ma il mondo e' cambiato
+   * sotto.
+   */
+  it('ferma la scrittura di una corsa partita prima della cancellazione', async () => {
+    (prisma.shop.findUnique as any)
+      .mockResolvedValueOnce({ lifecycleStatus: 'active', erasureGeneration: 3 })
+      .mockResolvedValue({ lifecycleStatus: 'erasing', erasureGeneration: 4 });
+
+    await expect(
+      runWithShopLease('shop-1', async (lease) => {
+        await lease.assertHeld();
+      }),
+    ).rejects.toThrow(/cancellazione/i);
+  });
+
+  it('ferma la scrittura anche quando la cancellazione e\' gia\' finita', async () => {
+    // Negozio sparito del tutto: il gettone e' l'unica cosa che alla corsa in
+    // volo dice che non ha piu' niente da scrivere.
+    (prisma.shop.findUnique as any)
+      .mockResolvedValueOnce({ lifecycleStatus: 'active', erasureGeneration: 3 })
+      .mockResolvedValue(null);
+
+    await expect(
+      runWithShopLease('shop-1', async (lease) => {
+        await lease.assertHeld();
+      }),
+    ).rejects.toThrow(/cancellazione/i);
+  });
+
+  /**
+   * Chi sta cancellando e' l'unico che ha il diritto di alzare il gettone,
+   * quindi e' anche l'unico a cui non va rinfacciato: senza questa opzione la
+   * cancellazione si accorgerebbe di se stessa e si fermerebbe da sola — e su
+   * un ritentativo, dove il negozio e' gia' marcato dal tentativo precedente,
+   * non partirebbe nemmeno.
+   */
+  it('chi sta cancellando lavora anche su un negozio gia\' marcato', async () => {
+    (prisma.shop.findUnique as any).mockResolvedValue({
+      lifecycleStatus: 'erasing',
+      erasureGeneration: 3,
+    });
+
+    const lavoro = vi.fn(async (lease: any) => {
+      await lease.assertHeld();
+    });
+
+    expect(await runWithShopLease('shop-1', lavoro, { duringErasure: true })).toBe('eseguito');
+    expect(lavoro).toHaveBeenCalledTimes(1);
+    // E non va nemmeno a chiedere: quando cancella, lo stato del negozio non e'
+    // una condizione, e' il suo lavoro.
+    expect(prisma.shop.findUnique).not.toHaveBeenCalled();
   });
 });
 
