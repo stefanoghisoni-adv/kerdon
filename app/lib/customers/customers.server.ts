@@ -113,13 +113,24 @@ export async function loadCustomersReport(opts: {
 
   const token = await getValidAccessToken(shop.id);
   const ref = shop.supabaseConfig.supabaseProjectRef;
+  // Il fuso e' del negozio, non della richiesta: si legge dalla sua riga
+  // insieme a tutto il resto, cosi' chi chiama non puo' scordarselo.
+  const timeZone = shop.ianaTimezone;
   const before = previousRange(opts.from, opts.to);
 
   await ensureReportTables(token, ref);
 
   const [current, previous, lifetime] = await Promise.all([
-    runQueryRows<RangeRow>(token, ref, customersInRangeSQL({ ...opts, limit: opts.limit })),
-    runQueryRows<RangeRow>(token, ref, customersInRangeSQL({ ...before, limit: opts.limit })),
+    runQueryRows<RangeRow>(
+      token,
+      ref,
+      customersInRangeSQL({ ...opts, timeZone, limit: opts.limit }),
+    ),
+    runQueryRows<RangeRow>(
+      token,
+      ref,
+      customersInRangeSQL({ ...before, timeZone, limit: opts.limit }),
+    ),
     runQueryRows<LifetimeRow>(token, ref, lifetimeProfitSQL(opts.limit)),
   ]);
 

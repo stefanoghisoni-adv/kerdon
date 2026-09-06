@@ -15,9 +15,16 @@
  * moltiplicazione — tante ce n'erano in questo file — sono quattro occasioni
  * perche' una resti indietro, e ne basta una per mostrare al merchant due
  * profitti diversi nella stessa schermata.
+ *
+ * Vale adesso anche per il PERIODO. Il filtro sulle date era riscritto a mano in
+ * ognuna di queste query, con dei confini che il fuso del negozio non lo
+ * conoscevano: sta in `dates/order-window`, dove c'e' scritto anche perche' un
+ * giorno non duri sempre ventiquattro ore.
  */
 
 
+import { placedAtWindowSQL } from '~/lib/dates/order-window';
+import { comparisonRange } from '~/lib/dates/ranges';
 import {
   COVERED_LINES,
   NET_CONTRIBUTION_SUM,
@@ -26,32 +33,29 @@ import {
   TOTAL_LINES,
 } from './net-contribution';
 
-/** Una data di calendario, come la scrive un selettore: 2026-08-01. */
-export function isCalendarDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value);
-}
+// La verifica delle date vive accanto a chi le date le costruisce: chi le
+// produce e chi le controlla non possono avere due idee diverse di cosa sia una
+// data. Resta esposta da qui perche' e' da qui che le rotte l'hanno sempre
+// presa.
+export { isCalendarDate } from '~/lib/dates/ranges';
 
 /**
- * Una data pronta per finire dentro una query.
+ * Il periodo di una lettura, con il fuso di chi lo sta guardando.
  *
- * La query si compone come testo — l'API che la esegue non prende parametri —
- * quindi ogni valore che arriva da fuori va verificato prima, non ripulito
- * dopo: una data che non e' una data non entra affatto.
+ * Il fuso e' obbligatorio e puo' essere `null`, non assente: `null` vuol dire
+ * "questo negozio non ce l'ha, si conta in UTC" ed e' una risposta: dimenticare
+ * il campo invece no, ed era esattamente cio' che succedeva prima.
  */
-function literalDate(value: string): string {
-  if (!isCalendarDate(value)) {
-    throw new Error(`Data non valida: ${value}`);
-  }
-  return `'${value}'`;
-}
-
-export interface CustomersRangeInput {
+export interface QueryRange {
   /** Primo giorno compreso. */
   from: string;
-  /** Ultimo giorno compreso: la query lo estende a tutto il giorno. */
+  /** Ultimo giorno compreso: la query lo estende fino alla mezzanotte dopo. */
   to: string;
+  /** Il fuso del negozio (`shops.iana_timezone`). null = si conta in UTC. */
+  timeZone: string | null;
+}
+
+export interface CustomersRangeInput extends QueryRange {
   /** Quanti clienti al massimo, per non riportare un negozio intero. */
   limit?: number;
 }
@@ -70,8 +74,7 @@ export interface CustomersRangeInput {
  * deve poterlo sapere.
  */
 export function customersInRangeSQL(input: CustomersRangeInput): string {
-  const from = literalDate(input.from);
-  const to = literalDate(input.to);
+  const window = placedAtWindowSQL(input, input.timeZone);
   const limit = Number.isInteger(input.limit) && input.limit! > 0 ? input.limit! : 500;
 
   return `
@@ -101,8 +104,7 @@ LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
 LEFT JOIN customers c ON c.shopify_customer_id = o.shopify_customer_id
 WHERE ${ORDER_COUNTS_AS_SALE}
   AND o.shopify_customer_id IS NOT NULL
-  AND o.placed_at >= ${from}::date
-  AND o.placed_at < (${to}::date + INTERVAL '1 day')
+  AND ${window}
 GROUP BY o.shopify_customer_id
 ORDER BY profit DESC
 LIMIT ${limit};`.trim();
@@ -140,19 +142,16 @@ LIMIT ${rows};`.trim();
  * Serve al confronto: "rispetto a prima" ha senso solo se "prima" dura quanto
  * "adesso" — trenta giorni contro trenta, un mese contro il mese. Estremi
  * compresi da entrambe le parti, come li intende chi li ha scelti.
+ *
+ * Il conto non si fa piu' qui: e' lo stesso "periodo precedente" che il
+ * selettore in cima alla dashboard offre fra i confronti, e finche' e' stato
+ * scritto due volte le due copie potevano rispondere due cose diverse alla
+ * stessa domanda. Qui resta il nome con cui questo file l'ha sempre chiamato.
  */
 export function previousRange(from: string, to: string): { from: string; to: string } {
-  const start = new Date(`${from}T00:00:00Z`);
-  const end = new Date(`${to}T00:00:00Z`);
-  const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
-
-  const previousEnd = new Date(start.getTime() - 86_400_000);
-  const previousStart = new Date(previousEnd.getTime() - (days - 1) * 86_400_000);
-
-  return {
-    from: previousStart.toISOString().slice(0, 10),
-    to: previousEnd.toISOString().slice(0, 10),
-  };
+  // `comparisonRange` torna null solo per 'none': con 'previousPeriod' il
+  // periodo c'e' sempre.
+  return comparisonRange({ from, to }, 'previousPeriod')!;
 }
 
 /**
@@ -168,9 +167,8 @@ export function previousRange(from: string, to: string): { from: string; to: str
  * profitto, e mostrarlo senza dirlo sarebbe la bugia piu' facile che questa app
  * possa raccontare.
  */
-export function shopProfitSQL(input: { from: string; to: string }): string {
-  const from = literalDate(input.from);
-  const to = literalDate(input.to);
+export function shopProfitSQL(input: QueryRange): string {
+  const window = placedAtWindowSQL(input, input.timeZone);
 
   return `
 SELECT
@@ -183,8 +181,7 @@ FROM orders o
 JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
 LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
 WHERE ${ORDER_COUNTS_AS_SALE}
-  AND o.placed_at >= ${from}::date
-  AND o.placed_at < (${to}::date + INTERVAL '1 day');`.trim();
+  AND ${window};`.trim();
 }
 
 
@@ -199,21 +196,16 @@ WHERE ${ORDER_COUNTS_AS_SALE}
  * Su tutti gli ordini e non sul mese: "nel tempo" e' la meta' della domanda, e
  * un mese solo su un negozio stagionale direbbe quasi il contrario del vero.
  */
-export function averagesSQL(range?: { from: string; to: string }): string {
+export function averagesSQL(range?: QueryRange): string {
   // Il periodo restringe gli ordini, non i prodotti: quello che si guarda e'
   // "quanto ho reso in questi giorni", e un ordine fuori dal periodo non deve
   // entrare nel conto nemmeno con le sue righe.
   //
-  // Le due date passano da `literalDate` come in ogni altra query di questo
-  // file: l'API che esegue queste istruzioni non accetta parametri, quindi la
-  // query si compone come testo e ogni valore che arriva da fuori va verificato
-  // PRIMA di entrarci. Interpolarle direttamente — come facevano queste due —
-  // significa che basta una stringa costruita ad arte al posto di una data per
-  // scrivere SQL dentro la nostra.
-  const window = range
-    ? `AND o.placed_at >= ${literalDate(range.from)}::date` +
-      ` AND o.placed_at < (${literalDate(range.to)}::date + INTERVAL '1 day')`
-    : '';
+  // I confini arrivano dallo stesso posto delle altre query — e con lo stesso
+  // controllo sulle date, che qui mancava del tutto: interpolare una data presa
+  // da fuori senza verificarla significa che basta una stringa costruita ad arte
+  // per scrivere SQL dentro la nostra.
+  const window = range ? `AND ${placedAtWindowSQL(range, range.timeZone)}` : '';
   return `
 SELECT
   COUNT(DISTINCT o.shopify_order_id) AS orders,

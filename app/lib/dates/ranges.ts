@@ -96,6 +96,23 @@ export function fromIso(value: string): Date {
 }
 
 /**
+ * Una data di calendario, come la scrive un selettore: 2026-08-01.
+ *
+ * Sta qui, accanto a chi le date le produce, perche' e' la stessa forma:
+ * chi la costruisce e chi la controlla non possono permettersi due idee
+ * diverse di cosa sia una data. Prima viveva accanto alle query dei clienti, e
+ * la cartella delle date la importava all'incontrario.
+ *
+ * Il 30 febbraio non passa: `new Date` lo accetterebbe trasformandolo nel 2
+ * marzo, e il periodo partirebbe da un giorno che nessuno ha chiesto.
+ */
+export function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value);
+}
+
+/**
  * La stessa data, ma come la legge un calendario.
  *
  * `fromIso` mette la mezzanotte UTC: giusto per i conti, sbagliato per il

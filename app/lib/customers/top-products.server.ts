@@ -51,6 +51,10 @@ export async function loadTopProducts(
       id: true,
       scopes: true,
       shopCurrency: true,
+      // Il fuso serve ai confini del periodo: senza, la classifica conterebbe i
+      // giorni in UTC mentre le card accanto li contano nel calendario del
+      // negozio.
+      ianaTimezone: true,
       supabaseConfig: { select: { supabaseProjectRef: true, connectionVerifiedAt: true } },
     },
   });
@@ -66,7 +70,11 @@ export async function loadTopProducts(
   if (!hasOrdersAccess(shop.scopes)) return empty('no_orders_access');
 
   const token = await getValidAccessToken(shop.id);
-  const rows = await runQueryRows<Row>(token, ref, topProductsSQL(opts));
+  const rows = await runQueryRows<Row>(
+    token,
+    ref,
+    topProductsSQL({ ...opts, timeZone: shop.ianaTimezone }),
+  );
 
   return {
     rows: rows.map((row) => ({

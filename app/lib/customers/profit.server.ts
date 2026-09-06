@@ -77,8 +77,14 @@ export async function loadShopProfit(
 
   const token = await getValidAccessToken(shop.id);
   const ref = shop.supabaseConfig.supabaseProjectRef;
-  // Senza un periodo indicato vale il default dell'app: gli ultimi 30 giorni.
-  const range = input?.range ?? defaultRange(null);
+  // Il fuso del negozio si legge qui e non lo passa la rotta: e' un dato del
+  // negozio, non della richiesta, e chiederlo a ogni chiamante sarebbe stato un
+  // altro posto da cui dimenticarlo — che e' come i giorni erano finiti a
+  // essere contati in UTC.
+  const timeZone = shop.ianaTimezone;
+  // Senza un periodo indicato vale il default dell'app: gli ultimi 30 giorni,
+  // nel calendario del negozio.
+  const range = input?.range ?? defaultRange(timeZone);
   // Senza un confronto chiesto si prende il periodo precedente: la variazione
   // e' meta' di cio' che quella card dice, e toglierla per difetto la
   // dimezzerebbe.
@@ -86,8 +92,10 @@ export async function loadShopProfit(
     input === undefined ? previousRange(range.from, range.to) : input.compare;
 
   const [[current], [previous]] = await Promise.all([
-    runQueryRows<ProfitRow>(token, ref, shopProfitSQL(range)),
-    before ? runQueryRows<ProfitRow>(token, ref, shopProfitSQL(before)) : Promise.resolve([]),
+    runQueryRows<ProfitRow>(token, ref, shopProfitSQL({ ...range, timeZone })),
+    before
+      ? runQueryRows<ProfitRow>(token, ref, shopProfitSQL({ ...before, timeZone }))
+      : Promise.resolve([]),
   ]);
 
   const profit = Math.round(num(current?.profit) * 100) / 100;
@@ -179,7 +187,9 @@ export async function loadShopAverages(
   const [row] = await runQueryRows<AveragesRow>(
     token,
     shop.supabaseConfig.supabaseProjectRef,
-    averagesSQL(range),
+    // Stesso periodo e stesso fuso della card del profitto qui accanto: due
+    // archi di tempo diversi nella stessa riga di schermo non si distinguono.
+    averagesSQL(range ? { ...range, timeZone: shop.ianaTimezone } : undefined),
   );
 
   const orders = num(row?.orders);

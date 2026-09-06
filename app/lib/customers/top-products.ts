@@ -1,4 +1,5 @@
-import { isCalendarDate } from './customers-query';
+import { placedAtWindowSQL } from '~/lib/dates/order-window';
+import type { QueryRange } from './customers-query';
 import {
   LINE_NET_CONTRIBUTION_OR_NULL,
   ORDER_COUNTS_AS_SALE,
@@ -46,23 +47,16 @@ const ORDER_BY: Record<Metric, string> = {
   ltp: 'ltp',
 };
 
-function literalDate(value: string): string {
-  // Come nel resto delle query sul database del merchant: cio' che arriva da
-  // fuori e non e' una data non entra, invece di essere ripulito.
-  if (!isCalendarDate(value)) throw new Error(`Data non valida: ${value}`);
-  return `'${value}'`;
-}
-
-export interface TopProductsInput {
-  from: string;
-  to: string;
+export interface TopProductsInput extends QueryRange {
   metric: Metric;
   limit?: number;
 }
 
 export function topProductsSQL(input: TopProductsInput): string {
-  const from = literalDate(input.from);
-  const to = literalDate(input.to);
+  // Lo stesso periodo del profitto e delle medie, preso dallo stesso posto: una
+  // classifica che guardasse un arco di tempo diverso dalle card sopra
+  // racconterebbe un altro negozio.
+  const window = placedAtWindowSQL(input, input.timeZone);
   const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 5)));
   const order = ORDER_BY[input.metric];
 
@@ -80,8 +74,7 @@ WITH l AS (
   JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
   LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
   WHERE ${ORDER_COUNTS_AS_SALE}
-    AND o.placed_at >= ${from}::date
-    AND o.placed_at < (${to}::date + INTERVAL '1 day')
+    AND ${window}
 ),
 -- Il profitto dell'intero carrello, ordine per ordine: e' il numeratore di ACP,
 -- e si calcola prima perche' non dipende dal prodotto che si sta guardando.

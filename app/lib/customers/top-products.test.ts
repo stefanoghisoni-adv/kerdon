@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { isMetric, topProductsSQL, METRICS } from './top-products';
 
-const range = { from: '2026-08-01', to: '2026-08-25' } as const;
+const range = { from: '2026-08-01', to: '2026-08-25', timeZone: 'Europe/Rome' } as const;
 
 describe('isMetric', () => {
   it('accetta le quattro domande e rifiuta il resto', () => {

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { orderWindow, placedAtWindowSQL } from '~/lib/dates/order-window';
+import { topProductsSQL } from './top-products';
 import {
   averagesSQL,
   customersInRangeSQL,
@@ -7,6 +9,9 @@ import {
   previousRange,
   shopProfitSQL,
 } from './customers-query';
+
+/** Un negozio a Roma: il fuso non e' un contorno, e' cio' che decide i confini. */
+const RANGE = { from: '2026-08-01', to: '2026-08-31', timeZone: 'Europe/Rome' } as const;
 
 describe('isCalendarDate', () => {
   it('accetta una data di calendario', () => {
@@ -25,24 +30,26 @@ describe('customersInRangeSQL', () => {
   it('una data che non e una data non entra nella query', () => {
     // La query si compone come testo: l'unica difesa e' rifiutare prima, non
     // ripulire dopo.
-    expect(() => customersInRangeSQL({ from: "'; DROP TABLE orders; --", to: '2026-08-31' })).toThrow();
-    expect(() => customersInRangeSQL({ from: '2026-08-01', to: 'oggi' })).toThrow();
+    expect(() =>
+      customersInRangeSQL({ ...RANGE, from: "'; DROP TABLE orders; --" }),
+    ).toThrow();
+    expect(() => customersInRangeSQL({ ...RANGE, to: 'oggi' })).toThrow();
   });
 
   it('il costo si prende dai prodotti, non dalle righe', () => {
-    const sql = customersInRangeSQL({ from: '2026-08-01', to: '2026-08-31' });
+    const sql = customersInRangeSQL(RANGE);
     expect(sql).toContain('LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id');
     expect(sql).toContain('p.cost_per_item');
   });
 
   it('gli ordini annullati non sono profitto', () => {
-    expect(customersInRangeSQL({ from: '2026-08-01', to: '2026-08-31' })).toContain(
+    expect(customersInRangeSQL(RANGE)).toContain(
       'o.cancelled_at IS NULL',
     );
   });
 
   it('dice anche quante righe hanno un costo: senza, il totale mentirebbe per omissione', () => {
-    const sql = customersInRangeSQL({ from: '2026-08-01', to: '2026-08-31' });
+    const sql = customersInRangeSQL(RANGE);
     expect(sql).toContain('covered_lines');
     expect(sql).toContain('total_lines');
   });
@@ -50,23 +57,25 @@ describe('customersInRangeSQL', () => {
   it('porta la valuta con cui il negozio vende', () => {
     // Il profitto e' del merchant e va scritto nei soldi che incassa, non in
     // quelli con cui paga noi.
-    expect(customersInRangeSQL({ from: '2026-08-01', to: '2026-08-31' })).toContain(
+    expect(customersInRangeSQL(RANGE)).toContain(
       'MAX(o.currency)',
     );
   });
 
   it('l ultimo giorno scelto e compreso per intero', () => {
     // Con un semplice <= la query taglierebbe gli ordini fatti dopo mezzanotte
-    // dell'ultimo giorno, cioe' quasi tutti quelli di quel giorno.
-    expect(customersInRangeSQL({ from: '2026-08-01', to: '2026-08-31' })).toContain(
-      "+ INTERVAL '1 day'",
-    );
+    // dell'ultimo giorno, cioe' quasi tutti quelli di quel giorno. Il confine
+    // e' la mezzanotte DOPO, esclusa: l'ordine fatto in quell'istante appartiene
+    // al giorno seguente e non a tutti e due.
+    const sql = customersInRangeSQL(RANGE);
+    expect(sql).toContain("o.placed_at < TIMESTAMP '2026-09-01 00:00:00'");
+    expect(sql).toContain("o.placed_at >= TIMESTAMP '2026-08-01 00:00:00'");
   });
 
   it('un tetto c e sempre, anche se non lo si chiede', () => {
-    expect(customersInRangeSQL({ from: '2026-08-01', to: '2026-08-31' })).toContain('LIMIT 500');
+    expect(customersInRangeSQL(RANGE)).toContain('LIMIT 500');
     expect(
-      customersInRangeSQL({ from: '2026-08-01', to: '2026-08-31', limit: -5 }),
+      customersInRangeSQL({ ...RANGE, limit: -5 }),
     ).toContain('LIMIT 500');
   });
 });
@@ -106,7 +115,7 @@ describe('previousRange', () => {
 
 describe('shopProfitSQL', () => {
   it('somma tutto il negozio, senza raggruppare per cliente', () => {
-    const sql = shopProfitSQL({ from: '2026-08-01', to: '2026-08-31' });
+    const sql = shopProfitSQL(RANGE);
     expect(sql).not.toContain('GROUP BY');
     expect(sql).toContain('COUNT(DISTINCT o.shopify_order_id)');
   });
@@ -114,22 +123,22 @@ describe('shopProfitSQL', () => {
   it('porta con se quanto di quel totale sia vero', () => {
     // Un profitto calcolato su meta' delle righe e' meta' profitto: mostrarlo
     // senza dirlo sarebbe la bugia piu' facile che questa app possa raccontare.
-    const sql = shopProfitSQL({ from: '2026-08-01', to: '2026-08-31' });
+    const sql = shopProfitSQL(RANGE);
     expect(sql).toContain('covered_lines');
     expect(sql).toContain('total_lines');
   });
 
   it('anche qui le date si rifiutano prima, non si ripuliscono dopo', () => {
-    expect(() => shopProfitSQL({ from: 'oggi', to: '2026-08-31' })).toThrow();
+    expect(() => shopProfitSQL({ ...RANGE, from: 'oggi' })).toThrow();
   });
 });
 
 
 describe('il periodo delle medie non entra nella query senza controllo', () => {
-  it('una data valida diventa un letterale fra apici', () => {
-    const sql = averagesSQL({ from: '2026-08-01', to: '2026-08-26' });
-    expect(sql).toContain("'2026-08-01'");
-    expect(sql).toContain("'2026-08-26'");
+  it('una data valida diventa un confine scritto per intero', () => {
+    const sql = averagesSQL({ from: '2026-08-01', to: '2026-08-26', timeZone: 'Europe/Rome' });
+    expect(sql).toContain("TIMESTAMP '2026-08-01 00:00:00'");
+    expect(sql).toContain("TIMESTAMP '2026-08-27 00:00:00'");
   });
 
   it('senza periodo la query non porta nessuna condizione sulle date', () => {
@@ -148,8 +157,8 @@ describe('il periodo delle medie non entra nella query senza controllo', () => {
       'ieri',
       '',
     ]) {
-      expect(() => averagesSQL({ from: bad, to: '2026-08-26' })).toThrow();
-      expect(() => averagesSQL({ from: '2026-08-01', to: bad })).toThrow();
+      expect(() => averagesSQL({ from: bad, to: '2026-08-26', timeZone: null })).toThrow();
+      expect(() => averagesSQL({ from: '2026-08-01', to: bad, timeZone: null })).toThrow();
     }
   });
 });
@@ -158,10 +167,68 @@ describe('la colonna della data e sempre la stessa in tutte le query', () => {
   it('gli ordini si filtrano su placed_at, non su created_at', () => {
     // `orders` non ha una colonna `created_at`: usarla non da' zero risultati,
     // fa fallire la query — e la card mostra "—" come se non ci fossero ordini.
-    const range = { from: '2026-08-01', to: '2026-08-26' };
+    const range = { from: '2026-08-01', to: '2026-08-26', timeZone: 'Europe/Rome' };
     for (const sql of [averagesSQL(range), shopProfitSQL(range)]) {
       expect(sql).toContain('o.placed_at');
       expect(sql).not.toContain('o.created_at');
     }
+  });
+});
+
+
+/**
+ * La ragione per cui l'intervallo vive in un posto solo: la stessa domanda,
+ * fatta da cinque schermate, deve chiedere al database lo stesso arco di tempo.
+ * Finche' ogni query se lo riscriveva, bastava che una restasse indietro perche'
+ * il merchant vedesse due totali diversi nella stessa pagina.
+ */
+describe('un intervallo solo, per tutte le query del periodo', () => {
+  const atteso = placedAtWindowSQL(RANGE, RANGE.timeZone);
+
+  const query: Record<string, string> = {
+    'tab Clienti': customersInRangeSQL(RANGE),
+    'card del profitto': shopProfitSQL(RANGE),
+    'medie del negozio': averagesSQL(RANGE),
+    'prodotti che rendono': topProductsSQL({ ...RANGE, metric: 'cm' }),
+  };
+
+  for (const [nome, sql] of Object.entries(query)) {
+    it(`${nome}: chiede lo stesso periodo, alla lettera`, () => {
+      expect(sql).toContain(atteso);
+    });
+
+    it(`${nome}: non ha piu una copia del vecchio filtro`, () => {
+      expect(sql).not.toContain('::date');
+      expect(sql).not.toContain("INTERVAL '1 day'");
+    });
+  }
+
+  it('il profitto di sempre resta l unico senza periodo', () => {
+    // "Lifetime" non conosce il periodo scelto: e' cio' che lo rende lifetime.
+    expect(lifetimeProfitSQL()).not.toContain('placed_at');
+  });
+});
+
+describe('i confini si scrivono nell ora di parete del negozio', () => {
+  it('perche e quella che la colonna tiene dentro', () => {
+    // `orders.placed_at` e' un TIMESTAMP senza fuso, e ci arriva la `createdAt`
+    // di Shopify, che porta lo scostamento del negozio: Postgres lo butta via e
+    // dentro resta l'ora che il negozio aveva sull'orologio. I confini si
+    // scrivono nella stessa forma, altrimenti si confronterebbero due misure
+    // diverse.
+    const roma = shopProfitSQL(RANGE);
+    const losAngeles = shopProfitSQL({ ...RANGE, timeZone: 'America/Los_Angeles' });
+
+    expect(roma).toContain("TIMESTAMP '2026-08-01 00:00:00'");
+    expect(losAngeles).toContain("TIMESTAMP '2026-08-01 00:00:00'");
+
+    // Gli ISTANTI pero' sono diversi, ed e' su quelli che l'ora legale viene
+    // fatta tornare: e' li' che il fuso conta, non nel testo della query.
+    expect(orderWindow(RANGE, 'Europe/Rome').fromUtc.toISOString()).toBe(
+      '2026-07-31T22:00:00.000Z',
+    );
+    expect(orderWindow(RANGE, 'America/Los_Angeles').fromUtc.toISOString()).toBe(
+      '2026-08-01T07:00:00.000Z',
+    );
   });
 });

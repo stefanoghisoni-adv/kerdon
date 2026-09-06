@@ -6,6 +6,7 @@ import { prisma } from '~/db.server';
 import { buildMonthSeries, monthLabel } from '~/lib/stats/history-series';
 import { localeForShop } from '~/lib/i18n/server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { fromIso, todayIn } from '~/lib/dates/ranges';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -17,8 +18,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw new Response('Shop not found', { status: 404 });
   }
 
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  // Quale mese sia "questo" lo decide il calendario del negozio, non quello del
+  // server: a un negozio di Los Angeles il 31 agosto alle sei di sera il grafico
+  // passava gia' a settembre — un mese vuoto al posto di quello appena chiuso —
+  // perche' a Greenwich era il primo settembre.
+  //
+  // Gli snapshot restano segnati a mezzanotte UTC e si continuano a confrontare
+  // cosi': quella data non e' un istante, e' l'ETICHETTA del giorno in cui la
+  // rilevazione e' stata presa. Spostare il confronto nel fuso del negozio
+  // lascerebbe fuori proprio lo snapshot del primo del mese.
+  const today = fromIso(todayIn(shop.ianaTimezone));
+  const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
 
   const [inMonth, previous, plan] = await Promise.all([
     prisma.productEligibilitySnapshot.findMany({
@@ -35,8 +45,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ]);
 
   return json({
-    points: buildMonthSeries(previous ? [previous, ...inMonth] : inMonth, now),
-    monthLabel: monthLabel(now, await localeForShop(session.shop)),
+    points: buildMonthSeries(previous ? [previous, ...inMonth] : inMonth, today),
+    monthLabel: monthLabel(today, await localeForShop(session.shop)),
     // Primo giorno del mese mostrato: al grafico serve per scrivere la data per
     // esteso nel riquadro del punto, dove il solo giorno non basterebbe.
     monthStart: monthStart.toISOString(),

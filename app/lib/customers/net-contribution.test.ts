@@ -12,7 +12,7 @@ import {
 import { averagesSQL, customersInRangeSQL, lifetimeProfitSQL, shopProfitSQL } from './customers-query';
 import { topProductsSQL } from './top-products';
 
-const RANGE = { from: '2026-08-01', to: '2026-08-31' };
+const RANGE = { from: '2026-08-01', to: '2026-08-31', timeZone: 'Europe/Rome' };
 
 describe('la formula', () => {
   it('e netto della riga meno costo per le unita rimaste', () => {
