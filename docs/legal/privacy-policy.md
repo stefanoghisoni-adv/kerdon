@@ -1,7 +1,7 @@
 # CoreWard — Privacy Policy
 
-**Last updated:** 25-08-2026
-**Version:** 1.0
+**Last updated:** 06-09-2026
+**Version:** 1.1
 
 ## 1. Who we are
 
@@ -33,7 +33,13 @@ Cost per item is the reason the app exists: it is what allows profit to be calcu
 
 The app synchronises **only customers who have given marketing consent** in your store. For those customers it processes: Shopify customer ID, email address, phone number, first and last name, consent state and opt-in level, total spent, number of orders, customer state, tags, note, verified-email and tax-exempt flags, and creation/update timestamps.
 
-It also processes the customer's **default address** — street, postcode, region and country — plus two fields left at your disposal: an external identifier and a date of birth. The app does not fill those two in: Shopify does not expose them as customer fields, and they stay empty until you decide which metafield to read them from.
+It also processes the customer's **default address** — street, postcode, region and country — the **date of birth**, and an **external identifier**. Those last two do not stay empty: the app writes them, and how it writes them is set out below.
+
+**The date of birth.** Shopify does not expose it as a customer field: it lives in a customer metafield. The app reads the field you point it at — Shopify's standard `facts.birth_date` field, or a date metafield that already exists in your store — and copies its value into your database. From the Customers tab you can also ask the app to enable the standard `facts.birth_date` definition for you: that is what the customer write permission the app requests at install is for.
+
+**The date of birth is also written back to Shopify.** Where your database holds a date and the Shopify metafield is empty, the app writes that value into the very metafield it reads from. This applies only to customers who have given marketing consent, only if you have pointed the app at a field to read the date from, and only if that field is a date field. The app never overwrites a value Shopify already holds, writes nothing when what it finds in your database is not a date, and touches no other field on the customer record: it does not create customers and does not change their name, email, phone or address. It is still the writing of personal data back to Shopify, and it is declared here because that is what it is.
+
+**The external identifier.** It is written by the visitor recognition described in 3.5: when a browser is linked to a customer, that customer's row records the identifier of the browser the person is browsing from at that moment.
 
 Why the address: country and postcode are what advertising platforms use to recognise your customers among their own users, and without them the audience you build comes out smaller than it really is. For the same reason the phone number is written as digits only, international prefix included, and the date of birth as `YYYYMMDD`: that is the form those platforms compare.
 
@@ -47,19 +53,46 @@ Where you have granted the app access to your orders, it processes: order ID and
 
 From **orders** the app deliberately does **not** take addresses, email addresses, phone numbers, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.
 
+Nor does it process **shipping data**: no carrier, no tracking number, no label, no shipping cost. All that remains of delivery is whatever the customer paid at checkout, which is already part of the order total.
+
 The customer address described in 3.3 is a different thing: it is the default address on the customer record, for customers who have given marketing consent, and it is not derived from orders.
 
-### 3.5 Operational records
+### 3.5 Visitor recognition
+
+If you enable visitor recognition, the app keeps a `users` table in **your** database, with **one row per browser**. Each row holds:
+
+- a **pseudonymous browser identifier**, minted by the app (the prefix `corew_` followed by 32 random characters) and kept in a cookie issued by your own domain;
+- the **browser label** and the **device-type label** — "Chrome", "mobile" and the like — when your tracking endpoint sends them;
+- the **first and last time** that browser was seen;
+- the **link to the Shopify customer**, written when the person identifies themselves by leaving an email address or phone number, or when they buy and the browser identifier arrives with the order;
+- the **merging of identifiers**: when several browsers turn out to belong to the same person, the more recent ones record which is the oldest, and that one becomes the reference. No row is deleted for this.
+
+**This is not anonymous data, and should not be called that.** The identifier holds no name, but it lives in that person's browser and, from the moment it is linked to a customer, it says which devices that person uses and when they used them. It is personal data and is treated as such.
+
+**Consent comes first.** Without the visitor's permission — which the app reads from the Shopify Customer Privacy signals your endpoint forwards — no identifier is minted and no row is written. On withdrawal, writes stop, that browser's row is deleted along with the links that joined it to the others, and the app expires the cookie it had issued on its own domain. The cookie planted by your domain is yours: your endpoint is the only thing that can remove it.
+
+**To link a browser to a customer** your endpoint sends us the email address or phone number the person has just given: the app uses them to find that customer in your database and write the link. Neither value is kept on our systems.
+
+**Rows never linked to a customer are deleted 90 days** after they were last seen.
+
+The app does **not** process the visitor's IP address and does **not** record the pages they visit.
+
+### 3.6 Operational records
 
 To run and support the app we keep, in our own database: a record of each synchronisation (type, outcome, timestamps, and how many records were added, updated or removed), product-level entries identifying which products changed, your billing charges, and access records for the read interface (outcome and HTTP status only).
 
-Records about **customers** in our own database are **counts only**. No customer name, email, phone or identifier is written to our systems by the synchronisation.
+What we keep about **customers** is very largely counts: the synchronisation does not copy names, email addresses or phone numbers into our database. There are, however, four cases where a reference to an individual is written on our side, and they belong here:
+
+- **Pending repairs.** When an operation concerning a single customer fails — marking someone who has withdrawn consent, writing a date of birth back to Shopify — a row remains holding that customer's Shopify identifier and, for the date of birth, the value still to be written. It goes when the operation succeeds, or when it is given up after the retries allowed.
+- **Privacy requests being worked on.** The signed message Shopify delivers to us holds the person's identifier, and it is kept until the request closes. It stays longer only where a request is stuck and has to be finished by hand: without it, nobody would know who it concerned.
+- **Exports for access requests.** They contain the person's data and stay on our systems for at most 30 days: see section 8.
+- **Withdrawals of recognition consent.** The browser identifier and, where the withdrawal names one, the customer identifier stay encrypted on the withdrawal row until it has been applied. They are then cleared, leaving only the — unreadable — proof that a withdrawal was made.
 
 ## 4. Where the data is stored
 
 **Your data lives in your own database.** The Supabase project connected during setup belongs to your Supabase account, in the region you chose. We do not own it, cannot transfer it, and cannot access it after you disconnect the app.
 
-**Our own database** holds the operational records in section 3.5, along with your store configuration and encrypted credentials. It is hosted in the European Union.
+**Our own database** holds the operational records in section 3.6, along with your store configuration and encrypted credentials. It is hosted in the European Union.
 
 ## 5. Who else is involved
 
@@ -88,19 +121,23 @@ Requests from Shopify are verified by signature before being acted upon.
 
 ## 7. How long data is kept
 
-Data in **your** database is kept for as long as you decide. The app does not delete it on a schedule.
+Data in **your** database is kept for as long as you decide. The app does not delete it on a schedule, with one exception: rows for browsers never linked to a customer are deleted 90 days after they were last seen.
+
+**In our own database**: access records for the read interface are kept for 12 months and then deleted; exports prepared for an access request for at most 30 days; repair rows and privacy requests until they close, as described in 3.6.
 
 **When you uninstall the app**, your data stays where it is — in your database, which remains yours — and our session with your store ends. We keep our operational and billing records for as long as required for accounting and legal purposes.
 
 **When Shopify asks us to erase your store** (the shop redaction request sent 48 hours after uninstall), we delete your store configuration, credentials and operational records from our systems. We do not touch your own database: it is not ours to delete.
 
+One row survives that erasure, and it is the proof that it happened: it holds a one-way fingerprint of the store domain, counts of what was deleted, and when. The fingerprint leads back to no store; someone holding the domain, however, can recompute it and confirm the erasure took place.
+
 ## 8. Requests from your customers
 
 Shopify forwards customer privacy requests to us automatically, and the app answers them:
 
-**Access request** — we collect the customer's synchronised record so you can provide it.
+**Access request** — the app collects from your database what has been written about that person: their customer row, their orders and those orders' lines, and the browsers linked to them. The export is prepared and made available to you inside the app, where you download it with your admin session: it is never placed at a public address. **It stays on our systems for at most 30 days**, then deletes itself.
 
-**Erasure request** — the customer's record is permanently deleted from your database, and the action is recorded in your logs.
+**Erasure request** — the customer's row is permanently deleted from your database, along with the rows of the browsers linked to that person. **Orders are not deleted**: they are accounting records you are required to keep, and deleting them would change your revenue. They are stripped of what leads back to the person — customer identifier, first and last name — and become indistinguishable from a purchase made without an account. The action is recorded in your logs.
 
 If a customer contacts you directly, you can also delete their record yourself: it is your database.
 

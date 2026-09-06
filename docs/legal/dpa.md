@@ -1,6 +1,6 @@
 # Data Processing Agreement (DPA) — CoreWard
 
-Last updated: 25 August 2026
+Last updated: 6 September 2026
 
 > This agreement is accepted together with the terms of service, when the app is
 > installed.
@@ -31,8 +31,16 @@ The agreement lasts as long as the app is installed and ends on uninstall.
 ## 2. Nature and purpose
 
 Collection from Shopify, transformation, writing to the merchant's database,
-updating, and controlled reading. On the merchant's request, writing a product's
-cost back to Shopify.
+updating, and controlled reading.
+
+Two things only are written back to Shopify: a **product's cost**, on the
+merchant's request, and a **customer's date of birth** — the value held in the
+merchant's database, written into the customer metafield CoreWard reads it from,
+where that metafield is empty and the customer has given marketing consent. No
+other field of the customer record is created or changed.
+
+Where the merchant enables the feature, CoreWard also processes **visitor
+recognition** for the store, described in section 3.
 
 Purpose: to let the merchant use its own commercial data to measure the
 profitability of its orders and its customers.
@@ -44,22 +52,36 @@ profitability of its orders and its customers.
 **Customer data**: Shopify identifier, email address, telephone number, first
 name, last name, marketing consent state and opt-in level, total spent, number of
 orders, customer state, tags, note, default address (street, postcode, region,
-country) and, where the merchant chooses to populate them, an external identifier
-and a date of birth.
+country), the date of birth — read from the customer metafield the merchant
+points to — and an external identifier, which is the identifier of the browser
+the person is browsing from.
 
 **Order data**: order identifier and number, customer identifier, customer first
 and last name, currency, totals, financial status, order date and any
 cancellation date and, for each line, product, variant, quantity, unit price and
 discount.
 
+**Visitor recognition data** (only where the merchant enables the feature, and
+only for visitors who have given consent): a pseudonymous browser identifier
+minted by CoreWard, the browser label and the device-type label where the
+merchant's endpoint sends them, the first and last time the browser was seen, the
+merging of identifiers found to belong to the same person, and the link to the
+Shopify customer identifier. This is not anonymous data: the identifier stays in
+a person's browser and, once linked to a customer, is attributable to them. To
+write that link, the merchant's endpoint sends CoreWard the email address or
+telephone number the person has just given; CoreWard uses them only to search the
+merchant's database and does not retain them.
+
 **Explicit exclusions**: no payment data; no address, email address, telephone
-number or note is taken from orders; no IP address; no browsing data; no special
-category of data within the meaning of Article 9 GDPR.
+number or note is taken from orders; no shipping data — no carrier, tracking
+number, label or shipping cost, since labels are bought outside Shopify and all
+that remains of delivery is what the customer paid at checkout; no IP address; no
+record of pages visited; no special category of data within the meaning of
+Article 9 GDPR.
 
 The address processed is the default address on the customer record, not a
-shipping or billing address derived from an order. A date of birth, where the
-merchant chooses to populate it, is not a special category within the meaning of
-Article 9.
+shipping or billing address derived from an order. A date of birth is not a
+special category within the meaning of Article 9.
 
 **Limit of the processing**: among customers, only the data of those who have
 given marketing consent on Shopify is processed.
@@ -124,8 +146,19 @@ The full procedure is set out in `INCIDENT-RESPONSE.md`, available on request.
 ## 8. Rights of data subjects
 
 CoreWard acts on the access and erasure requests it receives through the channels
-Shopify provides. On a customer erasure request, the corresponding record is
-permanently deleted from the merchant's database.
+Shopify provides.
+
+**Access**: CoreWard collects from the merchant's database the customer's row,
+their orders and those orders' lines, and the rows of the browsers linked to
+them. The resulting export contains personal data and is held on CoreWard's
+systems, where the merchant downloads it inside the app with their own admin
+session, **for at most 30 days**; it is deleted when that period expires.
+
+**Erasure**: the customer's row is permanently deleted from the merchant's
+database, along with the rows of the browsers linked to them. Orders are not
+deleted — they are accounting records the merchant is required to keep (Article
+17(3)(b) and (e) GDPR) — but are stripped of the customer identifier and of the
+customer's first and last name.
 
 ## 9. On termination
 
@@ -133,9 +166,17 @@ On uninstall, CoreWard ceases all processing: synchronisation stops and the
 Shopify session credentials are deleted.
 
 **Data already synchronised remains in the merchant's database**, of which the
-merchant is the holder. This is not retention by the processor: that data was
-never on CoreWard's infrastructure. The merchant may delete it at any time from
-its own project.
+merchant is the holder, and which the merchant may delete at any time from its
+own project.
+
+That data passes through CoreWard's infrastructure as it is written or read back,
+and in four limited cases it remains written there: pending repairs, which carry
+a customer's Shopify identifier and, for the date of birth, the value still to be
+written back; the signed message of a privacy request, until that request closes;
+the export prepared for an access request, for at most 30 days; and the browser
+identifier and customer identifier on a consent withdrawal, encrypted and cleared
+as soon as the withdrawal is applied. None of the four outlives its reason to
+exist.
 
 ## 10. Transfers outside the EU
 

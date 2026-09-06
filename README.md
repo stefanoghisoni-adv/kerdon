@@ -70,7 +70,7 @@ npm run dev             # shopify app dev
    ```
    SHOPIFY_API_KEY=xxx
    SHOPIFY_API_SECRET=xxx
-   SHOPIFY_SCOPES=read_products,write_products,read_inventory,read_cost,read_customers,write_customers,read_metafields
+   SHOPIFY_SCOPES=read_products,write_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders
    SHOPIFY_APP_URL=https://your-app.vercel.app
    SHOPIFY_API_VERSION=2026-07
    DATABASE_URL=postgresql://...   # Supabase Free, pooler transaction mode
@@ -97,6 +97,13 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
   imposta la variabile `APP_URL` e il secret `CRON_SECRET` (stesso valore di Vercel).
 
 ### Step 3 — Configurazione app Shopify
+
+Gli scope sono dichiarati in `shopify.app.toml`, che e' la fonte di verita':
+`SHOPIFY_SCOPES` sopra e in `.env.example` deve ripetere quella stessa riga,
+parola per parola. Se le due divergono, l'app chiede un consenso diverso da
+quello che il dashboard mostra al merchant. `read_cost` e `read_metafields`, che
+comparivano nelle prime versioni di questo README e nei documenti sotto
+`docs/plans` e `docs/specs`, non esistono piu' fra gli scope dell'app.
 
 Nel Partner Dashboard / `shopify.app.toml`:
 - `application_url`: `https://your-app.vercel.app`

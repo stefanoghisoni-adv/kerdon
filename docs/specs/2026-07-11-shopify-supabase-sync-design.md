@@ -1,5 +1,16 @@
 # Shopify-Supabase Product & Customer Sync App - Design Specification
 
+> **⚠️ DOCUMENTO STORICO — le parti su scope, permessi e dati NON sono più valide.**
+> Questa specifica descrive l'app come era stata progettata a luglio 2026. Gli
+> scope elencati qui (`read_cost`, `read_metafields`, gli scope clienti concessi
+> "dinamicamente all'upgrade") non esistono più: la fonte di verità è `scopes` in
+> `shopify.app.toml`, e oggi sono `read_products, write_products, read_inventory,
+> write_inventory, read_customers, write_customers, read_publications,
+> read_themes, read_orders, read_all_orders`, tutti concessi all'installazione.
+> Per cosa l'app tratta e scrive davvero, l'unico riferimento aggiornato è
+> `docs/legal/` (privacy policy, DPA, dichiarazione dei dati protetti). Non
+> ricopiare da qui.
+
 **Data:** 2026-07-11 (rev. 2026-07-12)
 **Autore:** Stefano Ghisoni
 **Stato:** Approvata — Part 1 del piano di implementazione già eseguita (commit 07db8a4..c6d794b)

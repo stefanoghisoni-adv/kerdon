@@ -1,5 +1,12 @@
 # Shopify-Supabase Sync App Implementation Plan - Part 4: Deployment
 
+> **⚠️ DOCUMENTO STORICO — non ricopiare gli scope da qui.**
+> La riga `SHOPIFY_SCOPES` di questo piano contiene `read_cost` e
+> `read_metafields`, che non esistono più fra gli scope dell'app, e non contiene
+> quelli aggiunti dopo (inventario in scrittura, pubblicazioni, temi, ordini). La
+> fonte di verità è `scopes` in `shopify.app.toml`; `.env.example` e il README ne
+> ripetono la riga.
+
 > **⚠️ MODIFICA ARCHITETTURALE: worker → cron**
 > Vincolo di progetto: **costi ZERO**. Il worker BullMQ long-running (Part 2, `worker.ts`/`Dockerfile.worker`) non è deployabile gratuitamente ed è sostituito in produzione da **route Remix triggerate da cron**: Vercel Cron (giro giornaliero di sicurezza) + GitHub Actions schedule (giro ogni 30 minuti). A ogni giro la route `api/cron/sync` (Task 17) drena i job BullMQ accodati dalla UI ed esegue i periodic check dei negozi in scadenza, riusando senza modifiche i processor di Part 2. Ogni riferimento a Railway/piani a pagamento è stato rimosso.
 

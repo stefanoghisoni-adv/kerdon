@@ -75,6 +75,20 @@ identificativo scelto da lui.
 Il cookie va emesso dall'endpoint del negozio, non da CoreWard: e' quel dominio
 a renderlo first-party, ed e' l'unica ragione per cui dura.
 
+## Cosa viene scritto, e dove
+
+Ogni identificativo coniato o rivisto lascia **una riga per browser** nella
+tabella `users` del database del merchant: l'identificativo stesso, l'etichetta
+del browser e quella del tipo di dispositivo quando il container le trasmette, il
+primo e l'ultimo avvistamento, l'eventuale collegamento al cliente Shopify e il
+rimando all'identificativo piu' vecchio quando due browser risultano della stessa
+persona.
+
+Non e' un dato anonimo, e non va chiamato cosi': l'identificativo vive nel browser
+di una persona e, dal collegamento in poi, dice quali dispositivi usa e quando li
+ha usati. Le righe mai collegate a un cliente si cancellano dopo 90 giorni.
+Il testo per gli interessati sta in `docs/legal/privacy-policy.it.md`, punto 3.5.
+
 ## Il consenso viene prima
 
 CoreWard non conia niente se chi naviga non ha dato il permesso: senza, la

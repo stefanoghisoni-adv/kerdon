@@ -1,5 +1,12 @@
 # Shopify-Supabase Sync App Implementation Plan - Part 1: Foundation
 
+> **⚠️ DOCUMENTO STORICO — non ricopiare gli scope da qui.**
+> La riga `SHOPIFY_SCOPES` di questo piano contiene `read_cost` e
+> `read_metafields`, che non esistono più fra gli scope dell'app, e non contiene
+> quelli aggiunti dopo (inventario in scrittura, pubblicazioni, temi, ordini). La
+> fonte di verità è `scopes` in `shopify.app.toml`; `.env.example` e il README ne
+> ripetono la riga.
+
 > **✅ COMPLETATO — 7/7 task, commit 07db8a4..c6d794b**
 > Codice implementato in `Desktop/Siti web/App Shopify + Supabase/shopify-supabase-sync`. Questo documento è il riferimento storico di ciò che è stato eseguito: il contenuto non va modificato, le checkbox sono spuntate a consuntivo.
 
