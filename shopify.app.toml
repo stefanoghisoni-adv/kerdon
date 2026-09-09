@@ -12,7 +12,7 @@
 # ora inoltra qui da se', quindi non c'e' nulla da tenere aperto.
 
 client_id = "461a83c84e9ce41a23b5364f1c1140ad"
-name = "CoreWard"
+name = "Kerdon"
 application_url = "https://api.coreward.app"
 embedded = true
 
