@@ -1,0 +1,59 @@
+{
+  "_commento": [
+    "Le vulnerabilita' che la CI ha il permesso di NON bloccare, per ora.",
+    "",
+    "Ogni voce deve dire tre cose: quale pacchetto, PERCHE' si accetta il",
+    "rischio, ed entro quando si smette di accettarlo. Una scadenza passata",
+    "fa fallire il controllo tanto quanto una vulnerabilita' nuova: e' l'unico",
+    "modo perche' questa lista non diventi il posto dove i problemi vanno a",
+    "morire di vecchiaia.",
+    "",
+    "'motivo' non e' una formalita': se non si riesce a scriverlo, la",
+    "vulnerabilita' non va accettata."
+  ],
+
+  "eccezioni": [
+    {
+      "pacchetto": "@remix-run/server-runtime",
+      "avviso": "GHSA turbo-stream <3.0.0 — DoS via input riflesso nel single fetch",
+      "motivo": "Remix 2.17.5 e' l'ultima versione della linea 2, che non riceve piu' correzioni: la catena turbo-stream@2.4.1 non ha un aggiornamento in nessun punto del grafo. Forzare turbo-stream@3 con un override cambia il formato di codifica dei dati fra server e client e romperebbe ogni navigazione. La correzione vera e' la migrazione a React Router 7, che e' un lavoro a se'. Nel frattempo il percorso vulnerabile non e' costruito: il single fetch non e' attivo (nessun future flag in vite.config.ts) e turbo-stream non compare nel bundle server (build/server/assets/server-build-*.js).",
+      "scadenza": "2026-12-31"
+    },
+    {
+      "pacchetto": "@remix-run/node",
+      "avviso": "dipende da @remix-run/server-runtime vulnerabile",
+      "motivo": "Stessa catena di @remix-run/server-runtime: e' la stessa vulnerabilita' contata di nuovo sul pacchetto che la contiene. Si chiude con la migrazione a React Router 7.",
+      "scadenza": "2026-12-31"
+    },
+    {
+      "pacchetto": "@remix-run/react",
+      "avviso": "turbo-stream + react-router 6.30.4 (open redirect, deserializeErrors)",
+      "motivo": "react-router@6.30.4 e' l'ultima della linea 6 e le correzioni stanno solo in react-router 7, che sotto Remix 2 non e' installabile: la linea 7 cambia identita' del pacchetto. Si chiude con la migrazione a React Router 7.",
+      "scadenza": "2026-12-31"
+    },
+    {
+      "pacchetto": "@remix-run/serve",
+      "avviso": "dipende da @remix-run/express e @remix-run/node vulnerabili",
+      "motivo": "Stessa catena Remix 2. In piu' su Vercel questo pacchetto non serve la produzione — l'handler lo costruisce il preset 'remix' — quindi il server express che porta con se' non e' in esecuzione da nessuna parte. Resta perche' `npm start` lo usa in locale.",
+      "scadenza": "2026-12-31"
+    },
+    {
+      "pacchetto": "@remix-run/express",
+      "avviso": "dipende da @remix-run/node vulnerabile",
+      "motivo": "Stessa catena Remix 2, e come @remix-run/serve non e' in esecuzione in produzione.",
+      "scadenza": "2026-12-31"
+    },
+    {
+      "pacchetto": "turbo-stream",
+      "avviso": "GHSA-... DoS via input riflesso nel single fetch",
+      "motivo": "La radice della catena Remix 2. Nessuna versione 2.x corretta esiste; turbo-stream@3 non e' compatibile con Remix 2. Prova di non raggiungibilita' del percorso server: `grep -c turbo-stream build/server/assets/server-build-*.js` restituisce 0 dopo `npm run build`.",
+      "scadenza": "2026-12-31"
+    },
+    {
+      "pacchetto": "@shopify/shopify-app-remix",
+      "avviso": "dipende da @remix-run/server-runtime vulnerabile",
+      "motivo": "La stessa catena Remix 2, ereditata. La versione 5.0.1 dipende anch'essa da @remix-run/server-runtime ^2.17.5, quindi aggiornarla non toglie l'avviso: non e' una correzione travestita da aggiornamento.",
+      "scadenza": "2026-12-31"
+    }
+  ]
+}

@@ -19,3 +19,7 @@ prisma/migrations/dev.db*
 .gq-probe.mjs
 .rest-probe.mjs
 .q.graphql
+
+# L'SBOM lo genera la CI a ogni esecuzione: in repository sarebbe solo
+# rumore che cambia a ogni install.
+sbom.cyclonedx.json

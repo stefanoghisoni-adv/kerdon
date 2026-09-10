@@ -28,10 +28,10 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_non_esiste?schema=public
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: 'npm'
@@ -99,10 +99,10 @@ jobs:
       PSQL_URL: postgresql://ci:ci@localhost:5432/coreward_vuoto
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: 'npm'
@@ -174,10 +174,10 @@ jobs:
       BASE_PSQL_URL: postgresql://ci:ci@localhost:5432/coreward_linea
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: 'npm'
@@ -215,3 +215,53 @@ jobs:
 
           DATABASE_URL="$BASE_DATABASE_URL" npx prisma migrate deploy | tee applicate.txt
           grep -q "No pending migrations to apply" applicate.txt
+
+  # Le dipendenze: quelle che bloccano e quelle che si e' scelto di tollerare.
+  #
+  # Sta in un job a se' e non dentro `test` perche' risponde a una domanda
+  # diversa. `test` chiede "il codice fa ancora quello che deve?" e la risposta
+  # dipende solo dal commit. Questo chiede "le dipendenze sono ancora sicure?",
+  # e la risposta cambia da sola, senza che nessuno tocchi niente: un avviso
+  # pubblicato stanotte rende rosso domani un commit che ieri era verde. Tenerli
+  # insieme vorrebbe dire non riuscire piu' a distinguere "ho rotto qualcosa" da
+  # "e' uscito un CVE".
+  #
+  # La politica sta in scripts/audit-gate.mjs: bloccano le critiche ovunque e le
+  # alte nel grafo di produzione. Le eccezioni stanno in
+  # scripts/audit-exceptions.json e scadono — una scadenza passata fa fallire
+  # questo job, che e' il punto: senza, la lista diventa il posto dove i
+  # problemi invecchiano indisturbati.
+  sicurezza:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      # `npm ci` e non `npm install`: l'audit deve rispondere sulle versioni
+      # scritte nel lockfile, non su quelle che npm sceglierebbe oggi.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit gate
+        run: npm run audit:gate
+
+      # La distinta dei materiali. Non blocca niente: serve dopo, quando esce un
+      # avviso e bisogna sapere in fretta se quella versione era davvero dentro
+      # a un certo deploy.
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        run: npm run sbom
+
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cyclonedx.json
+          retention-days: 90

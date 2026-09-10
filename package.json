@@ -17,7 +17,9 @@
     "webhooks:replay": "tsx scripts/webhooks-replay.ts",
     "consent:replay": "tsx scripts/consent-replay.ts",
     "worker:build": "node build-worker.mjs",
-    "build:verified": "prisma generate && npm run typecheck && vitest run && npm run build"
+    "build:verified": "prisma generate && npm run typecheck && vitest run && npm run build",
+    "audit:gate": "node scripts/audit-gate.mjs",
+    "sbom": "npm sbom --sbom-format=cyclonedx > sbom.cyclonedx.json"
   },
   "keywords": [],
   "author": "",
@@ -37,27 +39,34 @@
     "@shopify/shopify-app-remix": "^4.2.1",
     "@shopify/shopify-app-session-storage-prisma": "^9.0.1",
     "@supabase/supabase-js": "^2.110.2",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
     "@vercel/functions": "^3.7.5",
     "bullmq": "^5.80.1",
     "crypto-js": "^4.2.0",
     "dotenv": "^17.4.2",
     "ioredis": "^5.11.1",
     "isbot": "^5.2.0",
-    "prisma": "^6.19.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "typescript": "^5.9.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@remix-run/dev": "^2.17.5",
     "@types/crypto-js": "^4.2.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@vitest/ui": "^3.2.4",
-    "esbuild": "0.28.1",
+    "esbuild": "0.28.2",
+    "prisma": "^6.19.3",
     "tsx": "^4.23.0",
+    "typescript": "^5.9.3",
     "vite": "^6.4.3",
     "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "tar": "^7.5.22",
+    "qs": "^6.16.0",
+    "estree-util-value-to-estree": "^3.3.3",
+    "toml": "^4.3.0",
+    "deepmerge-ts": "^8.0.2"
   }
 }

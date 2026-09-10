@@ -9,10 +9,19 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma/schema.prisma ./prisma/
 
-# Installa tutte le dipendenze (non --production: servono anche le devDependencies
-# per costruire il fascio del worker). Il flag --legacy-peer-deps e' necessario
-# per i conflitti di peer dependency noti del progetto.
-RUN npm ci --legacy-peer-deps
+# Installa tutte le dipendenze: per costruire il fascio del worker servono anche
+# le devDependencies (esbuild, tsx, la CLI di Prisma).
+#
+# `--include=dev` e' esplicito di proposito. Il valore predefinito di `omit` in
+# npm diventa `dev` da solo quando NODE_ENV vale "production", e in un'immagine
+# di produzione quella variabile prima o poi la mette qualcuno: senza questo
+# flag l'install salterebbe in silenzio esbuild, e `npm run worker:build`
+# morirebbe qui invece che al deploy.
+#
+# Il vecchio `--legacy-peer-deps` non c'e' piu': serviva a nascondere conflitti
+# di peer dependency che oggi non esistono — `npm ls` chiude senza un solo
+# `invalid` — e finche' restava li' avrebbe nascosto anche il prossimo.
+RUN npm ci --include=dev
 
 # Genera il client Prisma. Non serve un DATABASE_URL: `generate` legge lo schema
 # e scrive dei file, non si collega a niente.
@@ -40,8 +49,12 @@ COPY package*.json ./
 COPY prisma/schema.prisma ./prisma/
 
 # Installa solo le dipendenze di produzione: il worker impacchettato non ha
-# bisogno delle devDependencies. Il flag --legacy-peer-deps resta necessario.
-RUN npm ci --production --legacy-peer-deps
+# bisogno delle devDependencies.
+#
+# `--omit=dev` al posto di `--production`: quest'ultimo e' deprecato da npm 7 e
+# in una versione futura smettera' di funzionare — cioe' installerebbe di nuovo
+# tutto senza dirlo. Anche qui niente `--legacy-peer-deps`.
+RUN npm ci --omit=dev
 
 # Il client Prisma generato arriva dallo stage di build invece di essere
 # rigenerato qui. Rigenerarlo era il modo lento di ottenere lo stesso file: i
