@@ -25,6 +25,15 @@ vi.mock('../../db.server', () => ({
     // alla fine, nella stessa transazione del confine incrementale. Qui e'
     // vuoto e non oppone resistenza; cosa ci finisca dentro lo provano i test
     // dedicati (sync-repairs.test.ts).
+    // Il registro dell'ambito: quali prodotti continuano ad aggiornarsi e
+    // quali sono fermi per il tetto del piano. Qui e' vuoto e non oppone
+    // resistenza; cosa ci finisca dentro lo provano i test dedicati
+    // (product-scope.test.ts e plan-scope.test.ts).
+    productScopeEntry: {
+      findMany: vi.fn(async () => []),
+      upsert: vi.fn(async () => ({})),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+    },
     syncRepair: {
       findMany: vi.fn(async () => []),
       upsert: vi.fn(async () => ({})),
@@ -92,6 +101,41 @@ const emptyProductsSelect = () => ({
   range: async () => ({ data: [], error: null }),
   in: async () => ({ data: [], error: null }),
 });
+
+/**
+ * Il doppione della cancellazione, con la catena che la spazzata usa davvero.
+ *
+ * A piano senza tetto la spazzata e' una `.lt()` e basta; a piano con tetto e'
+ * una `.lt().in(...)`, perche' si cancella solo dentro l'ambito. Il doppione
+ * deve reggere entrambe, altrimenti i test proverebbero una forma della query
+ * che il codice non usa piu'.
+ */
+function deleteChain(record: (call: { method: string; args: any[] }) => void) {
+  const esito = { data: [], error: null };
+  return {
+    gte: async (...args: any[]) => {
+      record({ method: 'gte', args });
+      return esito;
+    },
+    lt: (...args: any[]) => {
+      record({ method: 'lt', args });
+      return Object.assign(Promise.resolve(esito), {
+        in: async (...ids: any[]) => {
+          record({ method: 'lt.in', args: ids });
+          return esito;
+        },
+      });
+    },
+    in: async (...args: any[]) => {
+      record({ method: 'in', args });
+      return esito;
+    },
+    eq: async (...args: any[]) => {
+      record({ method: 'eq', args });
+      return esito;
+    },
+  };
+}
 
 // I processor non ricompongono piu' le condizioni sul posto: chiedono alla
 // policy se quel negozio puo' sincronizzare. Da qui i due campi in piu' su ogni
@@ -377,14 +421,22 @@ describe('Initial bulk sync processor', () => {
     vi.mocked(prisma.syncJob.create).mockResolvedValue({ id: 'sync-free' } as any);
     vi.mocked(prisma.syncJob.update).mockResolvedValue({} as any);
 
-    // Una sola pagina con 3 prodotti (più del limite) e un cursore successivo:
-    // il cap deve fermare la paginazione senza chiedere la pagina 2.
-    const page = [
+    // Due pagine: tre prodotti nella prima (piu' del tetto) e uno nella
+    // seconda. Il tetto ferma le SCRITTURE, non l'impaginazione — ed e' la
+    // differenza che prima non c'era: fermarsi qui faceva credere alla spazzata
+    // che il resto del catalogo non esistesse piu'.
+    const page1 = [
       { id: 1, title: 'P1', variants_complete: true, variants: [{ id: 101 }] },
       { id: 2, title: 'P2', variants_complete: true, variants: [{ id: 201 }] },
       { id: 3, title: 'P3', variants_complete: true, variants: [{ id: 301 }] },
     ];
-    const mockGetProducts = vi.fn().mockResolvedValue({ products: page, nextPageInfo: 'page-2' });
+    const page2 = [
+      { id: 4, title: 'P4', variants_complete: true, variants: [{ id: 401 }] },
+    ];
+    const mockGetProducts = vi
+      .fn()
+      .mockResolvedValueOnce({ products: page1, nextPageInfo: 'page-2' })
+      .mockResolvedValueOnce({ products: page2, nextPageInfo: null });
     vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
       getProducts: mockGetProducts,
     } as any));
@@ -393,12 +445,11 @@ describe('Initial bulk sync processor', () => {
       { shopify_product_id: p.id, shopify_variant_id: p.variants[0].id, is_variant: true } as any,
     ]);
 
-    const mockGte = vi.fn().mockReturnValue({ error: null });
-    const mockLt = vi.fn().mockReturnValue({ error: null });
+    const deleteCalls: { method: string; args: any[] }[] = [];
     const mockUpsert = vi.fn().mockReturnValue({ error: null });
     vi.mocked(createSupabaseClient).mockReturnValue({
       from: vi.fn().mockReturnValue({
-        delete: vi.fn().mockReturnValue({ gte: mockGte, lt: mockLt }),
+        delete: () => deleteChain((c) => deleteCalls.push(c)),
         upsert: mockUpsert,
         select: emptyProductsSelect,
       }),
@@ -408,9 +459,18 @@ describe('Initial bulk sync processor', () => {
 
     await processInitialBulkSync('shop-free', mockJob);
 
-    // Solo 2 prodotti trasformati (cap), e paginazione fermata dopo la pagina 1.
+    // Solo 2 prodotti trasformati (il tetto), ma tutte e due le pagine lette:
+    // il catalogo va visto per intero, sia per sapere che e' finito sia per
+    // sapere chi c'e' — e quindi chi ha diritto ai posti disponibili.
     expect(transformProduct).toHaveBeenCalledTimes(2);
-    expect(mockGetProducts).toHaveBeenCalledTimes(1);
+    expect(mockGetProducts).toHaveBeenCalledTimes(2);
+
+    // La cancellazione, se c'e', e' ristretta all'ambito: mai una `lt` nuda,
+    // che porterebbe via tutto quello che il tetto ha lasciato fuori.
+    const nude = deleteCalls.filter(
+      (c, i) => c.method === 'lt' && deleteCalls[i + 1]?.method !== 'lt.in',
+    );
+    expect(nude).toHaveLength(0);
 
     // Job completato con productsSynced = 2.
     const completedCall = vi.mocked(prisma.syncJob.update).mock.calls.find(
@@ -644,7 +704,12 @@ describe('Initial bulk sync processor', () => {
     expect(deleteCalls.some((c) => c.method === 'lt')).toBe(false);
   });
 
-  it('spazza anche quando si raggiunge il tetto del piano', async () => {
+  // ERA: "spazza anche quando si raggiunge il tetto del piano", e chiedeva
+  // proprio il guasto. Il tetto veniva trattato come una fine regolare
+  // dell'impaginazione, quindi la spazzata partiva e portava via tutto cio' che
+  // stava oltre — dati vivi su Shopify, cancellati dal database del merchant
+  // perche' nessuno era andato a chiederli.
+  it('a tetto raggiunto la spazzata resta dentro l ambito e non tocca l eccedenza', async () => {
     const mockShop = {
       id: 'shop-1',
       shopDomain: 'test-shop.myshopify.com',
@@ -668,10 +733,7 @@ describe('Initial bulk sync processor', () => {
     const deleteCalls: { method: string; args: any[] }[] = [];
     const supabaseMock = {
       from: () => ({
-        delete: () => ({
-          gte: async (...a: any[]) => { deleteCalls.push({ method: 'gte', args: a }); return { error: null }; },
-          lt: async (...a: any[]) => { deleteCalls.push({ method: 'lt', args: a }); return { error: null }; },
-        }),
+        delete: () => deleteChain((c) => deleteCalls.push(c)),
         upsert: async () => ({ error: null }),
         select: emptyProductsSelect,
       }),
@@ -680,7 +742,7 @@ describe('Initial bulk sync processor', () => {
     (ShopifyAPIClient as any).mockImplementation(() => ({
       getProducts: vi.fn().mockResolvedValue({
         products: [{ id: 1, variants_complete: true }, { id: 2, variants_complete: true }],
-        nextPageInfo: 'p2',
+        nextPageInfo: null,
       }),
     }));
     (transformProduct as any).mockImplementation((p: any) => [
@@ -689,8 +751,20 @@ describe('Initial bulk sync processor', () => {
 
     await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
 
-    // Il tetto e' una terminazione regolare: la spazzata deve avvenire.
-    expect(deleteCalls.some((c) => c.method === 'lt')).toBe(true);
+    // La spazzata avviene — l'impaginazione e' finita davvero — ma solo dentro
+    // l'ambito: la condizione porta con se' gli id dei prodotti che stiamo
+    // ancora aggiornando, e il prodotto 2, fermo per il tetto, non c'e'.
+    const ristrette = deleteCalls.filter((c) => c.method === 'lt.in');
+    expect(ristrette).toHaveLength(1);
+    expect(ristrette[0].args[0]).toBe('shopify_product_id');
+    expect(ristrette[0].args[1]).toEqual([1]);
+
+    // E nessuna cancellazione senza restrizione: era quella a portare via
+    // l'eccedenza.
+    const nude = deleteCalls.filter(
+      (c, i) => c.method === 'lt' && deleteCalls[i + 1]?.method !== 'lt.in',
+    );
+    expect(nude).toHaveLength(0);
   });
 
   it('registra il piano usato quando la sync si completa', async () => {

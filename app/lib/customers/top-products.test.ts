@@ -29,7 +29,9 @@ describe('topProductsSQL', () => {
 
   it('le righe senza costo non entrano: profitto ignoto non e profitto zero', () => {
     const sql = topProductsSQL({ ...range, metric: 'cm' });
-    expect(sql).toContain('CASE WHEN p.cost_per_item IS NOT NULL');
+    expect(sql).toContain(
+      'CASE WHEN COALESCE(l.unit_cost_at_sale, p.cost_per_item) IS NOT NULL',
+    );
     expect(sql).toContain('profit IS NOT NULL');
   });
 

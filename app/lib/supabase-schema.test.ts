@@ -98,11 +98,24 @@ describe('tabelle degli ordini', () => {
     expect(sql).not.toContain('DROP');
   });
 
-  it('il costo non sta nelle righe: si legge dai prodotti quando serve', () => {
-    // E' la ragione per cui compilare un costo oggi aggiorna il profitto di
-    // ieri. Salvarlo qui congelerebbe la storia.
+  it('il costo corrente non sta nelle righe: si legge dai prodotti quando serve', () => {
+    // E' la ragione per cui compilare un costo oggi aggiorna anche il profitto
+    // di ieri: la riga d'ordine non porta un costo suo, lo va a prendere dal
+    // prodotto nel momento in cui si guarda.
     expect(sql).not.toContain('cost_per_item');
     expect(sql).toContain('shopify_variant_id');
+  });
+
+  it('c e pero il posto per fermarlo, e resta vuoto finche nessuno lo chiede', () => {
+    // Le due colonne non sono una copia del costo corrente: si riempiono solo
+    // quando il merchant, cambiando un costo, dice che gli ordini gia'
+    // registrati non devono seguirlo. Vuote vogliono dire "per questa riga il
+    // costo non e' stato fissato", ed e' cosi' che nascono tutte: il costo del
+    // giorno della vendita non lo conserva nessuno, Shopify compreso, e
+    // riempirle all'indietro sarebbe inventarlo.
+    expect(sql).toContain('unit_cost_at_sale');
+    expect(sql).toContain('unit_cost_frozen_at');
+    expect(sql).not.toContain('unit_cost_at_sale NUMERIC(10, 2) NOT NULL');
   });
 
   it('degli ordini non si prende un dato personale in piu del necessario', () => {

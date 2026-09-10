@@ -5,6 +5,7 @@ import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
 import { can } from '~/lib/authz/capabilities';
 import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
+import { forgetProductScope } from '~/lib/sync/product-scope.server';
 
 export async function action({ request }: ActionFunctionArgs) {
   const body = await request.text();
@@ -54,7 +55,15 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const supabase = createSupabaseClient(shop.supabaseConfig);
 
-    // Hard delete all rows for this product
+    // Si cancella senza chiedere niente all'ambito, ed e' voluto.
+    //
+    // "Fuori quota" e "non esiste piu'" sono due cose diverse. Un prodotto che
+    // il tetto del piano ha fermato tiene le sue righe — quello e' il punto di
+    // tutto il registro dell'ambito — ma tenerle vuol dire non buttarle via
+    // perche' sono vecchie, non tenerle anche quando il merchant ha cancellato
+    // il prodotto. Se qui si guardasse l'ambito, un prodotto fermo e poi
+    // eliminato resterebbe nel database del merchant per sempre: fuori ambito
+    // non ci ripassa nessuna corsa, e nessuno verrebbe mai a toglierlo.
     const { error } = await supabase
       .from(shop.supabaseConfig.tableNameProducts)
       .delete()
@@ -77,6 +86,21 @@ export async function action({ request }: ActionFunctionArgs) {
       // stesso prodotto non fa danni.
       return json({ error: 'product_delete_failed' }, { status: 500 });
     } else {
+      // Via anche dal registro dell'ambito: un prodotto cancellato che restasse
+      // in graduatoria continuerebbe a occupare un posto del tetto, e quel
+      // posto e' un prodotto vivo tenuto fuori dalla sincronizzazione per
+      // sempre. Best effort: la cancellazione dei dati del merchant e' gia'
+      // andata a buon fine, e un guasto sulla nostra contabilita' non deve
+      // farla ripetere.
+      try {
+        await forgetProductScope(shop.id, [productId]);
+      } catch (scopeError) {
+        console.warn(
+          `Registro dell'ambito non aggiornato per il prodotto ${productId}:`,
+          scopeError instanceof Error ? scopeError.message : scopeError,
+        );
+      }
+
       await prisma.syncJob.create({
         data: {
           shopId: shop.id,

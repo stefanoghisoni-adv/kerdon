@@ -721,6 +721,38 @@ CREATE INDEX "shop_erasure_proofs_erased_at_idx" ON "shop_erasure_proofs"("erase
 -- del negozio, cioe' un riferimento in piu' a una cosa appena cancellata. Del
 -- negozio resta la sola impronta HMAC in `shop_ref`.
 
+-- CreateTable
+CREATE TABLE "product_scope" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "shopify_product_id" TEXT NOT NULL,
+    "source_created_at" TIMESTAMP(3),
+    "first_scoped_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "in_scope" BOOLEAN NOT NULL DEFAULT true,
+    "reason" TEXT NOT NULL DEFAULT 'in_scope',
+    "last_checked_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "last_in_scope_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "product_scope_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "product_scope_shop_id_shopify_product_id_key" ON "product_scope"("shop_id", "shopify_product_id");
+
+-- CreateIndex
+CREATE INDEX "product_scope_shop_id_in_scope_idx" ON "product_scope"("shop_id", "in_scope");
+
+-- AddForeignKey
+ALTER TABLE "product_scope" ADD CONSTRAINT "product_scope_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Il tetto del piano decide cosa continua ad aggiornarsi, non cosa esiste: le
+-- righe in eccedenza si marcano ferme qui, e restano nel database del merchant.
+-- Prima venivano cancellate dalla spazzata di fine corsa, che non sapeva
+-- distinguere "non riscritto perche' non esiste piu'" da "non riscritto perche'
+-- non l'ho nemmeno chiesto".
+
 -- I piani: cinque righe copiate dal database owner in uso.
 --
 -- Non si generano dallo schema perche' non sono struttura, sono scelte:

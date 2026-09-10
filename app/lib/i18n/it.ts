@@ -637,8 +637,14 @@ export const it = {
     },
     upgradeBack: (plan: string) =>
       `Se aggiornerai di nuovo almeno a ${plan} la sincronizzazione riprenderà normalmente.`,
+    /**
+     * Diceva "alcuni prodotti verranno rimossi", e per un periodo e' stato
+     * vero: la sincronizzazione cancellava davvero l'eccedenza. Era la stessa
+     * cosa che la pagina dei piani prometteva di non fare. Adesso i prodotti
+     * restano e smettono soltanto di aggiornarsi, e la frase lo dice.
+     */
     productsDowngrade: (cap: string) =>
-      `Alcuni prodotti verranno rimossi per rispettare il limite del piano: ${cap} prodotti sincronizzabili.`,
+      `I prodotti già sincronizzati restano nel tuo database: quelli oltre il nuovo limite di ${cap} prodotti smettono di aggiornarsi, senza essere eliminati.`,
     productsUpdated: (cap: string) =>
       `La sincronizzazione rispetterà automaticamente i nuovi limiti del piano: ${cap} prodotti sincronizzabili.`,
     customersGained:
@@ -652,6 +658,54 @@ export const it = {
       "La sincronizzazione dei clienti si interrompe. I dati già raccolti non " +
       "vengono cancellati e restano nel tuo progetto, ma non verranno più " +
       "aggiornati né potranno essere usati per il tracciamento.",
+  },
+
+  // Prodotti che si aggiornano e prodotti fermi.
+  //
+  // Compare solo quando c'e' davvero qualcosa di fermo: senza, ripeterebbe quel
+  // che le altre card dicono gia'. E dice sempre le due cose insieme — quanti
+  // si aggiornano e quanti no — perche' e' la distinzione che il merchant non
+  // puo' fare da solo guardando i suoi dati.
+  productScope: {
+    title: "Una parte dei prodotti non si aggiorna più",
+    counts: (active: number, paused: number) =>
+      `${active} ${active === 1 ? "prodotto si aggiorna" : "prodotti si aggiornano"} regolarmente, ` +
+      `${paused} ${paused === 1 ? "è fermo" : "sono fermi"}.`,
+    /** Segue il conteggio: la data è già formattata nel fuso del negozio. */
+    since: (date: string) =>
+      `I prodotti fermi mostrano i valori dell’ultimo aggiornamento ricevuto, del ${date}: da quel momento non sono più cambiati.`,
+    sinceUnknown:
+      "I prodotti fermi mostrano gli ultimi valori ricevuti: da allora non sono più cambiati.",
+    kept:
+      "I dati restano nel tuo database e non vengono eliminati. Passando a un piano con un limite più alto, i prodotti fermi tornano ad aggiornarsi da soli alla sincronizzazione successiva.",
+  },
+
+  // Fin dove arriva la modifica di un costo.
+  //
+  // La domanda esiste perche' il costo non e' un dato storico: si legge dal
+  // prodotto nel momento in cui si guarda, quindi scriverne uno oggi cambia
+  // anche il profitto degli ordini di mesi fa. Finora succedeva in silenzio.
+  // Qui si dice, e si lascia scegliere: le due strade portano a due verita'
+  // diverse sui numeri che il merchant ha gia' letto, e nessuna delle due e'
+  // quella giusta sempre.
+  costScope: {
+    title: "A quali ordini applichiamo il costo?",
+    intro:
+      "Il costo che hai appena inserito viene usato per calcolare il profitto. Dobbiamo sapere se vale solo da adesso in avanti o anche per gli ordini che hai già ricevuto.",
+    futureAction: "Solo da adesso in avanti",
+    futureBody:
+      "il costo vale per gli ordini futuri. Gli ordini già registrati restano come li hai visti finora e i loro numeri non cambiano.",
+    allAction: "Anche gli ordini passati",
+    allBody:
+      "il costo vale anche per gli ordini già ricevuti, e il loro profitto viene ricalcolato. È la scelta giusta se il costo di prima era sbagliato.",
+    /**
+     * Il limite, detto invece che nascosto. Chi legge deve poter capire perche'
+     * la prima strada non "recupera" il costo di allora: quel dato non esiste,
+     * ne' da noi ne' su Shopify.
+     */
+    noHistory:
+      "Shopify conserva soltanto il costo attuale di un prodotto, non quelli precedenti: per gli ordini già registrati non possiamo sapere quanto ti costava davvero quel prodotto il giorno della vendita, e non lo inventiamo.",
+    cancel: "Annulla",
   },
 
   // Aggiornamento delle tabelle del merchant, in attesa.
@@ -825,6 +879,9 @@ export const it = {
       "L’app non ha il permesso di modificare i costi su Shopify. Riapri o reinstalla l’app " +
       "per concedere l’autorizzazione, poi riprova.",
     costWriteFailed: "Salvataggio su Shopify non riuscito. Riprova.",
+    /** Nessuna scelta su quali ordini toccare: non si scrive niente, e non si sceglie al posto suo. */
+    costScopeMissing:
+      "Non abbiamo capito a quali ordini applicare il costo. Riprova e scegli una delle due opzioni.",
     costHalfSaved:
       "Costo salvato su Shopify ma non nel tuo database. Riprova per allinearli.",
     deleteConnected:

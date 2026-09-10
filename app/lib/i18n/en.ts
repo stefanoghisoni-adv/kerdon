@@ -568,7 +568,7 @@ export const en: typeof it = {
     upgradeBack: (plan: string) =>
       `Upgrade to ${plan} or above again and syncing resumes as before.`,
     productsDowngrade: (cap: string) =>
-      `Some products will be removed to stay within your plan’s limit: ${cap} products synced.`,
+      `The products you already synced stay in your database: the ones beyond the new limit of ${cap} products stop updating, they are not deleted.`,
     productsUpdated: (cap: string) =>
       `Syncing will follow your plan’s new limits automatically: ${cap} products synced.`,
     customersGained:
@@ -581,6 +581,34 @@ export const en: typeof it = {
     customersLost:
       "Customer syncing stops. The data you already collected isn’t deleted and stays in your " +
       "project, but it will no longer be updated and can’t be used for tracking.",
+  },
+
+  productScope: {
+    title: "Some products no longer update",
+    counts: (active: number, paused: number) =>
+      `${active} ${active === 1 ? "product updates" : "products update"} regularly, ` +
+      `${paused} ${paused === 1 ? "is" : "are"} on hold.`,
+    since: (date: string) =>
+      `Products on hold show the values from their last update, on ${date}: nothing has changed for them since.`,
+    sinceUnknown:
+      "Products on hold show the last values they received: nothing has changed for them since.",
+    kept:
+      "The data stays in your database and is not deleted. Move to a plan with a higher limit and the products on hold go back to updating on their own from the next sync.",
+  },
+
+  costScope: {
+    title: "Which orders should this cost apply to?",
+    intro:
+      "The cost you just entered is what we use to work out profit. We need to know whether it applies from now on only, or to the orders you have already received as well.",
+    futureAction: "From now on only",
+    futureBody:
+      "the cost applies to future orders. The orders already recorded stay exactly as you have seen them and their numbers do not change.",
+    allAction: "Past orders too",
+    allBody:
+      "the cost applies to the orders you already received, and their profit is recalculated. This is the right choice when the previous cost was simply wrong.",
+    noHistory:
+      "Shopify only keeps a product's current cost, not the previous ones: for orders already recorded we cannot know what that product actually cost you on the day of the sale, and we do not make it up.",
+    cancel: "Cancel",
   },
 
   schemaUpdate: {
@@ -705,6 +733,8 @@ export const en: typeof it = {
       "The app doesn’t have permission to change costs on Shopify. Reopen or reinstall the app " +
       "to grant it, then try again.",
     costWriteFailed: "Couldn’t save to Shopify. Try again.",
+    costScopeMissing:
+      "We didn’t catch which orders the cost should apply to. Try again and pick one of the two options.",
     costHalfSaved:
       "The cost was saved to Shopify but not to your database. Try again to line them up.",
     deleteConnected:

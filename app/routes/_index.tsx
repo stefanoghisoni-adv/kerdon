@@ -60,6 +60,7 @@ import { normalizePlanName, samePlanName } from '~/lib/billing/plan-name';
 import { authorizationBanners } from '~/components/Dashboard/authorization-banners';
 import { TrackingConflicts } from '~/components/Dashboard/TrackingConflicts';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
+import { ProductScopeBanner } from '~/components/Dashboard/ProductScopeBanner';
 import { suggestPlanForProducts } from '~/components/Dashboard/plan-suggestion';
 import type { TrackingFinding } from '~/lib/tracking/detect';
 import { needsSchemaUpdate } from '~/lib/supabase/merchant-migrations';
@@ -1601,6 +1602,14 @@ export default function Dashboard() {
             per giunta accanto al passo che quella scelta la sta chiedendo, dove
             il badge "Consigliato" dice gia' la stessa cosa meglio. */}
         {planConfirmed && <ProductOverflowBanner disabled={blocked} />}
+
+        {/* Subito sotto, e non a caso: il tetto raggiunto dice che una parte
+            del catalogo non entra, questo dice che una parte di quello che e'
+            gia' entrato ha smesso di aggiornarsi. Sono la stessa causa vista da
+            due lati, e il secondo e' quello che il merchant non puo' accorgersi
+            da solo — i numeri fermi hanno lo stesso aspetto di quelli freschi.
+            Compare solo se c'e' davvero qualcosa di fermo. */}
+        {planConfirmed && <ProductScopeBanner timeZone={shop.ianaTimezone} />}
 
 
         {/* L'avviso sul cambio di piano parla di una configurazione che gira

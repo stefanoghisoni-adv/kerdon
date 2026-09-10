@@ -5,7 +5,6 @@ import { transformProduct } from '../transformers/product.server';
 import { transformCustomer } from '../transformers/customer.server';
 import { createSupabaseClient } from '../supabase.server';
 import { prisma } from '../../db.server';
-import { isProductLimitReached } from '../limits/product-limit';
 import { enrichVariantCosts } from '../stats/inventory-cost.server';
 import { filterEligibleProductRows } from '../eligibility/product-eligibility';
 import { sortByCreatedAtAsc } from '../sync/product-order';
@@ -57,6 +56,20 @@ import {
   type StoredRepair,
 } from '~/lib/sync/repair-outbox.server';
 import { deltaFloor } from '~/lib/sync/watermark';
+import {
+  MAX_PRODUCT_PAGES,
+  createScopeSelector,
+  sweepVerdict,
+  type ScopeCandidate,
+  type ScopeSelector,
+} from '~/lib/sync/product-scope';
+import {
+  loadProductScope,
+  pruneProductScope,
+  recordProductScope,
+  scopeCandidatesOf,
+  type ScopeWrite,
+} from '~/lib/sync/product-scope.server';
 
 // Solo la parte di chi riporta l'avanzamento che i processor usano davvero.
 // Tipandola cosi' il bulk sync puo' girare anche senza nessuno che lo ascolti
@@ -1294,12 +1307,47 @@ export async function processPeriodicSyncCheck(
     let totalVariants = 0;
     let nextPageInfo: string | null = null;
 
-    // Per far rispettare il tetto del piano anche in delta: insieme dei prodotti
-    // già presenti. I prodotti nuovi oltre il limite non vengono aggiunti; quelli
-    // già presenti continuano ad aggiornarsi. null = piano illimitato (nessun cap).
-    const existingProductIds = maxProducts == null
-      ? null
-      : await fetchExistingProductIds(supabase, shop.supabaseConfig.tableNameProducts);
+    // Il tetto del piano anche in delta, ma con la stessa graduatoria della
+    // corsa completa invece che con l'ordine di arrivo.
+    //
+    // COSA C'ERA PRIMA. Un insieme degli id gia' presenti, e la regola "se e'
+    // nuovo e siamo pieni, salta". Funzionava, ma decideva per ordine di
+    // arrivo: chi capitava per primo nel delta si prendeva il posto libero, e
+    // due negozi identici finivano con due sottoinsiemi diversi.
+    //
+    // ADESSO il posto lo decide la data di creazione, come nella corsa
+    // completa: il selettore parte da chi e' gia' dentro l'ambito, e un
+    // prodotto piu' vecchio che arriva a quota piena prende il posto del piu'
+    // recente. Chi perde il posto non perde le righe — le sue restano dove
+    // sono, ferme e dichiarate tali.
+    //
+    // IL SEME, quando il registro e' ancora vuoto: gli id gia' presenti nel
+    // database del merchant. Succede una volta sola, prima che una corsa
+    // completa abbia classificato il catalogo, e senza sarebbe peggio — il
+    // selettore crederebbe di avere tutti i posti liberi e sforerebbe il tetto.
+    // Di quegli id non si conosce la data di creazione: la graduatoria ricade
+    // sull'id, che su Shopify cresce col tempo ed e' l'approssimazione piu'
+    // vicina disponibile.
+    const registroAmbito = maxProducts == null ? null : await loadProductScope(shop.id);
+    const selettore: ScopeSelector | null =
+      maxProducts == null
+        ? null
+        : createScopeSelector(
+            maxProducts,
+            registroAmbito && registroAmbito.size > 0
+              ? scopeCandidatesOf(registroAmbito).filter(
+                  (c) => registroAmbito.get(c.productId)?.inScope === true,
+                )
+              : [...(await fetchExistingProductIds(
+                  supabase,
+                  shop.supabaseConfig.tableNameProducts,
+                ))].map((id) => ({ productId: id, createdAt: null })),
+          );
+
+    // Cosa questa corsa ha da dire al registro dell'ambito. Si scrive alla
+    // fine, in blocco: un delta tocca poche risorse, e una scrittura per
+    // risorsa sarebbe una andata e ritorno per prodotto.
+    const scopeWrites: ScopeWrite[] = [];
 
     do {
       // Fetch updated products since last sync (delta)
@@ -1320,14 +1368,33 @@ export async function processPeriodicSyncCheck(
       // ai prodotti gia' presenti, e fra i nuovi ha la precedenza chi c'era da
       // piu' tempo su Shopify.
       for (const product of sortByCreatedAtAsc(products as ShopifyProduct[])) {
-        // Tetto del piano: se il prodotto è nuovo e il limite è già saturo,
-        // non aggiungerlo (gli aggiornamenti ai prodotti esistenti passano).
-        if (
-          existingProductIds != null &&
-          !existingProductIds.has(product.id) &&
-          existingProductIds.size >= (maxProducts as number)
-        ) {
-          continue;
+        // Tetto del piano: chi e' gia' dentro l'ambito continua ad
+        // aggiornarsi, chi e' nuovo entra solo se c'e' posto o se e' piu'
+        // vecchio di qualcuno che il posto ce l'ha.
+        if (selettore) {
+          const esito = selettore.offer({
+            productId: product.id,
+            createdAt: product.created_at ?? null,
+          });
+
+          // Chi ha ceduto il posto: le sue righe restano dove sono. Si segna
+          // fermo, e da quel momento l'interfaccia dice da quando quei dati non
+          // si aggiornano invece di mostrarli come se fossero di oggi.
+          if (esito.displaced) {
+            scopeWrites.push({
+              productId: esito.displaced.productId,
+              createdAt: esito.displaced.createdAt ?? null,
+              inScope: false,
+              reason: 'plan_quota',
+              written: false,
+            });
+          }
+
+          // Fuori quota e senza dati: non si scrive niente e non si registra
+          // niente. Una riga nel registro per un prodotto di cui non teniamo
+          // nulla direbbe che c'e' qualcosa di fermo dove non c'e' proprio
+          // niente.
+          if (!esito.admitted) continue;
         }
 
         // Solo righe idonee: le varianti senza costo non vanno scritte e, se
@@ -1507,13 +1574,30 @@ export async function processPeriodicSyncCheck(
 
         totalProducts++;
         totalVariants += eligibleRows.length;
-        // Aggiorna il conteggio prodotti distinti (no-op se già presente).
-        if (existingProductIds != null) existingProductIds.add(product.id);
+
+        // Scritto e dentro l'ambito: il registro se lo segna con la data di
+        // adesso. E' la data che l'interfaccia usera' per dire fin quando quei
+        // dati sono aggiornati, se un domani il prodotto dovesse fermarsi.
+        if (selettore) {
+          scopeWrites.push({
+            productId: product.id,
+            createdAt: product.created_at ?? null,
+            inScope: true,
+            reason: 'in_scope',
+            written: true,
+          });
+        }
       }
 
       nextPageInfo = nextPage;
 
     } while (nextPageInfo);
+
+    // Il registro dell'ambito, con quel che il delta ha visto. Niente potatura:
+    // una corsa incrementale conosce solo cio' che e' cambiato, e potare su
+    // quella base cancellerebbe l'ambito di tutti i prodotti fermi — che sono
+    // proprio quelli che il registro esiste per proteggere.
+    await recordProductScope({ shopId: shop.id, writes: scopeWrites, now: runStartedAt });
 
     // Incremental customer sync (delta) if the shop's plan includes customer sync
     const customers = await syncCustomersIfEnabled({
@@ -1619,6 +1703,175 @@ export async function processPeriodicSyncCheck(
  * This prevents infinite duplicates for single-variant products (where shopify_variant_id = NULL
  * and SQL NULL != NULL means onConflict never matches).
  */
+/**
+ * Quanti id di prodotto stanno in una sola richiesta.
+ *
+ * L'elenco finisce nell'indirizzo della chiamata, e un indirizzo ha una
+ * lunghezza massima che nessuno dichiara ma che esiste: un tetto da mille
+ * prodotti in un colpo solo la supera, e la richiesta tornerebbe indietro con
+ * un errore che sembra un guasto del database e non lo e'.
+ */
+const SWEEP_ID_CHUNK = 150;
+
+/**
+ * La spazzata dentro l'ambito: toglie le righe non riscritte da questa corsa,
+ * ma SOLO fra i prodotti che stiamo ancora aggiornando.
+ *
+ * E' la differenza fra questa versione e quella che perdeva dati. Prima la
+ * cancellazione era una sola query senza condizioni sul prodotto, e portava via
+ * tutto cio' che la corsa non aveva riscritto — comprese le risorse che non
+ * erano state riscritte perche' il tetto del piano aveva fermato
+ * l'impaginazione prima di arrivarci. Il tetto decide chi continua ad
+ * aggiornarsi, non chi esiste: le righe fuori ambito non sono materia di questa
+ * query, e infatti non compaiono nella condizione.
+ *
+ * UN GUASTO QUI NON LASCIA UNA RIPARAZIONE, e non e' una dimenticanza. Una
+ * riparazione e' una cancellazione rimandata, e una cancellazione rimandata si
+ * porta dietro l'ambito di quando e' stata decisa: rigiocarla domani vorrebbe
+ * dire cancellare in base a una fotografia invecchiata del piano, che e'
+ * esattamente cio' che questo lavoro esiste per impedire. Le righe obsolete
+ * restano fino alla prossima corsa completa, che ricalcola l'ambito prima di
+ * toccare qualunque cosa. Qualche riga vecchia di troppo e' un prezzo senza
+ * paragone rispetto a righe vive cancellate.
+ */
+async function sweepScopedProducts(opts: {
+  supabase: SupabaseClient;
+  tableName: string;
+  productIds: readonly number[];
+  before: string;
+  collector: SyncEventBuffer;
+  shopId: string;
+}): Promise<void> {
+  for (let i = 0; i < opts.productIds.length; i += SWEEP_ID_CHUNK) {
+    const blocco = opts.productIds.slice(i, i + SWEEP_ID_CHUNK);
+
+    const { rows, error } = await runReturningRows<RemovedProductRow>(
+      opts.supabase
+        .from(opts.tableName)
+        .delete()
+        .lt('synced_at', opts.before)
+        .in('shopify_product_id', blocco) as unknown as ReturningBuilder,
+      REMOVED_PRODUCT_COLUMNS,
+    );
+
+    if (error) {
+      console.warn(
+        `Spazzata dei prodotti obsoleti fallita per il negozio ${opts.shopId}:`,
+        error.message ?? error,
+      );
+      continue;
+    }
+    collectRemovedProducts(opts.collector, rows);
+  }
+}
+
+/**
+ * Le righe dei prodotti che su Shopify non ci sono piu'.
+ *
+ * Vanno via a prescindere dall'ambito: "fermo per quota" e "cancellato" sono
+ * due cose diverse, e confonderle nella direzione prudente lascerebbe nel
+ * database del merchant prodotti che non esistono — che continuano a comparire
+ * nei suoi conti e che nessuna corsa futura verrebbe piu' a togliere, visto che
+ * fuori ambito non li guarda nessuno.
+ *
+ * Nessuna condizione sulla data: un prodotto cancellato non ha righe da
+ * salvare, e aggiungere `synced_at` renderebbe la cancellazione parziale
+ * proprio nel caso in cui dev'essere totale.
+ */
+async function deleteVanishedProducts(opts: {
+  supabase: SupabaseClient;
+  tableName: string;
+  productIds: readonly number[];
+  collector: SyncEventBuffer;
+  shopId: string;
+}): Promise<void> {
+  for (let i = 0; i < opts.productIds.length; i += SWEEP_ID_CHUNK) {
+    const blocco = opts.productIds.slice(i, i + SWEEP_ID_CHUNK);
+
+    const { rows, error } = await runReturningRows<RemovedProductRow>(
+      opts.supabase
+        .from(opts.tableName)
+        .delete()
+        .in('shopify_product_id', blocco) as unknown as ReturningBuilder,
+      REMOVED_PRODUCT_COLUMNS,
+    );
+
+    if (error) {
+      console.warn(
+        `Rimozione dei prodotti spariti da Shopify fallita per il negozio ${opts.shopId}:`,
+        error.message ?? error,
+      );
+      continue;
+    }
+    collectRemovedProducts(opts.collector, rows);
+  }
+}
+
+/**
+ * Il registro dell'ambito dopo una corsa completa.
+ *
+ * CHI CI FINISCE. I prodotti dentro l'ambito, e fra quelli fuori quota solo
+ * quelli di cui teniamo davvero delle righe. Un prodotto oltre il tetto che non
+ * e' mai stato sincronizzato non ha niente da fermare e niente da proteggere:
+ * lo racconta gia' l'avviso del tetto raggiunto, e scriverne una riga qui
+ * vorrebbe dire un registro grande quanto il catalogo invece che quanto la
+ * parte sincronizzata.
+ *
+ * PIANO SENZA TETTO. Il registro si svuota: senza tetto non c'e' niente di
+ * fermo, e lasciare in giro classificazioni vecchie farebbe dire
+ * all'interfaccia che qualcosa non si aggiorna quando invece si aggiorna tutto.
+ * E' anche il modo in cui il ritorno a un piano piu' grande si racconta da
+ * solo.
+ */
+async function recordScopeAfterFullRun(opts: {
+  shopId: string;
+  maxProducts: number | null;
+  inScope: readonly ScopeCandidate[];
+  outOfQuota: readonly ScopeCandidate[];
+  withRows: Set<number> | null;
+  written: Set<number>;
+  now: Date;
+}): Promise<void> {
+  if (opts.maxProducts == null) {
+    await pruneProductScope(opts.shopId, opts.now);
+    return;
+  }
+
+  const writes: ScopeWrite[] = [];
+
+  for (const candidato of opts.inScope) {
+    writes.push({
+      productId: candidato.productId,
+      createdAt: candidato.createdAt ?? null,
+      inScope: true,
+      reason: 'in_scope',
+      written: opts.written.has(candidato.productId),
+    });
+  }
+
+  for (const candidato of opts.outOfQuota) {
+    if (!opts.withRows?.has(candidato.productId)) continue;
+    writes.push({
+      productId: candidato.productId,
+      createdAt: candidato.createdAt ?? null,
+      inScope: false,
+      reason: 'plan_quota',
+      // Fuori ambito non si scrive niente: la data dell'ultimo aggiornamento
+      // resta quella di quando la risorsa era dentro, che e' esattamente il
+      // dato che il merchant sta guardando.
+      written: false,
+    });
+  }
+
+  await recordProductScope({ shopId: opts.shopId, writes, now: opts.now });
+
+  // Chi non compare piu' ne' dentro ne' fuori: prodotti cancellati su Shopify,
+  // o che non hanno piu' righe da proteggere. Si potano per data di verifica,
+  // che e' l'unico modo di dirlo senza spedire un elenco di decine di migliaia
+  // di id dentro una query.
+  await pruneProductScope(opts.shopId, opts.now);
+}
+
 export async function processInitialBulkSync(
   shopId: string,
   // Opzionale: l'allineamento automatico dopo un cambio di piano parte dal cron,
@@ -1694,6 +1947,32 @@ export async function processInitialBulkSync(
   // falsa. Vedi il commento sulla spazzata.
   let productsWithIncompleteVariants = 0;
 
+  // L'impaginazione di Shopify e' arrivata in fondo davvero?
+  //
+  // E' LA VARIABILE CHE MANCAVA, e la sua assenza costava cataloghi interi.
+  // Prima la corsa usciva dal ciclo in due modi — "non ci sono altre pagine" e
+  // "ho raggiunto il tetto del piano" — e sotto, alla spazzata, i due modi
+  // erano diventati indistinguibili. La spazzata toglie tutto cio' che non e'
+  // stato riscritto adesso: dopo una fermata per quota, "non riscritto" vuol
+  // dire "non l'ho nemmeno chiesto", e quel che sta oltre il tetto e' vivo su
+  // Shopify e spariva dal database del merchant.
+  //
+  // Adesso il tetto non ferma piu' l'impaginazione: ferma le SCRITTURE. Si
+  // arriva in fondo alle pagine comunque, perche' e' l'unico modo di sapere che
+  // il catalogo e' finito — e di sapere chi c'e', il che e' anche cio' che
+  // rende ripetibile la scelta di chi resta dentro l'ambito.
+  let paginationComplete = false;
+  let pagineLette = 0;
+
+  // Chi tiene il conto della quota mentre le pagine passano. `maxProducts`
+  // nullo (piano senza tetto) e' un selettore che ammette tutti: cosi' il
+  // percorso e' uno solo e non ci sono due politiche da tenere allineate.
+  const selettore: ScopeSelector = createScopeSelector(maxProducts);
+
+  // Chi e' stato davvero riscritto in questa corsa: e' l'unica base onesta per
+  // la data che l'interfaccia mostra accanto alle risorse ferme.
+  const prodottiScritti = new Set<number>();
+
   // Dettaglio della corsa (cosa e' entrato, cosa e' uscito): vive fuori dal try
   // perche' anche il percorso di errore deve poterlo salvare.
   const collector = createEventCollector();
@@ -1734,26 +2013,51 @@ export async function processInitialBulkSync(
       now: runStartedAt,
     });
 
-    do {
+    for (;;) {
       // Fetch products batch (250 per page)
       const { products, nextPageInfo: nextPage } = await shopifyClient.getProducts({
         limit: 250,
         pageInfo: nextPageInfo || undefined,
       });
 
-      if (products.length === 0) break;
+      if (products.length === 0) {
+        // Pagina vuota: il catalogo e' finito. E' una fine regolare quanto un
+        // cursore assente, e va detto — altrimenti la spazzata resterebbe
+        // bloccata per prudenza su ogni negozio il cui catalogo finisce cosi'.
+        paginationComplete = true;
+        break;
+      }
+      pagineLette++;
+
+      // Chi di questa pagina resta dentro l'ambito.
+      //
+      // Si decide PRIMA di leggere i costi, e non e' un dettaglio: il costo del
+      // venduto vive sull'InventoryItem e va chiesto a Shopify uno per uno.
+      // Chiederlo anche per il catalogo che il piano lascia fuori vorrebbe dire
+      // pagare in chiamate tutta la parte di negozio che non stiamo
+      // sincronizzando — ed e' quel prezzo che prima si evitava fermando
+      // l'impaginazione, cioe' col rimedio che cancellava i dati.
+      //
+      // Dal piu' vecchio al piu' recente: e' l'ordine in cui la quota del piano
+      // va spesa, ed e' la stessa graduatoria con cui il selettore decide. Se
+      // fossero due ordini diversi si scriverebbe un insieme e se ne
+      // dichiarerebbe un altro.
+      const ordinati = sortByCreatedAtAsc(products as ShopifyProduct[]);
+      const ammessi: ShopifyProduct[] = [];
+      for (const product of ordinati) {
+        const esito = selettore.offer({
+          productId: product.id,
+          createdAt: product.created_at ?? null,
+        });
+        if (esito.admitted) ammessi.push(product);
+      }
 
       // Il cost_per_item vive sull'InventoryItem: popolalo prima di trasformare,
       // altrimenti verrebbe scritto sempre null su Supabase.
-      await enrichVariantCosts(shopifyClient, products);
+      if (ammessi.length > 0) await enrichVariantCosts(shopifyClient, ammessi);
 
-      // Trasforma, filtra le idonee e applica il tetto DOPO il filtro: un prodotto
-      // consuma quota solo se ha ≥1 variante idonea.
-      //
-      // Dal piu' vecchio al piu' recente: e' l'ordine in cui la quota del piano
-      // va spesa. Shopify pagina gia' per id crescente (cioe' per creazione),
-      // quindi qui si riordina la pagina appena scaricata e l'insieme resta in
-      // ordine anche fra pagine diverse.
+      // Trasforma e filtra le idonee: un prodotto senza nemmeno una variante
+      // idonea non ha righe da scrivere.
       const allRows = [];
       // Le righe la cui variante non c'era prima: si registrano dopo l'upsert,
       // perche' un upsert fallito non ha aggiunto niente.
@@ -1767,8 +2071,13 @@ export async function processInitialBulkSync(
       // quelle tentate.
       let pageProducts = 0;
       let pageVariants = 0;
-      for (const product of sortByCreatedAtAsc(products as ShopifyProduct[])) {
-        if (maxProducts != null && totalProducts + pageProducts >= maxProducts) break;
+      // Chi di questa pagina finisce davvero nel database del merchant: e' cio'
+      // che il registro dell'ambito segna come aggiornato adesso. Un prodotto
+      // dentro l'ambito ma senza righe idonee non e' stato aggiornato, e
+      // scrivere che lo e' stato falserebbe proprio la data che l'interfaccia
+      // mostra per non spacciare per fresco un dato vecchio.
+      const scrittiInPagina: ShopifyProduct[] = [];
+      for (const product of ammessi) {
         // Si conta PRIMA di qualunque scarto: un prodotto le cui varianti sono
         // arrivate a meta' puo' benissimo sembrare senza righe idonee, e uscire
         // di scena qui sotto senza che nessuno sappia piu' che era monco. E'
@@ -1786,6 +2095,7 @@ export async function processInitialBulkSync(
           }
         }
         allRows.push(...eligibleRows);
+        scrittiInPagina.push(product);
         pageProducts++;
         pageVariants += eligibleRows.length;
       }
@@ -1823,6 +2133,7 @@ export async function processInitialBulkSync(
       // Scritto: adesso i conti della pagina sono conti di righe commesse.
       totalProducts += pageProducts;
       totalVariants += pageVariants;
+      for (const product of scrittiInPagina) prodottiScritti.add(product.id);
 
       collectAddedProducts(collector, addedRows);
 
@@ -1840,72 +2151,175 @@ export async function processInitialBulkSync(
         },
       });
 
-      // Limite del piano raggiunto: interrompi la paginazione.
-      if (isProductLimitReached(totalProducts, maxProducts)) break;
-
       nextPageInfo = nextPage;
 
-    } while (nextPageInfo);
+      if (!nextPageInfo) {
+        // Nessun cursore successivo: il catalogo e' finito davvero. E' l'unica
+        // uscita che autorizza la spazzata globale.
+        paginationComplete = true;
+        break;
+      }
+
+      if (pagineLette >= MAX_PRODUCT_PAGES) {
+        // Fermata di sicurezza, non fine del catalogo: `paginationComplete`
+        // resta falso di proposito, e quel che sta oltre non viene toccato da
+        // nessuna cancellazione. E' la stessa distinzione che il tetto del
+        // piano non faceva.
+        console.warn(
+          `Impaginazione dei prodotti interrotta a ${MAX_PRODUCT_PAGES} pagine per il negozio ${shop.id}: nessuna spazzata in questa corsa`,
+        );
+        break;
+      }
+    }
+
+    // L'ambito, deciso adesso che il catalogo e' stato visto per intero.
+    //
+    // Il selettore ha gia' la risposta: chi e' rimasto dentro e chi e' stato
+    // lasciato fuori dal tetto. E' una graduatoria totale sulla data di
+    // creazione, quindi l'insieme non dipende dall'ordine in cui le pagine sono
+    // arrivate — due corse dello stesso catalogo con lo stesso piano danno lo
+    // stesso ambito, e nessuna risorsa entra ed esce a ogni giro.
+    const dentroAmbito = selettore.chosen();
+    const fuoriQuota = selettore.displaced();
+    const idDentroAmbito = new Set(dentroAmbito.map((c) => c.productId));
+    const idFuoriQuota = new Set(fuoriQuota.map((c) => c.productId));
+
+    // Di quali prodotti teniamo davvero delle righe. Serve a due cose che
+    // sembrano lontane e sono la stessa: sapere quali risorse fuori quota hanno
+    // dei dati da proteggere (le altre non hanno niente da fermare) e quali
+    // prodotti abbiamo nel database senza che esistano piu' su Shopify.
+    //
+    // Si legge solo a piano con tetto: senza tetto non c'e' nessuna eccedenza,
+    // e la spazzata globale copre gia' i prodotti spariti.
+    const righeTenute =
+      maxProducts != null && paginationComplete
+        ? await fetchExistingProductIds(supabase, shop.supabaseConfig.tableNameProducts)
+        : null;
+
+    // "Fuori quota" e "non esiste piu'" sono due cose diverse, e questa e' la
+    // seconda: un prodotto di cui teniamo righe e che l'impaginazione completa
+    // non ha incontrato non e' stato saltato, e' stato cancellato su Shopify.
+    // Le sue righe vanno via comunque, ambito o no — altrimenti un prodotto
+    // fermo per quota e poi cancellato resterebbe nel database del merchant per
+    // sempre, e continuerebbe a comparire nei suoi conti.
+    const idSpariti: number[] = [];
+    if (righeTenute) {
+      for (const id of righeTenute) {
+        if (!idDentroAmbito.has(id) && !idFuoriQuota.has(id)) idSpariti.push(id);
+      }
+    }
 
     // Spazzata: le righe con synced_at anteriore all'inizio corsa sono quelle che
     // la scansione non ha toccato, cioe' esattamente le due categorie da togliere
     // — prodotti non piu' presenti su Shopify e varianti che hanno perso il
-    // cost_per_item. Una sola query, indipendente dal numero di prodotti.
+    // cost_per_item.
     //
-    // Sta QUI di proposito: ci si arriva solo se la paginazione e' terminata
-    // regolarmente (anche per raggiunto tetto del piano). Se una pagina lancia,
-    // il controllo salta al catch e non si cancella nulla: meglio qualche riga
-    // obsoleta che perdere prodotti veri per un errore di rete.
+    // Sta QUI di proposito: se una pagina lancia, il controllo salta al catch e
+    // non si cancella nulla — meglio qualche riga obsoleta che perdere prodotti
+    // veri per un errore di rete.
     //
     // Le righe con synced_at NULL sopravvivono (in SQL un confronto con NULL non
     // e' mai vero): non le ha scritte l'app, non le tocchiamo.
     //
-    // E la stessa prudenza vale un gradino piu' in basso, dove il guasto e' meno
-    // vistoso di una pagina che lancia: la spazzata poggia tutta sull'idea che
-    // "non riscritto adesso" significhi "non esiste piu' su Shopify". Se anche un
-    // solo prodotto e' arrivato con l'elenco delle varianti monco, quelle che non
-    // abbiamo letto non sono state riscritte pur essendo vivissime, e la spazzata
-    // le porterebbe via tutte in una query — silenziosamente, e per l'intero
-    // catalogo. Allora si salta: le righe davvero obsolete resteranno un giro in
-    // piu', che e' un prezzo senza paragone rispetto a varianti perse.
-    if (productsWithIncompleteVariants > 0) {
+    // E LA PREMESSA SU CUI TUTTO QUESTO POGGIA e' che "non riscritto adesso"
+    // significhi "non esiste piu' su Shopify". Ci sono due modi di renderla
+    // falsa, e finora se ne controllava uno solo — vedi `sweepVerdict`.
+    const verdetto = sweepVerdict({ paginationComplete, productsWithIncompleteVariants });
+
+    if (!verdetto.allowed) {
       console.warn(
-        `Spazzata dei prodotti obsoleti saltata: ${productsWithIncompleteVariants} prodotti con elenco varianti incompleto in questa corsa`,
+        verdetto.reason === 'pagination_incomplete'
+          ? `Spazzata dei prodotti obsoleti saltata: l'impaginazione del catalogo non e' arrivata in fondo in questa corsa (negozio ${shop.id})`
+          : `Spazzata dei prodotti obsoleti saltata: ${productsWithIncompleteVariants} prodotti con elenco varianti incompleto in questa corsa`,
       );
     } else {
       // L'ultimo controllo prima della cancellazione piu' pericolosa dell'app.
-      // Questa query toglie tutto quello che non e' stato riscritto adesso: se
+      // Questa query toglie quello che non e' stato riscritto adesso: se
       // il lucchetto nel frattempo e' passato a un'altra corsa, "adesso" non e'
       // piu' il nostro adesso, e porteremmo via il suo catalogo appena scritto.
       // Lanciare qui e' il risultato voluto — il lavoro torna in coda intatto.
       await lease?.assertHeld();
 
-      const { rows: sweptRows, error: sweepError } = await runReturningRows<RemovedProductRow>(
-        supabase
-          .from(shop.supabaseConfig.tableNameProducts)
-          .delete()
-          .lt('synced_at', runStartedAtIso) as unknown as ReturningBuilder,
-        REMOVED_PRODUCT_COLUMNS,
-      );
+      if (maxProducts == null) {
+        // Piano senza tetto: nessuna risorsa e' fuori ambito, quindi "non
+        // riscritto adesso" vuol dire davvero "non esiste piu'". Una query
+        // sola, indipendente dal numero di prodotti — la spazzata di sempre.
+        const { rows: sweptRows, error: sweepError } = await runReturningRows<RemovedProductRow>(
+          supabase
+            .from(shop.supabaseConfig.tableNameProducts)
+            .delete()
+            .lt('synced_at', runStartedAtIso) as unknown as ReturningBuilder,
+          REMOVED_PRODUCT_COLUMNS,
+        );
 
-      if (sweepError) {
-        // "Le righe obsolete verranno rimosse alla corsa successiva" era una
-        // speranza senza nessuno che la mantenesse: la corsa successiva puo'
-        // benissimo essere una incrementale, che non spazza affatto. Adesso
-        // resta una riga durevole con dentro l'istante di confine, e la prossima
-        // corsa completa la rigioca prima di riscrivere qualunque cosa —
-        // rieseguirla con quel confine e' corretto, perche' quel che e' stato
-        // scritto dopo non ci ricade sotto.
-        segnalaRiparazione(ledger, 'product.sweep', {
-          resourceId: 'catalogue',
-          details: { before: runStartedAtIso },
-          error: sweepError.message ?? 'spazzata dei prodotti obsoleti non riuscita',
-        });
-        console.warn('Spazzata dei prodotti obsoleti fallita:', sweepError);
+        if (sweepError) {
+          // "Le righe obsolete verranno rimosse alla corsa successiva" era una
+          // speranza senza nessuno che la mantenesse: la corsa successiva puo'
+          // benissimo essere una incrementale, che non spazza affatto. Adesso
+          // resta una riga durevole con dentro l'istante di confine, e la prossima
+          // corsa completa la rigioca prima di riscrivere qualunque cosa —
+          // rieseguirla con quel confine e' corretto, perche' quel che e' stato
+          // scritto dopo non ci ricade sotto.
+          segnalaRiparazione(ledger, 'product.sweep', {
+            resourceId: 'catalogue',
+            details: { before: runStartedAtIso },
+            error: sweepError.message ?? 'spazzata dei prodotti obsoleti non riuscita',
+          });
+          console.warn('Spazzata dei prodotti obsoleti fallita:', sweepError);
+        } else {
+          chiudiRiparazione(ledger, 'product.sweep', 'catalogue');
+          collectRemovedProducts(collector, sweptRows);
+        }
       } else {
-        chiudiRiparazione(ledger, 'product.sweep', 'catalogue');
-        collectRemovedProducts(collector, sweptRows);
+        // Piano con tetto: si spazza SOLO dentro l'ambito.
+        //
+        // E' la riga che cambia tutto. Prima la stessa cancellazione girava
+        // senza questa restrizione: le risorse oltre il tetto non erano state
+        // riscritte perche' non erano state nemmeno chieste, risultavano
+        // vecchie, e sparivano. Adesso la condizione dice a voce alta cosa la
+        // spazzata ha il diritto di togliere — righe di prodotti che stiamo
+        // ancora aggiornando — e tutto il resto non e' materia sua.
+        //
+        // A blocchi perche' l'elenco degli id finisce nell'indirizzo della
+        // richiesta, e un tetto da mille prodotti in un solo indirizzo non ci
+        // sta.
+        await sweepScopedProducts({
+          supabase,
+          tableName: shop.supabaseConfig.tableNameProducts,
+          productIds: [...idDentroAmbito],
+          before: runStartedAtIso,
+          collector,
+          shopId: shop.id,
+        });
+
+        // I prodotti spariti da Shopify, ambito o no.
+        if (idSpariti.length > 0) {
+          await deleteVanishedProducts({
+            supabase,
+            tableName: shop.supabaseConfig.tableNameProducts,
+            productIds: idSpariti,
+            collector,
+            shopId: shop.id,
+          });
+        }
       }
+    }
+
+    // Il registro dell'ambito, riscritto adesso che si sa chi c'e'.
+    //
+    // Solo dopo un'impaginazione arrivata in fondo: dopo una corsa interrotta
+    // "non l'ho trovato" vuol dire "non l'ho cercato", e scriverlo nel registro
+    // farebbe passare per fermo un prodotto che nessuno ha guardato.
+    if (paginationComplete) {
+      await recordScopeAfterFullRun({
+        shopId: shop.id,
+        maxProducts,
+        inScope: dentroAmbito,
+        outOfQuota: fuoriQuota,
+        withRows: righeTenute,
+        written: prodottiScritti,
+        now: runStartedAt,
+      });
     }
 
     // Sync customers if the shop's plan includes customer sync

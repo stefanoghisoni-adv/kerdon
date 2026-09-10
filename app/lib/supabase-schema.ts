@@ -243,6 +243,27 @@ const ORDER_LINES_COLUMNS: Column[] = [
   // consegna vecchia arrivata dopo una nuova — due webhook per lo stesso ordine
   // non arrivano necessariamente in ordine.
   { name: 'source_updated_at', type: 'TIMESTAMP' },
+  // Il costo con cui questa riga e' stata calcolata, quando e' stato fissato.
+  //
+  // PERCHE' ESISTONO QUESTE DUE COLONNE. Il costo si legge dai prodotti nel
+  // momento in cui si guarda, quindi cambiarlo oggi cambia il profitto di sei
+  // mesi fa: numeri gia' letti, gia' esportati, gia' usati per decidere, che si
+  // riscrivono da soli senza che nessuno l'abbia chiesto. Shopify non conserva
+  // lo storico dei costi — `InventoryItem.unitCost` e' solo l'attuale — quindi
+  // il passato non e' ricostruibile, e l'unica cosa onesta e' fermare il valore
+  // in uso quando il merchant decide di cambiarlo.
+  //
+  // COME SI LEGGONO. `unit_cost_frozen_at` valorizzata vuol dire che per questa
+  // riga il conto e' chiuso: vale `unit_cost_at_sale`, e se e' NULL vuol dire
+  // che quando quella vendita e' stata registrata un costo non c'era. In quel
+  // caso la riga resta fuori dal profitto, invece di adottare un costo deciso
+  // dopo — che sarebbe inventarle un passato.
+  //
+  // Le righe senza `unit_cost_frozen_at` seguono il costo corrente, che e' il
+  // comportamento di sempre: e' giusto cosi' fino al primo cambio, perche' fino
+  // a quel momento il costo corrente E' quello con cui sono state calcolate.
+  { name: 'unit_cost_at_sale', type: 'NUMERIC(10, 2)' },
+  { name: 'unit_cost_frozen_at', type: 'TIMESTAMP' },
   { name: 'synced_at', type: 'TIMESTAMP DEFAULT NOW()' },
 ];
 

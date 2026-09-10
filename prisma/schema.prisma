@@ -203,6 +203,7 @@ model Shop {
   syncRepairs              SyncRepair[]
   webhookEvents            WebhookEvent[]
   consentRevocations       ConsentRevocation[]
+  productScope             ProductScopeEntry[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -1305,4 +1306,86 @@ model ShopErasureProof {
   @@index([shopRef])
   @@index([erasedAt])
   @@map("shop_erasure_proofs")
+}
+
+/// Il registro dell'ambito: per ogni prodotto di cui teniamo dei dati, se
+/// continua ad aggiornarsi o se e' fermo, e perche'.
+///
+/// PERCHE' ESISTE. La corsa completa smetteva di impaginare al tetto del piano e
+/// poi eseguiva lo stesso la spazzata globale ("via tutte le righe che questa
+/// corsa non ha riscritto"). Quel che stava oltre il tetto non era stato
+/// riscritto perche' non era stato nemmeno chiesto: risultava vecchio, e veniva
+/// cancellato. Il tetto di un piano deve decidere cosa continua ad aggiornarsi,
+/// non cosa esiste — e per poterlo fare serviva un posto dove dire "questa riga
+/// e' ferma di proposito", altrimenti "ferma" e "sparita" restano
+/// indistinguibili.
+///
+/// PERCHE' UNA TABELLA E NON UN TIPO NUOVO NELLA CODA. `sync_requests` e' una
+/// fila di lavori da chiamare: ogni item costa una presa, un lease e un
+/// battito, e qui non c'e' niente da chiamare — non e' un lavoro in attesa, e'
+/// uno stato che dura finche' il piano dura. La sua `dedup_key` inoltre e'
+/// unica per sempre, mentre qui la stessa risorsa cambia ambito avanti e
+/// indietro a ogni cambio di piano. E nemmeno `sync_repairs` andava bene, che
+/// pure e' un registro: li' ogni riga e' un guasto da rimettere a posto e la
+/// riga esiste per sparire, qui una riga fuori ambito e' il comportamento
+/// corretto e non c'e' niente da riparare. Stessa forma, significato opposto.
+///
+/// PERCHE' NON UNA COLONNA SULLA TABELLA DEL MERCHANT. Perche' e' roba nostra:
+/// il merchant nel suo database vuole i suoi prodotti, non la contabilita' del
+/// nostro tetto. E perche' un valore scritto li' andrebbe mantenuto allineato
+/// da fuori, mentre qui vive nella stessa transazione della decisione che lo
+/// produce.
+///
+/// COSA C'E' DENTRO, E COSA NON C'E'. Ci sono solo i prodotti di cui teniamo
+/// davvero dei dati: chi non e' mai entrato nell'ambito non ha righe da
+/// proteggere e non ha niente di fermo da dichiarare — lo conta gia' l'avviso
+/// del tetto raggiunto. Cosi' la tabella resta grande quanto il catalogo
+/// sincronizzato, non quanto il catalogo.
+model ProductScopeEntry {
+  id String @id @default(uuid())
+
+  shopId String @map("shop_id")
+
+  /// L'id su Shopify, come testo: stessa scelta di `sync_repairs`, e per la
+  /// stessa ragione — gli id di Shopify sono numeri grandi che nessuno usa per
+  /// fare aritmetica.
+  shopifyProductId String @map("shopify_product_id")
+
+  /// La data di creazione su Shopify: e' la chiave della graduatoria. Sta qui e
+  /// non si ricalcola ogni volta perche' e' cio' che rende la scelta ripetibile
+  /// — senza, "i primi N" dipenderebbe da quali pagine si sono viste.
+  sourceCreatedAt DateTime? @map("source_created_at")
+
+  /// Quando questa risorsa e' entrata nell'ambito la prima volta. Non si
+  /// riscrive: serve a raccontare da quanto il merchant ha quei dati, e
+  /// aggiornarla a ogni corsa la ridurrebbe a un duplicato di `last_checked_at`.
+  firstScopedAt DateTime @default(now()) @map("first_scoped_at")
+
+  /// Se continua ad aggiornarsi.
+  inScope Boolean @default(true) @map("in_scope")
+
+  /// 'in_scope' | 'plan_quota'. Il motivo si scrive anche quando e' "nessuno":
+  /// una colonna che vale qualcosa solo a volte si legge male, e un domani i
+  /// motivi per fermare una risorsa saranno piu' d'uno.
+  reason String @default("in_scope")
+
+  /// L'ultima corsa che ha verificato questa risorsa: dice se il registro e'
+  /// aggiornato, e distingue una riga ferma da una riga dimenticata.
+  lastCheckedAt DateTime @default(now()) @map("last_checked_at")
+
+  /// L'ultima volta che e' stata aggiornata mentre era dentro l'ambito. Su una
+  /// riga ferma e' la data del dato che il merchant sta guardando, ed e' il
+  /// numero che l'interfaccia mostra per non far passare per fresco un dato che
+  /// non lo e'.
+  lastInScopeAt DateTime? @map("last_in_scope_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  /// Una riga per prodotto: l'ambito e' uno stato, non una storia.
+  @@unique([shopId, shopifyProductId])
+  @@index([shopId, inScope])
+  @@map("product_scope")
 }

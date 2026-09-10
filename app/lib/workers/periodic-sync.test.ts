@@ -24,6 +24,15 @@ vi.mock('../../db.server', () => ({
     // alla fine, nella stessa transazione del confine incrementale. Qui e'
     // vuoto e non oppone resistenza; cosa ci finisca dentro lo provano i test
     // dedicati (sync-repairs.test.ts).
+    // Il registro dell'ambito: quali prodotti continuano ad aggiornarsi e
+    // quali sono fermi per il tetto del piano. Qui e' vuoto e non oppone
+    // resistenza; cosa ci finisca dentro lo provano i test dedicati
+    // (product-scope.test.ts e plan-scope.test.ts).
+    productScopeEntry: {
+      findMany: vi.fn(async () => []),
+      upsert: vi.fn(async () => ({})),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+    },
     syncRepair: {
       findMany: vi.fn(async () => []),
       upsert: vi.fn(async () => ({})),

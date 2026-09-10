@@ -16,7 +16,9 @@ const RANGE = { from: '2026-08-01', to: '2026-08-31', timeZone: 'Europe/Rome' };
 
 describe('la formula', () => {
   it('e netto della riga meno costo per le unita rimaste', () => {
-    expect(LINE_NET_CONTRIBUTION).toBe('(l.line_net_total - p.cost_per_item * l.current_quantity)');
+    expect(LINE_NET_CONTRIBUTION).toBe(
+      '(l.line_net_total - COALESCE(l.unit_cost_at_sale, p.cost_per_item) * l.current_quantity)',
+    );
   });
 
   it('non moltiplica mai un prezzo unitario per una quantita', () => {
@@ -32,7 +34,9 @@ describe('la formula', () => {
   it('costo mancante e netto mancante tengono la riga fuori dalla somma', () => {
     // Non e' profitto zero, e' profitto ignoto: metterlo a zero abbasserebbe un
     // totale che nessuno ha misurato.
-    expect(NET_CONTRIBUTION_SUM).toContain('p.cost_per_item IS NOT NULL');
+    expect(NET_CONTRIBUTION_SUM).toContain(
+      'COALESCE(l.unit_cost_at_sale, p.cost_per_item) IS NOT NULL',
+    );
     expect(NET_CONTRIBUTION_SUM).toContain('l.line_net_total IS NOT NULL');
     expect(COVERED_LINES).toContain('l.line_net_total IS NOT NULL');
   });
@@ -120,5 +124,35 @@ describe('mai sommare valute diverse', () => {
     ]) {
       expect(sql).toContain(ORDER_CURRENCY_CONSISTENT);
     }
+  });
+});
+
+// Il costo fissato al momento in cui il merchant lo cambia: da li' in poi quella
+// riga non segue piu' il listino. E' la meta' che rende vera la scelta "solo da
+// adesso in avanti" — senza, la scelta si registrerebbe e non si vedrebbe.
+describe('il costo fissato vince su quello corrente', () => {
+  it('una riga con il costo fissato non segue piu il listino', () => {
+    expect(
+      netContribution({ lineNetTotal: 100, unitCost: 40, unitCostAtSale: 25, currentQuantity: 2 }),
+    ).toBe(50);
+  });
+
+  it('senza valore fissato vale il corrente, che e la normalita', () => {
+    expect(
+      netContribution({ lineNetTotal: 100, unitCost: 40, unitCostAtSale: null, currentQuantity: 2 }),
+    ).toBe(20);
+    expect(netContribution({ lineNetTotal: 100, unitCost: 40, currentQuantity: 2 })).toBe(20);
+  });
+
+  it('lo zero fissato e un costo, non un valore assente', () => {
+    expect(
+      netContribution({ lineNetTotal: 100, unitCost: 40, unitCostAtSale: 0, currentQuantity: 2 }),
+    ).toBe(100);
+  });
+
+  it('senza nessuno dei due il profitto resta ignoto, non zero', () => {
+    expect(
+      netContribution({ lineNetTotal: 100, unitCost: null, unitCostAtSale: null, currentQuantity: 2 }),
+    ).toBeNull();
   });
 });

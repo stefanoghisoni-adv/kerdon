@@ -7,6 +7,10 @@ vi.mock('~/db.server', () => ({
     shop: { findUnique: vi.fn() },
     plan: { findFirst: vi.fn() },
     syncJob: { create: vi.fn() },
+    // Il registro dell'ambito: un prodotto cancellato deve uscire anche da li',
+    // altrimenti continua a occupare un posto del tetto — e quel posto e' un
+    // prodotto vivo tenuto fuori dalla sincronizzazione per sempre.
+    productScopeEntry: { deleteMany: vi.fn(async () => ({ count: 1 })) },
   },
 }));
 
@@ -93,6 +97,25 @@ describe('webhook products/delete', () => {
 
     expect(res.status).toBe(200);
     expect(deleted).toEqual(['products']);
+  });
+
+  // "Fuori quota" e "non esiste piu'" sono due cose diverse. Un prodotto fermo
+  // per il tetto del piano tiene le sue righe — e' il punto di tutto il
+  // registro dell'ambito — ma tenerle vuol dire non buttarle via perche' sono
+  // vecchie, non tenerle anche quando il merchant ha eliminato il prodotto.
+  // Fuori ambito non ci ripassa nessuna corsa: se non se ne va adesso, non se
+  // ne va piu'.
+  it('un prodotto fuori ambito viene comunque rimosso, e libera il posto', async () => {
+    const deleted = mockSupabase();
+    (prisma.productScopeEntry.deleteMany as any).mockClear();
+
+    const res = await deleteProduct({ request: req('products/delete', { id: 99 }) } as any);
+
+    expect(res.status).toBe(200);
+    expect(deleted).toEqual(['products']);
+    expect(prisma.productScopeEntry.deleteMany).toHaveBeenCalledWith({
+      where: { shopId: 'shop-1', shopifyProductId: { in: ['99'] } },
+    });
   });
 
   const nonSiCancella = async () => {

@@ -33,12 +33,28 @@
 export const LINE_NET_TOTAL = 'l.line_net_total';
 
 /**
+ * Il costo unitario da usare per questa riga.
+ *
+ * Il costo fissato vince sul corrente, e il motivo e' che il costo corrente e'
+ * l'unico che Shopify conserva: cambiarlo riscriveva all'indietro il margine di
+ * ogni ordine gia' passato, anche di un anno prima. Quando il merchant cambia un
+ * costo e sceglie di non toccare il passato, le righe gia' vendute vengono
+ * chiuse con il valore che stavano usando fino a quel momento — e da li' in poi
+ * quel valore e' loro, qualunque cosa faccia il costo di listino.
+ *
+ * `COALESCE` e non un CASE: una riga senza valore fissato non e' un caso
+ * particolare, e' la normalita' — finche' nessuno cambia un costo, il corrente
+ * E' quello con cui la riga e' stata calcolata, e le due strade coincidono.
+ */
+export const LINE_UNIT_COST = 'COALESCE(l.unit_cost_at_sale, p.cost_per_item)';
+
+/**
  * Il costo della merce rimasta al cliente.
  *
  * `current_quantity` e non `quantity`: su una riga rimborsata a meta' il costo
  * sostenuto e' quello delle unita' che non sono tornate indietro.
  */
-export const LINE_COST_BASIS = 'p.cost_per_item * l.current_quantity';
+export const LINE_COST_BASIS = `${LINE_UNIT_COST} * l.current_quantity`;
 
 /**
  * Le due condizioni senza le quali la riga non ha un contributo CALCOLABILE.
@@ -47,8 +63,14 @@ export const LINE_COST_BASIS = 'p.cost_per_item * l.current_quantity';
  * e vanno tenuti fuori dalla somma e contati a parte. `line_net_total` puo'
  * mancare sulle righe scritte prima che questa colonna esistesse, finche' la
  * corsa periodica non le rilegge.
+ *
+ * Il costo si guarda dopo il COALESCE, quindi una riga a cui e' stata fissata
+ * l'ASSENZA di costo — la vendita avvenuta quando un costo non c'era ancora —
+ * resta fuori dal conto anche dopo che il merchant quel costo l'ha inserito.
+ * E' voluto: quella merce e' stata venduta senza che si sapesse quanto fosse
+ * costata, e un valore deciso mesi dopo non lo cambia.
  */
-export const LINE_MEASURABLE = 'p.cost_per_item IS NOT NULL AND l.line_net_total IS NOT NULL';
+export const LINE_MEASURABLE = `${LINE_UNIT_COST} IS NOT NULL AND l.line_net_total IS NOT NULL`;
 
 /** Il contributo netto di UNA riga, senza aggregazione. */
 export const LINE_NET_CONTRIBUTION = `(${LINE_NET_TOTAL} - ${LINE_COST_BASIS})`;
@@ -112,12 +134,21 @@ export const ORDER_CURRENCY_CONSISTENT = `NOT EXISTS (
  */
 export const ORDER_COUNTS_AS_SALE = `o.cancelled_at IS NULL\n  AND ${ORDER_CURRENCY_CONSISTENT}`;
 
-/** Il contributo netto di una riga, fuori dall'SQL: stessa formula, stesso ordine. */
+/**
+ * Il contributo netto di una riga, fuori dall'SQL: stessa formula, stesso ordine.
+ *
+ * `unitCostAtSale` ha la precedenza come nell'SQL, ed e' un parametro a se' e
+ * non un valore gia' risolto dal chiamante: risolverlo fuori vorrebbe dire due
+ * posti in cui ricordarsi quale dei due costi vince, che e' esattamente cio' che
+ * questo file esiste per impedire.
+ */
 export function netContribution(input: {
   lineNetTotal: number | null;
   unitCost: number | null;
+  unitCostAtSale?: number | null;
   currentQuantity: number;
 }): number | null {
-  if (input.lineNetTotal == null || input.unitCost == null) return null;
-  return input.lineNetTotal - input.unitCost * input.currentQuantity;
+  const costo = input.unitCostAtSale ?? input.unitCost;
+  if (input.lineNetTotal == null || costo == null) return null;
+  return input.lineNetTotal - costo * input.currentQuantity;
 }

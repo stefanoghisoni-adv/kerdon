@@ -235,8 +235,22 @@ END $$;
  * profitto di ogni mese passato crollerebbe a zero il giorno
  * dell'aggiornamento. Per questo gira DOPO la DDL (`runAfterDDL`) e non prima
  * come gli altri: le colonne che riempie e' la DDL ad aggiungerle.
+ *
+ * La 10 porta due colonne sulle righe d'ordine — `unit_cost_at_sale` e
+ * `unit_cost_frozen_at` — e con loro la fine di un effetto che nessuno aveva
+ * chiesto: il costo si legge dai prodotti nel momento in cui si guarda, quindi
+ * correggere un costo oggi riscriveva il profitto di sei mesi fa. Numeri gia'
+ * letti, gia' esportati, gia' usati per decidere, che cambiavano da soli.
+ *
+ * Nessun passo esplicito in MERCHANT_MIGRATIONS, e stavolta l'assenza e' il
+ * punto: le due colonne devono restare VUOTE sullo storico. Riempirle
+ * significherebbe dichiarare un costo storico che non esiste — Shopify
+ * conserva solo il costo attuale, quello di allora non e' ricostruibile da
+ * nessuna parte. Vuote vogliono dire "per questa riga il costo non e' stato
+ * fissato", che e' vero, e il comportamento resta quello di prima finche' il
+ * merchant non decide diversamente.
  */
-export const LATEST_SCHEMA_VERSION = 9;
+export const LATEST_SCHEMA_VERSION = 10;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

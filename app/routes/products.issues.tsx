@@ -27,6 +27,7 @@ import {
   InlineStack,
   InlineGrid,
   BlockStack,
+  Modal,
   Pagination,
 } from '@shopify/polaris';
 import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
@@ -38,6 +39,13 @@ import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import type { ShopifyProduct } from '~/types/shopify';
 import type { SupabaseConfig } from '@prisma/client';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  costScopeEffect,
+  costToFreeze,
+  isCostScope,
+  type CostScope,
+} from '~/lib/products/cost-scope';
 import {
   enrichVariantCosts,
   getMissingCostInventoryIds,
@@ -162,6 +170,71 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 /**
+ * Applica alle righe d'ordine gia' scritte la scelta del merchant.
+ *
+ * COSA FA `future`. Chiude il conto: ogni riga di quella variante che non era
+ * ancora stata fissata si tiene il costo con cui e' stata calcolata finora —
+ * che qui, dove i costi si inseriscono la prima volta, di solito e' nessuno. E
+ * "nessuno" e' un esito, non un buco da riempire: quelle vendite sono sempre
+ * state senza costo, restano senza, e continuano a non entrare nel profitto
+ * invece di ereditare un valore deciso mesi dopo.
+ *
+ * Non si scrive MAI il costo nuovo sulle righe vecchie. Sarebbe il modo piu'
+ * comodo di far quadrare tutto e sarebbe una bugia: il costo di allora non lo
+ * sa nessuno, Shopify compreso — `InventoryItem.unitCost` e' solo l'attuale.
+ *
+ * COSA FA `all`. Riapre il conto: le righe tornano a seguire il costo corrente,
+ * cioe' il comportamento che c'e' sempre stato. Serve, ed e' la scelta giusta
+ * quando il costo di prima era semplicemente sbagliato e il merchant vuole i
+ * suoi conti rifatti per bene.
+ *
+ * Best effort di proposito: se questa scrittura non riesce, il costo su Shopify
+ * e' comunque quello nuovo e i conti tornano al comportamento di sempre. E'
+ * meno di quel che il merchant ha chiesto, ma non e' un dato perso — e far
+ * fallire l'intero salvataggio per questo gli lascerebbe il costo vecchio, che
+ * e' peggio.
+ */
+async function applyCostScope(
+  supabase: SupabaseClient,
+  variantId: number,
+  previousCost: unknown,
+  scope: CostScope,
+): Promise<void> {
+  const effetto = costScopeEffect(scope);
+
+  try {
+    if (effetto.freezeExisting) {
+      const { error } = await supabase
+        .from('order_lines')
+        .update({
+          unit_cost_at_sale: costToFreeze(previousCost),
+          unit_cost_frozen_at: new Date().toISOString(),
+        })
+        .eq('shopify_variant_id', variantId)
+        // Solo le righe non ancora fissate: una riga gia' chiusa da una
+        // modifica precedente porta il costo di ALLORA, e riscriverlo adesso
+        // vorrebbe dire spostarle il passato a ogni correzione successiva.
+        .is('unit_cost_frozen_at', null);
+      if (error) throw error;
+      return;
+    }
+
+    if (effetto.clearFrozen) {
+      const { error } = await supabase
+        .from('order_lines')
+        .update({ unit_cost_at_sale: null, unit_cost_frozen_at: null })
+        .eq('shopify_variant_id', variantId);
+      if (error) throw error;
+    }
+  } catch (err) {
+    console.warn(
+      `[products.issues save] estensione della modifica di costo non applicata (variante ${variantId}):`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
+/**
  * Scrive il costo di una variante su Shopify e allinea subito la riga su
  * Supabase, senza attendere la sincronizzazione.
  *
@@ -174,6 +247,10 @@ async function applyCost(
   client: ShopifyAPIClient,
   entry: { variantId: number; inventoryItemId: number; cost: string },
   t: Pick<Dictionary, 'errors'>,
+  // Fin dove arriva questa modifica. Non ha un valore predefinito: chi chiama
+  // l'ha gia' chiesto al merchant, perche' decidere al posto suo cosa succede
+  // ai numeri che ha gia' letto e' precisamente la cosa da non fare.
+  scope: CostScope,
 ): Promise<string | null> {
   const parsed = Number(entry.cost);
   if (!Number.isInteger(entry.inventoryItemId) || entry.inventoryItemId <= 0) {
@@ -203,12 +280,19 @@ async function applyCost(
       // Il prezzo dalla riga esistente, non dal form: il client non deve poter
       // decidere un valore che finisce in tabella. Se la riga non c'è ancora
       // (prodotto non idoneo, quindi mai sincronizzato) non si aggiorna nulla.
+      //
+      // Con il prezzo si legge anche il costo di PRIMA, e si legge adesso
+      // perche' fra un attimo non ci sara' piu': e' il valore con cui gli
+      // ordini gia' registrati sono stati calcolati fino a questo istante, e
+      // l'unico che si possa fermare senza inventare niente.
       const { data: existing, error: readError } = await supabase
         .from(supabaseConfig.tableNameProducts)
-        .select('price')
+        .select('price, cost_per_item')
         .eq('shopify_variant_id', entry.variantId)
         .maybeSingle();
       if (readError) throw readError;
+
+      await applyCostScope(supabase, entry.variantId, existing?.cost_per_item, scope);
 
       if (existing) {
         const price = Number(existing.price);
@@ -251,6 +335,7 @@ export async function action({ request }: ActionFunctionArgs) {
     intent?: string;
     inventoryItemIds?: number[];
     updates?: { variantId?: number | string; inventoryItemId?: number | string; cost?: string }[];
+    costScope?: string;
   };
 
   const client = await ShopifyAPIClient.forShop(shop.shopDomain);
@@ -258,6 +343,22 @@ export async function action({ request }: ActionFunctionArgs) {
   if (body.intent !== 'recheck') {
     return json({ ok: false, error: 'Richiesta non riconosciuta.' }, { status: 400 });
   }
+
+  // Fin dove arriva la modifica: sul passato o solo da adesso.
+  //
+  // Senza una scelta riconoscibile non si scrive niente, e non e' pignoleria.
+  // Un valore predefinito qui vorrebbe dire decidere al posto del merchant se i
+  // profitti che ha gia' letto — e magari esportato, o usato per decidere —
+  // debbano riscriversi da soli. E' una domanda a cui deve rispondere lui, ed
+  // e' l'unica ragione per cui esiste il dialogo che gliela fa.
+  const scope = body.costScope;
+  if ((body.updates ?? []).length > 0 && !isCostScope(scope)) {
+    return json(
+      { ok: false, error: (await dictionaryForShop(session.shop)).errors.costScopeMissing },
+      { status: 400 },
+    );
+  }
+  const costScope: CostScope = isCostScope(scope) ? scope : 'all';
 
   // --- Conferma dei costi inseriti, poi re-check mirato ---
   // I due passaggi stanno insieme di proposito: il merchant preme un pulsante
@@ -277,7 +378,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // raffica parallela si farebbe rifiutare a meta' elenco.
   const failures: { variantId: number; error: string }[] = [];
   for (const entry of updates) {
-    const error = await applyCost(shop.supabaseConfig, client, entry, t);
+    const error = await applyCost(shop.supabaseConfig, client, entry, t, costScope);
     if (error) failures.push({ variantId: entry.variantId, error });
   }
 
@@ -510,7 +611,7 @@ export default function ProblemProducts() {
   // Un solo passaggio: scrive i costi inseriti e poi ricontrolla l'elenco. E'
   // qui che i valori diventano definitivi — prima di questo clic non tocca
   // niente ne' su Shopify ne' sul conteggio dei prodotti sincronizzabili.
-  const runRecheck = () => {
+  const runRecheck = (costScope: CostScope) => {
     const { updates, rejected } = collectPendingCosts(rows, values);
 
     if (rejected.length > 0) {
@@ -535,9 +636,42 @@ export default function ProblemProducts() {
       .map((r) => r.inventoryItemId)
       .filter((x): x is number => x != null);
     recheckFetcher.submit(
-      { intent: 'recheck', inventoryItemIds, updates },
+      { intent: 'recheck', inventoryItemIds, updates, costScope },
       { method: 'post', encType: 'application/json' },
     );
+  };
+
+  /**
+   * La domanda prima di scrivere: fin dove arriva questo costo.
+   *
+   * Perche' si chiede invece di decidere. Il costo si legge dai prodotti nel
+   * momento in cui si guarda, quindi scriverne uno oggi riscrive anche il
+   * profitto degli ordini di sei mesi fa — numeri che il merchant ha gia'
+   * letto, magari esportati, magari usati per decidere un prezzo. Finora
+   * succedeva e basta, senza che nessuno lo dicesse. Non e' una cosa che si
+   * possa scegliere al posto suo: a volte e' proprio quel che vuole (il costo
+   * di prima era sbagliato), a volte e' l'ultima cosa che vuole.
+   *
+   * Il dialogo non ha un'opzione preselezionata: sceglie premendo, e le due
+   * risposte sono due pulsanti con scritto cosa fanno.
+   */
+  const [costScopeOpen, setCostScopeOpen] = useState(false);
+
+  const askCostScope = () => {
+    // Le righe rifiutate si vedono subito, senza passare dal dialogo: chiedere
+    // "fin dove?" per poi rispondere "il valore non e' valido" farebbe fare due
+    // giri per un errore che si vedeva gia' al primo.
+    const { rejected } = collectPendingCosts(rows, values);
+    if (rejected.length > 0) {
+      runRecheck('all');
+      return;
+    }
+    setCostScopeOpen(true);
+  };
+
+  const chooseCostScope = (scope: CostScope) => {
+    setCostScopeOpen(false);
+    runRecheck(scope);
   };
 
   // Esito: le varianti risolte spariscono dalla tabella (e il conteggio in
@@ -647,7 +781,7 @@ export default function ProblemProducts() {
                 restava lontano dal punto in cui il lavoro si conclude. */}
             <Button
               variant="primary"
-              onClick={runRecheck}
+              onClick={askCostScope}
               loading={updating}
               disabled={!hasChanges || blocked}
             >
@@ -655,6 +789,54 @@ export default function ProblemProducts() {
             </Button>
           </InlineStack>
         )}
+
+        {/* La domanda che prima nessuno faceva: fin dove arriva il costo
+            appena scritto. Le due risposte sono due pulsanti, e ognuno dice
+            cosa fa — non c'e' niente di preselezionato, perche' l'una e l'altra
+            portano a due verita' diverse sui numeri gia' letti. */}
+        <Modal
+          open={costScopeOpen}
+          onClose={() => setCostScopeOpen(false)}
+          title={t.costScope.title}
+          primaryAction={{
+            content: t.costScope.futureAction,
+            onAction: () => chooseCostScope('future'),
+          }}
+          secondaryActions={[
+            {
+              content: t.costScope.allAction,
+              onAction: () => chooseCostScope('all'),
+            },
+            { content: t.costScope.cancel, onAction: () => setCostScopeOpen(false) },
+          ]}
+        >
+          <Modal.Section>
+            <BlockStack gap="300">
+              <Text as="p">{t.costScope.intro}</Text>
+              <Text as="p">
+                <Text as="span" fontWeight="semibold">
+                  {t.costScope.futureAction}
+                </Text>
+                {' — '}
+                {t.costScope.futureBody}
+              </Text>
+              <Text as="p">
+                <Text as="span" fontWeight="semibold">
+                  {t.costScope.allAction}
+                </Text>
+                {' — '}
+                {t.costScope.allBody}
+              </Text>
+              {/* Il limite, detto invece che nascosto: per gli ordini gia'
+                  registrati il costo di allora non esiste da nessuna parte, e
+                  fingere di conoscerlo sarebbe il modo piu' comodo di far
+                  quadrare i conti. */}
+              <Text as="p" tone="subdued">
+                {t.costScope.noHistory}
+              </Text>
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
 
         {blocked && !error && (
           <Banner tone="warning">{t.issues.suspended}</Banner>

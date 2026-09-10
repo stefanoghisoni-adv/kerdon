@@ -154,10 +154,19 @@ describe('planChangeBanner', () => {
     expect(b.tone).toBe('success');
     expect(text(b)).toContain('senza limite');
   });
-  it('tetto che scende → warning e avviso di rimozione', () => {
+  // ERA: "warning e avviso di rimozione", e pretendeva la parola "rimossi".
+  // Per un periodo e' stata vera — la sincronizzazione cancellava davvero i
+  // prodotti oltre il tetto nuovo — ed era la stessa cosa che la pagina dei
+  // piani prometteva di non fare. Adesso le righe restano e smettono soltanto
+  // di aggiornarsi, quindi l'avviso resta un avviso (il merchant ha meno di
+  // prima) ma non annuncia piu' una cancellazione che non avviene.
+  it('tetto che scende → warning, e dice che i prodotti restano fermi invece che rimossi', () => {
     const b = planChangeBanner({ ...changed, currentMax: 50, previousMax: 400, ...noCustomers }, itDict)!;
     expect(b.tone).toBe('warning');
-    expect(text(b)).toContain('rimossi');
+    expect(text(b)).toContain('restano');
+    expect(text(b)).toContain('smettono di aggiornarsi');
+    expect(text(b)).toContain('senza essere eliminati');
+    expect(text(b)).not.toContain('rimossi');
   });
   it('da illimitato a limitato → warning', () => {
     const b = planChangeBanner({ ...changed, currentMax: 50, previousMax: null, ...noCustomers }, itDict)!;
