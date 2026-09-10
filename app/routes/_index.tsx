@@ -382,6 +382,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // passo, e ricomparire dopo che si e' risposto sarebbe una domanda a cui
       // il merchant ha gia' risposto.
       serverSideAnswer: trackingSetup?.answer ?? null,
+      // I soli nomi: nella stessa colonna vive anche la strada di installazione,
+      // e le spunte di questo passo non devono vederla.
       serverSidePlatforms: trackingSetup?.platforms ?? [],
       // I piani interni assegnati dall'owner non si comprano e non si cambiano:
       // per quei negozi il terzo passo non ha nessuna scelta da proporre.

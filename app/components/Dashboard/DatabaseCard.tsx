@@ -11,6 +11,8 @@ import {
 } from '@shopify/polaris';
 import { InfoIcon } from '@shopify/polaris-icons';
 import { MetricRow } from './MetricRow';
+import { TrackingInstall } from './TrackingInstall';
+import type { InstallPath } from '~/lib/tracking/install';
 import { middleTruncate } from './copy-value';
 import { CopyIconButton } from './CopyIconButton';
 import { useT } from '~/lib/i18n/context';
@@ -201,10 +203,20 @@ export function TrackingCredentialsCard({
   connected,
   appUrl,
   readKey,
+  install,
 }: {
   connected: boolean;
   appUrl: string | null;
   readKey: string | null;
+  /**
+   * Come il negozio installa il tracciamento, e se la verifica e' passata.
+   *
+   * Sta in questa card e non in una sua perche' i due valori qui sopra sono
+   * esattamente quelli che si copiano durante l'installazione: separarli
+   * vorrebbe dire far scorrere la pagina avanti e indietro fra le istruzioni e
+   * cio' che le istruzioni chiedono di copiare.
+   */
+  install: { path: InstallPath | null; endpoint: string | null; verifiedAt: string | null };
 }) {
   const t = useT();
 
@@ -233,6 +245,18 @@ export function TrackingCredentialsCard({
           value={readKey}
           available={connected}
         />
+
+        {/* Le istruzioni compaiono a progetto collegato: prima i due valori da
+            copiare non esistono, e un elenco di passi che comincia con "copia
+            questo" senza il "questo" e' una strada che finisce contro un muro. */}
+        {connected && (
+          <TrackingInstall
+            appUrl={appUrl}
+            path={install.path}
+            endpoint={install.endpoint}
+            verifiedAt={install.verifiedAt}
+          />
+        )}
       </BlockStack>
     </Card>
   );

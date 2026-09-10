@@ -45,7 +45,14 @@ function righe(override: Partial<ShopExportRows> = {}): ShopExportRows {
       schemaVersion: 7,
       createdAt: new Date('2026-01-11T08:30:00.000Z'),
     },
-    trackingSetup: { answer: 'has', platforms: ['meta'], answeredAt: QUANDO },
+    trackingSetup: {
+      answer: 'has',
+      platforms: ['meta'],
+      answeredAt: QUANDO,
+      installPath: 'cloudflare',
+      endpoint: 'https://negozio.it/kerdon/id',
+      verifiedAt: QUANDO,
+    },
     billingCharges: [
       {
         planType: 'pro',

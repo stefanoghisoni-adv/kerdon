@@ -18,6 +18,7 @@ import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import { getReadProxyTokenForDisplay } from '~/lib/read-proxy/token.server';
+import { readInstallState } from '~/lib/tracking/install';
 import { AccountCard } from '~/components/Dashboard/AccountCard';
 import { DatabaseCard, TrackingCredentialsCard } from '~/components/Dashboard/DatabaseCard';
 import { DataRequestsCard } from '~/components/Dashboard/DataRequestsCard';
@@ -48,7 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop },
-    include: { supabaseConfig: true },
+    include: { supabaseConfig: true, trackingSetup: true },
   });
 
   // Tutti i piani: da qui esce sia quello in uso (i clienti sono inclusi?) sia
@@ -173,9 +174,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ref: r.customerRef ? r.customerRef.slice(-8) : null,
   }));
 
+  // Come questo negozio installa il tracciamento, e se la verifica e' passata.
+  // Va in tutte e due le uscite del loader, anche in quella senza progetto: una
+  // forma che cambia a seconda del ramo costringerebbe la pagina a chiedersi
+  // ogni volta se quel campo c'e'.
+  const state = readInstallState(shop?.trackingSetup);
+  const install = {
+    path: state.path,
+    endpoint: state.endpoint,
+    verifiedAt: state.verifiedAt?.toISOString() ?? null,
+  };
+
   const config = shop?.supabaseConfig;
   if (!config) {
-    return json({ account, config: null, sync, authorization, dataRequests });
+    return json({ account, config: null, sync, authorization, dataRequests, install });
   }
 
   // Le letture di tracciamento non passano più dalla anon key del merchant ma
@@ -192,6 +204,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sync,
     authorization,
     dataRequests,
+    install,
     config: {
       readToken,
       proxyBaseUrl,
@@ -214,7 +227,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // automatica e non ha impostazioni, la chiave di lettura viene emessa una volta
 // al collegamento del progetto e le chiavi del progetto non si toccano da qui.
 export default function SupabaseSettings() {
-  const { account, config, sync, authorization, dataRequests } =
+  const { account, config, sync, authorization, dataRequests, install } =
     useLoaderData<typeof loader>();
   const t = useT();
   // L'avviso sul limite dei database: lo accende il menu dentro la card, e lo
@@ -428,6 +441,7 @@ export default function SupabaseSettings() {
                 connected={account.connected}
                 appUrl={config?.proxyBaseUrl || null}
                 readKey={config?.readToken ?? null}
+                install={install}
               />
               </BlockStack>
             </InlineGrid>

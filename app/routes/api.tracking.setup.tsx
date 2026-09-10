@@ -33,6 +33,13 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // Solo i nomi del catalogo: l'elenco arriva dal browser.
+  //
+  // E la scelta di installazione sopravvive, perche' vive nella stessa colonna.
+  // Non e' un dettaglio: senza questo, rispondere alla domanda sull'infrastruttura
+  // La strada scelta e l'esito della verifica stanno in colonne loro, quindi
+  // riscrivere le piattaforme non li tocca piu'. Prima vivevano dentro questo
+  // stesso elenco, e rispondere alla domanda sull'infrastruttura li cancellava:
+  // il tracciamento tornava "da configurare" per un gesto che non c'entrava.
   const platforms = knownPlatforms(body.platforms);
 
   try {

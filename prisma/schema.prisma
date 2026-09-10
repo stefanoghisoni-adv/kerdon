@@ -222,6 +222,22 @@ model TrackingSetup {
   platforms  String[]
   answeredAt DateTime @default(now()) @map("answered_at")
 
+  /// Come il merchant ha scelto di installare il ponte: 'sgtm' o 'cloudflare'.
+  ///
+  /// Colonne vere e non voci con un prefisso dentro `platforms`, che e' come
+  /// erano nate: li' dentro finivano in mezzo ai nomi delle piattaforme, e ogni
+  /// posto che leggeva quell'elenco — la dashboard, l'esportazione dei dati del
+  /// negozio — doveva ricordarsi di filtrarle. Tre punti in cui bastava
+  /// dimenticarsene per mostrare al merchant "kerdon:install=sgtm" fra le sue
+  /// piattaforme di marketing.
+  installPath String?   @map("install_path")
+  /// L'indirizzo first-party del merchant a cui il ponte parla.
+  endpoint    String?
+  /// Quando la verifica e' passata. null = mai verificata, e allora la
+  /// configurazione del tracciamento NON e' completa: scegliere una strada e
+  /// scrivere un indirizzo e' una dichiarazione di intenti, non una prova.
+  verifiedAt  DateTime? @map("verified_at")
+
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("tracking_setups")

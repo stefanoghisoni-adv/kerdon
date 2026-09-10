@@ -23,6 +23,8 @@
 // sempre. `SEGRETI_ESCLUSI` li elenca per nome e un test lo rilegge: aggiungere
 // una colonna segreta al modello senza aggiungerla qui deve rompere qualcosa.
 
+import { readInstallState } from '~/lib/tracking/install';
+
 /**
  * I nomi che non possono comparire nel file, a nessun livello.
  *
@@ -83,7 +85,14 @@ export interface ShopExportRows {
     schemaVersion: number;
     createdAt: Date;
   } | null;
-  trackingSetup: { answer: string; platforms: string[]; answeredAt: Date } | null;
+  trackingSetup: {
+    answer: string;
+    platforms: string[];
+    answeredAt: Date;
+    installPath: string | null;
+    endpoint: string | null;
+    verifiedAt: Date | null;
+  } | null;
   billingCharges: Array<{
     planType: string;
     price: unknown;
@@ -133,6 +142,7 @@ function importo(v: unknown): string | null {
  */
 export function buildShopExport(rows: ShopExportRows, generatoIl: Date) {
   const s = rows.shop;
+  const installazione = readInstallState(rows.trackingSetup);
   return {
     generato_il: generatoIl.toISOString(),
     cosa_e_questo:
@@ -197,10 +207,18 @@ export function buildShopExport(rows: ShopExportRows, generatoIl: Date) {
         }
       : null,
 
+    // La colonna `platforms` porta due cose: i nomi che il merchant ha spuntato
+    // e le voci con cui registriamo la strada di installazione. In una copia dei
+    // dati vanno separate — un elenco di piattaforme con dentro `kerdon:install=…`
+    // non e' l'elenco di niente — e la strada scelta va detta lo stesso, perche'
+    // e' un dato del negozio come gli altri.
     tracciamento: rows.trackingSetup
       ? {
           risposta: rows.trackingSetup.answer,
           piattaforme: rows.trackingSetup.platforms,
+          installazione: installazione.path,
+          endpoint: installazione.endpoint,
+          verificato_il: quando(installazione.verifiedAt),
           risposto_il: quando(rows.trackingSetup.answeredAt),
         }
       : null,

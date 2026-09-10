@@ -1,13 +1,17 @@
 # L'identificativo del visitatore: come si collega
 
 Questo documento descrive **l'unico trasporto supportato** per l'identificativo
-con cui CoreWard riconosce chi torna sul negozio. Non e' una fra piu' opzioni:
-e' quella che funziona, e le altre sono state provate e scartate.
+con cui l'app riconosce chi torna sul negozio. Non e' una fra piu' opzioni: e'
+quella che funziona, e le altre sono state provate e scartate.
+
+Quello che cambia da merchant a merchant e' **come** si installa l'endpoint che
+lo regge: due strade, tutte e due nel prodotto, con un asset versionato per
+ciascuna sotto [`integrations/`](../integrations/).
 
 ## In una riga
 
-Chi chiama CoreWard e' un **endpoint first-party del negozio** — un container
-server-side su un sottodominio suo, un worker di CDN, il backend del merchant —
+Chi chiama l'app e' un **endpoint first-party del negozio** — un container
+server-side su un sottodominio suo, un Worker di CDN, il backend del merchant —
 mai il browser.
 
 ## Perche' non il browser
@@ -15,48 +19,95 @@ mai il browser.
 Tre motivi, e ognuno basterebbe.
 
 **Il cookie sarebbe di terze parti.** Un cookie `SameSite=None; Secure` emesso
-dal dominio di CoreWard, letto dentro la pagina del negozio, e' di terze parti:
+dal nostro dominio, letto dentro la pagina del negozio, e' di terze parti:
 Safari lo cancella dopo sette giorni quando lo accetta, e spesso non lo accetta;
 Firefox lo isola per sito. Un identificativo che deve durare un anno non puo'
 vivere li'.
 
-**Non c'e' CORS, ed e' voluto.** Il progetto non dichiara nessun
-`Access-Control-Allow-Origin` e non risponde a `OPTIONS`: una chiamata dalla
-vetrina fallirebbe il controllo preliminare del browser prima ancora di partire.
-(Prima si dichiarava `Access-Control-Expose-Headers`, che senza
-`Allow-Origin` non serve a niente: e' stato tolto, perche' prometteva qualcosa
-che non e' mai stato vero.)
+**Non c'e' CORS sulle rotte dei dati, ed e' voluto.** Le rotte `/rest/v1/` non
+dichiarano nessun `Access-Control-Allow-Origin` e non rispondono a `OPTIONS`:
+una chiamata dalla vetrina fallirebbe il controllo preliminare del browser prima
+ancora di partire. L'unica rotta pubblica che si lascia includere da qualunque
+dominio e' `/tracking/bridge.js`, che e' uno script identico per tutti e non
+contiene nessun dato e nessuna credenziale.
 
 **Il token finirebbe in chiaro.** Una chiamata dalla pagina dovrebbe portarsi
 dietro il token di lettura del negozio, che diventerebbe leggibile da chiunque
 apra gli strumenti di sviluppo. Quel token vive dove deve vivere: nella pagina
 Impostazioni dell'app, dietro sessione amministratore, da dove il merchant lo
-copia dentro il proprio container.
+copia dentro il proprio container o Worker.
+
+## Le due meta'
+
+### In vetrina: `/tracking/bridge.js`
+
+Uno script solo, uguale per tutti i negozi e per tutte e due le strade di
+installazione. Il codice sta in
+[`app/lib/tracking/consent-bridge.ts`](../app/lib/tracking/consent-bridge.ts) ed
+e' servito dalla rotta `tracking.bridge[.]js`.
+
+```html
+<script src="https://api.kerdon.io/tracking/bridge.js"
+        data-kerdon-endpoint="https://negozio.it/kerdon/id" async></script>
+```
+
+Fa tre cose, in quest'ordine:
+
+1. legge dalla Customer Privacy API di Shopify cosa ha risposto il visitatore;
+2. **solo se il permesso c'e'**, chiama l'endpoint first-party del negozio —
+   mai noi — e ne riceve l'identificativo;
+3. attacca quell'identificativo all'attributo `corew_eid` del carrello, cosi'
+   risale nell'ordine.
+
+Non contiene nessuna credenziale e non scrive il cookie dell'identificativo: lo
+scrive l'endpoint, con `Set-Cookie`, che e' l'unico posto da cui si ottengono
+`Secure` e una durata che il browser rispetti.
+
+Alla revoca chiama l'endpoint per far disfare, toglie il cookie dal browser e
+svuota l'attributo del carrello — e **non guarda** la risposta di quella
+chiamata: un endpoint che rispondesse comunque con un identificativo lo
+rimetterebbe addosso a chi ha appena detto di no.
+
+### Sul dominio del negozio: l'endpoint
+
+| Strada | Asset | Per chi |
+|---|---|---|
+| Google Tag Manager server-side | [`integrations/sgtm/`](../integrations/sgtm/) | Ha gia' un container server-side su un sottodominio proprio |
+| Workers Cloudflare | [`integrations/cloudflare-worker/`](../integrations/cloudflare-worker/) | Ha il dominio su Cloudflare e non vuole un container |
+
+Il merchant sceglie quale dal menu **Installazione**, nella card "Connessione e
+credenziali di tracking" in Impostazioni. La scelta si ricorda per negozio e
+decide quali istruzioni vede.
+
+In tutti e due gli asset **l'indirizzo dell'API e' un parametro** e non una
+costante scritta nel codice: `KERDON_URL` nel Worker, "Indirizzo dell'API" nel
+template. Quando l'indirizzo cambia si modifica il valore e si ripubblica.
 
 ## Il giro completo
 
 ### Prima visita
 
-1. Il visitatore apre una pagina del negozio.
-2. Il tag chiama **l'endpoint del negozio** (es. `https://sgtm.negozio.it/...`),
-   non CoreWard.
-3. Quell'endpoint chiama CoreWard con il token di lettura, **senza**
+1. Il visitatore apre una pagina del negozio e risponde al banner.
+2. Il ponte legge il permesso e chiama **l'endpoint del negozio** (es.
+   `https://negozio.it/kerdon/id`), non noi.
+3. Quell'endpoint chiama l'app con il token di lettura, **senza**
    identificativo: non ne ha ancora uno.
-4. CoreWard ne conia uno e lo restituisce nell'header
-   `X-CoreW-External-Id` (e nel corpo, come `external_id`).
+4. L'app ne conia uno e lo restituisce nell'header `X-CoreW-External-Id` (e nel
+   corpo, come `external_id`).
 5. **L'endpoint del negozio pianta il cookie**, dal proprio dominio, con il
    valore ricevuto. E' un cookie first-party: nessun browser lo tratta da
    estraneo.
+6. Il ponte attacca lo stesso valore al carrello.
 
 ### Visite successive
 
-1. Il tag chiama di nuovo l'endpoint del negozio.
-2. L'endpoint legge il **proprio** cookie first-party.
-3. Lo passa a CoreWard in uno di questi due modi:
+1. Il ponte chiama di nuovo l'endpoint del negozio, passando il valore letto dal
+   cookie first-party.
+2. L'endpoint lo passa all'app in uno di questi due modi:
    - header `X-CoreW-External-Id: corew_...` — la via normale;
    - parametro di query `existing_external_id=corew_...` — dove l'header non si
      puo' aggiungere, cosa che certi template di tag non permettono.
-4. CoreWard **restituisce lo stesso identificativo**, senza coniarne uno nuovo.
+3. L'app **restituisce lo stesso identificativo**, senza coniarne uno nuovo.
 
 Se il valore che arriva non ha la forma giusta viene trattato come assente e se
 ne conia uno buono: e' anche cio' che impedisce a qualcuno di farsi assegnare un
@@ -66,14 +117,45 @@ identificativo scelto da lui.
 
 | | |
 |---|---|
-| Chiamare | `GET https://api.coreward.app/rest/v1/tracking_id` |
+| Chiamare | `GET <indirizzo dell'API>/rest/v1/tracking_id` |
 | Autenticarsi | header `apikey: <token di lettura>` oppure `Authorization: Bearer <token>` |
-| Inoltrare | `X-CoreW-External-Id` con il valore del cookie first-party, quando c'e' |
+| Inoltrare | il permesso del visitatore, e `X-CoreW-External-Id` con il valore del cookie first-party quando c'e' |
 | Leggere | l'header `X-CoreW-External-Id` della risposta |
-| Piantare | il cookie `corew_eid` **dal proprio dominio**, con quel valore |
+| Piantare | il cookie `corew_eid` **dal proprio dominio**, con `Secure`, `Path=/`, un `SameSite` dichiarato e una durata |
+| Non fare | niente, quando non arriva nessun segnale di permesso |
 
-Il cookie va emesso dall'endpoint del negozio, non da CoreWard: e' quel dominio
-a renderlo first-party, ed e' l'unica ragione per cui dura.
+Il cookie va emesso dall'endpoint del negozio, non da noi: e' quel dominio a
+renderlo first-party, ed e' l'unica ragione per cui dura.
+
+## La verifica: finche' non passa, non e' configurato
+
+Una schermata che dice "collegato" guarda cose nostre — il progetto collegato,
+la chiave emessa — e il pezzo che manca non e' mai stato nostro. Prima si poteva
+arrivare in fondo alla configurazione, vedere tutto a posto, e non tracciare
+niente.
+
+`POST /api/tracking/verify` (autenticata, sessione amministratore) chiama
+l'endpoint del merchant **davvero**, come lo chiamerebbe il browser di un
+visitatore — cioe' senza nessuna credenziale — e guarda:
+
+| Controllo | Cosa deve risultare |
+|---|---|
+| `endpoint_url` | https, host pubblico, non il nostro, non `myshopify.com`, sullo stesso sito della vetrina |
+| `https` | lo schema e' https |
+| `reachable` | risponde |
+| `no_redirect` | risponde subito, senza 3xx: un rimando fa perdere per strada header e `Set-Cookie` |
+| `consent_granted` | con il permesso restituisce un identificativo ben formato e pianta il cookie |
+| `cookie_attributes` | `Secure`, `Path=/`, `SameSite` dichiarato, una durata |
+| `consent_missing` | **senza nessun segnale** non restituisce niente e non pianta niente |
+| `consent_withdrawn` | alla revoca non restituisce piu' niente e fa scadere il cookie |
+
+Finche' tutti e otto non passano, la configurazione del tracciamento **non si
+segna completata**: la card mostra "Da verificare". Cambiare strada o indirizzo
+annulla una verifica precedente — una verifica e' una frase su una
+configurazione precisa, non un bollino sul negozio.
+
+`HttpOnly` non e' richiesto ed e' voluto: il ponte deve poter rileggere il
+cookie per attaccare lo stesso identificativo al carrello.
 
 ## Cosa viene scritto, e dove
 
@@ -91,23 +173,42 @@ Il testo per gli interessati sta in `docs/legal/privacy-policy.it.md`, punto 3.5
 
 ## Il consenso viene prima
 
-CoreWard non conia niente se chi naviga non ha dato il permesso: senza, la
-risposta non porta nessun identificativo e non viene scritta nessuna riga. Il
-permesso si legge dai segnali del Customer Privacy di Shopify, che l'endpoint
-del negozio inoltra insieme alla chiamata. Alla revoca, le scritture successive
-si fermano.
+Non si conia niente se chi naviga non ha dato il permesso: senza, la risposta
+non porta nessun identificativo e non viene scritta nessuna riga. Servono
+`analytics` e `marketing` insieme — e' lo stesso identificativo a misurare e ad
+attribuire, e non se ne conia mezzo.
+
+**L'assenza di segnale vale come no**, in tutti e tre i punti del giro: nel
+ponte, nell'endpoint e nell'app. Nessun valore di ripiego, nessuna regola per
+paese scritta da noi: se il negozio non e' in una configurazione che richiede il
+consenso, e' Shopify a dire che le finalita' sono permesse, e quel "permesso" si
+legge come qualunque altro.
 
 Il container non deve **mai** dichiarare un consenso che il visitatore non ha
-dato: sarebbe registrarlo al posto suo.
+dato: sarebbe registrarlo al posto suo. La verifica lo controlla.
 
-## Sulla durata
+Alla revoca il cookie scade e la riga sparisce dal database. Le due meta' della
+revoca sono queste, e la prima avviene comunque: se la seconda non riesce, si
+perde una cancellazione a valle, non si continua a raccogliere.
 
-Il cookie chiede un anno di vita (`Max-Age`). E' una richiesta al browser, non
-una garanzia: il browser puo' accorciarla per politica, la persona puo'
-cancellare i cookie, una sessione privata non ne conserva nessuno. La durata
-vera la ottiene il cookie first-party dell'endpoint del negozio; quella del
-cookie che CoreWard emette sul proprio dominio e' molto piu' incerta, ed e'
-esattamente il motivo per cui questo trasporto esiste.
+## Sulla durata: un massimo tecnico, non una garanzia
+
+Il cookie chiede fino a un anno di vita (`Max-Age`). E' una **richiesta al
+browser soggetta al consenso**, non una promessa di conservazione:
+
+- il consenso si puo' ritirare in qualunque momento, e da quell'istante non c'e'
+  piu' niente da conservare;
+- il browser puo' accorciare la durata per politica propria — Safari lo fa anche
+  sui cookie first-party scritti da JavaScript;
+- la persona puo' cancellare i cookie, o navigare in una sessione privata che non
+  ne conserva nessuno.
+
+Quindi: un anno e' il **massimo** che si chiede, non il tempo per cui un
+riconoscimento esiste. Dirlo come una durata certa e' il modo in cui, mesi dopo,
+qualcuno si accorge che i numeri non tornano e non capisce perche'. La durata
+piu' vicina a quel massimo la ottiene il cookie first-party dell'endpoint del
+negozio; quella di un cookie emesso sul nostro dominio sarebbe molto piu'
+incerta, ed e' esattamente il motivo per cui questo trasporto esiste.
 
 ## Il formato dell'identificativo
 
@@ -118,3 +219,11 @@ Gli identificativi del formato precedente — `corew_<millisecondi>_<32
 caratteri>` — restano validi e vengono riconosciuti: sono nei browser delle
 persone, e rifiutarli vorrebbe dire coniarne uno nuovo a chiunque torni. Non se
 ne creano piu' di nuovi in quella forma.
+
+## Cosa questi asset non fanno
+
+Non parlano con Meta, con Google o con nessun'altra piattaforma. Restituiscono
+un identificativo e piantano un cookie. A chi mandarlo, e se mandarlo, lo decide
+il merchant nei propri tag: quella decisione deve stare dove avviene il fatto.
+Cosa ha risposto il visitatore sulla condivisione con terzi glielo diciamo
+nell'header `X-CoreW-Sale-Of-Data`.

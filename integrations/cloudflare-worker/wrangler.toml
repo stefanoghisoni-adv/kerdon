@@ -1,0 +1,34 @@
+# Il Worker che chiude il giro del tracciamento, sul dominio del negozio.
+#
+# I valori qui sotto sono quelli da cambiare: il nome, la rotta e l'indirizzo
+# dell'API. Il codice non si tocca.
+
+name = "kerdon-id"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# La rotta su cui il Worker risponde.
+#
+# DEVE stare sul dominio da cui si vede la vetrina, non su un altro: e' l'unica
+# cosa che renda first-party il cookie, ed e' tutta la ragione per cui questo
+# Worker esiste. `negozio.it` va sostituito con il dominio vero del negozio.
+routes = [
+  { pattern = "negozio.it/kerdon/id", zone_name = "negozio.it" }
+]
+
+[vars]
+# L'indirizzo dell'API, come parametro e non cablato nel codice: il giorno in
+# cui cambia si modifica qui e si ripubblica.
+KERDON_URL = "https://api.coreward.app"
+
+# Il dominio su cui piantare il cookie. Con il punto davanti vale anche per i
+# sottodomini, che e' quel che serve se la vetrina sta su `www` e il Worker no.
+COOKIE_DOMAIN = ".negozio.it"
+
+# KERDON_TOKEN NON VA QUI. E' la chiave di lettura del negozio, si copia dalla
+# pagina Impostazioni dell'app e si carica come segreto:
+#
+#   npx wrangler secret put KERDON_TOKEN
+#
+# Scritta in questo file finirebbe nel controllo di versione, e una chiave in un
+# repository e' una chiave da revocare.

@@ -101,6 +101,9 @@ CREATE TABLE "tracking_setups" (
     "answer" TEXT NOT NULL,
     "platforms" TEXT[],
     "answered_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "install_path" TEXT,
+    "endpoint" TEXT,
+    "verified_at" TIMESTAMP(3),
 
     CONSTRAINT "tracking_setups_pkey" PRIMARY KEY ("shop_id")
 );
