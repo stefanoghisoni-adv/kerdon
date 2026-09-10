@@ -1,9 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { creaFakeWebhookStore } from '~/lib/webhooks/inbox-fake-store';
+
+/**
+ * Le cancellazioni dopo che il lavoro e' uscito dalla richiesta HTTP.
+ *
+ * Una cancellazione non riuscita non e' piu' un 500: la ricevuta e' gia'
+ * scritta, quindi si risponde 200 e la riga torna in attesa. La differenza non
+ * e' formale — prima era Shopify a ritentare, per una finestra che finisce;
+ * adesso ritentiamo noi, e se dopo cinque tentativi non ci si riesce l'evento
+ * finisce in lettera morta invece di sparire.
+ */
+const store = creaFakeWebhookStore();
 
 vi.mock('~/lib/webhooks/verify.server', () => ({ verifyWebhook: () => true }));
 vi.mock('~/lib/supabase.server', () => ({ createSupabaseClient: vi.fn() }));
 vi.mock('~/db.server', () => ({
   prisma: {
+    // La posta in arrivo vera: l'indice unico e la presa condizionata sullo
+    // stato sono cio' che rende un evento consegnato due volte un effetto solo.
+    get webhookEvent() {
+      return store;
+    },
+    session: { count: async () => 0, findMany: async () => [], deleteMany: async () => ({ count: 0 }) },
     shop: { findUnique: vi.fn() },
     plan: { findFirst: vi.fn() },
     syncJob: { create: vi.fn() },
@@ -14,8 +32,9 @@ vi.mock('~/db.server', () => ({
   },
 }));
 
-import { action as deleteProduct } from './webhooks.products.delete';
-import { action as deleteCustomer } from './webhooks.customers.delete';
+import { action as rottaProdotto } from './webhooks.products.delete';
+import { action as rottaCliente } from './webhooks.customers.delete';
+import { settleWebhookWork } from '~/lib/webhooks/receive.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
 
@@ -34,6 +53,24 @@ import { prisma } from '~/db.server';
  * chiedono niente alla policy, e cancellano anche a negozio sospeso o
  * disinstallato.
  */
+
+/** Le due rotte, ognuna con il lavoro che parte dopo la risposta. */
+async function deleteProduct(args: { request: Request }) {
+  const res = await rottaProdotto(args as never);
+  await settleWebhookWork();
+  return res;
+}
+
+async function deleteCustomer(args: { request: Request }) {
+  const res = await rottaCliente(args as never);
+  await settleWebhookWork();
+  return res;
+}
+
+/** L'evento numero `i` fra quelli che il test ha prodotto. */
+function evento(i = 0) {
+  return store.righe[i];
+}
 
 function req(path: string, body: unknown) {
   return new Request(`https://app/webhooks/${path}`, {
@@ -85,6 +122,7 @@ function mockSupabase(error: { message: string; code?: string } | null = null) {
 }
 
 beforeEach(() => {
+  store.reset();
   vi.clearAllMocks();
   mockShop();
 });
@@ -188,25 +226,29 @@ describe('webhook customers/delete', () => {
 // comparire nei suoi conti, i dati della persona restano dove non dovrebbero.
 // Ed e' definitivo, perche' con il 200 Shopify non ripete la consegna.
 describe('una cancellazione fallita non si dichiara riuscita', () => {
-  it('prodotto non cancellato → 500 e riga nel registro dei job', async () => {
+  it('prodotto non cancellato → l evento resta da lavorare, e la traccia c e', async () => {
     mockShop();
     mockSupabase({ message: 'permission denied for table products', code: '42501' });
 
     const res = await deleteProduct({ request: req('products/delete', { id: 99 }) } as any);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    expect(evento().status).toBe('queued');
+    expect(evento().attempts).toBe(1);
     const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
     expect(job).toMatchObject({ shopId: 'shop-1', status: 'failed' });
     expect(job.errors.message).toContain('permission denied');
   });
 
-  it('cliente non cancellato → 500 e riga nel registro dei job', async () => {
+  it('cliente non cancellato → l evento resta da lavorare, e la traccia c e', async () => {
     mockShop();
     mockSupabase({ message: 'permission denied for table customers', code: '42501' });
 
     const res = await deleteCustomer({ request: req('customers/delete', { id: 7 }) } as any);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    expect(evento().status).toBe('queued');
+    expect(evento().attempts).toBe(1);
     const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
     expect(job).toMatchObject({ shopId: 'shop-1', status: 'failed' });
     expect(job.errors.message).toContain('permission denied');
@@ -214,13 +256,21 @@ describe('una cancellazione fallita non si dichiara riuscita', () => {
 
   // Il guasto che non sappiamo gestire e' passeggero quanto l'altro: il
   // database dell'app che non risponde non deve costare la cancellazione.
-  it('database dell app irraggiungibile → 500, non un finto ricevuto', async () => {
+  it('database dell app irraggiungibile → nessun finto ricevuto: il lavoro resta', async () => {
+    // La ricevuta e' passata (la scrive un'altra tabella), quindi il 200 e'
+    // dovuto: rifiutare adesso un evento gia' accettato non aiuterebbe. Cio'
+    // che NON si dichiara e' che la cancellazione sia avvenuta — le due righe
+    // tornano in attesa, ed e' li' che si legge la differenza.
     (prisma.shop.findUnique as any).mockRejectedValue(new Error('connection refused'));
 
     const prodotto = await deleteProduct({ request: req('products/delete', { id: 99 }) } as any);
     const cliente = await deleteCustomer({ request: req('customers/delete', { id: 7 }) } as any);
 
-    expect(prodotto.status).toBe(500);
-    expect(cliente.status).toBe(500);
+    expect(prodotto.status).toBe(200);
+    expect(cliente.status).toBe(200);
+    expect(evento(0).status).toBe('queued');
+    expect(evento(1).status).toBe('queued');
+    expect(evento(0).completedAt).toBeNull();
+    expect(evento(1).completedAt).toBeNull();
   });
 });

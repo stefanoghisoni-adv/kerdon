@@ -31,12 +31,39 @@
  * poter creare una riga che nessun processore sa lavorare: resterebbe in attesa
  * per sempre, che e' il difetto che la coda ha gia' pagato una volta.
  *
+ * DUE FAMIGLIE, UNA POSTA IN ARRIVO. I primi due sono amministrativi — parlano
+ * del negozio e del suo abbonamento — e sono quelli per cui questa posta in
+ * arrivo e' nata. Gli altri sono operativi: prodotti, clienti e ordini. Prima
+ * facevano tutto il lavoro DENTRO la richiesta HTTP, cioe' rileggevano da
+ * Shopify, interrogavano due database e scrivevano, e solo alla fine
+ * rispondevano. Un timeout li' voleva dire che Shopify ritentava e si rifaceva
+ * tutto da capo, con alcune pulizie che fallivano lasciando un avviso nel log
+ * mentre la consegna risultava riuscita lo stesso.
+ *
+ * Sono nella stessa posta in arrivo e non in una seconda perche' le regole che
+ * servono sono identiche: una ricevuta per `X-Shopify-Webhook-Id`, una presa
+ * condizionata sullo stato, tentativi distanziati, lettera morta e replay.
+ * Duplicarle avrebbe voluto dire due deduplica libere di divergere.
+ *
  * I tre webhook di conformita' NON stanno qui: hanno gia' la loro posta in
  * arrivo (`compliance_requests`), con i termini di legge e il payload che si
  * cancella da solo. Il perche' sono due tabelle e non una sta nell'intestazione
  * di `inbox.server`.
  */
-export const WEBHOOK_TOPICS = ['app/uninstalled', 'app_subscriptions/update'] as const;
+export const WEBHOOK_TOPICS = [
+  'app/uninstalled',
+  'app_subscriptions/update',
+  'products/create',
+  'products/update',
+  'products/delete',
+  'customers/create',
+  'customers/update',
+  'customers/delete',
+  'orders/create',
+  'orders/updated',
+  'refunds/create',
+  'orders/delete',
+] as const;
 
 export type WebhookTopic = (typeof WEBHOOK_TOPICS)[number];
 
@@ -130,4 +157,65 @@ export function statusAfterAttempt(
   if (outcome === 'done') return 'completed';
   if (outcome === 'dead_letter') return 'dead_letter';
   return isExhausted(attempts) ? 'dead_letter' : 'queued';
+}
+
+/**
+ * Quanto grande puo' essere il corpo di una consegna.
+ *
+ * Il controllo sta PRIMA della lettura completa e prima del parse, e non e' una
+ * cortesia verso la memoria: senza, un corpo enorme — sbagliato, o spedito
+ * apposta — veniva bufferizzato per intero, poi passato all'HMAC e poi a
+ * `JSON.parse`, tre volte il suo peso, dentro la richiesta che deve rispondere
+ * entro il budget. Il tetto e' largo per quel che Shopify manda davvero: un
+ * ordine con centinaia di righe o un prodotto con centinaia di varianti stanno
+ * abbondantemente sotto.
+ */
+export const MAX_WEBHOOK_BODY_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Il budget di risposta, ed e' il motivo per cui il lavoro non sta piu' dentro
+ * la richiesta.
+ *
+ * `TARGET` e' dove deve stare il novantacinquesimo percentile, `HARD` e' il
+ * muro: oltre quello Shopify considera la consegna non riuscita e ritenta, e
+ * ritentare quando in realta' avevamo appena finito e' il modo esatto in cui
+ * nascevano i doppioni. Una ricevuta e' due scritture sul database owner e
+ * nient'altro; tutto cio' che parla con Shopify o con il database del merchant
+ * sta dopo la risposta.
+ */
+export const WEBHOOK_RESPONSE_TARGET_MS = 1_000;
+export const WEBHOOK_RESPONSE_HARD_LIMIT_MS = 5_000;
+
+/** Com'e' andata una raffica di risposte, misurata sul budget. */
+export interface ResponseBudgetReport {
+  p95Ms: number;
+  maxMs: number;
+  withinTarget: boolean;
+  withinHardLimit: boolean;
+}
+
+/**
+ * Il giudizio sul budget, calcolato in un posto solo.
+ *
+ * Sta qui e non dentro un test perche' la soglia e il modo di calcolarla sono
+ * la regola, non l'attrezzo di chi la prova: due test che calcolassero il
+ * percentile ognuno a modo suo misurerebbero due cose diverse e nessuno se ne
+ * accorgerebbe.
+ */
+export function responseBudgetReport(durationsMs: readonly number[]): ResponseBudgetReport {
+  if (durationsMs.length === 0) {
+    return { p95Ms: 0, maxMs: 0, withinTarget: true, withinHardLimit: true };
+  }
+  const ordinate = [...durationsMs].sort((a, b) => a - b);
+  // Il percentile "piu' vicino al rango", quello che su pochi campioni non
+  // interpola fra due misure che non sono mai state prese.
+  const indice = Math.min(ordinate.length - 1, Math.ceil(0.95 * ordinate.length) - 1);
+  const p95Ms = ordinate[Math.max(0, indice)];
+  const maxMs = ordinate[ordinate.length - 1];
+  return {
+    p95Ms,
+    maxMs,
+    withinTarget: p95Ms < WEBHOOK_RESPONSE_TARGET_MS,
+    withinHardLimit: maxMs < WEBHOOK_RESPONSE_HARD_LIMIT_MS,
+  };
 }

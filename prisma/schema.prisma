@@ -1054,7 +1054,19 @@ model WebhookEvent {
   /// secondo effetto.
   webhookId String @unique @map("webhook_id")
 
-  /// 'app/uninstalled' | 'app_subscriptions/update'.
+  /// Il topic, fra quelli dell'elenco chiuso in `lib/webhooks/inbox-model`.
+  ///
+  /// Due famiglie. Gli amministrativi — 'app/uninstalled',
+  /// 'app_subscriptions/update' — parlano del negozio. Gli operativi parlano
+  /// di una sua risorsa: prodotti, clienti e ordini, cancellazioni comprese.
+  /// I secondi sono arrivati qui perche' facevano tutto dentro la richiesta
+  /// HTTP e non lasciavano nessuna riga: un timeout faceva ritentare Shopify,
+  /// e il ritentativo rifaceva daccapo cio' che era gia' riuscito.
+  ///
+  /// Piu' topic possono avere lo stesso processore ('orders/create',
+  /// 'orders/updated' e 'refunds/create' dicono la stessa cosa), ma il topic
+  /// si conserva com'e' arrivato: serve a capire dopo cos'era, non a decidere
+  /// cosa fare.
   topic String
 
   /// Il negozio come lo dichiara Shopify. C'e' sempre — l'header e' il solo
@@ -1067,10 +1079,24 @@ model WebhookEvent {
   /// nullo per un negozio che non abbiamo mai avuto.
   shopId String? @map("shop_id")
 
-  /// Il corpo verificato, com'e' arrivato. Serve a rifare l'elaborazione tante
-  /// volte quante ne servono, e a capire dopo cos'era successo. Non contiene
-  /// dati personali: questi due topic parlano di un negozio e di un
-  /// abbonamento, non di una persona.
+  /// L'innesco: il minimo da cui si puo' rifare il lavoro, non la busta.
+  ///
+  /// Per gli amministrativi e' il corpo verificato com'e' arrivato — parlano di
+  /// un negozio e di un abbonamento, non di una persona, e il processore
+  /// dell'abbonamento ne legge molto piu' di un identificativo.
+  ///
+  /// Per gli operativi e' il corpo DISTILLATO, e non e' un'ottimizzazione. La
+  /// risorsa canonica sta su Shopify e si rilegge quando si lavora: qui basta
+  /// sapere QUALE. Conservare la busta intera di 'customers/update' vorrebbe
+  /// dire tenere per una settimana nome, email, telefono e indirizzo di una
+  /// persona in un database che nessuna cancellazione richiesta a Shopify
+  /// attraversa. Le cancellazioni sono l'eccezione alla rilettura — la risorsa
+  /// non e' piu' leggibile, quindi l'identificativo va conservato adesso — ma
+  /// non a questa regola: di dati personali non ne portano.
+  ///
+  /// L'unico campo che non si potrebbe rileggere e' l'identificativo del
+  /// browser che ha riempito il carrello: in GraphQL non c'e', e la busta del
+  /// webhook e' l'unico posto da cui passa. Vedi `lib/webhooks/trigger`.
   payload Json?
 
   /// 'queued' | 'processing' | 'completed' | 'dead_letter'.

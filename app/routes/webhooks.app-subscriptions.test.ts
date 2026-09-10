@@ -39,10 +39,29 @@ vi.mock('~/db.server', () => ({
     },
     shop: { findUnique: (...a: unknown[]) => shopFindUnique(...a) },
     billingCharge: { updateMany: (...a: unknown[]) => chargeUpdateMany(...a) },
+    // La posta in arrivo conosce adesso TUTTI i processori, compresi quelli
+    // che passano dal client Shopify: il magazzino delle sessioni si costruisce
+    // all'import e pretende di trovare questa tabella.
+    session: { count: async () => 0, findMany: async () => [], deleteMany: async () => ({ count: 0 }) },
   },
 }));
 
-import { action } from './webhooks.app-subscriptions.update';
+import { action as rotta } from './webhooks.app-subscriptions.update';
+import { settleWebhookWork } from '~/lib/webhooks/receive.server';
+
+/**
+ * La rotta piu' il lavoro che parte dopo la risposta.
+ *
+ * L'elaborazione non e' piu' attesa dentro la richiesta — il budget di
+ * risposta e' quello della sola ricevuta — quindi chi deve osservare l'effetto
+ * aspetta qui. Shopify no, ed e' esattamente il punto.
+ */
+async function action(args: { request: Request }) {
+  const res = await rotta(args as never);
+  await settleWebhookWork();
+  return res;
+}
+
 import { applyPlanToShop } from '~/lib/billing/apply-plan.server';
 import { findFreePlan, findPlanByName } from '~/lib/billing/find-plan.server';
 

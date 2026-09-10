@@ -1,9 +1,31 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { creaFakeWebhookStore } from '~/lib/webhooks/inbox-fake-store';
+
+/**
+ * Gli ordini dopo che il lavoro e' uscito dalla richiesta HTTP.
+ *
+ * Era il webhook piu' lento e il piu' frequente insieme: rilettura GraphQL,
+ * scrittura dell'ordine, scrittura delle righe, cancellazione per differenza e
+ * legame browser-cliente, tutto PRIMA di rispondere. Adesso la risposta e' la
+ * sola ricevuta, e cosa e' successo davvero si legge sulla riga dell'evento —
+ * e' li' che questi test guardano dove prima guardavano il codice di stato.
+ *
+ * Il resto non cambia, ed e' voluto: il payload resta un innesco, l'ordine si
+ * rilegge, e gli attributi del carrello restano l'unica cosa che la rilettura
+ * non porta — per questo il trigger conservato se li porta dietro.
+ */
+const store = creaFakeWebhookStore();
 
 vi.mock('~/lib/webhooks/verify.server', () => ({ verifyWebhook: () => true }));
 vi.mock('~/lib/supabase.server', () => ({ createSupabaseClient: vi.fn() }));
 vi.mock('~/db.server', () => ({
   prisma: {
+    // La posta in arrivo vera: e' l'unico modo di contare gli effetti prodotti
+    // da due consegne dello stesso evento.
+    get webhookEvent() {
+      return store;
+    },
+    session: { count: async () => 0, findMany: async () => [], deleteMany: async () => ({ count: 0 }) },
     shop: { findUnique: vi.fn() },
     plan: { findFirst: vi.fn() },
     syncJob: { create: vi.fn() },
@@ -32,18 +54,43 @@ vi.mock('~/lib/supabase/ensure-users-table.server', () => ({
   provisionUsersTable: vi.fn(async () => true),
 }));
 
-import { action } from './webhooks.orders';
+import { action as rotta } from './webhooks.orders';
+import { settleWebhookWork } from '~/lib/webhooks/receive.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { prisma } from '~/db.server';
 import type { ShopifyOrder, ShopifyOrderLine } from '~/lib/customers/order-rows';
 
-function req(body: unknown) {
+/** La rotta piu' il lavoro che parte dopo la risposta. */
+async function action(args: { request: Request }) {
+  const res = await rotta(args as never);
+  await settleWebhookWork();
+  return res;
+}
+
+/** L'evento numero `i` fra quelli che il test ha prodotto. */
+function evento(i = 0) {
+  return store.righe[i];
+}
+
+/**
+ * Una consegna, con il suo identificativo.
+ *
+ * L'id conta adesso quanto il corpo: due consegne che lo condividono sono LA
+ * STESSA consegna e devono produrre un effetto solo, due che non lo
+ * condividono sono due notifiche distinte dello stesso ordine e devono
+ * produrre lo stesso risultato scritto due volte. Senza l'header, l'impronta
+ * del corpo decide — ed e' voluto: un ritentativo che perde l'header non deve
+ * diventare un secondo evento.
+ */
+function req(body: unknown, consegna?: string) {
+  const headers: Record<string, string> = {
+    'X-Shopify-Hmac-Sha256': 'sig',
+    'X-Shopify-Shop-Domain': 'test-shop.myshopify.com',
+  };
+  if (consegna) headers['X-Shopify-Webhook-Id'] = consegna;
   return new Request('https://app/webhooks/orders', {
     method: 'POST',
-    headers: {
-      'X-Shopify-Hmac-Sha256': 'sig',
-      'X-Shopify-Shop-Domain': 'test-shop.myshopify.com',
-    },
+    headers,
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
 }
@@ -160,6 +207,7 @@ let warned: string[];
 let errored: string[];
 
 beforeEach(() => {
+  store.reset();
   vi.clearAllMocks();
   getOrderById.mockResolvedValue(canonicalOrder());
   logged = [];
@@ -364,14 +412,47 @@ describe('webhook orders — la stessa busta due volte', () => {
     const senzaOrario = (righe: any[]) =>
       JSON.stringify(righe.map(({ synced_at: _scritta, ...resto }) => resto));
 
-    await action({ request: req(receipt()) } as any);
+    // Due consegne DISTINTE dello stesso ordine: e' quel che succede quando
+    // Shopify rimanda la notifica perche' non ha ricevuto risposta in tempo.
+    // Ognuna rilegge l'ordine da capo e riscrive le stesse chiavi.
+    await action({ request: req(receipt(), 'consegna-1') } as any);
     const primo = senzaOrario(writes.order_lines);
     writes.order_lines = [];
     writes.orders = [];
 
-    await action({ request: req(receipt()) } as any);
+    await action({ request: req(receipt(), 'consegna-2') } as any);
 
     expect(senzaOrario(writes.order_lines)).toBe(primo);
+    expect(writes.orders).toHaveLength(1);
+  });
+
+  it('la STESSA consegna due volte: una riga sola e un solo effetto', async () => {
+    // La deduplica su `X-Shopify-Webhook-Id`, che prima per gli ordini non
+    // esisteva affatto: un timeout faceva ritentare Shopify, e il ritentativo
+    // rileggeva, riscriveva e ricancellava tutto daccapo.
+    mockShop();
+    const { writes } = mockSupabase();
+
+    await action({ request: req(receipt(), 'consegna-1') } as any);
+    const res = await action({ request: req(receipt(), 'consegna-1') } as any);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ duplicate: true });
+    expect(store.righe).toHaveLength(1);
+    expect(writes.orders).toHaveLength(1);
+    expect(getOrderById).toHaveBeenCalledTimes(1);
+  });
+
+  it('senza l header dell id, due consegne identiche restano la stessa', async () => {
+    // Un ritentativo che perde l'header non deve diventare un secondo evento:
+    // l'impronta del corpo lo riconosce lo stesso.
+    mockShop();
+    const { writes } = mockSupabase();
+
+    await action({ request: req(receipt()) } as any);
+    await action({ request: req(receipt()) } as any);
+
+    expect(store.righe).toHaveLength(1);
     expect(writes.orders).toHaveLength(1);
   });
 
@@ -380,8 +461,8 @@ describe('webhook orders — la stessa busta due volte', () => {
     const { writes } = mockSupabase();
 
     await Promise.all([
-      action({ request: req(receipt()) } as any),
-      action({ request: req(receipt()) } as any),
+      action({ request: req(receipt(), 'consegna-1') } as any),
+      action({ request: req(receipt(), 'consegna-2') } as any),
     ]);
 
     // Due consegne, due upsert per riga: le chiavi restano due, e a fare da
@@ -400,9 +481,13 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
 
     const res = await action({ request: req(receipt()) } as any);
 
-    // 500: la scrittura non e' riuscita, e con il 200 Shopify considerava la
-    // consegna andata a buon fine — quell'ordine non tornava mai piu'.
-    expect(res.status).toBe(500);
+    // 200 perche' la ricevuta e' scritta: rifiutare adesso un evento gia'
+    // accettato non rimetterebbe a posto niente. Che la scrittura NON sia
+    // riuscita si legge sulla riga, che torna in attesa — e a ritentare siamo
+    // noi, non piu' Shopify per una finestra che finisce.
+    expect(res.status).toBe(200);
+    expect(evento().status).toBe('queued');
+    expect(evento().attempts).toBe(1);
     expect(writes.order_lines).toBeUndefined();
 
     expect(lastTrace(errored)).toMatchObject({ status: 'failed', order: 5001 });
@@ -420,7 +505,8 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
 
     const res = await action({ request: req(receipt()) } as any);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    expect(evento().status).toBe('queued');
     expect(writes.orders).toHaveLength(1);
     expect(lastTrace(errored)).toMatchObject({ status: 'failed' });
     expect((prisma.syncJob.create as any).mock.calls[0][0].data.errors.message).toContain(
@@ -428,18 +514,24 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
     );
   });
 
-  it('corpo illeggibile: nessuna scrittura, ma una riga di errore', async () => {
+  it('corpo illeggibile: 400, nessuna riga, e comunque una traccia', async () => {
+    // Cambio di risposta consapevole, e adesso la regola vale per tutti i
+    // webhook. Un corpo che non e' JSON non diventera' valido riprovandolo, ma
+    // non e' nemmeno qualcosa che si possa dichiarare preso in carico: non
+    // c'e' niente da scrivere in posta in arrivo. La traccia resta — un corpo
+    // che non si legge vuol dire che a monte qualcosa non va.
     mockShop();
     mockSupabase();
 
     const res = await action({ request: req('{ questo non e JSON') } as any);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
+    expect(store.righe).toHaveLength(0);
     expect(createSupabaseClient).not.toHaveBeenCalled();
-    expect(lastTrace(errored)).toMatchObject({ status: 'failed', order: null });
+    expect(errored.some((e) => e.includes('corpo non leggibile come JSON'))).toBe(true);
   });
 
-  it('rilettura non riuscita: si risponde 500, cosi Shopify riprova', async () => {
+  it('rilettura non riuscita: l evento resta da lavorare', async () => {
     // Diverso da "ordine sparito": qui l'API non ha risposto, e non sappiamo
     // niente. Su un non-letto non si scrive e non si cancella.
     mockShop();
@@ -448,19 +540,22 @@ describe('webhook orders — un errore non sparisce piu in silenzio', () => {
 
     const res = await action({ request: req(receipt()) } as any);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    expect(evento().status).toBe('queued');
+    expect(evento().lastError).toContain('Shopify API error: 503');
     expect(writes.orders).toBeUndefined();
-    expect(lastTrace(errored)).toMatchObject({ status: 'failed' });
   });
 
-  it('database dell app irraggiungibile: si risponde 500, cosi Shopify riprova', async () => {
+  it('database dell app irraggiungibile: l evento resta da lavorare', async () => {
     (prisma.shop.findUnique as any).mockRejectedValue(new Error('connection refused'));
     mockSupabase();
 
     const res = await action({ request: req(receipt()) } as any);
 
-    expect(res.status).toBe(500);
-    expect(lastTrace(errored)).toMatchObject({ status: 'failed', detail: 'connection refused' });
+    expect(res.status).toBe(200);
+    expect(evento().status).toBe('queued');
+    expect(evento().completedAt).toBeNull();
+    expect(evento().lastError).toContain('connection refused');
   });
 });
 
@@ -566,21 +661,23 @@ describe('webhook orders — quando non c e niente da fare', () => {
   // parola per parola, cosi' chi le riconosce in un registro non deve
   // reimpararle.
   it('il registro dice PERCHE l ordine e stato saltato', async () => {
+    // Tre consegne DISTINTE: con lo stesso identificativo sarebbero la stessa,
+    // e la deduplica — giustamente — non lavorerebbe le ultime due.
     mockShop({ scopes: 'read_products' });
     mockSupabase();
-    await action({ request: req(receipt()) } as any);
+    await action({ request: req(receipt(), 'consegna-1') } as any);
     expect(lastTrace(logged)).toMatchObject({
       detail: 'permesso sugli ordini non concesso',
     });
 
     mockShop({ supabaseConfig: null });
-    await action({ request: req(receipt()) } as any);
+    await action({ request: req(receipt(), 'consegna-2') } as any);
     expect(lastTrace(logged)).toMatchObject({
       detail: 'nessun progetto collegato e verificato: non c e dove scrivere',
     });
 
     mockShop({ authorization: 'DISABLED' });
-    await action({ request: req(receipt()) } as any);
+    await action({ request: req(receipt(), 'consegna-3') } as any);
     expect(lastTrace(logged)).toMatchObject({
       detail: 'uso dell app sospeso: la sincronizzazione e ferma',
     });

@@ -129,12 +129,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     complianceFailed: 0,
     /** Abbonamenti sostituiti che si e' finalmente riusciti a chiudere. */
     subscriptionsCancelled: 0,
-    /** Webhook amministrativi ricevuti e finalmente applicati. */
+    /** Webhook ricevuti e finalmente applicati. */
     webhooksProcessed: 0,
     /** Ricevuti, non applicati, da ritentare al giro dopo. */
     webhooksRetried: 0,
     /** Fermi: nessuno ci riprova piu' da solo, e c'e' un allarme nel log. */
     webhooksDeadLettered: 0,
+    /**
+     * Il drenaggio si e' fermato per tempo scaduto, non perche' aveva finito.
+     *
+     * Vederlo vero un giro ogni tanto e' normale — un arretrato si smaltisce in
+     * piu' passate. Vederlo vero sempre vuol dire che gli eventi arrivano piu'
+     * in fretta di quanto li si lavori, ed e' l'unica riga che lo dice.
+     */
+    webhookDrainBudgetExhausted: false,
     webhookEventsPruned: 0,
     /** Revoche del tracciamento prese in carico e finalmente applicate. */
     revocationsProcessed: 0,
@@ -199,19 +207,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  // I webhook amministrativi ricevuti e non ancora applicati.
+  // I webhook ricevuti e non ancora applicati.
   //
   // Fuori dal ciclo dei negozi e prima delle sincronizzazioni di proposito: qui
   // dentro ci sono le disinstallazioni e le fini di abbonamento, cioe' proprio i
   // fatti che decidono quali negozi vadano sincronizzati. Lavorarli dopo
   // vorrebbe dire sincronizzare per un giro ancora un negozio che se n'e'
   // andato.
+  //
+  // Da quando ci passano anche prodotti, clienti e ordini questo non e' piu'
+  // un pugno di righe: e' la rete sotto ogni notifica che il negozio manda, e
+  // dopo un'interruzione puo' essere un arretrato vero. Per questo il drenaggio
+  // ha un tetto al TEMPO oltre che al numero — quel che non entra nel budget
+  // resta in attesa e ci ripassa il giro dopo, invece di tenere fermo tutto il
+  // resto.
   if (!onlyShopId) {
     try {
       const eventi = await drainWebhookEvents(WEBHOOK_PROCESSORS);
       results.webhooksProcessed = eventi.processed;
       results.webhooksRetried = eventi.retried;
       results.webhooksDeadLettered = eventi.deadLettered;
+      results.webhookDrainBudgetExhausted = eventi.budgetExhausted;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('Cron webhook inbox error:', message);

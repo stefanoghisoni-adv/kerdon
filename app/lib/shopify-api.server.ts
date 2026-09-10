@@ -457,6 +457,24 @@ export function retryDelay(error: unknown, attempt: number, mutation: boolean): 
   return mutation ? null : backoff;
 }
 
+
+/**
+ * Il filtro della query dei clienti, in un posto solo.
+ *
+ * Tre casi e non due: la pagina successiva non porta filtro (il cursore lo
+ * conserva gia'), un id chiede quel cliente e basta, una data chiede la
+ * finestra. Scritti in linea erano un ternario che nascondeva la precedenza.
+ */
+function filtroClienti(options: {
+  pageInfo?: string;
+  updatedAtMin?: string;
+  customerId?: number | null;
+}): string | null {
+  if (options.pageInfo) return null;
+  if (options.customerId != null) return `id:${options.customerId}`;
+  return options.updatedAtMin ? `updated_at:>='${options.updatedAtMin}'` : null;
+}
+
 export class ShopifyAPIClient {
   private shopDomain: string;
   private accessToken: string;
@@ -888,6 +906,17 @@ export class ShopifyAPIClient {
     pageInfo?: string;
     updatedAtMin?: string;
     /**
+     * Un cliente solo, per id.
+     *
+     * Serve al webhook dei clienti, che del corpo della consegna non conserva
+     * niente oltre l'identificativo e rilegge l'anagrafica da qui. Passa dalla
+     * stessa query dell'elenco di proposito: il cliente riletto per il webhook
+     * e quello riletto dalla corsa periodica devono avere gli stessi campi,
+     * altrimenti le due strade scriverebbero due righe diverse per la stessa
+     * persona.
+     */
+    customerId?: number | null;
+    /**
      * Il metafield da cui leggere la data di nascita, scelto dal merchant.
      *
      * Assente vuol dire "non chiederlo": i clienti tornano senza il campo
@@ -956,7 +985,10 @@ export class ShopifyAPIClient {
       {
         first: options.limit || 250,
         after: options.pageInfo ?? null,
-        query: !options.pageInfo && options.updatedAtMin ? `updated_at:>='${options.updatedAtMin}'` : null,
+        // L'id ha la precedenza sulla finestra temporale: chiedere UN cliente e
+        // filtrarlo anche per data significherebbe non trovarlo ogni volta che
+        // non e' cambiato di recente, che e' proprio il caso del ritentativo.
+        query: filtroClienti(options),
         ...(birthdate ? { namespace: birthdate.namespace, key: birthdate.key } : {}),
       },
     );
@@ -1015,6 +1047,29 @@ export class ShopifyAPIClient {
       })),
       nextPageInfo: data.customers.pageInfo.hasNextPage ? data.customers.pageInfo.endCursor : null,
     };
+  }
+
+  /**
+   * Un cliente riletto da Shopify, che e' la fonte canonica.
+   *
+   * `null` quando non c'e' piu': cancellato, unito a un altro, o fuori da cio'
+   * che il negozio ci lascia leggere. Chi chiama non deve scambiarlo per una
+   * riga vuota — non abbiamo letto niente, e su un non-letto non si cancella e
+   * non si scrive.
+   */
+  async getCustomerById(
+    customerId: number,
+    options: { birthdateMetafield?: MetafieldKey | null } = {},
+  ) {
+    const { customers } = await this.getCustomers({
+      limit: 1,
+      customerId,
+      birthdateMetafield: options.birthdateMetafield ?? null,
+    });
+    // Si controlla l'id invece di prendere il primo: il filtro di Shopify e'
+    // una ricerca, e restituire un cliente diverso da quello chiesto vorrebbe
+    // dire scrivere l'anagrafica di una persona sopra quella di un'altra.
+    return customers.find((c) => c.id === customerId) ?? null;
   }
 
   /**

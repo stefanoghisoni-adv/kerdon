@@ -38,7 +38,21 @@ vi.mock('~/db.server', () => ({
   },
 }));
 
-import { receiveAdminWebhook } from './receive.server';
+import { receiveAdminWebhook, settleWebhookWork } from './receive.server';
+
+/**
+ * La rotta piu' il lavoro che parte dopo la risposta.
+ *
+ * Serve perche' l'elaborazione non e' piu' attesa dentro la richiesta: il
+ * budget di risposta e' quello della sola ricevuta, e il lavoro parte subito
+ * dopo. Chi deve osservare l'effetto — questi test — aspetta qui; chi risponde
+ * a Shopify no, ed e' il punto.
+ */
+async function ricevi(request: Request, topic: 'app/uninstalled') {
+  const res = await receiveAdminWebhook(request, topic);
+  await settleWebhookWork();
+  return res;
+}
 
 const DOMINIO = 'negozio.myshopify.com';
 
@@ -69,7 +83,7 @@ describe('prima della ricevuta', () => {
   it('firma non valida → 401, e nessuna riga scritta', async () => {
     verifyWebhook.mockReturnValue(false);
 
-    const res = await receiveAdminWebhook(richiesta(), 'app/uninstalled');
+    const res = await ricevi(richiesta(), 'app/uninstalled');
 
     expect(res.status).toBe(401);
     expect(store.righe).toHaveLength(0);
@@ -82,12 +96,12 @@ describe('prima della ricevuta', () => {
       body: '{}',
     });
 
-    expect((await receiveAdminWebhook(req, 'app/uninstalled')).status).toBe(400);
+    expect((await ricevi(req, 'app/uninstalled')).status).toBe(400);
     expect(store.righe).toHaveLength(0);
   });
 
   it('corpo illeggibile → 400 e non 5xx: ritentarlo darebbe lo stesso esito', async () => {
-    const res = await receiveAdminWebhook(
+    const res = await ricevi(
       richiesta({ body: 'non-e-json' }),
       'app/uninstalled',
     );
@@ -105,7 +119,7 @@ describe('la ricevuta non riesce', () => {
     const allarme = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(store, 'create').mockRejectedValueOnce(new Error('database irraggiungibile'));
 
-    const res = await receiveAdminWebhook(richiesta(), 'app/uninstalled');
+    const res = await ricevi(richiesta(), 'app/uninstalled');
 
     expect(res.status).toBeGreaterThanOrEqual(500);
     expect(await res.json()).not.toHaveProperty('ok');
@@ -120,7 +134,7 @@ describe('la ricevuta non riesce', () => {
     const allarme = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(store, 'create').mockRejectedValueOnce(new Error('database irraggiungibile'));
 
-    await receiveAdminWebhook(
+    await ricevi(
       richiesta({ body: JSON.stringify({ id: 1, segreto: 'shpat_xyz' }) }),
       'app/uninstalled',
     );
@@ -139,7 +153,7 @@ describe('dopo la ricevuta', () => {
     // concluso: torna in attesa, e il drenaggio del cron ci ripassa.
     transaction.mockRejectedValueOnce(new Error('database irraggiungibile'));
 
-    const res = await receiveAdminWebhook(richiesta(), 'app/uninstalled');
+    const res = await ricevi(richiesta(), 'app/uninstalled');
 
     expect(res.status).toBe(200);
     expect(store.righe).toHaveLength(1);
@@ -149,7 +163,7 @@ describe('dopo la ricevuta', () => {
   });
 
   it('elaborazione riuscita → 200 con l evento concluso', async () => {
-    const res = await receiveAdminWebhook(richiesta(), 'app/uninstalled');
+    const res = await ricevi(richiesta(), 'app/uninstalled');
 
     expect(res.status).toBe(200);
     expect(store.righe[0].status).toBe('completed');
@@ -157,8 +171,8 @@ describe('dopo la ricevuta', () => {
   });
 
   it('lo stesso webhook id due volte → una riga sola e un solo effetto', async () => {
-    await receiveAdminWebhook(richiesta({ webhookId: 'consegna-1' }), 'app/uninstalled');
-    const seconda = await receiveAdminWebhook(
+    await ricevi(richiesta({ webhookId: 'consegna-1' }), 'app/uninstalled');
+    const seconda = await ricevi(
       richiesta({ webhookId: 'consegna-1' }),
       'app/uninstalled',
     );
@@ -175,10 +189,10 @@ describe('dopo la ricevuta', () => {
     // La prima consegna ha scritto la ricevuta e poi e' morta: la seconda non
     // deve limitarsi a dire "gia' vista", deve finire quel che era rimasto.
     transaction.mockRejectedValueOnce(new Error('database irraggiungibile'));
-    await receiveAdminWebhook(richiesta({ webhookId: 'consegna-1' }), 'app/uninstalled');
+    await ricevi(richiesta({ webhookId: 'consegna-1' }), 'app/uninstalled');
     expect(store.righe[0].status).toBe('queued');
 
-    await receiveAdminWebhook(richiesta({ webhookId: 'consegna-1' }), 'app/uninstalled');
+    await ricevi(richiesta({ webhookId: 'consegna-1' }), 'app/uninstalled');
 
     expect(store.righe[0].status).toBe('completed');
     // Due tentativi sulla stessa riga, non due righe: il primo non ha lasciato
@@ -193,8 +207,8 @@ describe('dopo la ricevuta', () => {
   it('senza l header dell id, due consegne identiche restano la stessa', async () => {
     // Un ritentativo che perde l'header non deve diventare un secondo evento:
     // l'impronta del corpo lo riconosce lo stesso.
-    await receiveAdminWebhook(richiesta({ webhookId: null }), 'app/uninstalled');
-    await receiveAdminWebhook(richiesta({ webhookId: null }), 'app/uninstalled');
+    await ricevi(richiesta({ webhookId: null }), 'app/uninstalled');
+    await ricevi(richiesta({ webhookId: null }), 'app/uninstalled');
 
     expect(store.righe).toHaveLength(1);
     expect(shopUpdateMany).toHaveBeenCalledTimes(1);

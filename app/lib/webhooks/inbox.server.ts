@@ -238,13 +238,39 @@ function segnala(
   );
 }
 
-/** Quanti eventi si lavorano in un solo giro. */
-const DRAIN_BATCH = 25;
+/**
+ * Quanti eventi si lavorano al massimo in un solo giro.
+ *
+ * Era venticinque, e bastava: qui dentro passavano due soli topic
+ * amministrativi, che arrivano una manciata di volte al giorno. Con prodotti,
+ * clienti e ordini il conto cambia — un negozio in una giornata di saldi manda
+ * raffiche di consegne — e dopo un'interruzione il drenaggio puo' trovarsi
+ * davanti un arretrato vero. A venticinque per giro, mezz'ora l'uno, un
+ * arretrato di mille eventi ci metterebbe venti ore.
+ */
+const DRAIN_BATCH = 200;
+
+/**
+ * Per quanto il drenaggio puo' tenere occupato il giro del cron.
+ *
+ * E' il compagno obbligatorio del tetto alzato: ogni evento operativo parla
+ * con Shopify e con il database del merchant, quindi duecento eventi possono
+ * costare piu' di quanto il cron abbia. Il drenaggio sta PRIMA delle
+ * sincronizzazioni di proposito — qui dentro ci sono le disinstallazioni, cioe'
+ * i fatti che decidono quali negozi vadano sincronizzati — e senza un tetto al
+ * tempo un arretrato di ordini terrebbe fermo tutto il resto del giro.
+ *
+ * Fermarsi non perde niente: quel che resta e' ancora 'queued', e ci ripassa
+ * il giro dopo. E' la stessa scelta della coda, per la stessa ragione.
+ */
+export const WEBHOOK_DRAIN_BUDGET_MS = 20_000;
 
 export interface WebhookDrainResult {
   processed: number;
   retried: number;
   deadLettered: number;
+  /** Vero se il budget e' finito prima degli eventi pronti. */
+  budgetExhausted: boolean;
 }
 
 /**
@@ -260,6 +286,7 @@ export async function drainWebhookEvents(
   processors: Record<WebhookTopic, WebhookProcessor>,
   now: Date = new Date(),
   limit: number = DRAIN_BATCH,
+  budgetMs: number = WEBHOOK_DRAIN_BUDGET_MS,
 ): Promise<WebhookDrainResult> {
   const scaduti = new Date(now.getTime() - WEBHOOK_STALE_MS);
 
@@ -279,9 +306,27 @@ export async function drainWebhookEvents(
     select: { id: true, status: true },
   });
 
-  const esito: WebhookDrainResult = { processed: 0, retried: 0, deadLettered: 0 };
+  const esito: WebhookDrainResult = {
+    processed: 0,
+    retried: 0,
+    deadLettered: 0,
+    budgetExhausted: false,
+  };
+
+  // L'orologio vero, non `now`: `now` e' l'istante logico del giro — quello con
+  // cui si decide cosa e' scaduto — e usarlo anche per misurare quanto si e'
+  // lavorato vorrebbe dire un budget che non scorre mai.
+  const inizio = Date.now();
 
   for (const riga of pronti) {
+    if (Date.now() - inizio >= budgetMs) {
+      // Non si e' perso niente: le righe rimaste sono ancora 'queued' con il
+      // loro `nextAttemptAt` gia' passato, quindi il giro dopo le ritrova in
+      // cima — l'ordine e' per data di ricevuta.
+      esito.budgetExhausted = true;
+      break;
+    }
+
     // Una 'processing' abbandonata va prima riportata a 'queued', altrimenti la
     // presa non la prende: e' la stessa condizione sullo stato che protegge dai
     // doppioni, e qui deve valere identica.

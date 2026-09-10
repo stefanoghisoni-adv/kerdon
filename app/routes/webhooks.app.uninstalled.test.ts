@@ -50,7 +50,22 @@ vi.mock('~/lib/supabase/delete-merchant-data.server', () => ({
   deleteMerchantData: (...a: unknown[]) => deleteMerchantData(...a),
 }));
 
-import { action } from './webhooks.app.uninstalled';
+import { action as rotta } from './webhooks.app.uninstalled';
+import { settleWebhookWork } from '~/lib/webhooks/receive.server';
+
+/**
+ * La rotta piu' il lavoro che parte dopo la risposta.
+ *
+ * L'elaborazione non e' piu' attesa dentro la richiesta — il budget di
+ * risposta e' quello della sola ricevuta — quindi chi deve osservare l'effetto
+ * aspetta qui. Shopify no, ed e' esattamente il punto.
+ */
+async function action(args: { request: Request }) {
+  const res = await rotta(args as never);
+  await settleWebhookWork();
+  return res;
+}
+
 
 const DOMINIO = 'test-shop.myshopify.com';
 

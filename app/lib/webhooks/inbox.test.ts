@@ -34,17 +34,21 @@ import {
   recordWebhookReceipt,
   replayDeadWebhookEvents,
 } from './inbox.server';
-import { MAX_WEBHOOK_ATTEMPTS } from './inbox-model';
+import { MAX_WEBHOOK_ATTEMPTS, WEBHOOK_TOPICS } from './inbox-model';
 import type { WebhookProcessor } from './inbox.server';
 import type { WebhookTopic } from './inbox-model';
 
 const ORA = new Date('2026-09-05T12:00:00.000Z');
 
+/**
+ * L'elenco completo dei processori, con quello della disinstallazione scelto
+ * dal test. Si costruisce dai topic invece di elencarli a mano: cosi' un topic
+ * nuovo non lascia questo file indietro senza che nessuno se ne accorga.
+ */
 function processori(uninstall: WebhookProcessor): Record<WebhookTopic, WebhookProcessor> {
-  return {
-    'app/uninstalled': uninstall,
-    'app_subscriptions/update': async () => 'done',
-  };
+  const tutti = {} as Record<WebhookTopic, WebhookProcessor>;
+  for (const topic of WEBHOOK_TOPICS) tutti[topic] = async () => 'done';
+  return { ...tutti, 'app/uninstalled': uninstall };
 }
 
 function consegna(webhookId = 'consegna-1') {
@@ -80,7 +84,7 @@ describe('la ricevuta', () => {
 
   it('rifiuta un topic che nessuno sa lavorare, invece di scrivere una riga morta', async () => {
     await expect(
-      recordWebhookReceipt({ ...consegna(), topic: 'orders/create' as never }),
+      recordWebhookReceipt({ ...consegna(), topic: 'orders/paid' as never }),
     ).rejects.toThrow('topic non gestito');
     expect(righe).toHaveLength(0);
   });
@@ -203,6 +207,38 @@ describe('il drenaggio', () => {
 
     expect(esito.processed).toBe(2);
     expect(righe.every((r) => r.status === 'completed')).toBe(true);
+  });
+
+  it('il budget del tempo ferma il giro, e non perde niente', async () => {
+    // Il tetto al numero da solo non basta piu': da quando qui dentro passano
+    // anche prodotti, clienti e ordini, ogni evento parla con Shopify e con il
+    // database del merchant. Senza un tetto al TEMPO un arretrato di ordini
+    // terrebbe fermo tutto il resto del giro del cron — comprese le
+    // sincronizzazioni che stanno subito dopo.
+    for (const id of ['a', 'b', 'c', 'd']) await recordWebhookReceipt(consegna(id));
+
+    // Ogni lavorazione costa piu' del budget: dopo la prima si smette.
+    const lento = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 12));
+      return 'done' as const;
+    });
+
+    const esito = await drainWebhookEvents(processori(lento), ORA, 10, 10);
+
+    expect(esito.budgetExhausted).toBe(true);
+    expect(lento).toHaveBeenCalledTimes(1);
+    // Non si e' perso niente: le altre tre sono ancora da lavorare, con la loro
+    // scadenza gia' passata, quindi il giro dopo le ritrova in cima.
+    expect(righe.filter((r) => r.status === 'queued')).toHaveLength(3);
+  });
+
+  it('quando gli eventi finiscono prima del budget, il budget non risulta speso', async () => {
+    await recordWebhookReceipt(consegna('a'));
+
+    const esito = await drainWebhookEvents(processori(async () => 'done'), ORA, 10, 10_000);
+
+    expect(esito.budgetExhausted).toBe(false);
+    expect(esito.processed).toBe(1);
   });
 
   it('non tocca quel che e ancora distanziato', async () => {

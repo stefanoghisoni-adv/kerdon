@@ -1,4 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { creaFakeWebhookStore } from '~/lib/webhooks/inbox-fake-store';
+
+/**
+ * La rotta dei prodotti dopo che il lavoro e' uscito dalla richiesta HTTP.
+ *
+ * COSA E' CAMBIATO. Prima la rotta rileggeva da Shopify, scriveva nel database
+ * del merchant e ripuliva, tutto PRIMA di rispondere: una scrittura fallita
+ * diventava un 500 e Shopify ritentava rifacendo tutto daccapo. Adesso la
+ * risposta e' la sola ricevuta, e cosa e' successo davvero si legge sulla riga
+ * dell'evento — e' li' che questi test guardano quando prima guardavano il
+ * codice di stato.
+ */
+const store = creaFakeWebhookStore();
 
 vi.mock('~/lib/webhooks/verify.server', () => ({ verifyWebhook: () => true }));
 vi.mock('~/lib/transformers/product.server', () => ({ transformProduct: vi.fn() }));
@@ -16,13 +29,36 @@ vi.mock('~/lib/stats/inventory-cost.server', () => ({
 }));
 vi.mock('~/db.server', () => ({
   prisma: {
+    // La posta in arrivo vera, non un mock che dice sempre di si': l'indice
+    // unico su `webhook_id` e la presa condizionata sullo stato sono cio' che
+    // rende un evento consegnato due volte un effetto solo, e provarli con dei
+    // mock compiacenti vorrebbe dire non provarli affatto.
+    get webhookEvent() {
+      return store;
+    },
     shop: { findUnique: vi.fn() },
     plan: { findFirst: vi.fn() },
     syncJob: { create: vi.fn() },
+    // Serve all'import: la posta in arrivo conosce tutti i processori, e quelli
+    // che parlano con Shopify si portano dietro il magazzino delle sessioni.
+    session: { count: async () => 0, findMany: async () => [], deleteMany: async () => ({ count: 0 }) },
   },
 }));
 
-import { action } from './webhooks.products.create';
+import { action as rotta } from './webhooks.products.create';
+import { settleWebhookWork } from '~/lib/webhooks/receive.server';
+
+/** La rotta piu' il lavoro che parte dopo la risposta. */
+async function action(args: { request: Request }) {
+  const res = await rotta(args as never);
+  await settleWebhookWork();
+  return res;
+}
+
+/** Com'e' finito l'unico evento che questi test producono. */
+function evento() {
+  return store.righe[0];
+}
 import { transformProduct } from '~/lib/transformers/product.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { enrichVariantCosts } from '~/lib/stats/inventory-cost.server';
@@ -119,6 +155,7 @@ function mockSupabase(upsertError: { message: string; code?: string } | null = n
 
 describe('webhook products/create — idoneità', () => {
   beforeEach(() => {
+    store.reset();
     vi.clearAllMocks();
   });
 
@@ -157,6 +194,7 @@ describe('webhook products/create — idoneità', () => {
 
 describe('webhook products/create — il payload non e una fotografia', () => {
   beforeEach(() => {
+    store.reset();
     vi.clearAllMocks();
   });
 
@@ -236,7 +274,11 @@ describe('webhook products/create — il payload non e una fotografia', () => {
     expect(res.status).toBe(200);
   });
 
-  it('payload senza id: si acknowledgia senza toccare nulla', async () => {
+  it('payload senza id: si acknowledgia, ma l evento non sparisce in silenzio', async () => {
+    // Prima si scriveva un avviso nel log e si rispondeva "ricevuto": una busta
+    // che non nomina nessun prodotto non la ritrovava piu' nessuno. Adesso la
+    // riga si scrive lo stesso e va in lettera morta, che e' l'unico modo di
+    // accorgersi che qualcosa a monte manda buste illeggibili.
     mockShop();
     const getProductById = mockClient({ id: 1, variants_complete: true, variants: [] });
 
@@ -244,6 +286,7 @@ describe('webhook products/create — il payload non e una fotografia', () => {
 
     expect(getProductById).not.toHaveBeenCalled();
     expect(res.status).toBe(200);
+    expect(evento().status).toBe('dead_letter');
   });
 });
 
@@ -307,10 +350,11 @@ describe('webhook products/create — chi non ha diritto non scrive', () => {
 // prezzo o un costo che nel negozio e' gia' cambiato.
 describe('webhook products/create — una scrittura fallita non si dichiara riuscita', () => {
   beforeEach(() => {
+    store.reset();
     vi.clearAllMocks();
   });
 
-  it('upsert rifiutato → 500 e riga nel registro dei job', async () => {
+  it('upsert rifiutato → l evento resta da lavorare, e la traccia c e', async () => {
     mockShop();
     mockClient({ id: 1, variants_complete: true, variants: [{ id: 11 }] });
     mockSupabase({ message: 'permission denied for table products', code: '42501' });
@@ -321,7 +365,13 @@ describe('webhook products/create — una scrittura fallita non si dichiara rius
 
     const res = await action({ request: req({ id: 1, variants: [{ id: 11 }] }) } as any);
 
-    expect(res.status).toBe(500);
+    // 200 perche' la ricevuta e' scritta, e rifiutare adesso un evento gia'
+    // accettato non rimetterebbe a posto niente. Che la scrittura NON sia
+    // riuscita si legge sulla riga: torna in attesa, con un tentativo speso.
+    expect(res.status).toBe(200);
+    expect(evento().status).toBe('queued');
+    expect(evento().attempts).toBe(1);
+    expect(evento().completedAt).toBeNull();
     const job = (prisma.syncJob.create as any).mock.calls[0][0].data;
     expect(job).toMatchObject({ shopId: 'shop-1', status: 'failed' });
     expect(job.errors.message).toContain('permission denied');
