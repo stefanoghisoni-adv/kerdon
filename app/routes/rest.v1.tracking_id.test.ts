@@ -62,7 +62,7 @@ const consentGranted = (): VisitorConsent => ({
 
 const call = (headers: Record<string, string> = {}, search = '') =>
   loader({
-    request: new Request(`https://api.coreward.app/rest/v1/tracking_id${search}`, { headers }),
+    request: new Request(`https://api.kerdon.io/rest/v1/tracking_id${search}`, { headers }),
   } as never);
 
 beforeEach(() => {

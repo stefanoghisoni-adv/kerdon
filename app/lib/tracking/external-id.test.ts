@@ -89,7 +89,7 @@ describe('gli identificativi del formato precedente', () => {
   });
 
   it('arrivano fino in fondo come gli altri', () => {
-    const url = new URL('https://api.coreward.app/rest/v1/tracking_id');
+    const url = new URL('https://api.kerdon.io/rest/v1/tracking_id');
     const headers = new Headers({ [EXTERNAL_ID_HEADER]: vecchio });
     expect(incomingExternalId(new Request(url, { headers }))).toBe(vecchio);
     expect(readExternalId(`${EXTERNAL_ID_COOKIE}=${vecchio}`)).toBe(vecchio);
@@ -164,7 +164,7 @@ describe('readExternalId', () => {
 // rimanda il valore che il visitatore ha gia'.
 describe('incomingExternalId', () => {
   const richiesta = (init?: { header?: string; query?: string; cookie?: string }) => {
-    const url = new URL('https://api.coreward.app/rest/v1/tracking_id');
+    const url = new URL('https://api.kerdon.io/rest/v1/tracking_id');
     if (init?.query !== undefined) url.searchParams.set(EXISTING_EXTERNAL_ID_PARAM, init.query);
 
     const headers = new Headers();

@@ -34,7 +34,7 @@ ___TEMPLATE_PARAMETERS___
     "name": "kerdonUrl",
     "displayName": "Indirizzo dell'API",
     "simpleValueType": true,
-    "defaultValue": "https://api.coreward.app",
+    "defaultValue": "https://api.kerdon.io",
     "help": "Sta qui e non nel codice: il giorno in cui l'indirizzo cambia si modifica questo campo, senza rifare il template.",
     "valueValidators": [
       {
@@ -706,7 +706,7 @@ ___SERVER_PERMISSIONS___
             "listItem": [
               {
                 "type": 1,
-                "string": "https://api.coreward.app/"
+                "string": "https://api.kerdon.io/"
               }
             ]
           }

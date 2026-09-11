@@ -872,11 +872,7 @@ model SupabaseManagedResource {
   resourceKind      String   @default("table") @map("resource_kind")
   /// L'unica domanda che conta al momento dell'eliminazione. false = la tabella
   /// c'era gia', e' del merchant, non si tocca.
-  /// La colonna sul database si chiama ancora `created_by_coreward`, e resta
-  /// cosi': rinominarla vorrebbe dire una migrazione che riscrive una tabella
-  /// per un fatto di sola lettura umana. Il nome del campo segue il prodotto,
-  /// quello della colonna segue la storia.
-  createdByKerdon Boolean  @map("created_by_coreward")
+  createdByKerdon Boolean  @map("created_by_kerdon")
   /// Versione dello schema con cui la risorsa e' stata creata: dice quale DDL
   /// l'ha fatta, senza doverlo dedurre dalla data.
   schemaVersion     Int      @map("schema_version")

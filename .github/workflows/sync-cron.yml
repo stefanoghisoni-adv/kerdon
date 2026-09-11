@@ -69,5 +69,5 @@ jobs:
           esac
         env:
           # Il dominio in uso; `vars.APP_URL` lo scavalca dove serve.
-          APP_URL: ${{ vars.APP_URL || 'https://api.coreward.app' }}
+          APP_URL: ${{ vars.APP_URL || 'https://api.kerdon.io' }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

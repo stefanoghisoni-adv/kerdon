@@ -78,7 +78,7 @@ jobs:
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
-          POSTGRES_DB: coreward_vuoto
+          POSTGRES_DB: kerdon_vuoto
         ports:
           - 5432:5432
         options: >-
@@ -95,8 +95,8 @@ jobs:
     # succedeva: il job moriva al primo `psql` e i controlli su deriva, dati
     # iniziali e RLS non venivano mai eseguiti.
     env:
-      DATABASE_URL: postgresql://ci:ci@localhost:5432/coreward_vuoto?schema=public
-      PSQL_URL: postgresql://ci:ci@localhost:5432/coreward_vuoto
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/kerdon_vuoto?schema=public
+      PSQL_URL: postgresql://ci:ci@localhost:5432/kerdon_vuoto
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -154,7 +154,7 @@ jobs:
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
-          POSTGRES_DB: coreward_migrazioni
+          POSTGRES_DB: kerdon_migrazioni
         ports:
           - 5432:5432
         options: >-
@@ -167,11 +167,11 @@ jobs:
     # `?schema=public`, psql quel parametro non lo conosce e rifiuta l'intero
     # indirizzo con "invalid URI query parameter: schema".
     env:
-      DATABASE_URL: postgresql://ci:ci@localhost:5432/coreward_migrazioni?schema=public
-      PSQL_URL: postgresql://ci:ci@localhost:5432/coreward_migrazioni
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/kerdon_migrazioni?schema=public
+      PSQL_URL: postgresql://ci:ci@localhost:5432/kerdon_migrazioni
       PSQL_ADMIN: postgresql://ci:ci@localhost:5432/postgres
-      BASE_DATABASE_URL: postgresql://ci:ci@localhost:5432/coreward_linea?schema=public
-      BASE_PSQL_URL: postgresql://ci:ci@localhost:5432/coreward_linea
+      BASE_DATABASE_URL: postgresql://ci:ci@localhost:5432/kerdon_linea?schema=public
+      BASE_PSQL_URL: postgresql://ci:ci@localhost:5432/kerdon_linea
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -203,7 +203,7 @@ jobs:
       # vero verrebbe saltata in silenzio.
       - name: Rehearse the baseline procedure on a script-built database
         run: |
-          psql "$PSQL_ADMIN" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE coreward_linea'
+          psql "$PSQL_ADMIN" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE kerdon_linea'
           psql "$BASE_PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/owner-bootstrap.sql
 
           for cartella in prisma/migrations/*/; do

@@ -42,7 +42,7 @@ function goodEndpoint(overrides: Partial<Record<'granted' | 'missing' | 'withdra
 const run = (fetchImpl: typeof fetch, endpoint = ENDPOINT, storefrontDomain?: string) =>
   verifyTrackingEndpoint({
     endpoint,
-    appHost: 'api.coreward.app',
+    appHost: 'api.kerdon.io',
     storefrontDomain,
     fetchImpl,
   });
@@ -92,7 +92,7 @@ describe('verifyTrackingEndpoint', () => {
     // Il cookie li e' di terze parti: e' il problema per cui tutto questo giro
     // esiste, e vederlo configurato cosi' significa che non ha capito.
     it('rifiuta un endpoint che punta a noi', async () => {
-      const result = await run(goodEndpoint(), 'https://api.coreward.app/rest/v1/tracking_id');
+      const result = await run(goodEndpoint(), 'https://api.kerdon.io/rest/v1/tracking_id');
       expect(reasonOf(result.checks, 'endpoint_url')).toBe('endpoint_is_app');
     });
 

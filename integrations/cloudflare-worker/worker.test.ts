@@ -8,7 +8,7 @@ const ENDPOINT = 'https://negozio.it/kerdon/id';
 const TOKEN = 'spx_segretissimo';
 
 const ENV = {
-  KERDON_URL: 'https://api.coreward.app',
+  KERDON_URL: 'https://api.kerdon.io',
   KERDON_TOKEN: TOKEN,
   COOKIE_DOMAIN: '.negozio.it',
 };

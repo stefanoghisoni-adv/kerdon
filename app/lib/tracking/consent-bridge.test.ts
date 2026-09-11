@@ -123,7 +123,7 @@ describe('il ponte in vetrina', () => {
   });
 
   it('parla solo con l endpoint del negozio, non con l app', () => {
-    expect(consentBridgeScript()).not.toContain('coreward.app');
+    expect(consentBridgeScript()).not.toContain('kerdon.io');
   });
 
   describe('senza permesso', () => {

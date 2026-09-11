@@ -16,7 +16,7 @@ con sei livelli di escalation sarebbe una finzione.
 **Responsabile unico**: il titolare di CoreWard, che è anche l'unica persona con
 accesso ai sistemi di produzione.
 
-**Contatto di sicurezza**: security@coreward.app — casella da tenere
+**Contatto di sicurezza**: security@kerdon.io — casella da tenere
 raggiungibile e controllata quotidianamente. È l'indirizzo pubblicato per le
 segnalazioni esterne, incluse quelle di ricercatori di sicurezza.
 
@@ -54,7 +54,7 @@ Le fonti di segnale, in ordine di quanto sono affidabili:
    `denied_invalid_token`, o accessi `allowed` in orari senza traffico, sono il
    segnale più diretto che qualcuno sta provando token altrui.
 2. **Segnalazione di un merchant** o di un ricercatore, via
-   security@coreward.app.
+   security@kerdon.io.
 3. **Notifica di Shopify** o di Supabase.
 4. **Log della piattaforma**: errori anomali su Vercel, Advisors di Supabase.
 

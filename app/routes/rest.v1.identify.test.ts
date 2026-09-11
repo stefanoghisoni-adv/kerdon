@@ -61,7 +61,7 @@ const VISITATORE = 'corew_1700000000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 function post(body: unknown, headers: Record<string, string> = { apikey: 'buono' }) {
   return action({
-    request: new Request('https://api.coreward.app/rest/v1/identify', {
+    request: new Request('https://api.kerdon.io/rest/v1/identify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: typeof body === 'string' ? body : JSON.stringify(body),
@@ -129,7 +129,7 @@ describe('/rest/v1/identify — il metodo e una misura di protezione', () => {
 
   it('anche un metodo diverso da POST viene rifiutato prima di guardare altro', async () => {
     const res = (await action({
-      request: new Request('https://api.coreward.app/rest/v1/identify', {
+      request: new Request('https://api.kerdon.io/rest/v1/identify', {
         method: 'PUT',
         headers: { apikey: 'buono' },
       }),

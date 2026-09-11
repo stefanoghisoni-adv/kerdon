@@ -34,14 +34,15 @@ const IV_BYTES = 12;
 
 /** Le due etichette con cui si derivano le due chiavi. Non si toccano. */
 //
-// L'etichetta porta il nome di prima del cambio, e resta cosi'. Non e' una
-// stringa da leggere: e' un ingrediente da cui si deriva la chiave, quindi
-// cambiarla cambia la chiave. Tutto cio' che e' gia' stato cifrato o firmato
-// con quella smetterebbe di potersi rileggere o verificare — e qui dentro
-// finiscono le prove di una cancellazione e gli identificativi di chi ha
-// revocato il consenso. Il nome del prodotto cambia, le chiavi no.
-const CIPHER_KEY_LABEL = 'coreward:consent-revocation-cipher:v1';
-const DIGEST_KEY_LABEL = 'coreward:consent-revocation-digest:v1';
+// L'etichetta e' un ingrediente da cui si deriva la chiave, non una stringa da
+// leggere: cambiarla cambia la chiave, e tutto cio' che era gia' stato cifrato
+// o firmato con quella non si rilegge piu'. Si e' potuta rinominare solo
+// perche' l'app non era ancora pubblicata e l'unico negozio collegato era
+// quello di prova — fuori da quella finestra, qui dentro ci sono le prove di
+// una cancellazione e gli identificativi di chi ha revocato il consenso, e il
+// nome sarebbe rimasto quello di prima per sempre.
+const CIPHER_KEY_LABEL = 'kerdon:consent-revocation-cipher:v1';
+const DIGEST_KEY_LABEL = 'kerdon:consent-revocation-digest:v1';
 
 /**
  * Il segreto di base.

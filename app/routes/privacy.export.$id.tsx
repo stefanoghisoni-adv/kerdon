@@ -35,7 +35,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Not found', { status: 404 });
   }
 
-  const name = `coreward-data-request-${record.customerRef?.slice(0, 8) ?? 'export'}.json`;
+  const name = `kerdon-data-request-${record.customerRef?.slice(0, 8) ?? 'export'}.json`;
 
   return new Response(JSON.stringify(record.export, null, 2), {
     headers: {

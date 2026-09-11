@@ -19,7 +19,7 @@ routes = [
 [vars]
 # L'indirizzo dell'API, come parametro e non cablato nel codice: il giorno in
 # cui cambia si modifica qui e si ripubblica.
-KERDON_URL = "https://api.coreward.app"
+KERDON_URL = "https://api.kerdon.io"
 
 # Il dominio su cui piantare il cookie. Con il punto davanti vale anche per i
 # sottodomini, che e' quel che serve se la vetrina sta su `www` e il Worker no.

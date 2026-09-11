@@ -45,7 +45,7 @@ import { loader } from './feed.$file';
 
 const call = (file = 'tok123.csv') =>
   loader({
-    request: new Request(`https://api.coreward.app/feed/${file}`),
+    request: new Request(`https://api.kerdon.io/feed/${file}`),
     params: { file },
     context: {},
   } as never);

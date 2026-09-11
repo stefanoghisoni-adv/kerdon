@@ -81,7 +81,7 @@ const VISITATORE = 'corew_1700000000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 /** Una POST come la manda il template Writer: corpo piatto, token in entrambi gli header. */
 function write(body: unknown, headers: Record<string, string> = {}) {
   return action({
-    request: new Request('https://api.coreward.app/rest/v1/users', {
+    request: new Request('https://api.kerdon.io/rest/v1/users', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

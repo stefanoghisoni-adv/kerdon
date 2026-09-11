@@ -495,7 +495,7 @@ CREATE TABLE "supabase_managed_resources" (
     "schema_name" TEXT NOT NULL DEFAULT 'public',
     "resource_name" TEXT NOT NULL,
     "resource_kind" TEXT NOT NULL DEFAULT 'table',
-    "created_by_coreward" BOOLEAN NOT NULL,
+    "created_by_kerdon" BOOLEAN NOT NULL,
     "schema_version" INTEGER NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
