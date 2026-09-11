@@ -13,7 +13,7 @@
 
 client_id = "461a83c84e9ce41a23b5364f1c1140ad"
 name = "Kerdon"
-application_url = "https://api.coreward.app"
+application_url = "https://api.kerdon.io"
 embedded = true
 
 [access_scopes]
@@ -33,7 +33,7 @@ use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
-  "https://api.coreward.app/auth/callback"
+  "https://api.kerdon.io/auth/callback"
 ]
 
 [webhooks]
