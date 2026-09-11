@@ -58,16 +58,14 @@ export interface InstallCopy {
 const it: InstallCopy = {
   title: "Installazione",
   intro:
-    "Il tracciamento si chiude con un pezzo che sta sul dominio del tuo negozio: è lui a ricevere la chiamata dalle pagine, a parlare con Kerdon e a scrivere il riconoscimento nel browser di chi visita. Scegli come installarlo.",
+    "Il tracciamento si chiude nel tuo container server-side: è lui a ricevere la chiamata dalle pagine, a parlare con Kerdon e a scrivere il riconoscimento nel browser di chi visita. Kerdon è l’ultimo anello della catena e non sostituisce quello che hai già davanti.",
   installLabel: "Installazione",
   choose: "Scegli come installare",
   paths: {
     sgtm: "Google Tag Manager server-side",
-    cloudflare: "Workers Cloudflare",
   },
   pathHelp: {
     sgtm: "Per chi ha già un container server-side su un sottodominio del negozio.",
-    cloudflare: "Per chi ha il dominio su Cloudflare e non vuole un container.",
   },
   steps: {
     sgtm: [
@@ -78,14 +76,6 @@ const it: InstallCopy = {
       "Aggiungi alle pagine del negozio lo script qui sotto, nel tema prima di </head> oppure come tag personalizzato.",
       "Torna qui e premi Verifica installazione.",
     ],
-    cloudflare: [
-      "Scarica la cartella cloudflare-worker e apri wrangler.toml: sostituisci negozio.it con il dominio vero del tuo negozio.",
-      "Carica la chiave di lettura come segreto, con npx wrangler secret put KERDON_TOKEN. Non scriverla nel file.",
-      "Crea qui sopra la chiave di invio e caricala come segreto: il pezzo prima del punto con npx wrangler secret put KERDON_INGEST_KEY_ID, quello dopo con npx wrangler secret put KERDON_INGEST_SECRET. La vedi una volta sola.",
-      "Pubblica con npx wrangler deploy.",
-      "Aggiungi alle pagine del negozio lo script qui sotto, nel tema prima di </head> oppure come tag personalizzato.",
-      "Torna qui e premi Verifica installazione.",
-    ],
   },
   snippetLabel: "Da aggiungere alle pagine del negozio",
   endpointLabel: "Indirizzo dell’endpoint sul tuo dominio",
@@ -93,7 +83,6 @@ const it: InstallCopy = {
     "L’indirizzo a cui le pagine del negozio chiedono il riconoscimento. Deve stare sul dominio da cui si vede il negozio, ed essere in https: è questo che permette al riconoscimento di durare.",
   endpointPlaceholder: {
     sgtm: "https://sgtm.negozio.it/kerdon/id",
-    cloudflare: "https://negozio.it/kerdon/id",
   },
   save: "Salva",
   saved: "Salvato",
@@ -156,11 +145,9 @@ const en: InstallCopy = {
   choose: "Choose how to install",
   paths: {
     sgtm: "Server-side Google Tag Manager",
-    cloudflare: "Cloudflare Workers",
   },
   pathHelp: {
     sgtm: "For stores that already run a server-side container on their own subdomain.",
-    cloudflare: "For stores on Cloudflare that would rather not run a container.",
   },
   steps: {
     sgtm: [
@@ -171,14 +158,6 @@ const en: InstallCopy = {
       "Add the snippet below to your store pages, in the theme before </head> or as a custom tag.",
       "Come back here and press Verify installation.",
     ],
-    cloudflare: [
-      "Download the cloudflare-worker folder and open wrangler.toml: replace negozio.it with your store's real domain.",
-      "Upload the read key as a secret, with npx wrangler secret put KERDON_TOKEN. Do not write it in the file.",
-      "Create the sending key above and upload it as a secret too: the part before the dot with npx wrangler secret put KERDON_INGEST_KEY_ID, the part after it with npx wrangler secret put KERDON_INGEST_SECRET. You only see it once.",
-      "Publish with npx wrangler deploy.",
-      "Add the snippet below to your store pages, in the theme before </head> or as a custom tag.",
-      "Come back here and press Verify installation.",
-    ],
   },
   snippetLabel: "Add this to your store pages",
   endpointLabel: "Endpoint address on your domain",
@@ -186,7 +165,6 @@ const en: InstallCopy = {
     "The address your store pages ask for recognition. It has to sit on the domain your store is served from, and be https: that is what lets the recognition last.",
   endpointPlaceholder: {
     sgtm: "https://sgtm.yourstore.com/kerdon/id",
-    cloudflare: "https://yourstore.com/kerdon/id",
   },
   save: "Save",
   saved: "Saved",

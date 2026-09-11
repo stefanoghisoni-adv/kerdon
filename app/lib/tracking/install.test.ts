@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  INSTALL_PATHS,
   isInstallPath,
   isTrackingInstallComplete,
   installStateData,
@@ -39,14 +40,14 @@ describe('normalizeEndpoint', () => {
 
 describe('lo stato letto dalla riga', () => {
   const riga = {
-    installPath: 'cloudflare',
+    installPath: 'sgtm',
     endpoint: 'https://negozio.it/kerdon/id',
     verifiedAt: new Date('2026-05-01T10:00:00.000Z'),
   };
 
   it('si rilegge intero', () => {
     const state = readInstallState(riga);
-    expect(state.path).toBe('cloudflare');
+    expect(state.path).toBe('sgtm');
     expect(state.endpoint).toBe('https://negozio.it/kerdon/id');
     expect(state.verifiedAt?.toISOString()).toBe('2026-05-01T10:00:00.000Z');
   });
@@ -70,7 +71,7 @@ describe('lo stato letto dalla riga', () => {
 
   it('lo stato torna nella forma che il database vuole', () => {
     expect(installStateData(readInstallState(riga))).toEqual({
-      installPath: 'cloudflare',
+      installPath: 'sgtm',
       endpoint: 'https://negozio.it/kerdon/id',
       verifiedAt: new Date('2026-05-01T10:00:00.000Z'),
     });
@@ -94,12 +95,26 @@ describe('withInstall', () => {
 
   // E' il cuore della cosa: una verifica e' una frase su UNA configurazione, e
   // tenerla dopo un cambio dichiarerebbe funzionante un giro mai provato.
+  //
+  // Oggi la strada e' una sola, quindi si prova togliendola: e' il solo cambio
+  // di strada che resta possibile, e vale la stessa regola. Il giorno in cui le
+  // strade tornassero due, questo test andrebbe rifatto sul passaggio fra loro.
   it('cambiare strada annulla la verifica', () => {
     const after = withInstall(verified, {
-      path: 'cloudflare',
+      path: null,
       endpoint: 'https://sgtm.negozio.it/kerdon/id',
     });
     expect(after.verifiedAt).toBeNull();
+  });
+
+  // La catena vera e' in fila e non a bivio: il Worker che sta sul dominio del
+  // negozio lo monta chi si occupa del tracciamento, e reinstrada verso il
+  // container. Kerdon e' l'ultimo anello, e non offre una strada che scavalchi
+  // quel pezzo — che e' proprio cio' che serve al merchant per non farsi
+  // bloccare da Safari e dalle estensioni.
+  it('non esiste una strada che scavalchi il container', () => {
+    expect(INSTALL_PATHS).toEqual(['sgtm']);
+    expect(isInstallPath('cloudflare')).toBe(false);
   });
 
   it('cambiare indirizzo annulla la verifica', () => {

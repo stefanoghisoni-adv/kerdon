@@ -55,11 +55,11 @@ beforeEach(() => {
 
 describe('salvare la strada di installazione', () => {
   it('registra scelta e indirizzo', async () => {
-    const response = await call({ path: 'cloudflare', endpoint: ENDPOINT });
+    const response = await call({ path: 'sgtm', endpoint: ENDPOINT });
     const body = await bodyOf(response);
 
     expect(body.ok).toBe(true);
-    expect(body.path).toBe('cloudflare');
+    expect(body.path).toBe('sgtm');
     expect(body.endpoint).toBe(ENDPOINT);
   });
 

@@ -68,16 +68,28 @@ svuota l'attributo del carrello — e **non guarda** la risposta di quella
 chiamata: un endpoint che rispondesse comunque con un identificativo lo
 rimetterebbe addosso a chi ha appena detto di no.
 
-### Sul dominio del negozio: l'endpoint
+### Dove sta Kerdon nella catena
 
-| Strada | Asset | Per chi |
-|---|---|---|
-| Google Tag Manager server-side | [`integrations/sgtm/`](../integrations/sgtm/) | Ha gia' un container server-side su un sottodominio proprio |
-| Workers Cloudflare | [`integrations/cloudflare-worker/`](../integrations/cloudflare-worker/) | Ha il dominio su Cloudflare e non vuole un container |
+La catena del tracciamento server-side e' **in fila, non a bivio**:
 
-Il merchant sceglie quale dal menu **Installazione**, nella card "Connessione e
-credenziali di tracking" in Impostazioni. La scelta si ricorda per negozio e
-decide quali istruzioni vede.
+    vetrina
+      → endpoint sul dominio del negozio (di solito un Worker di Cloudflare)
+      → sottodominio del provider del container (Stape o altro), cifrato
+      → Kerdon
+
+Il primo anello lo monta gia' chi si occupa del tracciamento, e il suo mestiere
+e' un altro dal nostro: reinstradare in modo cifrato verso il container, perche'
+Safari, Brave, Firefox e le estensioni non blocchino le richieste — cosa che
+riesce solo perche' il dominio e' di prima parte.
+
+**Kerdon e' l'ultimo anello.** Si fa chiamare dal container, restituisce
+l'identificativo, e non sostituisce nessuno dei pezzi che stanno davanti.
+
+L'unico asset che pubblichiamo e' quindi il modello per il container:
+[`integrations/sgtm/`](../integrations/sgtm/). Non ne esiste uno che scavalchi
+il container parlando direttamente con noi, e non deve esistere: sarebbe il
+merchant a perderci, perche' quel pezzo davanti e' proprio cio' che gli evita di
+essere bloccato.
 
 In tutti e due gli asset **l'indirizzo dell'API e' un parametro** e non una
 costante scritta nel codice: `KERDON_URL` nel Worker, "Indirizzo dell'API" nel

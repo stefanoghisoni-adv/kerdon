@@ -60,7 +60,11 @@ export function TrackingInstall({ appUrl, path, endpoint, verifiedAt }: Tracking
   const locale = useLocale();
   const t = installCopy(locale);
 
-  const [chosen, setChosen] = useState<InstallPath | ''>(path ?? '');
+  // Con una strada sola non c'e' niente da scegliere: si parte gia' scelta.
+  // Il menu ricompare da se' il giorno in cui le strade tornano a essere due —
+  // e' la stessa condizione, scritta una volta.
+  const unicaStrada = INSTALL_PATHS.length === 1 ? INSTALL_PATHS[0] : null;
+  const [chosen, setChosen] = useState<InstallPath | ''>(path ?? unicaStrada ?? '');
   const [address, setAddress] = useState(endpoint ?? '');
   const [savedAt, setSavedAt] = useState<string | null>(verifiedAt);
   const [saving, setSaving] = useState(false);
@@ -146,13 +150,26 @@ export function TrackingInstall({ appUrl, path, endpoint, verifiedAt }: Tracking
 
       <MetricRow label={t.statusLabel} badge={status} />
 
-      <Select
-        label={t.installLabel}
-        options={options}
-        value={chosen}
-        onChange={(value) => setChosen(isInstallPath(value) ? value : '')}
-        helpText={chosen ? t.pathHelp[chosen] : undefined}
-      />
+      {/* Un menu con una voce sola non e' un menu: e' una domanda a cui c'e'
+          una risposta sola, e chiederla fa perdere tempo a chi la legge. */}
+      {unicaStrada ? (
+        <MetricRow
+          label={t.installLabel}
+          action={
+            <Text as="span" variant="bodyMd">
+              {t.paths[unicaStrada]}
+            </Text>
+          }
+        />
+      ) : (
+        <Select
+          label={t.installLabel}
+          options={options}
+          value={chosen}
+          onChange={(value) => setChosen(isInstallPath(value) ? value : '')}
+          helpText={chosen ? t.pathHelp[chosen] : undefined}
+        />
+      )}
 
       {/* Il resto compare solo dopo la scelta: prima non c'e' niente da dire
           che valga per tutte e due le strade, e mostrarlo lo stesso vorrebbe

@@ -49,7 +49,7 @@ function righe(override: Partial<ShopExportRows> = {}): ShopExportRows {
       answer: 'has',
       platforms: ['meta'],
       answeredAt: QUANDO,
-      installPath: 'cloudflare',
+      installPath: 'sgtm',
       endpoint: 'https://negozio.it/kerdon/id',
       verifiedAt: QUANDO,
     },

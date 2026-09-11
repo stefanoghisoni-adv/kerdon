@@ -8,16 +8,28 @@ affatto. Deve scriverlo il dominio del negozio.
 
 Serve quindi un pezzo che stia **sul dominio del negozio**, riceva la chiamata
 dalla vetrina, parli con Kerdon da server a server e pianti il cookie da li'.
-Questa cartella contiene quel pezzo, in due versioni: se ne installa **una**.
+Questa cartella contiene quel pezzo: [`sgtm/`](sgtm/), il modello da importare
+nel container server-side.
 
-| Cartella | Per chi |
-|---|---|
-| [`sgtm/`](sgtm/) | Ha gia' un container server-side di Google Tag Manager su un sottodominio proprio |
-| [`cloudflare-worker/`](cloudflare-worker/) | Ha il dominio su Cloudflare e non vuole un container |
+La catena del tracciamento server-side e' **in fila, non a bivio**:
+
+    vetrina
+      → endpoint sul dominio del negozio (di solito un Worker di Cloudflare)
+      → sottodominio del provider del container (Stape o altro), cifrato
+      → Kerdon
+
+Il primo anello lo monta gia' chi si occupa del tracciamento, e il suo mestiere
+e' un altro dal nostro: reinstradare in modo cifrato verso il container, perche'
+Safari, Brave, Firefox e le estensioni non blocchino le richieste — cosa che
+riesce solo perche' il dominio e' di prima parte.
+
+**Kerdon e' l'ultimo anello.** Si fa chiamare dal container, restituisce
+l'identificativo, e non sostituisce nessuno dei pezzi che stanno davanti.
+
 
 ## Le due meta'
 
-**In vetrina** — lo stesso script per tutte e due le strade, servito da Kerdon a
+**In vetrina** — lo script servito da Kerdon a
 `/tracking/bridge.js`. Legge cosa ha risposto il visitatore al banner, e **solo
 se il permesso c'e'** chiama l'endpoint del negozio, poi attacca al carrello
 l'identificativo che riceve. Non contiene nessuna chiave.

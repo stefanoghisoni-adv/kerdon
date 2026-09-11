@@ -21,13 +21,32 @@
  * `withInstall`, cosi' nessun chiamante puo' dimenticarsene.
  */
 
-/** Le due strade supportate. Non ce ne sono altre, e non e' un elenco aperto. */
-export type InstallPath = 'sgtm' | 'cloudflare';
+/**
+ * La strada supportata. E' una sola, e non e' un elenco aperto.
+ *
+ * PERCHE' UNA SOLA, visto che per un periodo ne abbiamo elencate due. La catena
+ * vera del tracciamento server-side e' in fila, non a bivio:
+ *
+ *   vetrina → endpoint sul dominio del negozio (di solito un Worker di
+ *   Cloudflare) → sottodominio del provider del container, cifrato → Kerdon
+ *
+ * Quel Worker lo monta gia' chi si occupa del tracciamento, e il suo mestiere e'
+ * un altro dal nostro: reinstradare in modo cifrato verso il container perche'
+ * Safari, Brave, Firefox e le estensioni non blocchino le richieste — cosa che
+ * riesce solo perche' il dominio e' di prima parte.
+ *
+ * Kerdon e' l'ULTIMO anello: si fa chiamare dal container e restituisce
+ * l'identificativo. Offrire un Worker nostro come strada alternativa voleva
+ * dire due cose sbagliate insieme — duplicare il lavoro che il container fa
+ * gia' (il cookie lo pianta lui) e scavalcare il Cloudflare che il merchant ha
+ * gia', cioe' proprio il pezzo che gli serve per non farsi bloccare.
+ */
+export type InstallPath = 'sgtm';
 
-export const INSTALL_PATHS: InstallPath[] = ['sgtm', 'cloudflare'];
+export const INSTALL_PATHS: InstallPath[] = ['sgtm'];
 
 export function isInstallPath(value: unknown): value is InstallPath {
-  return value === 'sgtm' || value === 'cloudflare';
+  return value === 'sgtm';
 }
 
 /** Cosa sappiamo dell'installazione di un negozio. */

@@ -41,7 +41,7 @@ const bodyOf = async (response: Response): Promise<Record<string, unknown>> =>
 const written = () => updateSetup.mock.calls[0][0].data;
 
 const configured = (verifiedAt: Date | null = null) => ({
-  installPath: 'cloudflare',
+  installPath: 'sgtm',
   endpoint: ENDPOINT,
   verifiedAt,
 });
