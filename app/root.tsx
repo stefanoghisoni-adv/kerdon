@@ -204,7 +204,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
  * Se il file mancasse davvero — non per un rilascio appena andato online — un
  * ricaricamento immediato girerebbe all'infinito.
  */
-const ASSET_RELOAD_KEY = 'coreward:asset-reload';
+const ASSET_RELOAD_KEY = 'kerdon:asset-reload';
 const ASSET_RELOAD_GRACE_MS = 15_000;
 
 /**

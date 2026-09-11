@@ -36,7 +36,7 @@ export function PrivacyModal({ open, onClose }: Props) {
     setScaricando(true);
     setErrore(false);
     try {
-      await downloadFile('/privacy/my-data', 'coreward.json');
+      await downloadFile('/privacy/my-data', 'kerdon.json');
       chiudi();
     } catch (err) {
       console.error('[privacy] copia dei dati non scaricata:', err);

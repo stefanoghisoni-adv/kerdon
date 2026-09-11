@@ -17,7 +17,7 @@
 import type { BirthdateFieldState } from '~/lib/customers/birthdate-metafield';
 
 /** Dove si ricorda per quale campo l'avviso di conferma e' gia' stato chiuso. */
-export const DISMISSED_KEY = 'coreward.birthdate.dismissedFor';
+export const DISMISSED_KEY = 'kerdon.birthdate.dismissedFor';
 
 /**
  * Cosa sta a schermo.

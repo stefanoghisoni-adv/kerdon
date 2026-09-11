@@ -26,11 +26,11 @@ describe('chiedere un file da dentro l admin', () => {
 
   it('restituisce il file col nome che il server ha dichiarato', async () => {
     (global.fetch as any).mockResolvedValueOnce(
-      risposta({ disposition: 'attachment; filename="coreward-demo.json"' }),
+      risposta({ disposition: 'attachment; filename="kerdon-demo.json"' }),
     );
 
     const esito = await fetchFileForDownload('/privacy/my-data', 'riserva.json');
-    expect(esito.nome).toBe('coreward-demo.json');
+    expect(esito.nome).toBe('kerdon-demo.json');
   });
 
   it('senza intestazione usa il nome di riserva', async () => {

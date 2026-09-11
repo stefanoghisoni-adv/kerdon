@@ -14,7 +14,7 @@ Last updated: 6 September 2026
 Kerdon is installed.
 
 **Processor**: Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genoa (GE),
-Italy, VAT IT02705860993, contact support@coreward.app.
+Italy, VAT IT02705860993, contact support@kerdon.io.
 
 The merchant determines the purposes and means of processing its customers' data.
 Kerdon processes that data solely to provide the service, and solely on the
@@ -199,4 +199,4 @@ applicable, the EU-US Data Privacy Framework.
 ## 11. Audit
 
 The merchant may request the information necessary to verify compliance with this
-agreement, by writing to support@coreward.app.
+agreement, by writing to support@kerdon.io.

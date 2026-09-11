@@ -271,10 +271,19 @@ export function TrackingCredentialsCard({
           />
         )}
 
-        {/* Le istruzioni compaiono a progetto collegato: prima i due valori da
-            copiare non esistono, e un elenco di passi che comincia con "copia
-            questo" senza il "questo" e' una strada che finisce contro un muro. */}
-        {connected && (
+        {/* NASCOSTA FINO ALLA REVISIONE, per scelta del proprietario.
+            
+            Il codice resta intero e provato — rotte, verifica dell'endpoint e i
+            due asset in `integrations/` — perche' quello che manca non e' il
+            lavoro: e' il momento. Mostrare una strada di installazione mentre
+            l'app e' in revisione vuol dire farla guardare a chi la giudica
+            prima che sia stata provata da un merchant vero.
+            
+            Per riaccenderla si toglie `false &&`. Le istruzioni restano legate
+            al progetto collegato: prima i due valori da copiare non esistono, e
+            un elenco di passi che comincia con "copia questo" senza il "questo"
+            e' una strada che finisce contro un muro. */}
+        {false && connected && (
           <TrackingInstall
             appUrl={appUrl}
             path={install.path}

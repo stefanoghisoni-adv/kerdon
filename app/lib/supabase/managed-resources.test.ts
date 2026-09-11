@@ -93,10 +93,10 @@ describe('la verifica dopo il COMMIT', () => {
   });
 
   it('schemi diversi restano separati', () => {
-    const sql = buildExistenceCheckSQL([table('products'), table('users', 'coreward')]);
+    const sql = buildExistenceCheckSQL([table('products'), table('users', 'kerdon')]);
 
     expect(sql).toContain("(table_schema = 'public' AND table_name IN ('products'))");
-    expect(sql).toContain("(table_schema = 'coreward' AND table_name IN ('users'))");
+    expect(sql).toContain("(table_schema = 'kerdon' AND table_name IN ('users'))");
     expect(sql).toContain(' OR ');
   });
 

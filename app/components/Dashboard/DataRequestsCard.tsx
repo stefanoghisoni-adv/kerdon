@@ -46,7 +46,7 @@ export function DataRequestsCard({ requests }: Props) {
     setInCorso(id);
     setFallita(null);
     try {
-      await downloadFile(`/privacy/export/${id}`, 'coreward-data-request.json');
+      await downloadFile(`/privacy/export/${id}`, 'kerdon-data-request.json');
     } catch (err) {
       console.error('[dataRequests] esportazione non scaricata:', err);
       setFallita(id);

@@ -266,5 +266,5 @@ export function buildShopExport(rows: ShopExportRows, generatoIl: Date) {
 export function shopExportFilename(shopDomain: string, generatoIl: Date): string {
   const giorno = generatoIl.toISOString().slice(0, 10);
   const negozio = shopDomain.replace(/\.myshopify\.com$/, '').replace(/[^a-z0-9-]/gi, '-');
-  return `coreward-${negozio}-${giorno}.json`;
+  return `kerdon-${negozio}-${giorno}.json`;
 }

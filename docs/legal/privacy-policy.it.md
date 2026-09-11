@@ -8,7 +8,7 @@
 
 ## 1. Chi siamo
 
-Kerdon è un'applicazione per negozi Shopify, gestita da Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genova (GE), Italia, P. IVA IT02705860993. Puoi scriverci a support@coreward.app.
+Kerdon è un'applicazione per negozi Shopify, gestita da Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genova (GE), Italia, P. IVA IT02705860993. Puoi scriverci a support@kerdon.io.
 
 ## 2. Il nostro ruolo e il tuo
 
@@ -146,7 +146,7 @@ Se un cliente si rivolge direttamente a te, puoi anche cancellarne il record da 
 
 ## 9. I tuoi diritti
 
-Dove agiamo da titolari per i dati del tuo account, puoi chiedere accesso, rettifica, cancellazione, limitazione, portabilità od opporti al trattamento scrivendo a support@coreward.app. Hai inoltre il diritto di proporre reclamo all'autorità di controllo competente.
+Dove agiamo da titolari per i dati del tuo account, puoi chiedere accesso, rettifica, cancellazione, limitazione, portabilità od opporti al trattamento scrivendo a support@kerdon.io. Hai inoltre il diritto di proporre reclamo all'autorità di controllo competente.
 
 Dove agiamo da responsabili, le richieste che riguardano i tuoi clienti vanno indirizzate a te in quanto titolare; noi ti assistiamo nel rispondere.
 

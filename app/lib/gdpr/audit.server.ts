@@ -46,6 +46,13 @@ export type GdprJobType = 'gdpr_redact' | 'gdpr_data_request' | 'gdpr_shop_redac
  * `GDPR_AUDIT_SECRET`, se c'e', vince: serve a poter ruotare questa chiave da
  * sola, senza toccare quella con cui sono cifrati i token dei negozi.
  */
+//
+// L'etichetta porta il nome di prima del cambio, e resta cosi'. Non e' una
+// stringa da leggere: e' un ingrediente da cui si deriva la chiave, quindi
+// cambiarla cambia la chiave. Tutto cio' che e' gia' stato cifrato o firmato
+// con quella smetterebbe di potersi rileggere o verificare — e qui dentro
+// finiscono le prove di una cancellazione e gli identificativi di chi ha
+// revocato il consenso. Il nome del prodotto cambia, le chiavi no.
 const AUDIT_KEY_LABEL = 'coreward:gdpr-audit-ref:v2';
 
 function gdprAuditKey(): Buffer {

@@ -11,7 +11,7 @@ const QUANDO = new Date('2026-09-05T10:00:00.000Z');
 function righe(override: Partial<ShopExportRows> = {}): ShopExportRows {
   return {
     shop: {
-      shopDomain: 'coreward-demo.myshopify.com',
+      shopDomain: 'kerdon-demo.myshopify.com',
       primaryDomain: 'negozio.it',
       installedAt: new Date('2026-01-10T08:00:00.000Z'),
       uninstalledAt: null,
@@ -89,7 +89,7 @@ describe('la copia dei dati del negozio', () => {
   it('porta chi e il negozio, il piano e come e configurato', () => {
     const f = buildShopExport(righe(), QUANDO);
 
-    expect(f.negozio.dominio).toBe('coreward-demo.myshopify.com');
+    expect(f.negozio.dominio).toBe('kerdon-demo.myshopify.com');
     expect(f.negozio.permessi_concessi).toEqual([
       'read_products',
       'write_products',
@@ -125,7 +125,7 @@ describe('la copia dei dati del negozio', () => {
     const f = buildShopExport(righe({ supabaseConfig: null, trackingSetup: null }), QUANDO);
     expect(f.database_collegato).toBeNull();
     expect(f.tracciamento).toBeNull();
-    expect(f.negozio.dominio).toBe('coreward-demo.myshopify.com');
+    expect(f.negozio.dominio).toBe('kerdon-demo.myshopify.com');
   });
 
   it('dice a chi lo apre che i dati dei clienti non sono li dentro', () => {
@@ -133,10 +133,10 @@ describe('la copia dei dati del negozio', () => {
   });
 
   it('il nome del file distingue due negozi e porta il giorno', () => {
-    expect(shopExportFilename('coreward-demo.myshopify.com', QUANDO)).toBe(
-      'coreward-coreward-demo-2026-09-05.json',
+    expect(shopExportFilename('kerdon-demo.myshopify.com', QUANDO)).toBe(
+      'kerdon-kerdon-demo-2026-09-05.json',
     );
     // Un dominio proprio non deve poter uscire dal nome del file.
-    expect(shopExportFilename('negozio/../etc', QUANDO)).toBe('coreward-negozio----etc-2026-09-05.json');
+    expect(shopExportFilename('negozio/../etc', QUANDO)).toBe('kerdon-negozio----etc-2026-09-05.json');
   });
 });

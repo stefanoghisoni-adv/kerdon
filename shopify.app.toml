@@ -3,7 +3,11 @@
 # Questo file e' la fonte di verita': `shopify app deploy` sovrascrive i campi
 # del dashboard, non il contrario. Si modifica qui, poi si fa il deploy.
 #
-# URL di produzione: https://api.coreward.app
+# URL di produzione: https://api.kerdon.io
+#
+# L'indirizzo di prima, api.coreward.app, resta acceso e inoltra qui: una
+# sessione aperta o un webhook gia' in volo quando l'indirizzo e' cambiato non
+# deve cadere nel vuoto.
 #
 # Un solo redirect dichiarato, e per una ragione di sicurezza: un indirizzo
 # lasciato fra quelli consentiti dopo che non serve piu' e' un varco che si

@@ -13,7 +13,7 @@ Ultimo aggiornamento: 6 settembre 2026
 **Titolare del trattamento**: il merchant, cioè il soggetto intestatario del
 negozio Shopify su cui Kerdon è installata.
 
-**Responsabile del trattamento**: Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genova (GE), contatto support@coreward.app.
+**Responsabile del trattamento**: Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genova (GE), contatto support@kerdon.io.
 
 Il merchant decide finalità e mezzi del trattamento dei dati dei propri clienti.
 Kerdon li tratta solo per erogare il servizio e solo su sua istruzione.
@@ -203,4 +203,4 @@ ove applicabile, EU-US Data Privacy Framework.
 ## 11. Audit
 
 Il merchant può chiedere le informazioni necessarie a verificare il rispetto di
-questo accordo, scrivendo a support@coreward.app.
+questo accordo, scrivendo a support@kerdon.io.
