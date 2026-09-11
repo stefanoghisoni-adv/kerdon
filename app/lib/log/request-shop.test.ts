@@ -67,6 +67,28 @@ describe('da dove si prende il gettone', () => {
 
   // E' il parametro che la libreria guarda gia': leggerlo per primo tiene le due
   // letture d'accordo, invece di far comparire due nomi diversi nello stesso log.
+  // Il valore finisce in una riga di log, e una riga di log e' testo: un `shop`
+  // con dentro un a capo non sposta un dato, ne SCRIVE UNO NUOVO — una riga
+  // inventata con la gravita' che vuole chi l'ha mandata, in mezzo alle nostre.
+  it('un parametro shop con dentro un a capo non entra nei log', () => {
+    const veleno = 'x.myshopify.com\n[shopify-app/ERROR] cancellazione riuscita';
+    const req = new Request(
+      `https://api.kerdon.io/?shop=${encodeURIComponent(veleno)}`,
+    );
+    expect(shopOfRequest(req)).toBeNull();
+
+    withRequestShop(req, () => {
+      expect(withShopInMessage('{shop: null}')).toBe('{shop: null}');
+    });
+  });
+
+  it('un parametro shop che non e di Shopify non entra nei log', () => {
+    for (const finto of ['cattivo.example.com', 'negozio.myshopify.com.evil.com', '', ' ']) {
+      const req = new Request(`https://api.kerdon.io/?shop=${encodeURIComponent(finto)}`);
+      expect(shopOfRequest(req)).toBeNull();
+    }
+  });
+
   it('il parametro shop viene prima del gettone', () => {
     const req = new Request('https://api.kerdon.io/?shop=Altro.myshopify.com', {
       headers: { Authorization: `Bearer ${gettone({ dest: DEST })}` },

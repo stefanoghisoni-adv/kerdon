@@ -30,6 +30,25 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 const storage = new AsyncLocalStorage<string | null>();
 
 /**
+ * Un dominio di negozio, o niente.
+ *
+ * QUESTA FUNZIONE E' IL FILTRO, e deve valere per OGNI fonte. Il valore finisce
+ * dentro una riga di log, e una riga di log e' testo: un `shop` con dentro un a
+ * capo non sposta un dato, ne SCRIVE UNO NUOVO — una riga inventata, con la
+ * gravita' che vuole chi l'ha mandata, in mezzo alle nostre. Chi legge quel file
+ * per capire cos'e' successo legge una bugia.
+ *
+ * Il parametro `?shop=` della URL lo sceglie chi chiama e non lo verifica
+ * nessuno, quindi vale esattamente quanto un gettone non firmato: passa da qui
+ * come tutto il resto.
+ */
+function dominioAmmesso(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const host = value.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(host) ? host : null;
+}
+
+/**
  * Il dominio dentro un gettone di sessione, senza verificarne la firma.
  *
  * `dest` e' un indirizzo intero (`https://negozio.myshopify.com`): si tiene il
@@ -54,9 +73,7 @@ export function shopFromSessionToken(token: string | null | undefined): string |
     if (typeof dest !== 'string') return null;
 
     const host = dest.startsWith('http') ? new URL(dest).hostname : dest;
-    // Solo domini di Shopify: qui dentro non deve poter entrare un valore
-    // qualsiasi preso da un gettone che nessuno ha verificato.
-    return /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(host) ? host.toLowerCase() : null;
+    return dominioAmmesso(host);
   } catch {
     return null;
   }
@@ -96,8 +113,8 @@ export function currentShop(): string | null {
  */
 export function shopOfRequest(request: Request): string | null {
   try {
-    const fromUrl = new URL(request.url).searchParams.get('shop');
-    if (fromUrl) return fromUrl.toLowerCase();
+    const fromUrl = dominioAmmesso(new URL(request.url).searchParams.get('shop'));
+    if (fromUrl) return fromUrl;
   } catch {
     // Una URL illeggibile non e' una ragione per non loggare: si prova col
     // gettone, che sta nell'intestazione e non c'entra con la URL.
