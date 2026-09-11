@@ -107,11 +107,11 @@ prova.describe('il ponte del consenso in vetrina', () => {
 
     // L'annuncio sul dataLayer, e poi l'identificativo.
     await expect
-      .poll(() => page.evaluate(() => window.eventi('corew_identity').length))
+      .poll(() => page.evaluate(() => window.eventi('kerdon_identity').length))
       .toBe(1);
-    expect(await page.evaluate(() => window.eventi('corew_consent_granted').length)).toBe(1);
+    expect(await page.evaluate(() => window.eventi('kerdon_consent_granted').length)).toBe(1);
     expect(
-      await page.evaluate(() => window.eventi('corew_identity')[0].corew_external_id),
+      await page.evaluate(() => window.eventi('kerdon_identity')[0].kerdon_external_id),
     ).toBe(IDENTIFICATIVO);
 
     // E l'identificativo finisce sul carrello: e' cosi' che risale nell'ordine,
@@ -136,9 +136,9 @@ prova.describe('il ponte del consenso in vetrina', () => {
     expect(new URL(chiamate[0].url).searchParams.get('consent')).toBe('v1.a0.m0');
 
     await expect
-      .poll(() => page.evaluate(() => window.eventi('corew_consent_withdrawn').length))
+      .poll(() => page.evaluate(() => window.eventi('kerdon_consent_withdrawn').length))
       .toBe(1);
-    expect(await page.evaluate(() => window.eventi('corew_identity').length)).toBe(0);
+    expect(await page.evaluate(() => window.eventi('kerdon_identity').length)).toBe(0);
 
     // Il carrello viene ripulito, non lasciato com'era.
     await expect.poll(() => carrello.length).toBe(1);
@@ -196,7 +196,7 @@ prova.describe('il ponte del consenso in vetrina', () => {
     await page.waitForTimeout(300);
 
     expect(chiamate).toHaveLength(1);
-    expect(await page.evaluate(() => window.eventi('corew_consent_granted').length)).toBe(1);
+    expect(await page.evaluate(() => window.eventi('kerdon_consent_granted').length)).toBe(1);
   });
 
   prova('se l endpoint non conia niente, il ponte non insiste', async ({ page }) => {
@@ -208,7 +208,7 @@ prova.describe('il ponte del consenso in vetrina', () => {
 
     // Nessun identificativo nella risposta E' una risposta: l'endpoint ha
     // deciso di non coniare, e non si riprova.
-    expect(await page.evaluate(() => window.eventi('corew_identity').length)).toBe(0);
+    expect(await page.evaluate(() => window.eventi('kerdon_identity').length)).toBe(0);
     expect(carrello).toHaveLength(0);
   });
 
@@ -224,6 +224,6 @@ prova.describe('il ponte del consenso in vetrina', () => {
     expect(await cookie(page, CONSENT_COOKIE)).toBe('v1.a1');
     expect(chiamate).toHaveLength(0);
     expect(carrello).toHaveLength(0);
-    expect(await page.evaluate(() => window.eventi('corew_identity').length)).toBe(0);
+    expect(await page.evaluate(() => window.eventi('kerdon_identity').length)).toBe(0);
   });
 });

@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import {
   EXTERNAL_ID_HEADER,
+  LEGACY_EXTERNAL_ID_HEADER,
   expiredExternalIdCookie,
   externalIdCookie,
   incomingExternalId,
@@ -12,6 +13,7 @@ import {
 } from '~/lib/ingest/ingest-guard.server';
 import {
   evaluateVisitorConsent,
+  LEGACY_SALE_OF_DATA_HEADER,
   SALE_OF_DATA_HEADER,
   type ConsentDecision,
 } from '~/lib/tracking/consent';
@@ -133,11 +135,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const headers = new Headers({
     'Content-Type': 'application/json',
+    // Tutti e due i nomi, finche' i container non sono passati al nuovo: uno
+    // rimasto indietro non troverebbe l'identificativo e smetterebbe di
+    // riconoscere le persone, senza un errore che lo dica.
     [EXTERNAL_ID_HEADER]: externalId,
+    [LEGACY_EXTERNAL_ID_HEADER]: externalId,
     // Cosa ha detto il visitatore sulla condivisione con terzi. Non cambia
     // niente qui: serve a chi, a valle, decide se mandare questo identificativo
     // a una piattaforma pubblicitaria.
     [SALE_OF_DATA_HEADER]: consent.consent.saleOfData,
+    [LEGACY_SALE_OF_DATA_HEADER]: consent.consent.saleOfData,
     // Un identificativo si conia una volta e vale per sempre: farlo mettere in
     // cache vorrebbe dire darne lo stesso a due browser diversi.
     'Cache-Control': 'no-store',
@@ -184,6 +191,7 @@ async function withoutIdentifier(
   const headers = new Headers({
     'Content-Type': 'application/json',
     [SALE_OF_DATA_HEADER]: consent.consent.saleOfData,
+    [LEGACY_SALE_OF_DATA_HEADER]: consent.consent.saleOfData,
     'Cache-Control': 'no-store',
   });
 

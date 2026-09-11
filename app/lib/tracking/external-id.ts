@@ -6,7 +6,7 @@
  * Senza, ogni visita e' una persona nuova e il profitto per cliente non si puo'
  * costruire.
  *
- * Il formato e' `corew_<32 caratteri casuali>`. Due parti, e bastano:
+ * Il formato e' `kerdon_<32 caratteri casuali>`. Due parti, e bastano:
  *
  *  - il prefisso lo rende riconoscibile fra i cookie di un negozio, dove ce ne
  *    sono decine di terzi diversi;
@@ -119,7 +119,10 @@ export const EXTERNAL_ID_COOKIE = 'kerdon_eid';
  * impostazioni dell'app, dietro sessione amministratore, da dove il merchant
  * lo copia dentro il proprio container.
  */
-export const EXTERNAL_ID_HEADER = 'X-CoreW-External-Id';
+export const EXTERNAL_ID_HEADER = 'X-Kerdon-External-Id';
+
+/** Il nome di prima del cambio: si legge e si manda ancora, accanto al nuovo. */
+export const LEGACY_EXTERNAL_ID_HEADER = 'X-CoreW-External-Id';
 
 /**
  * Come il container ci rimanda il valore che il browser ha gia'.
@@ -236,7 +239,8 @@ export function readExternalId(cookieHeader: string | null | undefined): string 
  * difesa contro chi provasse a farsi assegnare un identificativo scelto da lui.
  */
 export function incomingExternalId(request: Request): string | null {
-  const forwarded = request.headers.get(EXTERNAL_ID_HEADER);
+  const forwarded =
+    request.headers.get(EXTERNAL_ID_HEADER) ?? request.headers.get(LEGACY_EXTERNAL_ID_HEADER);
   if (isExternalId(forwarded)) return forwarded;
 
   const fromQuery = new URL(request.url).searchParams.get(EXISTING_EXTERNAL_ID_PARAM);

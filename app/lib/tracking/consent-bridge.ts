@@ -1,4 +1,9 @@
-import { CONSENT_COOKIE, COMPACT_CONSENT_VERSION, CONSENT_QUERY_PARAM } from './consent';
+import {
+  CONSENT_COOKIE,
+  COMPACT_CONSENT_VERSION,
+  CONSENT_QUERY_PARAM,
+  LEGACY_CONSENT_COOKIE,
+} from './consent';
 import { EXISTING_EXTERNAL_ID_PARAM, EXTERNAL_ID_COOKIE } from './external-id';
 
 /**
@@ -39,10 +44,10 @@ import { EXISTING_EXTERNAL_ID_PARAM, EXTERNAL_ID_COOKIE } from './external-id';
  */
 
 /** Gli eventi che il ponte spinge sul dataLayer. Nomi stabili: ci si aggancia. */
-export const CONSENT_GRANTED_EVENT = 'corew_consent_granted';
-export const CONSENT_WITHDRAWN_EVENT = 'corew_consent_withdrawn';
+export const CONSENT_GRANTED_EVENT = 'kerdon_consent_granted';
+export const CONSENT_WITHDRAWN_EVENT = 'kerdon_consent_withdrawn';
 /** L'identificativo e' arrivato: da qui in poi i tag possono attaccarlo. */
-export const IDENTITY_EVENT = 'corew_identity';
+export const IDENTITY_EVENT = 'kerdon_identity';
 
 /**
  * L'attributo del tag `<script>` da cui si legge l'indirizzo dell'endpoint.
@@ -69,6 +74,7 @@ export function consentBridgeScript(): string {
   return `(function (win, doc) {
   var VERSION = ${JSON.stringify(COMPACT_CONSENT_VERSION)};
   var CONSENT_COOKIE = ${JSON.stringify(CONSENT_COOKIE)};
+  var LEGACY_CONSENT_COOKIE = ${JSON.stringify(LEGACY_CONSENT_COOKIE)};
   var ID_COOKIE = ${JSON.stringify(EXTERNAL_ID_COOKIE)};
   var CONSENT_PARAM = ${JSON.stringify(CONSENT_QUERY_PARAM)};
   var EXISTING_PARAM = ${JSON.stringify(EXISTING_EXTERNAL_ID_PARAM)};
@@ -217,7 +223,7 @@ export function consentBridgeScript(): string {
         // Nessun identificativo nella risposta e' una risposta: l'endpoint ha
         // deciso di non coniare. Non e' un errore e non si insiste.
         if (!id) return;
-        push(IDENTITY, { corew_external_id: id });
+        push(IDENTITY, { kerdon_external_id: id });
         cart(id);
       })['catch'](function () {});
   }
@@ -233,6 +239,10 @@ export function consentBridgeScript(): string {
     announced = current.compact;
 
     setCookie(CONSENT_COOKIE, current.compact, YEAR);
+    // Il cookie col nome di prima del cambio si cancella, non si aggiorna: due
+    // copie dello stesso permesso sono due cose che possono divergere, e la
+    // divergenza su un consenso e' la piu' brutta da spiegare.
+    if (readCookie(LEGACY_CONSENT_COOKIE)) setCookie(LEGACY_CONSENT_COOKIE, '', 0);
 
     if (current.withdrawn) {
       // Si chiama l'endpoint anche qui, e prima di cancellare: e' l'unico modo
@@ -241,12 +251,12 @@ export function consentBridgeScript(): string {
       ask(current.compact, false);
       setCookie(ID_COOKIE, '', 0);
       cart('');
-      push(WITHDRAWN, { corew_consent: current.compact });
+      push(WITHDRAWN, { kerdon_consent: current.compact });
       return;
     }
 
     if (current.allowed) {
-      push(GRANTED, { corew_consent: current.compact });
+      push(GRANTED, { kerdon_consent: current.compact });
       ask(current.compact, true);
     }
   }

@@ -26,7 +26,7 @@ import { hydrateRoot } from 'react-dom/client';
  * Questa copre il caso che ci riguarda — chi ha l'app aperta mentre si rilascia
  * — senza coprirne altri che quella coprirebbe.
  */
-const RICARICATA = 'corew:ricaricata-dopo-rilascio';
+const RICARICATA = 'kerdon:ricaricata-dopo-rilascio';
 
 window.addEventListener('vite:preloadError', (event) => {
   let gia = false;

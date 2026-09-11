@@ -73,7 +73,21 @@ export const UNKNOWN_CONSENT: VisitorConsent = {
 export const CONSENT_QUERY_PARAM = 'consent';
 
 /** Per chi ha un container che sa aggiungere header. Stessa grammatica. */
-export const CONSENT_HEADER = 'X-CoreW-Consent';
+export const CONSENT_HEADER = 'X-Kerdon-Consent';
+/**
+ * I nomi di prima del cambio, che si continuano ad ACCETTARE.
+ *
+ * Un'intestazione e un cookie sono un protocollo: da una parte c'e' il
+ * container del merchant, che non si aggiorna nell'istante in cui ci
+ * aggiorniamo noi. Se leggessimo solo il nome nuovo, un container ancora
+ * sul vecchio ci manderebbe il consenso e noi non lo vedremmo — e siccome
+ * l'assenza di segnale vale NO, il tracciamento si spegnerebbe in silenzio,
+ * che e' il modo peggiore: nessun errore, solo dati che smettono di arrivare.
+ *
+ * In ingresso si accettano tutti e due, in uscita si mandano tutti e due. Si
+ * potra' togliere il vecchio quando nessun container lo usera' piu'.
+ */
+export const LEGACY_CONSENT_HEADER = 'X-CoreW-Consent';
 
 /**
  * Il cookie di Shopify, se arriva fino a qui.
@@ -93,7 +107,10 @@ export const SHOPIFY_CONSENT_COOKIE = '_tracking_consent';
  * attaccare alla chiamata. Non e' una prova di consenso e non sostituisce
  * quella di Shopify — e' il modo in cui il "si" gia' dato arriva fin qui.
  */
-export const CONSENT_COOKIE = 'corew_consent';
+export const CONSENT_COOKIE = 'kerdon_consent';
+
+/** Il nome di prima del cambio: si legge ancora, non si scrive piu'. */
+export const LEGACY_CONSENT_COOKIE = 'corew_consent';
 
 /**
  * L'header con cui rispondiamo sulla condivisione con terzi.
@@ -102,7 +119,10 @@ export const CONSENT_COOKIE = 'corew_consent';
  * una piattaforma pubblicitaria. Vale `granted`, `denied` o `unknown`, e
  * `unknown` non e' un permesso.
  */
-export const SALE_OF_DATA_HEADER = 'X-CoreW-Sale-Of-Data';
+export const SALE_OF_DATA_HEADER = 'X-Kerdon-Sale-Of-Data';
+
+/** Il nome di prima del cambio: si manda ancora, accanto a quello nuovo. */
+export const LEGACY_SALE_OF_DATA_HEADER = 'X-CoreW-Sale-Of-Data';
 
 /**
  * La forma compatta: `v1.a1.m1.p0.s0`.
@@ -351,7 +371,9 @@ export function consentFromRequest(
     parseCompactConsent(params.get(CONSENT_QUERY_PARAM)) ?? parseNamedConsent(params);
   if (fromQuery) return { consent: fromQuery, source: 'query' };
 
-  const fromHeader = parseCompactConsent(request.headers.get(CONSENT_HEADER));
+  const fromHeader = parseCompactConsent(
+    request.headers.get(CONSENT_HEADER) ?? request.headers.get(LEGACY_CONSENT_HEADER),
+  );
   if (fromHeader) return { consent: fromHeader, source: 'header' };
 
   const fromBody = consentFromFields(fields);

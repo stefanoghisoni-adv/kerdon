@@ -5,13 +5,18 @@ import {
   newExternalId,
   incomingExternalId,
   EXTERNAL_ID_HEADER,
+  LEGACY_EXTERNAL_ID_HEADER,
 } from '~/lib/tracking/external-id';
 import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
 import {
   resolveShopReadContext,
   type ShopReadContext,
 } from '~/lib/read-proxy/context.server';
-import { evaluateVisitorConsent, SALE_OF_DATA_HEADER } from '~/lib/tracking/consent';
+import {
+  evaluateVisitorConsent,
+  LEGACY_SALE_OF_DATA_HEADER,
+  SALE_OF_DATA_HEADER,
+} from '~/lib/tracking/consent';
 import { revokeTrackingIdentity } from '~/lib/consent/revoke-tracking.server';
 import {
   allowedReadTables,
@@ -175,7 +180,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // La condivisione con terzi si dichiara sempre, permesso o no: e' un'altra
   // domanda, e la risposta serve a valle anche quando qui non si conia niente.
+  // Tutti e due i nomi: il container del merchant non si aggiorna nell'istante
+  // in cui ci aggiorniamo noi, e uno ancora sul nome di prima smetterebbe di
+  // trovare la risposta senza che nessuno se ne accorga.
   result.response.headers.set(SALE_OF_DATA_HEADER, consent.consent.saleOfData);
+  result.response.headers.set(LEGACY_SALE_OF_DATA_HEADER, consent.consent.saleOfData);
 
   // Qui c'era un `Access-Control-Expose-Headers`, e prometteva una cosa che non
   // e' mai stata vera: diceva a JavaScript cross-origin quali header poteva
@@ -225,6 +234,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // `SameSite=None; Secure` dal nostro dominio e' di terze parti e Safari e
   // Firefox lo scartano.
   result.response.headers.set(EXTERNAL_ID_HEADER, externalId);
+  result.response.headers.set(LEGACY_EXTERNAL_ID_HEADER, externalId);
 
   return result.response;
 }

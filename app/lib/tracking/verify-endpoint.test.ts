@@ -161,7 +161,7 @@ describe('verifyTrackingEndpoint', () => {
       if (consent.includes('a0')) return reply({ cookies: [EXPIRED_COOKIE] });
       const headers = new Headers({
         'Content-Type': 'application/json',
-        'X-CoreW-External-Id': ID,
+        'X-Kerdon-External-Id': ID,
       });
       headers.append('Set-Cookie', GOOD_COOKIE);
       return new Response('[]', { status: 200, headers });

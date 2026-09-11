@@ -8,8 +8,8 @@
 
 interface RigaDataLayer {
   event?: string;
-  corew_external_id?: string;
-  corew_consent?: string;
+  kerdon_external_id?: string;
+  kerdon_consent?: string;
 }
 
 declare global {

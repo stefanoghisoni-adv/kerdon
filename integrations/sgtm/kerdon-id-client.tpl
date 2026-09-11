@@ -122,9 +122,10 @@ const JSON = require('JSON');
 
 // I nomi che questo Client condivide con Kerdon. Cambiarli qui non basta.
 const ID_COOKIE = 'kerdon_eid';
-const CONSENT_COOKIE = 'corew_consent';
+const CONSENT_COOKIE = 'kerdon_consent';
+const LEGACY_CONSENT_COOKIE = 'corew_consent';
 const SHOPIFY_CONSENT_COOKIE = '_tracking_consent';
-const ID_HEADER = 'X-CoreW-External-Id';
+const ID_HEADER = 'X-Kerdon-External-Id';
 const CONSENT_PARAM = 'consent';
 const EXISTING_PARAM = 'existing_external_id';
 
@@ -217,9 +218,20 @@ function isAlphanumeric(text) {
  */
 function isIdentifier(value) {
   if (!value) return false;
-  if (value.indexOf('corew_') !== 0) return false;
 
-  const rest = value.substring(6);
+  // Due prefissi: quello di adesso e quello di prima del cambio di nome. Gli
+  // identificativi coniati allora sono nei browser delle persone, e rifiutarli
+  // vorrebbe dire coniarne uno nuovo a chiunque torni — cioe' perdere proprio
+  // cio' per cui esistono.
+  let rest;
+  if (value.indexOf('kerdon_') === 0) {
+    rest = value.substring(7);
+  } else if (value.indexOf('corew_') === 0) {
+    rest = value.substring(6);
+  } else {
+    return false;
+  }
+
   const cut = rest.indexOf('_');
   if (cut < 0) return rest.length === 32 && isAlphanumeric(rest);
 
@@ -316,7 +328,11 @@ function readConsent() {
   const fromShopify = parseShopifyConsent(cookie(SHOPIFY_CONSENT_COOKIE));
   if (fromShopify) return fromShopify;
 
-  return parseCompact(cookie(CONSENT_COOKIE));
+  // Anche il nome di prima del cambio: in un browser che aveva gia' risposto
+  // il permesso e' scritto li', e non vederlo vorrebbe dire trattare come
+  // silenzio un si' gia' dato — cioe' smettere di tracciare chi aveva detto di
+  // si', senza un errore che lo spieghi.
+  return parseCompact(cookie(CONSENT_COOKIE) || cookie(LEGACY_CONSENT_COOKIE));
 }
 
 /**
@@ -384,7 +400,7 @@ function upstreamUrl() {
 /** L'identificativo dentro la risposta di Kerdon: header o corpo. */
 function identifierFrom(result) {
   const headers = result.headers || {};
-  const fromHeader = headers['x-corew-external-id'];
+  const fromHeader = headers['x-kerdon-external-id'] || headers['x-corew-external-id'];
   if (isIdentifier(fromHeader)) return fromHeader;
 
   const body = JSON.parse(result.body);
@@ -407,7 +423,7 @@ if (!allowed) {
     plantCookie('', 0);
     if (existing) {
       sendHttpGet(upstreamUrl(), {
-        headers: { apikey: data.readToken, 'X-CoreW-External-Id': existing },
+        headers: { apikey: data.readToken, 'X-Kerdon-External-Id': existing },
         timeout: 5000
       }).then(() => {
         empty();
@@ -419,7 +435,7 @@ if (!allowed) {
 } else {
   sendHttpGet(upstreamUrl(), {
     headers: existing
-      ? { apikey: data.readToken, 'X-CoreW-External-Id': existing }
+      ? { apikey: data.readToken, 'X-Kerdon-External-Id': existing }
       : { apikey: data.readToken },
     timeout: 5000
   }).then((result) => {
@@ -549,7 +565,7 @@ ___SERVER_PERMISSIONS___
               },
               {
                 "type": 1,
-                "string": "X-CoreW-External-Id"
+                "string": "X-Kerdon-External-Id"
               }
             ]
           }
@@ -597,6 +613,14 @@ ___SERVER_PERMISSIONS___
               {
                 "type": 1,
                 "string": "kerdon_eid"
+              },
+              {
+                "type": 1,
+                "string": "corew_eid"
+              },
+              {
+                "type": 1,
+                "string": "kerdon_consent"
               },
               {
                 "type": 1,
