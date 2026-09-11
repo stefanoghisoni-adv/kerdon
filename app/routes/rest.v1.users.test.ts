@@ -1,17 +1,34 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { VisitorConsent } from '~/lib/tracking/consent';
 
-const resolveShopReadContext = vi.fn();
-vi.mock('~/lib/read-proxy/context.server', () => ({ resolveShopReadContext }));
-// Stesso ordine del vero `extractReadProxyToken`: prima Authorization, poi
-// apikey. Il template li manda sempre tutti e due.
-vi.mock('~/lib/read-proxy/token.server', () => ({
-  extractReadProxyToken: (request: Request) => {
-    const auth = request.headers.get('authorization');
-    const bearer = auth && /^Bearer\s+/i.test(auth) ? auth.replace(/^Bearer\s+/i, '').trim() : '';
-    if (bearer) return bearer;
-    const apikey = request.headers.get('apikey');
-    return apikey && apikey.trim() ? apikey.trim() : null;
+// Il cancello delle scritture e' finto qui dentro, e ha i suoi test in
+// `lib/ingest/ingest-guard.test`: credenziale, ambito, tetti, quota, firma e
+// finestra si provano una volta sola, la' dove vivono. Qui interessa quello che
+// la rotta fa DOPO aver ottenuto il permesso — e che i rifiuti li restituisca
+// tali e quali invece di inventarsene di propri.
+const ingestCtx = { shopId: 's1', projectRef: 'abcdef', serviceRoleKey: 'k', customersEnabled: true };
+let ingestRefusal: { status: number; error: string } | null = null;
+const finish = vi.fn();
+vi.mock('~/lib/ingest/ingest-guard.server', () => ({
+  authorizeIngest: async (request: Request) => {
+    if (ingestRefusal) {
+      return {
+        ok: false,
+        response: new Response(JSON.stringify({ error: ingestRefusal.error }), {
+          status: ingestRefusal.status,
+        }),
+      };
+    }
+    try {
+      return { ok: true, ctx: ingestCtx, body: await request.json(), credential: 'ingest', finish };
+    } catch {
+      // Il corpo illeggibile lo rifiuta il cancello, che e' anche l'unico posto
+      // dove il corpo viene letto.
+      return {
+        ok: false,
+        response: new Response(JSON.stringify({ error: 'malformed' }), { status: 400 }),
+      };
+    }
   },
 }));
 
@@ -80,10 +97,7 @@ function write(body: unknown, headers: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  resolveShopReadContext.mockResolvedValue({
-    kind: 'ok',
-    ctx: { shopId: 's1', canReadData: true, projectRef: 'abcdef', serviceRoleKey: 'k' },
-  });
+  ingestRefusal = null;
   // Di default: consenso completo.
   evaluateVisitorConsent.mockReturnValue({
     consent: consentGranted(),
@@ -112,12 +126,6 @@ describe('/rest/v1/users — la forma che il template sa mandare', () => {
       browser: 'Safari',
       deviceType: 'mobile',
     });
-  });
-
-  it('il token va bene sia in apikey sia in Authorization', async () => {
-    // Il template li manda sempre tutti e due, e non e' modificabile.
-    const res = await write({ external_id: VISITATORE }, { apikey: '' });
-    expect(res.status).toBe(200);
   });
 
   it('in GET non si legge: l elenco dei browser non esce da un endpoint pubblico', async () => {
@@ -180,18 +188,15 @@ describe('/rest/v1/users — cosa non entra', () => {
     expect(recordUserSeen).not.toHaveBeenCalled();
   });
 
-  it('senza token non si scrive nel database di nessuno', async () => {
-    resolveShopReadContext.mockResolvedValue({ kind: 'unknown' });
+  it('senza credenziale non si scrive nel database di nessuno', async () => {
+    ingestRefusal = { status: 401, error: 'unauthorized' };
     const res = await write({ external_id: VISITATORE });
     expect(res.status).toBe(401);
     expect(recordUserSeen).not.toHaveBeenCalled();
   });
 
-  it('tracciamento sospeso: non si scrive', async () => {
-    resolveShopReadContext.mockResolvedValue({
-      kind: 'ok',
-      ctx: { shopId: 's1', canReadData: false, projectRef: 'abcdef', serviceRoleKey: 'k' },
-    });
+  it('negozio che non puo scrivere: non si scrive', async () => {
+    ingestRefusal = { status: 403, error: 'forbidden' };
     const res = await write({ external_id: VISITATORE });
     expect(res.status).toBe(403);
     expect(recordUserSeen).not.toHaveBeenCalled();

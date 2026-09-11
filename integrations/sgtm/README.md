@@ -51,3 +51,42 @@ indirizzo di Google Cloud no.
 Sta nel campo del client, dentro il container. La chiamata dalla vetrina va al
 container, il container chiama Kerdon: chi apre gli strumenti di sviluppo su
 quel negozio non trova nessuna credenziale, perche' non ce n'e' mai passata una.
+
+## La chiave di invio, e la data da segnarsi
+
+Dal 2026 il giro del tracciamento ha **due** credenziali, non una: quella di
+**lettura**, che serve a farsi restituire dati gia' raccolti, e quella di
+**invio**, che serve a comunicare chi sta visitando adesso. Il perche' sta in
+[`../README.md`](../README.md): questa rotta non si limita a leggere — conia
+l'identificativo del visitatore e ne registra la riga — e finche' per farlo
+bastava la chiave di lettura, chi ne aveva una per consultare i dati poteva
+anche scriverli.
+
+**Il template di questa cartella usa ancora la sola chiave di lettura.** Una
+versione aggiornata, che firma le chiamate con la chiave di invio, e' in
+lavorazione; il Worker di Cloudflare la usa gia'.
+
+**Fino al 1 dicembre 2026** questa installazione continua a funzionare
+esattamente com'e'. Chi sta su questa strada trovera' in Impostazioni l'avviso
+che l'installazione va aggiornata, e le istruzioni, ben prima di quella data —
+non c'e' niente da fare adesso.
+
+Chi vuole passare prima ha due possibilita': spostarsi sul Worker di Cloudflare,
+oppure — per chi se la cava con i template — far firmare le chiamate dal proprio
+container. La stringa da firmare, in HMAC-SHA256 con il segreto di invio, e'
+questa, un pezzo per riga:
+
+```
+v1
+ingest
+ingest:identity
+<millisecondi dall'epoch>
+GET
+/rest/v1/tracking_id
+<SHA-256 del corpo, base64url; per una GET, quello della stringa vuota>
+<una chiave di idempotenza diversa a ogni chiamata>
+```
+
+e va nelle intestazioni `X-Kerdon-Key-Id`, `X-Kerdon-Timestamp`,
+`X-Kerdon-Signature` (`v1=<firma in base64url>`) e `X-Kerdon-Idempotency-Key`.
+La firma vale cinque minuti attorno al proprio istante.

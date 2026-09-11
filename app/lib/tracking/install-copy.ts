@@ -73,6 +73,7 @@ const it: InstallCopy = {
     sgtm: [
       "Nel container server-side, apri Modelli → Modelli client → Nuovo, e importa il file kerdon-id-client.tpl.",
       "Crea un client con quel modello e compila i campi: il percorso su cui rispondere (/kerdon/id), l’indirizzo dell’app e la chiave di lettura che trovi qui sopra, e il dominio del tuo negozio.",
+      "Su questa strada la chiave di invio non serve ancora: te lo diremo qui, con le istruzioni, ben prima che serva.",
       "Pubblica il container.",
       "Aggiungi alle pagine del negozio lo script qui sotto, nel tema prima di </head> oppure come tag personalizzato.",
       "Torna qui e premi Verifica installazione.",
@@ -80,6 +81,7 @@ const it: InstallCopy = {
     cloudflare: [
       "Scarica la cartella cloudflare-worker e apri wrangler.toml: sostituisci negozio.it con il dominio vero del tuo negozio.",
       "Carica la chiave di lettura come segreto, con npx wrangler secret put KERDON_TOKEN. Non scriverla nel file.",
+      "Crea qui sopra la chiave di invio e caricala come segreto: il pezzo prima del punto con npx wrangler secret put KERDON_INGEST_KEY_ID, quello dopo con npx wrangler secret put KERDON_INGEST_SECRET. La vedi una volta sola.",
       "Pubblica con npx wrangler deploy.",
       "Aggiungi alle pagine del negozio lo script qui sotto, nel tema prima di </head> oppure come tag personalizzato.",
       "Torna qui e premi Verifica installazione.",
@@ -164,6 +166,7 @@ const en: InstallCopy = {
     sgtm: [
       "In your server-side container, open Templates → Client Templates → New, and import the kerdon-id-client.tpl file.",
       "Create a client from that template and fill in the fields: the path it answers on (/kerdon/id), the app address and the read key shown above, and your store's domain.",
+      "On this route the sending key is not needed yet: we will tell you here, with the instructions, well before it is.",
       "Publish the container.",
       "Add the snippet below to your store pages, in the theme before </head> or as a custom tag.",
       "Come back here and press Verify installation.",
@@ -171,6 +174,7 @@ const en: InstallCopy = {
     cloudflare: [
       "Download the cloudflare-worker folder and open wrangler.toml: replace negozio.it with your store's real domain.",
       "Upload the read key as a secret, with npx wrangler secret put KERDON_TOKEN. Do not write it in the file.",
+      "Create the sending key above and upload it as a secret too: the part before the dot with npx wrangler secret put KERDON_INGEST_KEY_ID, the part after it with npx wrangler secret put KERDON_INGEST_SECRET. You only see it once.",
       "Publish with npx wrangler deploy.",
       "Add the snippet below to your store pages, in the theme before </head> or as a custom tag.",
       "Come back here and press Verify installation.",

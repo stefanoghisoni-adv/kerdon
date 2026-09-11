@@ -1,15 +1,10 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { isExternalId } from '~/lib/tracking/external-id';
-import {
-  identifyVisitor,
-  supabaseFromReadContext,
-  type IdentifyOutcome,
-} from '~/lib/tracking/users.server';
+import { identifyVisitor, supabaseFromReadContext } from '~/lib/tracking/users.server';
 import { revokeTrackingIdentity } from '~/lib/consent/revoke-tracking.server';
 import { evaluateVisitorConsent } from '~/lib/tracking/consent';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
-import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
-import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
+import { authorizeIngest } from '~/lib/ingest/ingest-guard.server';
 
 /**
  * L'identificazione prima dell'acquisto.
@@ -40,6 +35,14 @@ import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
  * merchant per poterci cercare sopra, e una cerimonia che nasconde il dato
  * proprio a chi lo sta gia' leggendo dall'altra parte.
  *
+ * QUESTA E' LA SCRITTURA PIU' PESANTE DELL'APP, ed e' il motivo per cui ha un
+ * ambito tutto suo. Legare un browser a una persona con nome e cognome e'
+ * l'unica cosa che, ottenuta da chi non doveva, permette di attribuirsi gli
+ * acquisti di qualcun altro. Una credenziale emessa per far scrivere le
+ * etichette di un browser non arriva qui, e — da quando l'ingest e' separato
+ * dalla lettura — non ci arriva nemmeno chi ha soltanto il token con cui il
+ * proxy serve i dati.
+ *
  * Detto questo, due cautele valgono comunque e non sono negoziabili.
  */
 export async function action({ request }: ActionFunctionArgs) {
@@ -55,29 +58,19 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ error: 'method_not_allowed' }, 405);
   }
 
-  // Stesso pedaggio del proxy e della rotta che conia gli identificativi: il
-  // token dice di quale negozio si parla. Senza, chiunque potrebbe scrivere
-  // legami fra browser e clienti nel database di un merchant.
-  const token = extractReadProxyToken(request);
-  const result = token ? await resolveShopReadContext(token) : { kind: 'unknown' as const };
-  if (result.kind !== 'ok') return json({ error: 'unauthorized' }, 401);
+  const permesso = await authorizeIngest(request, {
+    scope: 'ingest:links',
+    route: '/rest/v1/identify',
+  });
+  if (!permesso.ok) return permesso.response;
 
-  const { ctx } = result;
-  // Stesso cancello del proxy: un negozio con il tracciamento sospeso non
-  // scrive e non legge dati dei suoi clienti.
-  if (!ctx.canReadData) return json({ error: 'forbidden' }, 403);
-
-  let body: IdentifyBody;
-  try {
-    body = (await request.json()) as IdentifyBody;
-  } catch {
-    // Il corpo illeggibile si dichiara per quello che e', SENZA riportarlo:
-    // vedi la seconda cautela, qui sotto.
-    return json({ error: 'bad_request' }, 400);
-  }
+  const { ctx, body, finish } = permesso;
 
   const externalId = typeof body?.external_id === 'string' ? body.external_id.trim() : '';
-  if (!isExternalId(externalId)) return json({ error: 'bad_request' }, 400);
+  if (!isExternalId(externalId)) {
+    finish('bad_external_id', 400);
+    return json({ error: 'bad_request' }, 400);
+  }
 
   const supabase = supabaseFromReadContext(ctx);
 
@@ -93,7 +86,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // Se il no e' esplicito si cancella quello che c'era, invece di limitarsi a
   // non aggiungere: chi revoca mentre lascia la sua email sta chiedendo proprio
   // che i due non restino legati.
-  const consent = evaluateVisitorConsent(request, body as Record<string, unknown>);
+  const consent = evaluateVisitorConsent(request, body);
   if (!consent.allowed) {
     // La revoca si scrive prima di dirsi applicata, come sulle altre rotte. Qui
     // il corpo puo' portare anche l'email — che nel registro NON entra: il
@@ -103,11 +96,12 @@ export async function action({ request }: ActionFunctionArgs) {
       ? await revokeTrackingIdentity({ shopId: ctx.shopId, externalId })
       : null;
 
-    logIdentify(ctx.shopId, 'no_consent');
-
     if (esito?.retriable) {
+      finish('revoke_not_recorded', 503);
       return json({ error: 'revoke_not_recorded' }, 503, { 'Retry-After': '60' });
     }
+
+    finish('no_consent');
     return json({ ok: true, outcome: 'no_consent' }, 200);
   }
 
@@ -115,17 +109,25 @@ export async function action({ request }: ActionFunctionArgs) {
     supabase,
     {
       externalId,
-      email: body.email ?? null,
-      phone: body.phone ?? null,
+      email: asText(body.email),
+      phone: asText(body.phone),
       // Se il container li manda si scrivono, se non li manda restano vuoti:
       // sono un di piu' per segmentare, mai una condizione per riconoscere.
-      browser: body.browser ?? null,
-      deviceType: body.device_type ?? null,
+      browser: asText(body.browser),
+      deviceType: asText(body.device_type),
     },
     () => provisionUsersTable(ctx.shopId, supabase),
   );
 
-  logIdentify(ctx.shopId, outcome.outcome);
+  // SECONDA CAUTELA, ed e' quella che questa riga rispetta: nel log va l'esito,
+  // mai il contenuto. Un'email finita in una riga di log e' un dato personale
+  // uscito dal database del merchant e arrivato in un posto che nessuno ha
+  // dichiarato, che nessuno pota, e dove chi cerca dati personali non pensera'
+  // mai di guardare — a cominciare dal merchant stesso il giorno in cui deve
+  // rispondere a una richiesta di cancellazione. Cosa entra in quella riga non
+  // lo sceglie questa rotta: lo decide `ingest-guard`, in un posto solo per
+  // tutte e tre.
+  finish(outcome.outcome);
 
   // Sempre 200 quando la richiesta era ben formata, anche se il cliente non si
   // e' trovato: non trovarlo e' un esito normale — nella tabella dei clienti
@@ -148,12 +150,9 @@ export async function loader() {
   return json({ error: 'method_not_allowed' }, 405);
 }
 
-interface IdentifyBody {
-  external_id?: unknown;
-  email?: string | null;
-  phone?: string | null;
-  browser?: string | null;
-  device_type?: string | null;
+/** Solo stringhe: il corpo arriva da fuori e un oggetto qui non ci va. */
+function asText(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
 }
 
 function json(
@@ -165,25 +164,4 @@ function json(
     status,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra },
   });
-}
-
-/**
- * SECONDA CAUTELA: nel log va l'esito, mai il contenuto.
- *
- * Un'email finita in una riga di log e' un dato personale uscito dal database
- * del merchant e finito in un posto che nessuno ha dichiarato, che nessuno
- * pota, e dove chi cerca dati personali non pensera' mai di guardare — a
- * cominciare dal merchant stesso il giorno in cui deve rispondere a una
- * richiesta di cancellazione. Qui si scrive che un'identificazione e' avvenuta
- * e com'e' andata: e' tutto cio' che serve per capire se il meccanismo
- * funziona, ed e' tutto cio' che si puo' scrivere.
- */
-function logIdentify(shopId: string, outcome: IdentifyOutcome): void {
-  console.log(
-    `[rest/v1/identify] ${JSON.stringify({
-      shop: shopId,
-      outcome,
-      at: new Date().toISOString(),
-    })}`,
-  );
 }

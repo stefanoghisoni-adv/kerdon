@@ -25,10 +25,24 @@ KERDON_URL = "https://api.coreward.app"
 # sottodomini, che e' quel che serve se la vetrina sta su `www` e il Worker no.
 COOKIE_DOMAIN = ".negozio.it"
 
-# KERDON_TOKEN NON VA QUI. E' la chiave di lettura del negozio, si copia dalla
-# pagina Impostazioni dell'app e si carica come segreto:
+# LE CHIAVI NON VANNO QUI. Sono tre valori e si caricano come segreti:
 #
-#   npx wrangler secret put KERDON_TOKEN
+#   npx wrangler secret put KERDON_TOKEN            # la chiave di lettura
+#   npx wrangler secret put KERDON_INGEST_KEY_ID    # l'identificativo di invio
+#   npx wrangler secret put KERDON_INGEST_SECRET    # il segreto di invio
 #
-# Scritta in questo file finirebbe nel controllo di versione, e una chiave in un
-# repository e' una chiave da revocare.
+# Scritte in questo file finirebbero nel controllo di versione, e una chiave in
+# un repository e' una chiave da revocare.
+#
+# PERCHE' DUE CREDENZIALI E NON UNA. Questa rotta non si limita a leggere:
+# conia l'identificativo del visitatore e ne registra la riga nel database del
+# negozio. Finche' bastava la chiave di lettura, chiunque l'avesse per farsi
+# restituire i dati poteva anche riempire quelle tabelle. Adesso leggere e
+# scrivere sono due permessi distinti, con due credenziali che si ruotano e si
+# revocano l'una senza toccare l'altra.
+#
+# Il segreto di invio non viaggia mai: il Worker lo usa per calcolare una firma,
+# ed e' la firma che parte. Il valore intero si vede UNA VOLTA SOLA, nel momento
+# in cui lo si crea in Impostazioni: se lo si perde se ne crea un altro, e
+# quello di prima continua a funzionare per due giorni — il tempo di
+# ripubblicare.

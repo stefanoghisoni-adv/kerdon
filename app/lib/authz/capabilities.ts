@@ -44,6 +44,7 @@ export const CAPABILITIES = [
   'sync_orders',
   'use_feeds',
   'use_read_proxy',
+  'ingest_tracking',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -366,6 +367,32 @@ export function evaluateShopCapabilities(
     use_read_proxy: decide(
       firstDenial(
         installed,
+        enabled(facts.trackingAuthorization) ? null : 'tracking_suspended',
+        trialOver,
+        connected,
+      ),
+    ),
+    // SCRIVERE NON E' LEGGERE, ed e' per questo che questa capacita' esiste
+    // accanto a quella sopra invece di essere la stessa.
+    //
+    // Le rotte di ingest non servono dati gia' sincronizzati: creano righe nel
+    // database del merchant passando dalla chiave di servizio, che salta le
+    // RLS. Finche' le due cose chiedevano lo stesso permesso, chi aveva una
+    // credenziale di sola lettura poteva anche creare browser e dichiarare che
+    // un browser qualsiasi appartiene a un cliente qualsiasi.
+    //
+    // La differenza nella regola e' una sola riga, ed e' quella che conta:
+    // l'ingest chiede ANCHE `authorization`, cioe' l'uso dell'app. Un negozio
+    // sospeso continua a leggere quello che c'e' — dati fermi, ma suoi e
+    // utilizzabili, ed e' una scelta deliberata da quando la lettura ha una sua
+    // autorizzazione — mentre smette di far crescere le sue tabelle. Leggere
+    // una tabella ferma e' inerte; continuare a scriverci dentro mentre tutto il
+    // resto e' fermo lascia al merchant, alla riattivazione, dei dati raccolti
+    // in un periodo in cui l'app per lui non esisteva.
+    ingest_tracking: decide(
+      firstDenial(
+        installed,
+        authorized,
         enabled(facts.trackingAuthorization) ? null : 'tracking_suspended',
         trialOver,
         connected,

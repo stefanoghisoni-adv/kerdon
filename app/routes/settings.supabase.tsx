@@ -19,6 +19,8 @@ import { prisma } from '~/db.server';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import { getReadProxyTokenForDisplay } from '~/lib/read-proxy/token.server';
 import { readInstallState } from '~/lib/tracking/install';
+import { listIngestKeys } from '~/lib/ingest/ingest-key.server';
+import { legacySunsetAt } from '~/lib/ingest/ingest-model';
 import { AccountCard } from '~/components/Dashboard/AccountCard';
 import { DatabaseCard, TrackingCredentialsCard } from '~/components/Dashboard/DatabaseCard';
 import { DataRequestsCard } from '~/components/Dashboard/DataRequestsCard';
@@ -185,9 +187,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
     verifiedAt: state.verifiedAt?.toISOString() ?? null,
   };
 
+  // Le credenziali di invio, e come sta andando il passaggio a quella nuova.
+  //
+  // MAI IL VALORE E MAI IL SEGRETO: da qui escono l'identificativo pubblico e
+  // le date, che sono tutto cio' che serve a dire "ce n'e' una, l'hai usata
+  // ieri, e la tua installazione va aggiornata entro il tal giorno". Il valore
+  // esiste solo nella risposta alla chiamata che lo emette — e' quella la
+  // differenza con la chiave di lettura, che invece si rilegge da qui ogni
+  // volta.
+  //
+  // `ingestLastLegacyAt` e' la sola cosa che dica al merchant che c'e'
+  // qualcosa da fare, e va detta molto prima che smetta di funzionare.
+  const ingest = {
+    keys: shop
+      ? (await listIngestKeys(shop.id)).map((chiave) => ({
+          keyId: chiave.keyId,
+          issuedAt: chiave.issuedAt.toISOString(),
+          expiresAt: chiave.expiresAt?.toISOString() ?? null,
+          revokedAt: chiave.revokedAt?.toISOString() ?? null,
+          lastUsedAt: chiave.lastUsedAt?.toISOString() ?? null,
+        }))
+      : [],
+    legacyLastAt: shop?.trackingSetup?.ingestLastLegacyAt?.toISOString() ?? null,
+    sunset: legacySunsetAt(process.env.INGEST_LEGACY_SUNSET).toISOString(),
+  };
+
   const config = shop?.supabaseConfig;
   if (!config) {
-    return json({ account, config: null, sync, authorization, dataRequests, install });
+    return json({ account, config: null, sync, authorization, dataRequests, install, ingest });
   }
 
   // Le letture di tracciamento non passano più dalla anon key del merchant ma
@@ -205,6 +232,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     authorization,
     dataRequests,
     install,
+    ingest,
     config: {
       readToken,
       proxyBaseUrl,
@@ -227,7 +255,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // automatica e non ha impostazioni, la chiave di lettura viene emessa una volta
 // al collegamento del progetto e le chiavi del progetto non si toccano da qui.
 export default function SupabaseSettings() {
-  const { account, config, sync, authorization, dataRequests, install } =
+  const { account, config, sync, authorization, dataRequests, install, ingest } =
     useLoaderData<typeof loader>();
   const t = useT();
   // L'avviso sul limite dei database: lo accende il menu dentro la card, e lo
@@ -442,6 +470,7 @@ export default function SupabaseSettings() {
                 appUrl={config?.proxyBaseUrl || null}
                 readKey={config?.readToken ?? null}
                 install={install}
+                ingest={ingest}
               />
               </BlockStack>
             </InlineGrid>

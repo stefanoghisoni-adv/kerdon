@@ -10,11 +10,19 @@
  * la chiamata dalla vetrina, parla con Kerdon da server a server e scrive il
  * cookie da qui.
  *
- * IL TOKEN STA QUI E NON NEL BROWSER. Arriva da un segreto del Worker
- * (`KERDON_TOKEN`) e non compare mai in una risposta: chi apre gli strumenti di
- * sviluppo su quel negozio non lo trova, perche' non e' mai passato di li'.
- * Se un giorno qualcuno lo mette in una pagina, il rimedio non e' nasconderlo
- * meglio: e' che questo Worker esiste apposta perche' non serva.
+ * LE CHIAVI STANNO QUI E NON NEL BROWSER. Arrivano da segreti del Worker e non
+ * compaiono mai in una risposta: chi apre gli strumenti di sviluppo su quel
+ * negozio non le trova, perche' non ci sono mai passate. Se un giorno qualcuno
+ * ne mette una in una pagina, il rimedio non e' nasconderla meglio: e' che
+ * questo Worker esiste apposta perche' non serva.
+ *
+ * E SONO DUE, non una. `KERDON_TOKEN` e' la chiave di LETTURA;
+ * `KERDON_INGEST_KEY_ID` + `KERDON_INGEST_SECRET` sono la credenziale di
+ * INVIO. Non e' burocrazia: questa rotta scrive — conia un identificativo e ne
+ * registra la riga nel database del negozio — e finche' bastava la chiave di
+ * lettura, chiunque l'avesse per farsi restituire i dati poteva anche riempire
+ * quelle tabelle. Il segreto di invio non viaggia mai: si usa per FIRMARE, ed e'
+ * la firma che parte.
  *
  * IL CONSENSO VIENE PRIMA, E L'ASSENZA DI SEGNALE E' UN NO. Non c'e' nessun
  * valore di ripiego e nessuna regola per paese qui dentro: se non arriva niente
@@ -37,6 +45,24 @@ const SHOPIFY_CONSENT_COOKIE = '_tracking_consent';
 const ID_HEADER = 'X-CoreW-External-Id';
 const CONSENT_PARAM = 'consent';
 const EXISTING_PARAM = 'existing_external_id';
+
+/**
+ * Le intestazioni con cui questo Worker si dichiara a Kerdon.
+ *
+ * PERCHE' NON BASTA PIU' LA SOLA CHIAVE. Fino a ieri questo Worker mandava la
+ * chiave di LETTURA e con quella si faceva anche coniare l'identificativo e
+ * scrivere la riga del browser. Erano due permessi diversi dietro un valore
+ * solo: chi avesse avuto quella chiave per farsi restituire i dati del negozio
+ * avrebbe potuto anche riempirgli le tabelle. Adesso l'invio ha una chiave sua,
+ * e non viaggia: quello che viaggia e' una FIRMA calcolata con essa.
+ */
+const INGEST_KEY_HEADER = 'X-Kerdon-Key-Id';
+const INGEST_TIMESTAMP_HEADER = 'X-Kerdon-Timestamp';
+const INGEST_SIGNATURE_HEADER = 'X-Kerdon-Signature';
+const INGEST_IDEMPOTENCY_HEADER = 'X-Kerdon-Idempotency-Key';
+
+/** L'ambito che serve a questa rotta, e nessun altro. */
+const INGEST_SCOPE = 'ingest:identity';
 
 /** Un anno di vita richiesta al browser. Richiesta, non garanzia. */
 const COOKIE_MAX_AGE = 31536000;
@@ -245,6 +271,65 @@ async function identifierFrom(response) {
   return typeof value === 'string' && ID_PATTERN.test(value) ? value : null;
 }
 
+/** Base64url senza riempimento, la forma in cui Kerdon scrive le impronte. */
+function base64url(bytes) {
+  let binario = '';
+  for (const byte of new Uint8Array(bytes)) binario += String.fromCharCode(byte);
+  return btoa(binario).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Le intestazioni firmate per una chiamata a Kerdon.
+ *
+ * COSA ENTRA NELLA FIRMA, e perche' ogni pezzo c'e': la versione e il
+ * destinatario (una firma composta altrove non vale qui), l'ambito (una firma
+ * catturata su una rotta leggera non si ripresenta su quella pesante),
+ * l'istante (una richiesta catturata scade), il metodo e il percorso, l'impronta
+ * del corpo — qui la stringa vuota, perche' la chiamata e' una GET — e una
+ * chiave di idempotenza, che distingue due invii uguali da un invio ripetuto.
+ *
+ * `{}` quando la chiave di invio non e' configurata: il Worker continua a
+ * funzionare con la sola chiave di lettura finche' la fase di convivenza dura.
+ * Passata la data di spegnimento, Kerdon rifiuta — ed e' scritto nel README
+ * che quella data esiste.
+ */
+async function ingestHeaders(env, path) {
+  const keyId = env.KERDON_INGEST_KEY_ID || '';
+  const secret = env.KERDON_INGEST_SECRET || '';
+  if (!keyId || !secret) return {};
+
+  const timestamp = String(Date.now());
+  const idempotency = crypto.randomUUID();
+  const corpoVuoto = base64url(await crypto.subtle.digest('SHA-256', new Uint8Array()));
+
+  const canonica = [
+    'v1',
+    'ingest',
+    INGEST_SCOPE,
+    timestamp,
+    'GET',
+    path,
+    corpoVuoto,
+    idempotency,
+  ].join('\n');
+
+  const chiave = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const firma = await crypto.subtle.sign('HMAC', chiave, new TextEncoder().encode(canonica));
+
+  return {
+    [INGEST_KEY_HEADER]: keyId,
+    [INGEST_TIMESTAMP_HEADER]: timestamp,
+    [INGEST_SIGNATURE_HEADER]: `v1=${base64url(firma)}`,
+    [INGEST_IDEMPOTENCY_HEADER]: idempotency,
+  };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -319,7 +404,11 @@ export default {
       if (existing) {
         try {
           await fetch(upstream.toString(), {
-            headers: { apikey: token, [ID_HEADER]: existing },
+            headers: {
+              apikey: token,
+              [ID_HEADER]: existing,
+              ...(await ingestHeaders(env, upstream.pathname)),
+            },
           });
         } catch {
           // Niente da fare da qui: il visitatore ha gia' smesso di essere
@@ -329,7 +418,7 @@ export default {
       return empty(headers);
     }
 
-    const upstreamHeaders = { apikey: token };
+    const upstreamHeaders = { apikey: token, ...(await ingestHeaders(env, upstream.pathname)) };
     if (existing) upstreamHeaders[ID_HEADER] = existing;
 
     let response;

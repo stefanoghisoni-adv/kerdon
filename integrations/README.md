@@ -27,16 +27,42 @@ l'identificativo che riceve. Non contiene nessuna chiave.
         data-kerdon-endpoint="https://negozio.it/kerdon/id" async></script>
 ```
 
-**Sul dominio del negozio** — il Worker o il Client di GTM. Questo pezzo ha la
-chiave di lettura, e per questo non sta nel browser.
+**Sul dominio del negozio** — il Worker o il Client di GTM. Questo pezzo ha le
+credenziali, e per questo non sta nel browser.
+
+## Le credenziali sono due, e non e' burocrazia
+
+| Chiave | A cosa serve | Come si presenta |
+|---|---|---|
+| **di lettura** | Farsi restituire dati gia' raccolti | Si manda tale e quale |
+| **di invio** | Comunicare chi sta visitando adesso | Non si manda: si usa per **firmare** |
+
+Il giro del tracciamento non solo legge: **conia** l'identificativo di un
+visitatore, ne scrive la riga e — quando la persona si rivela — la lega a un
+cliente del negozio. Finche' per tutte queste cose bastava la chiave di lettura,
+chi ne aveva una per consultare i dati poteva anche scriverli: creare browser, e
+dichiarare che un browser qualsiasi appartiene a un cliente qualsiasi. Adesso
+sono due permessi distinti, con due credenziali che si ruotano e si revocano
+l'una senza toccare l'altra.
+
+La chiave di invio **si vede una volta sola**, nel momento in cui la si crea in
+Impostazioni. Se si perde se ne crea un'altra: quella di prima continua a
+funzionare per due giorni, il tempo di ripubblicare il container o il Worker.
+Chi invece sospetta che sia finita nelle mani sbagliate non la sostituisce, la
+**revoca** — e quella non ha nessuna finestra.
+
+**Fino al 1 dicembre 2026** le installazioni con la sola chiave di lettura
+continuano a funzionare. Da quella data no. Un'installazione ancora indietro si
+riconosce da un avviso in Impostazioni, che compare molto prima.
 
 ## Le regole che nessuna delle due versioni puo' rompere
 
 1. **L'assenza di segnale e' un no.** Nessun valore di ripiego, nessuna regola
    per paese: se non arriva niente che dica cosa ha risposto il visitatore, non
    si chiama nessuno, non si conia niente, non si pianta nessun cookie.
-2. **Nessuna chiave nel browser.** La chiave di lettura sta nel Worker o nel
-   container, mai in una pagina.
+2. **Nessuna chiave nel browser.** Tutte e due le chiavi stanno nel Worker o nel
+   container, mai in una pagina. E il segreto di invio non esce nemmeno da li':
+   serve a calcolare una firma, ed e' la firma che viaggia.
 3. **Il cookie e' first-party.** Sul dominio da cui si vede la vetrina, con
    `Secure`, `Path=/`, un `SameSite` dichiarato e una durata.
 4. **La revoca disfa.** Al no esplicito il cookie scade e la riga sparisce.

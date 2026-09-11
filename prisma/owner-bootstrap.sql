@@ -104,6 +104,8 @@ CREATE TABLE "tracking_setups" (
     "install_path" TEXT,
     "endpoint" TEXT,
     "verified_at" TIMESTAMP(3),
+    "ingest_last_signed_at" TIMESTAMP(3),
+    "ingest_last_legacy_at" TIMESTAMP(3),
 
     CONSTRAINT "tracking_setups_pkey" PRIMARY KEY ("shop_id")
 );
@@ -755,6 +757,42 @@ CREATE INDEX "product_scope_shop_id_in_scope_idx" ON "product_scope"("shop_id", 
 
 -- AddForeignKey
 ALTER TABLE "product_scope" ADD CONSTRAINT "product_scope_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "tracking_ingest_keys" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "key_id" TEXT NOT NULL,
+    "secret_cipher" TEXT NOT NULL,
+    "value_hash" TEXT NOT NULL,
+    "audience" TEXT NOT NULL DEFAULT 'ingest',
+    "version" INTEGER NOT NULL DEFAULT 1,
+    "scopes" TEXT[],
+    "issued_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "superseded_at" TIMESTAMP(3),
+    "expires_at" TIMESTAMP(3),
+    "revoked_at" TIMESTAMP(3),
+    "last_used_at" TIMESTAMP(3),
+
+    CONSTRAINT "tracking_ingest_keys_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "tracking_ingest_keys_key_id_key" ON "tracking_ingest_keys"("key_id");
+
+-- CreateIndex
+CREATE INDEX "tracking_ingest_keys_shop_id_revoked_at_idx" ON "tracking_ingest_keys"("shop_id", "revoked_at");
+
+-- AddForeignKey
+ALTER TABLE "tracking_ingest_keys" ADD CONSTRAINT "tracking_ingest_keys_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- La credenziale con cui si SCRIVE, separata da quella con cui si legge: le
+-- rotte che creano righe di visitatori e legano un browser a una persona
+-- passano dalla chiave di servizio del progetto del merchant, che salta le RLS,
+-- e finche' chiedevano lo stesso token del proxy chi aveva la sola lettura
+-- poteva anche scrivere. CASCADE e non SET NULL, al contrario delle prove: una
+-- credenziale che sopravvive al negozio a cui apriva la porta e' solo una
+-- chiave orfana ancora valida.
 
 -- Il tetto del piano decide cosa continua ad aggiornarsi, non cosa esiste: le
 -- righe in eccedenza si marcano ferme qui, e restano nel database del merchant.

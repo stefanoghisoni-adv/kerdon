@@ -97,6 +97,29 @@ export const en: typeof it = {
     open: "Open database",
     copy: "Copy",
     copied: "Copied!",
+
+    writeKey: "Sending key",
+    writeKeyHelp:
+      "The key your installation uses to tell Kerdon who is visiting your store. You see it once, when you create it: if you lose it, create another one.",
+    writeKeyNone: "Not created yet",
+    writeKeyActive: (n: number) => (n === 1 ? "1 active key" : `${n} active keys`),
+    writeKeyCreate: "Create the sending key",
+    writeKeyRotate: "Replace the key",
+    writeKeyRevoke: "Revoke now",
+    writeKeyWorking: "One moment…",
+    writeKeyFailed: "That could not be completed. Try again.",
+    writeKeyOnce: "Copy it now: this is the only time you can see it.",
+    writeKeyOverlap: (when: string) =>
+      `The previous key keeps working until ${when}: that is how long you have to publish the new one.`,
+    writeKeyRevokeTitle: "Revoke the sending key?",
+    writeKeyRevokeBody:
+      "From now on your installation stops sending data until you publish a new key. Do this if you think the key has ended up in the wrong hands.",
+    writeKeyRevoked: "Revoked.",
+    writeKeyLastUsed: (when: string) => `Last data received on ${when}`,
+    writeKeyNeverUsed: "No data received yet",
+    writeKeyUpdateNeeded: (when: string) =>
+      `Your installation still sends data with the read key. Update it by ${when}, or it will stop working on that date.`,
+    writeKeyUpToDate: "Installation up to date",
   },
 
   logs: {

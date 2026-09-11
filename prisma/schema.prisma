@@ -204,6 +204,7 @@ model Shop {
   webhookEvents            WebhookEvent[]
   consentRevocations       ConsentRevocation[]
   productScope             ProductScopeEntry[]
+  trackingIngestKeys       TrackingIngestKey[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -238,9 +239,95 @@ model TrackingSetup {
   /// scrivere un indirizzo e' una dichiarazione di intenti, non una prova.
   verifiedAt  DateTime? @map("verified_at")
 
+  /// L'ultima scrittura arrivata con la credenziale di ingest firmata.
+  ///
+  /// E' meta' della metrica di adozione: insieme alla colonna qui sotto dice se
+  /// questo negozio e' gia' passato alla chiave nuova o se scrive ancora con
+  /// quella di lettura. Una DATA e non un contatore, perche' un contatore
+  /// vorrebbe dire una scrittura sul database owner a ogni visita di ogni
+  /// vetrina per rispondere a una domanda che si fa una volta a settimana. Si
+  /// riscrive al massimo ogni dieci minuti (`INGEST_ADOPTION_THROTTLE_MS`).
+  ingestLastSignedAt DateTime? @map("ingest_last_signed_at")
+  /// L'ultima scrittura arrivata ancora con il token di lettura.
+  ///
+  /// L'altra meta', e quella che serve davvero: un negozio con questa colonna
+  /// recente e' un negozio la cui installazione va aggiornata prima della data
+  /// di spegnimento, e lo si sa PRIMA che smetta di funzionare invece di
+  /// scoprirlo dai dati che non arrivano piu'.
+  ingestLastLegacyAt DateTime? @map("ingest_last_legacy_at")
+
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("tracking_setups")
+}
+
+/// La credenziale con cui un negozio SCRIVE: righe di visitatori, etichette,
+/// legami fra un browser e una persona.
+///
+/// PERCHE' UNA TABELLA E NON DUE COLONNE SU `shops`, che e' come sta il token di
+/// lettura. Tre ragioni, e nessuna delle tre si risolve con delle colonne:
+///
+///  - LA ROTAZIONE HA BISOGNO DI DUE RIGHE VIVE INSIEME. Fra il momento in cui
+///    il merchant preme "ruota" e quello in cui il valore nuovo e' pubblicato
+///    nel suo container passano ore o giorni. Con due colonne, ruotare
+///    sovrascrive: il tracciamento si ferma finche' lui non arriva a
+///    ripubblicare, e una misura di sicurezza che costa un'interruzione e' una
+///    misura che nessuno usa.
+///  - GLI AMBITI SONO PER CREDENZIALE, non per negozio. Chi installa il ponte
+///    in vetrina ha bisogno di scrivere l'identificativo; non ha nessun bisogno
+///    di poter legare un browser a una persona. Un array su `shops` darebbe un
+///    permesso solo per tutte le chiavi del negozio, che e' lo stesso errore da
+///    cui si parte, in piccolo.
+///  - LA REVOCA DEV'ESSERE PER SINGOLA CHIAVE. "Questa e' finita dove non
+///    doveva" e' una frase su una credenziale, non su un negozio.
+model TrackingIngestKey {
+  id           String    @id @default(uuid())
+  shopId       String    @map("shop_id")
+  /// L'identificativo PUBBLICO: viaggia in chiaro nell'intestazione e sta in
+  /// chiaro qui. E' quello su cui si cerca la riga — senza, per trovare la
+  /// credenziale bisognerebbe provarle tutte oppure indicizzare il segreto.
+  keyId        String    @unique @map("key_id")
+  /// Il segreto, CIFRATO e non solo improntato.
+  ///
+  /// Un'impronta basta per una credenziale che viene presentata; questa non
+  /// viene presentata mai — serve a calcolare una firma, e per verificare una
+  /// firma HMAC bisogna poterla rifare. La chiave di cifratura e' derivata sua
+  /// (`kerdon:tracking-ingest-cipher:v1`): chi arrivasse ai token dei negozi
+  /// non arriva a queste.
+  secretCipher String    @map("secret_cipher")
+  /// L'impronta del valore INTERO, quello mostrato una volta sola.
+  ///
+  /// Non serve ad autorizzare — quello lo fa la firma — ma a riconoscere un
+  /// valore incollato dove non doveva: nella card di Impostazioni le due chiavi
+  /// stanno a due righe di distanza, e chi le scambia deve ottenere un rifiuto
+  /// comprensibile invece di una scrittura che sembra funzionare.
+  valueHash    String    @map("value_hash")
+  /// A chi e' rivolta. Scritto dentro la stringa firmata: una firma composta per
+  /// un altro destinatario non deve valere qui.
+  audience     String    @default("ingest")
+  /// La versione delle regole con cui si compone la firma.
+  version      Int       @default(1)
+  /// Cosa questa credenziale puo' scrivere, per nome. Ogni rotta chiede il
+  /// proprio e nient'altro.
+  scopes       String[]
+  issuedAt     DateTime  @default(now()) @map("issued_at")
+  /// Quando una rotazione l'ha messa in uscita. Da quel momento vale ancora,
+  /// ma fino a `expiresAt`.
+  supersededAt DateTime? @map("superseded_at")
+  /// La fine della finestra di sovrapposizione. null = nessuna scadenza.
+  expiresAt    DateTime? @map("expires_at")
+  /// La revoca, che NON ha nessuna finestra: si revoca quando si sa che una
+  /// chiave e' in mano a qualcun altro, e "vale ancora due giorni" sarebbe la
+  /// risposta sbagliata alla sola domanda che conta.
+  revokedAt    DateTime? @map("revoked_at")
+  /// Serve a una domanda sola e non urgente: questa chiave la usa ancora
+  /// qualcuno, o si puo' revocare? Scritta senza attendere.
+  lastUsedAt   DateTime? @map("last_used_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, revokedAt])
+  @@map("tracking_ingest_keys")
 }
 
 // Stati di autorizzazione di un negozio. Il tipo Postgres si chiama

@@ -4,26 +4,24 @@ import { recordUserSeen, supabaseFromReadContext } from '~/lib/tracking/users.se
 import { revokeTrackingIdentity } from '~/lib/consent/revoke-tracking.server';
 import { evaluateVisitorConsent } from '~/lib/tracking/consent';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
-import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
-import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
+import { authorizeIngest } from '~/lib/ingest/ingest-guard.server';
 
 /**
  * La scrittura della riga del visitatore, nella forma che il container sa
  * mandare.
  *
  * Il merchant scrive qui con il template "Supabase Writer", che fa una POST su
- * `{url}/rest/v1/{tableName}` con un oggetto JSON piatto e gli header
- * `apikey` + `Authorization: Bearer`. Quel codice non e' modificabile: la rotta
- * deve stare esattamente li' e accettare esattamente quella forma, o per chi usa
- * quel template non esiste.
+ * `{url}/rest/v1/{tableName}` con un oggetto JSON piatto. Quel codice non e'
+ * modificabile: la rotta deve stare esattamente li' e accettare esattamente
+ * quella forma, o per chi usa quel template non esiste.
  *
  * QUI DENTRO NON PASSA NIENTE DI QUEL CORPO. E' il punto piu' importante di
  * questo file. Il proxy inoltra al progetto del merchant con la chiave di
  * servizio, che salta le RLS: prendere l'oggetto che arriva e girarlo al
- * database vorrebbe dire lasciare che chiunque abbia il token scriva le colonne
- * che vuole con i privilegi massimi — a cominciare da `shopify_customer_id`,
- * cioe' la possibilita' di dichiarare che un browser qualsiasi appartiene a un
- * cliente qualsiasi.
+ * database vorrebbe dire lasciare che chiunque abbia la credenziale scriva le
+ * colonne che vuole con i privilegi massimi — a cominciare da
+ * `shopify_customer_id`, cioe' la possibilita' di dichiarare che un browser
+ * qualsiasi appartiene a un cliente qualsiasi.
  *
  * Quindi: si guardano le tre chiavi che conosciamo, il resto si scarta in
  * silenzio (in silenzio e non con un errore: un container che manda una chiave
@@ -33,6 +31,13 @@ import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
  * aggiornamento lo decide la nostra logica — e' sempre un upsert
  * sull'identificativo — non chi chiama.
  *
+ * E IL PEDAGGIO NON E' PIU' QUELLO DEL PROXY DI LETTURA. Era lo stesso token, ed
+ * era il difetto: chi aveva una credenziale per farsi SERVIRE i dati poteva
+ * anche crearne. Adesso serve la credenziale di ingest con l'ambito
+ * `ingest:browsers` e nient'altro, e il resto del pedaggio — tetti sul corpo,
+ * quota, firma, finestra — sta tutto in `lib/ingest/ingest-guard`, che e' anche
+ * l'unico posto dove si scrive la riga di log.
+ *
  * Rispetto alla riga che nasce da `/rest/v1/tracking_id`, questa strada porta in
  * piu' le due etichette facoltative: li' il template puo' attaccare una sola
  * coppia in querystring, qui l'oggetto e' intero.
@@ -40,28 +45,25 @@ import { resolveShopReadContext } from '~/lib/read-proxy/context.server';
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
 
-  // Stesso pedaggio del proxy e della rotta che conia gli identificativi. Il
-  // template manda il token sia in `apikey` sia in `Authorization: Bearer`, e
-  // `extractReadProxyToken` legge gia' entrambi.
-  const token = extractReadProxyToken(request);
-  const result = token ? await resolveShopReadContext(token) : { kind: 'unknown' as const };
-  if (result.kind !== 'ok') return json({ error: 'unauthorized' }, 401);
+  const permesso = await authorizeIngest(request, {
+    // L'ambito delle ETICHETTE, non quello dei legami: questa rotta scrive
+    // browser e dispositivo, e una credenziale emessa per fare solo questo non
+    // deve poter legare un browser a una persona passando di qua.
+    scope: 'ingest:browsers',
+    route: '/rest/v1/users',
+  });
+  if (!permesso.ok) return permesso.response;
 
-  const { ctx } = result;
-  if (!ctx.canReadData) return json({ error: 'forbidden' }, 403);
-
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return json({ error: 'bad_request' }, 400);
-  }
+  const { ctx, body, finish } = permesso;
 
   const externalId = typeof body?.external_id === 'string' ? body.external_id.trim() : '';
   // L'unico campo senza il quale non c'e' niente da scrivere, ed e' anche
   // l'unico controllato: dev'essere un identificativo coniato da noi. Uno
   // inventato creerebbe una riga che nessuna visita successiva ritrovera' mai.
-  if (!isExternalId(externalId)) return json({ error: 'bad_request' }, 400);
+  if (!isExternalId(externalId)) {
+    finish('bad_external_id', 400);
+    return json({ error: 'bad_request' }, 400);
+  }
 
   const supabase = supabaseFromReadContext(ctx);
 
@@ -82,20 +84,15 @@ export async function action({ request }: ActionFunctionArgs) {
       ? await revokeTrackingIdentity({ shopId: ctx.shopId, externalId })
       : null;
 
-    console.log(
-      `[rest/v1/users] ${JSON.stringify({
-        shop: ctx.shopId,
-        outcome: esito ? `no_consent:${esito.outcome}` : 'no_consent',
-        at: new Date().toISOString(),
-      })}`,
-    );
-
     // 503 solo quando la revoca non e' stata presa in carico: e' l'unico caso
     // in cui il ritentativo del container cambia qualcosa, perche' la riga
     // durevole non c'e' e nessuno applichera' mai quella revoca.
     if (esito?.retriable) {
+      finish('revoke_not_recorded', 503);
       return json({ error: 'revoke_not_recorded' }, 503, { 'Retry-After': '60' });
     }
+
+    finish(esito ? `no_consent:${esito.outcome}` : 'no_consent');
     return json({ ok: true }, 200);
   }
 
@@ -116,10 +113,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // riceve un errore lo segnala al merchant, e una scrittura non riuscita sul
   // suo database non e' qualcosa che lui possa risolvere. L'esito vero sta nel
   // log.
-  console.log(
-    `[rest/v1/users] ${JSON.stringify({ shop: ctx.shopId, outcome, at: new Date().toISOString() })}`,
-  );
-
+  finish(outcome);
   return json({ ok: true }, 200);
 }
 
@@ -127,6 +121,9 @@ export async function action({ request }: ActionFunctionArgs) {
  * La stessa rotta in lettura non esiste: `users` non e' fra le tabelle che il
  * proxy serve, e non deve diventarlo di straforo. Restituirla vorrebbe dire far
  * uscire l'elenco dei browser di ogni cliente da un endpoint pubblico.
+ *
+ * E' anche la meta' speculare della separazione: la credenziale di ingest
+ * scrive e NON legge — qui non c'e' niente da leggere per nessuna delle due.
  */
 export async function loader() {
   return json({ error: 'method_not_allowed' }, 405);

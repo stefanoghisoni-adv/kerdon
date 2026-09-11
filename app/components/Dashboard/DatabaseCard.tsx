@@ -12,6 +12,7 @@ import {
 import { InfoIcon } from '@shopify/polaris-icons';
 import { MetricRow } from './MetricRow';
 import { TrackingInstall } from './TrackingInstall';
+import { IngestKeySection, type IngestKeySummary } from './IngestKeySection';
 import type { InstallPath } from '~/lib/tracking/install';
 import { middleTruncate } from './copy-value';
 import { CopyIconButton } from './CopyIconButton';
@@ -204,6 +205,7 @@ export function TrackingCredentialsCard({
   appUrl,
   readKey,
   install,
+  ingest,
 }: {
   connected: boolean;
   appUrl: string | null;
@@ -217,6 +219,18 @@ export function TrackingCredentialsCard({
    * cio' che le istruzioni chiedono di copiare.
    */
   install: { path: InstallPath | null; endpoint: string | null; verifiedAt: string | null };
+  /**
+   * Le credenziali di invio del negozio, e come sta andando il passaggio.
+   *
+   * Stanno in questa card e non in una loro perche' si copiano nello stesso
+   * momento delle due righe qui sopra, dentro lo stesso container: chi installa
+   * ha bisogno di vederle insieme, non di cercarle in due posti.
+   */
+  ingest: {
+    keys: IngestKeySummary[];
+    legacyLastAt: string | null;
+    sunset: string;
+  };
 }) {
   const t = useT();
 
@@ -245,6 +259,17 @@ export function TrackingCredentialsCard({
           value={readKey}
           available={connected}
         />
+
+        {/* La chiave di invio subito sotto quella di lettura: sono le due che
+            si copiano nello stesso momento, e una accanto all'altra si vede a
+            colpo d'occhio che sono due cose diverse. */}
+        {connected && (
+          <IngestKeySection
+            keys={ingest.keys}
+            legacyLastAt={ingest.legacyLastAt}
+            sunset={ingest.sunset}
+          />
+        )}
 
         {/* Le istruzioni compaiono a progetto collegato: prima i due valori da
             copiare non esistono, e un elenco di passi che comincia con "copia

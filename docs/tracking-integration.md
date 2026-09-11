@@ -118,7 +118,7 @@ identificativo scelto da lui.
 | | |
 |---|---|
 | Chiamare | `GET <indirizzo dell'API>/rest/v1/tracking_id` |
-| Autenticarsi | header `apikey: <token di lettura>` oppure `Authorization: Bearer <token>` |
+| Autenticarsi | la credenziale di **invio**, firmata (vedi sotto). Fino al 1 dicembre 2026 vale ancora il solo header `apikey: <token di lettura>` |
 | Inoltrare | il permesso del visitatore, e `X-CoreW-External-Id` con il valore del cookie first-party quando c'e' |
 | Leggere | l'header `X-CoreW-External-Id` della risposta |
 | Piantare | il cookie `corew_eid` **dal proprio dominio**, con `Secure`, `Path=/`, un `SameSite` dichiarato e una durata |
@@ -126,6 +126,92 @@ identificativo scelto da lui.
 
 Il cookie va emesso dall'endpoint del negozio, non da noi: e' quel dominio a
 renderlo first-party, ed e' l'unica ragione per cui dura.
+
+## Le due credenziali, e perche' non sono una
+
+Le rotte sotto `/rest/v1/` non si limitano a servire dati: `tracking_id` **conia**
+l'identificativo di un visitatore e ne registra la riga, `users` ne scrive le
+etichette, `identify` lo **lega a una persona con nome e cognome**. Tutte e tre
+scrivono nel progetto del merchant con la chiave di servizio, che salta le RLS.
+
+Finche' per farlo bastava il token di lettura, chi ne aveva uno per consultare i
+dati poteva anche scriverli — a cominciare dal legame browser-cliente, cioe' la
+possibilita' di attribuirsi gli acquisti di qualcun altro.
+
+| | Lettura | Invio |
+|---|---|---|
+| Valore | `spx_…`, rileggibile da Impostazioni | `kin_<id>.<segreto>`, mostrato **una volta sola** |
+| Come si presenta | si manda tale e quale | non si manda: si usa per **firmare** |
+| Ambiti | — | `ingest:identity`, `ingest:browsers`, `ingest:links`, separati |
+| Rotazione | sostituisce | sostituisce, e la vecchia vale ancora **48 ore** |
+| Revoca | — | immediata, senza nessuna finestra |
+
+### Come si firma
+
+HMAC-SHA256 con il segreto di invio, sulla stringa composta da questi pezzi, uno
+per riga:
+
+```
+v1                       ← versione delle regole
+ingest                   ← destinatario dichiarato
+ingest:links             ← l'ambito della rotta chiamata
+1789041600000            ← millisecondi dall'epoch
+POST                     ← il metodo vero della richiesta
+/rest/v1/identify        ← il percorso della rotta, senza querystring
+<sha256(corpo) base64url>← per una GET, quello della stringa vuota
+<chiave di idempotenza>  ← diversa a ogni chiamata
+```
+
+Le intestazioni:
+
+| Intestazione | Valore |
+|---|---|
+| `X-Kerdon-Key-Id` | il pezzo prima del punto: non e' segreto |
+| `X-Kerdon-Timestamp` | lo stesso istante che sta nella firma |
+| `X-Kerdon-Signature` | `v1=<firma in base64url>` |
+| `X-Kerdon-Idempotency-Key` | al massimo 128 caratteri, diversa a ogni chiamata |
+
+Ogni pezzo della stringa c'e' per un attacco preciso, e toglierne uno riapre
+quello: la versione e il destinatario perche' una firma composta altrove non
+valga qui; l'ambito perche' una firma catturata su una rotta leggera non si
+ripresenti su quella che lega browser e persone; l'istante perche' una richiesta
+catturata scada; il metodo e il percorso perche' l'ambito non lo scelga chi
+chiama; l'impronta del corpo perche' il corpo non si possa cambiare tenendo la
+firma; la chiave di idempotenza perche' due invii uguali restino distinguibili da
+un invio ripetuto.
+
+### I rifiuti
+
+| Stato | Quando |
+|---|---|
+| `401` | nessuna credenziale, credenziale sconosciuta, revocata, scaduta, firma che non torna, istante fuori dalla finestra di **cinque minuti** |
+| `403` | la credenziale non ha l'ambito della rotta, oppure il negozio non puo' scrivere |
+| `409` | la stessa chiave di idempotenza, dalla stessa credenziale, dentro la finestra |
+| `413` | corpo oltre **16 KB** |
+| `400` | JSON annidato oltre **6 livelli**, o non leggibile |
+| `429` | quota superata; porta `Retry-After` in secondi |
+
+La quota e' per negozio e per credenziale: **300 richieste in un colpo** e
+**40 al secondo** di regime, perche' il traffico di una vetrina arriva a
+raffiche. L'indirizzo IP e' un segnale secondario — impedisce a una sola
+provenienza di consumare la quota di tutte — e **non e' mai un'identita'**: non
+autorizza niente e non compare in nessun log.
+
+### La fase di convivenza
+
+Il token di lettura continua a essere accettato sulle rotte di scrittura **fino
+al 1 dicembre 2026**. Ogni negozio ha due date in `tracking_setups`
+(`ingest_last_signed_at`, `ingest_last_legacy_at`) che dicono con quale delle due
+credenziali ha scritto l'ultima volta: e' da li' che si sa chi va ancora
+aggiornato, e la seconda accende un avviso in Impostazioni molto prima della
+scadenza.
+
+### Cosa finisce nei log
+
+Rotta, riferimento del negozio, identificativo pubblico della credenziale,
+esito, stato, millisecondi e — solo quando c'e' stato — quale secchiello ha
+detto di no. **Mai** email, telefoni, identificativi di visitatore, pezzi del
+corpo, indirizzi IP o chiavi.
 
 ## La verifica: finche' non passa, non e' configurato
 

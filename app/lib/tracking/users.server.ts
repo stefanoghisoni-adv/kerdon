@@ -106,8 +106,17 @@ async function withUsersTable<T extends WithError>(
  * abbia fornito — ed e' controllato prima di essere usato: e' la stessa
  * precauzione contro le richieste dirottate che il proxy prende sulle letture,
  * e non c'e' motivo di essere piu' disinvolti sulle scritture.
+ *
+ * Chiede i DUE CAMPI che usa, e non il contesto di lettura intero: da quando le
+ * rotte di scrittura hanno un contesto proprio — con la credenziale di ingest
+ * al posto del token di lettura — i chiamanti sono due, e pretendere la forma
+ * di uno dei due avrebbe costretto l'altro a portarsi dietro campi che non
+ * servono a costruire un client. Il nome resta quello con cui e' chiamata da
+ * quattro rotte.
  */
-export function supabaseFromReadContext(ctx: ShopReadContext): SupabaseClient {
+export function supabaseFromReadContext(
+  ctx: Pick<ShopReadContext, 'projectRef' | 'serviceRoleKey'>,
+): SupabaseClient {
   if (!/^[a-z0-9]+$/.test(ctx.projectRef)) {
     throw new Error(`Project ref non valido: ${ctx.projectRef}`);
   }

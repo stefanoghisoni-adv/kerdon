@@ -102,6 +102,43 @@ export const it = {
     open: "Vai al database",
     copy: "Copia",
     copied: "Copiato!",
+
+    /**
+     * La chiave con cui l'installazione INVIA i dati, distinta da quella con cui
+     * LEGGE.
+     *
+     * Il merchant ne vede due, e la differenza va detta in termini suoi: una
+     * serve a farsi restituire chi ha gia' visitato, l'altra a comunicare chi
+     * sta visitando adesso. Perche' siano due e non una non lo riguarda.
+     */
+    writeKey: "Chiave di invio",
+    writeKeyHelp:
+      "È la chiave con cui la tua installazione comunica a Kerdon chi sta visitando il negozio. Si vede una volta sola, nel momento in cui la crei: se la perdi, ne crei un'altra.",
+    writeKeyNone: "Non ancora creata",
+    writeKeyActive: (n: number) =>
+      n === 1 ? "1 chiave attiva" : `${n} chiavi attive`,
+    writeKeyCreate: "Crea la chiave di invio",
+    writeKeyRotate: "Sostituisci la chiave",
+    writeKeyRevoke: "Revoca subito",
+    writeKeyWorking: "Un momento…",
+    writeKeyFailed: "Non è stato possibile completare l'operazione. Riprova.",
+    /** Il valore appena emesso, con l'unico avviso che conta. */
+    writeKeyOnce: "Copiala adesso: questa è l'unica volta in cui puoi vederla.",
+    writeKeyOverlap: (when: string) =>
+      `La chiave di prima continua a funzionare fino al ${when}: hai tempo fino ad allora per pubblicare quella nuova.`,
+    writeKeyRevokeTitle: "Revocare la chiave di invio?",
+    writeKeyRevokeBody:
+      "Da questo momento la tua installazione smette di inviare dati, finché non pubblichi una chiave nuova. Fallo se pensi che la chiave sia finita nelle mani sbagliate.",
+    writeKeyRevoked: "Revocata.",
+    writeKeyLastUsed: (when: string) => `Ultimo invio ricevuto il ${when}`,
+    writeKeyNeverUsed: "Nessun invio ricevuto finora",
+    /**
+     * Il passaggio alla chiave nuova, come lo vede il merchant: una cosa da
+     * fare entro una data, non un dettaglio di funzionamento.
+     */
+    writeKeyUpdateNeeded: (when: string) =>
+      `La tua installazione invia ancora i dati con la chiave di lettura. Aggiornala entro il ${when}, altrimenti da quella data smetterà di funzionare.`,
+    writeKeyUpToDate: "Installazione aggiornata",
   },
 
   logs: {

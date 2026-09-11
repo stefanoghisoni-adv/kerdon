@@ -46,6 +46,13 @@ export const SEGRETI_ESCLUSI = [
   'callback_nonce',
   'accessTokenEnc',
   'refreshTokenEnc',
+  // La credenziale di invio: il segreto sigillato e l'impronta del valore. Non
+  // e' nell'esportazione e non deve diventarci — e' una credenziale, non un
+  // dato personale, e un file scaricato resta su un disco per sempre.
+  'secretCipher',
+  'secret_cipher',
+  'valueHash',
+  'value_hash',
   'export',
 ] as const;
 

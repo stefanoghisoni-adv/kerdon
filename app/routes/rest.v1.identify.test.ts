@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { VisitorConsent } from '~/lib/tracking/consent';
 
-const resolveShopReadContext = vi.fn();
-vi.mock('~/lib/read-proxy/context.server', () => ({ resolveShopReadContext }));
-vi.mock('~/lib/read-proxy/token.server', () => ({
-  extractReadProxyToken: (request: Request) => request.headers.get('apikey') ?? null,
+// Il cancello delle scritture e' finto qui dentro, e ha i suoi test in
+// `lib/ingest/ingest-guard.test`: credenziale, ambito, tetti, quota, firma e
+// finestra si provano una volta sola, la' dove vivono. Qui interessa quello che
+// la rotta fa DOPO aver ottenuto il permesso — e soprattutto COSA passa a
+// `finish`, che e' l'unico canale da cui un dato personale potrebbe uscire da
+// questa rotta verso un log.
+const ingestCtx = { shopId: 's1', projectRef: 'abcdef', serviceRoleKey: 'k', customersEnabled: true };
+let ingestRefusal: { status: number; error: string } | null = null;
+const authorizeIngest = vi.fn();
+const finish = vi.fn();
+vi.mock('~/lib/ingest/ingest-guard.server', () => ({
+  authorizeIngest: (request: Request, params: unknown) => authorizeIngest(request, params),
 }));
 
 const identifyVisitor = vi.fn();
@@ -65,9 +73,33 @@ let logged: string[];
 
 beforeEach(() => {
   vi.clearAllMocks();
-  resolveShopReadContext.mockResolvedValue({
-    kind: 'ok',
-    ctx: { shopId: 's1', canReadData: true, projectRef: 'abcdef', serviceRoleKey: 'k' },
+  ingestRefusal = null;
+  authorizeIngest.mockImplementation(async (request: Request) => {
+    if (ingestRefusal) {
+      return {
+        ok: false,
+        response: new Response(JSON.stringify({ error: ingestRefusal.error }), {
+          status: ingestRefusal.status,
+        }),
+      };
+    }
+    // Senza credenziale il cancello rifiuta: qui lo si riproduce guardando
+    // l'header che il template manda, cosi' il caso "nessun pedaggio" resta
+    // provato anche da questa parte.
+    if (!request.headers.get('apikey')) {
+      return {
+        ok: false,
+        response: new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 }),
+      };
+    }
+    try {
+      return { ok: true, ctx: ingestCtx, body: await request.json(), credential: 'ingest', finish };
+    } catch {
+      return {
+        ok: false,
+        response: new Response(JSON.stringify({ error: 'malformed' }), { status: 400 }),
+      };
+    }
   });
   identifyVisitor.mockResolvedValue({ outcome: 'linked', canonical: VISITATORE, merged: [] });
   // Di default: consenso completo.
@@ -106,28 +138,25 @@ describe('/rest/v1/identify — il metodo e una misura di protezione', () => {
     expect(res.status).toBe(405);
     // Il metodo si controlla PRIMA del token: nessuna identificazione parte.
     expect(identifyVisitor).not.toHaveBeenCalled();
-    expect(resolveShopReadContext).not.toHaveBeenCalled();
+    expect(authorizeIngest).not.toHaveBeenCalled();
   });
 });
 
 describe('/rest/v1/identify — il pedaggio', () => {
-  it('senza token non lega niente', async () => {
+  it('senza credenziale non lega niente', async () => {
     const res = await post({ external_id: VISITATORE, email: 'anna@example.com' }, {});
     expect(res.status).toBe(401);
     expect(identifyVisitor).not.toHaveBeenCalled();
   });
 
-  it('token non valido: nessun legame', async () => {
-    resolveShopReadContext.mockResolvedValue({ kind: 'unknown' });
+  it('credenziale non valida: nessun legame', async () => {
+    ingestRefusal = { status: 401, error: 'unauthorized' };
     const res = await post({ external_id: VISITATORE, email: 'anna@example.com' });
     expect(res.status).toBe(401);
   });
 
-  it('tracciamento sospeso: non si scrive nel database del merchant', async () => {
-    resolveShopReadContext.mockResolvedValue({
-      kind: 'ok',
-      ctx: { shopId: 's1', canReadData: false, projectRef: 'abcdef', serviceRoleKey: 'k' },
-    });
+  it('negozio che non puo scrivere: niente arriva al suo database', async () => {
+    ingestRefusal = { status: 403, error: 'forbidden' };
     const res = await post({ external_id: VISITATORE, email: 'anna@example.com' });
     expect(res.status).toBe(403);
     expect(identifyVisitor).not.toHaveBeenCalled();
@@ -191,16 +220,21 @@ describe('/rest/v1/identify — il corpo non finisce nei log', () => {
       phone: '+393331234567',
     });
 
-    const riga = logged.join('\n');
-    expect(riga).toContain('[rest/v1/identify]');
-    expect(riga).toContain('linked');
-    expect(riga).not.toContain('anna@example.com');
-    expect(riga).not.toContain('393331234567');
+    // Quello che la rotta consegna al log e' solo l'esito: la riga vera la
+    // compone `ingest-guard`, che non riceve niente altro da cui potrebbe
+    // ricavare un contatto.
+    expect(finish).toHaveBeenCalledWith('linked');
+
+    const tutto = [...logged, ...finish.mock.calls.flat().map(String)].join('\n');
+    expect(tutto).not.toContain('anna@example.com');
+    expect(tutto).not.toContain('393331234567');
+    expect(tutto).not.toContain(VISITATORE);
   });
 
   it('nemmeno quando la richiesta e malformata', async () => {
     await post({ external_id: 'inventato', email: 'anna@example.com' });
-    expect(logged.join('\n')).not.toContain('anna@example.com');
+    const tutto = [...logged, ...finish.mock.calls.flat().map(String)].join('\n');
+    expect(tutto).not.toContain('anna@example.com');
   });
 });
 

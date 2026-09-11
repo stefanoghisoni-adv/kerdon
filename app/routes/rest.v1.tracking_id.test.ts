@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { VisitorConsent } from '~/lib/tracking/consent';
 
-const resolveShopReadContext = vi.fn();
-vi.mock('~/lib/read-proxy/context.server', () => ({ resolveShopReadContext }));
-vi.mock('~/lib/read-proxy/token.server', () => ({
-  extractReadProxyToken: (request: Request) =>
-    request.headers.get('apikey') ?? null,
+// Il cancello delle scritture e' finto qui dentro, e ha i suoi test in
+// `lib/ingest/ingest-guard.test`. Questa rotta ci passa come le altre due, e non
+// e' un dettaglio: quello che restituisce sembra una lettura, ma quello che FA
+// e' coniare un identificativo e scriverne la riga nel database del merchant.
+const ingestCtx = { shopId: 's1', projectRef: 'abcdef', serviceRoleKey: 'k', customersEnabled: true };
+let ingestRefusal: { status: number; error: string } | null = null;
+const finish = vi.fn();
+const authorizeIngest = vi.fn();
+vi.mock('~/lib/ingest/ingest-guard.server', () => ({
+  authorizeIngest: (request: Request, params: unknown) => authorizeIngest(request, params),
 }));
 
 // La scrittura della riga del browser ha i suoi test in
@@ -61,18 +66,27 @@ const call = (headers: Record<string, string> = {}, search = '') =>
   } as never);
 
 beforeEach(() => {
-  resolveShopReadContext.mockReset();
+  ingestRefusal = null;
+  finish.mockClear();
+  authorizeIngest.mockReset();
+  authorizeIngest.mockImplementation(async (request: Request) => {
+    // Senza credenziale il cancello rifiuta, e qui lo si riproduce guardando
+    // l'header che il container manda: il caso "nessun pedaggio" resta provato
+    // anche da questa parte.
+    const rifiuto = ingestRefusal ?? (request.headers.get('apikey') ? null : { status: 401, error: 'unauthorized' });
+    if (rifiuto) {
+      return {
+        ok: false,
+        response: new Response(JSON.stringify({ error: rifiuto.error }), { status: rifiuto.status }),
+      };
+    }
+    return { ok: true, ctx: ingestCtx, body: {}, credential: 'ingest', finish };
+  });
   recordUserSeen.mockClear();
   forgetVisitor.mockClear();
   revokeTrackingIdentity.mockClear();
   revokeTrackingIdentity.mockResolvedValue({ outcome: 'applied', retriable: false });
   evaluateVisitorConsent.mockReset();
-  resolveShopReadContext.mockResolvedValue({
-    kind: 'ok',
-    // `canReadData` e' la risposta della policy, e adesso questa rotta la
-    // guarda come le altre tre di /rest/v1/: prima era l'unica a non farlo.
-    ctx: { shopId: 's1', canReadData: true, projectRef: 'abcdef', serviceRoleKey: 'k' },
-  });
   // Di default: consenso completo, i test lo cambiano dove serve.
   evaluateVisitorConsent.mockReturnValue({
     consent: consentGranted(),
@@ -83,21 +97,17 @@ beforeEach(() => {
 });
 
 describe('/rest/v1/tracking_id', () => {
-  it('senza token non conia niente', async () => {
+  it('senza credenziale non conia niente', async () => {
     const res = await call();
     expect(res.status).toBe(401);
   });
 
-  // Il buco che c'era: il token bastava. Un negozio con il tracciamento
-  // sospeso, o che aveva disinstallato l'app, continuava a farsi coniare
-  // identificativi — e siccome questa e' anche l'unica rotta di lettura che
-  // SCRIVE, la sua tabella dei visitatori cresceva mentre tutto il resto era
-  // fermo.
-  it('lettura non concessa: niente identificativo e niente riga', async () => {
-    resolveShopReadContext.mockResolvedValue({
-      kind: 'ok',
-      ctx: { shopId: 's1', canReadData: false, projectRef: 'abcdef', serviceRoleKey: 'k' },
-    });
+  // Il buco che c'era: il token di lettura bastava. Un negozio con il
+  // tracciamento sospeso, o che aveva disinstallato l'app, continuava a farsi
+  // coniare identificativi — e siccome questa rotta SCRIVE, la sua tabella dei
+  // visitatori cresceva mentre tutto il resto era fermo.
+  it('scrittura non concessa: niente identificativo e niente riga', async () => {
+    ingestRefusal = { status: 403, error: 'forbidden' };
 
     const res = await call({ apikey: 'buono' });
 
@@ -106,8 +116,8 @@ describe('/rest/v1/tracking_id', () => {
     expect(res.headers.get('Set-Cookie')).toBeNull();
   });
 
-  it('token non valido: nessun identificativo', async () => {
-    resolveShopReadContext.mockResolvedValue({ kind: 'unknown' });
+  it('credenziale non valida: nessun identificativo', async () => {
+    ingestRefusal = { status: 401, error: 'unauthorized' };
     const res = await call({ apikey: 'sbagliato' });
     expect(res.status).toBe(401);
   });
@@ -190,8 +200,8 @@ describe('/rest/v1/tracking_id — la riga del browser', () => {
     });
   });
 
-  it('senza token non si scrive niente nel database di nessuno', async () => {
-    resolveShopReadContext.mockResolvedValue({ kind: 'unknown' });
+  it('senza credenziale non si scrive niente nel database di nessuno', async () => {
+    ingestRefusal = { status: 401, error: 'unauthorized' };
     await call({ apikey: 'sbagliato' });
     expect(recordUserSeen).not.toHaveBeenCalled();
   });

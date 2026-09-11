@@ -6,11 +6,10 @@ import {
   incomingExternalId,
   newExternalId,
 } from '~/lib/tracking/external-id';
-import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
 import {
-  resolveShopReadContext,
-  type ShopReadContext,
-} from '~/lib/read-proxy/context.server';
+  authorizeIngest,
+  type ShopIngestContext,
+} from '~/lib/ingest/ingest-guard.server';
 import {
   evaluateVisitorConsent,
   SALE_OF_DATA_HEADER,
@@ -62,36 +61,26 @@ import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
  * dire in una risposta di PostgREST.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
-  // Stesso pedaggio del proxy: il token dice di quale negozio si parla. Senza,
-  // chiunque potrebbe farsi coniare identificativi sulla nostra infrastruttura.
-  const token = extractReadProxyToken(request);
-  const result = token ? await resolveShopReadContext(token) : { kind: 'unknown' as const };
-
-  if (result.kind !== 'ok') {
-    return new Response(JSON.stringify({ error: 'unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Il negozio puo' ancora leggere?
+  // IL PEDAGGIO E' QUELLO DELLE SCRITTURE, non quello del proxy di lettura, e
+  // questa rotta e' il caso in cui la differenza si vede meglio: quello che
+  // restituisce sembra una lettura — una riga con dentro un identificativo — ma
+  // quello che FA e' coniare quell'identificativo e scriverne la riga nel
+  // database del merchant, con la chiave di servizio, una volta per ogni
+  // browser che passa. Finche' bastava il token di lettura, chi aveva una
+  // credenziale per farsi servire i dati poteva anche riempire di righe la
+  // tabella dei visitatori di quel negozio.
   //
-  // Qui questo controllo non c'era, ed era l'unica rotta di /rest/v1/ a non
-  // averlo: le altre tre lo fanno tutte. Un token valido bastava, e un negozio
-  // con il tracciamento sospeso — o che aveva disinstallato l'app — continuava
-  // a farsi coniare identificativi. Peggio: questa rotta e' anche l'unica che
-  // SCRIVE nel database del merchant, una riga per ogni browser che passa,
-  // quindi la sospensione lasciava crescere la tabella dei visitatori proprio
-  // mentre tutto il resto era fermo.
-  //
-  // 403 come sulle altre: per un container server-side e' "nessun dato", e la
-  // vetrina prosegue senza che nessuno veda un errore.
-  if (!result.ctx.canReadData) {
-    return new Response(JSON.stringify({ error: 'forbidden' }), {
-      status: 403,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  // `body: 'none'` perche' il container chiama in GET con la sola querystring:
+  // la firma copre lo stesso l'impronta di un corpo, che qui e' quella della
+  // stringa vuota.
+  const permesso = await authorizeIngest(request, {
+    scope: 'ingest:identity',
+    route: '/rest/v1/tracking_id',
+    body: 'none',
+  });
+  if (!permesso.ok) return permesso.response;
+
+  const ctx = permesso.ctx;
 
   // Si riusa quello che il browser ha gia', se ce l'ha. Coniarne uno nuovo a
   // ogni pagina vorrebbe dire non riconoscere piu' nessuno, che e' l'opposto di
@@ -113,7 +102,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // risponde per lei. Le finalita' che servono sono `analytics` e `marketing`
   // insieme, e il perche' sta in `lib/tracking/consent`.
   const consent = evaluateVisitorConsent(request);
-  if (!consent.allowed) return withoutIdentifier(result.ctx, consent, existing);
+  if (!consent.allowed) {
+    permesso.finish('no_consent');
+    return withoutIdentifier(ctx, consent, existing);
+  }
 
   const externalId = existing ?? newExternalId();
 
@@ -136,7 +128,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Attesa e non lasciata in volo: su una funzione serverless una promise non
   // attesa muore con l'istanza. Best effort dentro: qualunque cosa vada storta,
   // l'identificativo si restituisce lo stesso — la vetrina sta aspettando.
-  await recordVisitor(result.ctx, externalId, request);
+  await recordVisitor(ctx, externalId, request);
+  permesso.finish(existing ? 'seen' : 'minted');
 
   const headers = new Headers({
     'Content-Type': 'application/json',
@@ -184,7 +177,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
  * la revoca viene presa in carico davvero. Il cookie resta scaduto anche li'.
  */
 async function withoutIdentifier(
-  ctx: ShopReadContext,
+  ctx: ShopIngestContext,
   consent: ConsentDecision,
   existing: string | null,
 ): Promise<Response> {
@@ -227,7 +220,7 @@ async function withoutIdentifier(
  * sbagliata.
  */
 async function recordVisitor(
-  ctx: ShopReadContext,
+  ctx: ShopIngestContext,
   externalId: string,
   request: Request,
 ): Promise<void> {

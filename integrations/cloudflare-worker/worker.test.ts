@@ -226,3 +226,92 @@ describe('il Worker sul dominio del negozio', () => {
     });
   });
 });
+
+/**
+ * La credenziale di INVIO, e la firma che il Worker calcola con essa.
+ *
+ * QUESTO BLOCCO PROVA LE DUE META' INSIEME, ed e' l'unico posto in cui si puo'
+ * fare: il Worker compone la stringa canonica per conto suo — e' un file senza
+ * build, pubblicato com'e' sull'infrastruttura del merchant, e non puo'
+ * importare niente dall'app — mentre Kerdon la ricompone dalla sua parte. Due
+ * composizioni che divergono darebbero una firma che non torna mai, e a
+ * scoprirlo sarebbe un merchant con il tracciamento fermo. Qui lo scopre un
+ * test.
+ */
+describe('la chiave di invio', () => {
+  const KEY_ID = 'identificativo-pubblico';
+  const SECRET = 'segreto-di-invio';
+  const CON_INVIO = { ...ENV, KERDON_INGEST_KEY_ID: KEY_ID, KERDON_INGEST_SECRET: SECRET };
+
+  const inviate = () => new Headers((upstream.mock.calls[0][1] as RequestInit).headers as HeadersInit);
+
+  it('il segreto non viaggia: viaggia una firma', async () => {
+    await call(CON_INVIO, { search: '?consent=v1.a1.m1' });
+
+    const headers = inviate();
+    expect(headers.get('X-Kerdon-Key-Id')).toBe(KEY_ID);
+    expect(headers.get('X-Kerdon-Signature')?.startsWith('v1=')).toBe(true);
+    // Il segreto non compare da nessuna parte, in nessuna intestazione.
+    expect(JSON.stringify([...headers])).not.toContain(SECRET);
+  });
+
+  it('la firma e esattamente quella che Kerdon si aspetta', async () => {
+    const { canonicalIngestPayload } = await import('~/lib/ingest/ingest-model');
+    const { signIngestPayload } = await import('~/lib/ingest/ingest-key.server');
+    const { createHash } = await import('node:crypto');
+
+    await call(CON_INVIO, { search: '?consent=v1.a1.m1' });
+    const headers = inviate();
+
+    const attesa = signIngestPayload(
+      SECRET,
+      canonicalIngestPayload({
+        scope: 'ingest:identity',
+        timestampMs: Number(headers.get('X-Kerdon-Timestamp')),
+        method: 'GET',
+        path: '/rest/v1/tracking_id',
+        // Il corpo di una GET e' vuoto, e la sua impronta e' quella della
+        // stringa vuota: nessun caso a parte, da nessuna delle due parti.
+        bodyDigest: createHash('sha256').update('', 'utf8').digest('base64url'),
+        idempotencyKey: headers.get('X-Kerdon-Idempotency-Key') ?? '',
+      }),
+    );
+
+    expect(headers.get('X-Kerdon-Signature')).toBe(attesa);
+  });
+
+  it('ogni chiamata porta una chiave di idempotenza diversa', async () => {
+    // Due visite uguali devono restare distinguibili da una visita catturata e
+    // rigiocata: senza, la difesa dal replay non avrebbe su cosa appoggiarsi.
+    await call(CON_INVIO, { search: '?consent=v1.a1.m1' });
+    const prima = inviate().get('X-Kerdon-Idempotency-Key');
+
+    upstream.mockClear();
+    await call(CON_INVIO, { search: '?consent=v1.a1.m1' });
+    const seconda = inviate().get('X-Kerdon-Idempotency-Key');
+
+    expect(prima).toBeTruthy();
+    expect(seconda).not.toBe(prima);
+  });
+
+  it('senza chiave di invio il Worker continua a funzionare con la sola lettura', async () => {
+    // E' la fase di convivenza: chi ha installato prima non si ferma il giorno
+    // del rilascio. Fino alla data di spegnimento, non oltre.
+    await call(ENV, { search: '?consent=v1.a1.m1' });
+
+    const headers = inviate();
+    expect(headers.get('X-Kerdon-Key-Id')).toBeNull();
+    expect(headers.get('apikey')).toBe(TOKEN);
+  });
+
+  it('anche la chiamata che fa dimenticare un visitatore e firmata', async () => {
+    // Alla revoca si scrive — si cancella — e scrivere chiede la credenziale di
+    // invio esattamente come coniare.
+    await call(CON_INVIO, {
+      search: '?consent=v1.a0.m1',
+      cookies: `corew_eid=${ID}`,
+    });
+
+    expect(inviate().get('X-Kerdon-Key-Id')).toBe(KEY_ID);
+  });
+});

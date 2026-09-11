@@ -196,6 +196,35 @@ describe("policy — uso dell'app sospeso", () => {
       true,
     );
   });
+
+  it('ma NON lascia scrivere: leggere e inerte, scrivere no', () => {
+    // E' la sola riga in cui le due capacita' del tracciamento divergono, ed e'
+    // la ragione per cui sono due. Continuare a scrivere mentre tutto il resto
+    // e' fermo lascerebbe al merchant, alla riattivazione, dati raccolti in un
+    // periodo in cui l'app per lui non esisteva.
+    const sospeso = con({ authorization: 'DISABLED' });
+    expect(can(evaluateShopCapabilities(sospeso), 'ingest_tracking')).toBe(false);
+    expect(motivo(sospeso, 'ingest_tracking')).toBe('not_authorized');
+  });
+});
+
+describe("policy — la scrittura di tracciamento", () => {
+  it('e concessa a un negozio sano', () => {
+    expect(can(evaluateShopCapabilities(SANO), 'ingest_tracking')).toBe(true);
+  });
+
+  it("segue l'autorizzazione del tracciamento, come la lettura", () => {
+    const fermo = con({ trackingAuthorization: 'PENDING' });
+    expect(motivo(fermo, 'ingest_tracking')).toBe('tracking_suspended');
+  });
+
+  it("un'app disinstallata non scrive piu' niente", () => {
+    expect(motivo(con({ uninstalledAt: new Date() }), 'ingest_tracking')).toBe('uninstalled');
+  });
+
+  it('senza progetto collegato non c e dove scrivere', () => {
+    expect(motivo(con({ connectionVerifiedAt: null }), 'ingest_tracking')).toBe('not_connected');
+  });
 });
 
 describe("policy — il valore della colonna, letto senza generosita'", () => {
