@@ -12,8 +12,8 @@ import {
 } from './external-id';
 
 describe('newExternalId', () => {
-  it('ha il formato corew_<32 caratteri>, e nient altro', () => {
-    expect(newExternalId()).toMatch(/^corew_[A-Za-z0-9]{32}$/);
+  it('ha il formato kerdon_<32 caratteri>, e nient altro', () => {
+    expect(newExternalId()).toMatch(/^kerdon_[A-Za-z0-9]{32}$/);
   });
 
   // Il momento in cui il browser e' stato visto la prima volta sta in
@@ -25,7 +25,7 @@ describe('newExternalId', () => {
     const id = newExternalId();
     const dopo = Date.now();
 
-    for (const pezzo of id.slice('corew_'.length).match(/\d+/g) ?? []) {
+    for (const pezzo of id.slice('kerdon_'.length).match(/\d+/g) ?? []) {
       const numero = Number(pezzo);
       // Nessuna sequenza di cifre puo' essere l'istante di adesso, ne' in
       // millisecondi ne' in secondi.
@@ -71,6 +71,21 @@ describe('gli identificativi del formato precedente', () => {
   it('si riconoscono ancora come tali', () => {
     expect(LEGACY_EXTERNAL_ID_PATTERN.test(vecchio)).toBe(true);
     expect(LEGACY_EXTERNAL_ID_PATTERN.test(newExternalId())).toBe(false);
+  });
+
+  // Il cambio di nome del prodotto non e' una ragione per non riconoscere piu'
+  // una persona. Un identificativo coniato prima porta il nome di prima, ed e'
+  // nel browser di qualcuno: se smettesse di valere, quel browser tornerebbe
+  // sconosciuto e il suo storico resterebbe legato a un identificativo che
+  // nessuno cerca piu'.
+  it('anche quelli col nome di prima del cambio restano validi', () => {
+    expect(isExternalId('corew_aB3dEfGhIjKlMnOpQrStUvWxYz0123456')).toBe(false);
+    expect(isExternalId('corew_aB3dEfGhIjKlMnOpQrStUvWxYz012345')).toBe(true);
+    expect(isExternalId(vecchio)).toBe(true);
+  });
+
+  it('ma se ne conia uno solo, col nome di adesso', () => {
+    expect(newExternalId().startsWith('kerdon_')).toBe(true);
   });
 
   it('arrivano fino in fondo come gli altri', () => {

@@ -4,7 +4,7 @@
 //
 // COSA C'ERA PRIMA, in una riga: la revoca era best effort da capo a fondo.
 // `forgetVisitor` restituiva 'failed' senza dire quale dei tre gesti fosse
-// fallito, le rotte quel valore non lo guardavano, e il cookie `corew_eid`
+// fallito, le rotte quel valore non lo guardavano, e il cookie `kerdon_eid`
 // veniva fatto scadere comunque — cioe' spariva dal browser proprio il
 // riferimento con cui si sarebbe potuto riprovare.
 //

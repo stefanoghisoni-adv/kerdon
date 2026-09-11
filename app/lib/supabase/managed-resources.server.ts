@@ -79,18 +79,18 @@ export async function recordProvisionedResources(
           schemaName: MERCHANT_SCHEMA,
           resourceName: name,
           resourceKind: 'table',
-          createdByCoreWard: ours,
+          createdByKerdon: ours,
           schemaVersion: input.schemaVersion,
         },
       });
       continue;
     }
 
-    if (row.createdByCoreWard || !ours) continue;
+    if (row.createdByKerdon || !ours) continue;
 
     await prisma.supabaseManagedResource.update({
       where: { id: row.id },
-      data: { createdByCoreWard: true, schemaVersion: input.schemaVersion },
+      data: { createdByKerdon: true, schemaVersion: input.schemaVersion },
     });
   }
 }
@@ -108,7 +108,7 @@ export async function ownedResources(
   projectRef: string,
 ): Promise<ManagedResource[]> {
   const rows = await prisma.supabaseManagedResource.findMany({
-    where: { shopId, projectRef, createdByCoreWard: true },
+    where: { shopId, projectRef, createdByKerdon: true },
   });
   return rows.map((r) => ({
     schemaName: r.schemaName,

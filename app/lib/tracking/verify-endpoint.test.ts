@@ -3,8 +3,8 @@ import { verifyTrackingEndpoint } from './verify-endpoint.server';
 import type { CheckId } from './verify-checks';
 
 const ID = 'corew_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-const GOOD_COOKIE = `corew_eid=${ID}; Path=/; Max-Age=31536000; SameSite=Lax; Secure`;
-const EXPIRED_COOKIE = 'corew_eid=; Path=/; Max-Age=0; SameSite=Lax; Secure';
+const GOOD_COOKIE = `kerdon_eid=${ID}; Path=/; Max-Age=31536000; SameSite=Lax; Secure`;
+const EXPIRED_COOKIE = 'kerdon_eid=; Path=/; Max-Age=0; SameSite=Lax; Secure';
 
 const ENDPOINT = 'https://negozio.it/kerdon/id';
 
@@ -176,7 +176,7 @@ describe('verifyTrackingEndpoint', () => {
       goodEndpoint({
         granted: {
           body: JSON.stringify([{ external_id: ID }]),
-          cookies: [`corew_eid=${ID}; Path=/; Max-Age=31536000; SameSite=Lax`],
+          cookies: [`kerdon_eid=${ID}; Path=/; Max-Age=31536000; SameSite=Lax`],
         },
       }),
     );

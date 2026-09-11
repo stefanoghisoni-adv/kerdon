@@ -7,72 +7,72 @@ import {
   registrableDomain,
 } from './verify-checks';
 
-const cookie = (raw: string) => parseSetCookie([raw], 'corew_eid')!;
+const cookie = (raw: string) => parseSetCookie([raw], 'kerdon_eid')!;
 
 describe('parseSetCookie', () => {
   it('trova il nostro fra gli altri', () => {
     const found = parseSetCookie(
-      ['_shopify_y=abc; Path=/', 'corew_eid=corew_x; Path=/; Secure'],
-      'corew_eid',
+      ['_shopify_y=abc; Path=/', 'kerdon_eid=corew_x; Path=/; Secure'],
+      'kerdon_eid',
     );
     expect(found?.value).toBe('corew_x');
     expect(found?.attributes.secure).toBe('');
   });
 
   it('se non c e, non c e', () => {
-    expect(parseSetCookie(['_shopify_y=abc'], 'corew_eid')).toBeNull();
-    expect(parseSetCookie([], 'corew_eid')).toBeNull();
+    expect(parseSetCookie(['_shopify_y=abc'], 'kerdon_eid')).toBeNull();
+    expect(parseSetCookie([], 'kerdon_eid')).toBeNull();
   });
 
   // Le date di Expires contengono una virgola: un parser che spezza li si
   // ritrova mezzo cookie e boccia una configurazione buona.
   it('la virgola dentro Expires non spezza niente', () => {
-    const found = cookie('corew_eid=v; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT; Secure');
+    const found = cookie('kerdon_eid=v; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT; Secure');
     expect(found.attributes.expires).toBe('Wed, 21 Oct 2026 07:28:00 GMT');
   });
 });
 
 describe('isExpiredCookie', () => {
   it('Max-Age a zero e scaduto', () => {
-    expect(isExpiredCookie(cookie('corew_eid=; Path=/; Max-Age=0'))).toBe(true);
+    expect(isExpiredCookie(cookie('kerdon_eid=; Path=/; Max-Age=0'))).toBe(true);
   });
 
   it('una data passata e scaduta', () => {
     expect(
-      isExpiredCookie(cookie('corew_eid=v; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT')),
+      isExpiredCookie(cookie('kerdon_eid=v; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT')),
     ).toBe(true);
   });
 
   it('un valore vuoto e scaduto anche senza attributi', () => {
-    expect(isExpiredCookie(cookie('corew_eid=; Path=/'))).toBe(true);
+    expect(isExpiredCookie(cookie('kerdon_eid=; Path=/'))).toBe(true);
   });
 
   it('un anno davanti non e scaduto', () => {
-    expect(isExpiredCookie(cookie('corew_eid=corew_x; Path=/; Max-Age=31536000'))).toBe(false);
+    expect(isExpiredCookie(cookie('kerdon_eid=corew_x; Path=/; Max-Age=31536000'))).toBe(false);
   });
 });
 
 describe('cookieAttributeProblem', () => {
-  const buono = 'corew_eid=corew_x; Path=/; Max-Age=31536000; SameSite=Lax; Secure';
+  const buono = 'kerdon_eid=corew_x; Path=/; Max-Age=31536000; SameSite=Lax; Secure';
 
   it('un cookie fatto come si deve non ha problemi', () => {
     expect(cookieAttributeProblem(cookie(buono))).toBeNull();
   });
 
   it('senza Secure viaggia in chiaro', () => {
-    expect(cookieAttributeProblem(cookie('corew_eid=x; Path=/; Max-Age=1; SameSite=Lax'))).toBe(
+    expect(cookieAttributeProblem(cookie('kerdon_eid=x; Path=/; Max-Age=1; SameSite=Lax'))).toBe(
       'cookie_not_secure',
     );
   });
 
   it('un Path stretto lo fa sparire nel resto del negozio', () => {
     expect(
-      cookieAttributeProblem(cookie('corew_eid=x; Path=/kerdon; Max-Age=1; SameSite=Lax; Secure')),
+      cookieAttributeProblem(cookie('kerdon_eid=x; Path=/kerdon; Max-Age=1; SameSite=Lax; Secure')),
     ).toBe('cookie_path');
   });
 
   it('senza SameSite decide il browser, e ognuno decide diverso', () => {
-    expect(cookieAttributeProblem(cookie('corew_eid=x; Path=/; Max-Age=1; Secure'))).toBe(
+    expect(cookieAttributeProblem(cookie('kerdon_eid=x; Path=/; Max-Age=1; Secure'))).toBe(
       'cookie_samesite',
     );
   });
@@ -80,7 +80,7 @@ describe('cookieAttributeProblem', () => {
   // Il caso che non si vede: tutto sembra a posto, e l'attribuzione muore alla
   // chiusura della scheda.
   it('senza durata muore chiudendo la scheda', () => {
-    expect(cookieAttributeProblem(cookie('corew_eid=x; Path=/; SameSite=Lax; Secure'))).toBe(
+    expect(cookieAttributeProblem(cookie('kerdon_eid=x; Path=/; SameSite=Lax; Secure'))).toBe(
       'cookie_session_only',
     );
   });

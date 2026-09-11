@@ -121,7 +121,7 @@ const encodeUriComponent = require('encodeUriComponent');
 const JSON = require('JSON');
 
 // I nomi che questo Client condivide con Kerdon. Cambiarli qui non basta.
-const ID_COOKIE = 'corew_eid';
+const ID_COOKIE = 'kerdon_eid';
 const CONSENT_COOKIE = 'corew_consent';
 const SHOPIFY_CONSENT_COOKIE = '_tracking_consent';
 const ID_HEADER = 'X-CoreW-External-Id';
@@ -596,7 +596,7 @@ ___SERVER_PERMISSIONS___
             "listItem": [
               {
                 "type": 1,
-                "string": "corew_eid"
+                "string": "kerdon_eid"
               },
               {
                 "type": 1,
@@ -655,7 +655,7 @@ ___SERVER_PERMISSIONS___
                 "mapValue": [
                   {
                     "type": 1,
-                    "string": "corew_eid"
+                    "string": "kerdon_eid"
                   },
                   {
                     "type": 1,

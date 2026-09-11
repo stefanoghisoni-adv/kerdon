@@ -132,7 +132,7 @@ describe('/rest/v1/tracking_id', () => {
     const body = JSON.parse(await res.text());
     expect(Array.isArray(body)).toBe(true);
     expect(body).toHaveLength(1);
-    expect(body[0].external_id).toMatch(/^corew_[A-Za-z0-9]{32}$/);
+    expect(body[0].external_id).toMatch(/^kerdon_[A-Za-z0-9]{32}$/);
   });
 
   it('corpo, header e cookie dicono lo stesso identificativo', async () => {
@@ -144,7 +144,7 @@ describe('/rest/v1/tracking_id', () => {
 
   it('se il browser ne ha gia uno si riusa quello', async () => {
     const gia = 'corew_1700000000000_abcdefghijklmnopqrstuvwxyz012345';
-    const res = await call({ apikey: 'buono', Cookie: `corew_eid=${gia}` });
+    const res = await call({ apikey: 'buono', Cookie: `kerdon_eid=${gia}` });
     const [row] = JSON.parse(await res.text());
     expect(row.external_id).toBe(gia);
     // Rimandarlo identico a ogni pagina sarebbe peso che non cambia niente.
@@ -214,7 +214,7 @@ describe('/rest/v1/tracking_id — la riga del browser', () => {
     const res = await call({ apikey: 'buono' });
 
     expect(res.status).toBe(200);
-    expect(JSON.parse(await res.text())[0].external_id).toMatch(/^corew_[A-Za-z0-9]{32}$/);
+    expect(JSON.parse(await res.text())[0].external_id).toMatch(/^kerdon_[A-Za-z0-9]{32}$/);
   });
 });
 
@@ -284,7 +284,7 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
     expect(res.status).toBe(200);
     const body = JSON.parse(await res.text());
     expect(body).toHaveLength(1);
-    expect(body[0].external_id).toMatch(/^corew_[A-Za-z0-9]{32}$/);
+    expect(body[0].external_id).toMatch(/^kerdon_[A-Za-z0-9]{32}$/);
     expect(recordUserSeen).toHaveBeenCalledTimes(1);
   });
 
@@ -297,10 +297,10 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
       withdrawn: true,
     });
 
-    const res = await call({ apikey: 'buono', Cookie: `corew_eid=${existing}` });
+    const res = await call({ apikey: 'buono', Cookie: `kerdon_eid=${existing}` });
 
     expect(JSON.parse(await res.text())).toEqual([]);
-    expect(res.headers.get('Set-Cookie')).toContain('corew_eid=');
+    expect(res.headers.get('Set-Cookie')).toContain('kerdon_eid=');
     expect(res.headers.get('Set-Cookie')).toContain('Max-Age=0');
     expect(revokeTrackingIdentity).toHaveBeenCalledWith({ shopId: 's1', externalId: existing });
   });
@@ -314,7 +314,7 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
       withdrawn: true,
     });
 
-    const res = await call({ apikey: 'buono', Cookie: `corew_eid=${existing}` });
+    const res = await call({ apikey: 'buono', Cookie: `kerdon_eid=${existing}` });
 
     expect(revokeTrackingIdentity).toHaveBeenCalledWith({ shopId: 's1', externalId: existing });
   });
@@ -332,7 +332,7 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
       withdrawn: true,
     });
 
-    const res = await call({ apikey: 'buono', Cookie: `corew_eid=${existing}` });
+    const res = await call({ apikey: 'buono', Cookie: `kerdon_eid=${existing}` });
 
     expect(res.status).toBe(503);
     expect(res.headers.get('Retry-After')).toBe('60');
@@ -356,7 +356,7 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
 
     const res = await call({
       apikey: 'buono',
-      Cookie: 'corew_eid=corew_1700000000000_abcdefghijklmnopqrstuvwxyz012345',
+      Cookie: 'kerdon_eid=corew_1700000000000_abcdefghijklmnopqrstuvwxyz012345',
     });
 
     expect(res.status).toBe(200);

@@ -56,7 +56,7 @@ Fa tre cose, in quest'ordine:
 1. legge dalla Customer Privacy API di Shopify cosa ha risposto il visitatore;
 2. **solo se il permesso c'e'**, chiama l'endpoint first-party del negozio —
    mai noi — e ne riceve l'identificativo;
-3. attacca quell'identificativo all'attributo `corew_eid` del carrello, cosi'
+3. attacca quell'identificativo all'attributo `kerdon_eid` del carrello, cosi'
    risale nell'ordine.
 
 Non contiene nessuna credenziale e non scrive il cookie dell'identificativo: lo
@@ -121,7 +121,7 @@ identificativo scelto da lui.
 | Autenticarsi | la credenziale di **invio**, firmata (vedi sotto). Fino al 1 dicembre 2026 vale ancora il solo header `apikey: <token di lettura>` |
 | Inoltrare | il permesso del visitatore, e `X-CoreW-External-Id` con il valore del cookie first-party quando c'e' |
 | Leggere | l'header `X-CoreW-External-Id` della risposta |
-| Piantare | il cookie `corew_eid` **dal proprio dominio**, con `Secure`, `Path=/`, un `SameSite` dichiarato e una durata |
+| Piantare | il cookie `kerdon_eid` **dal proprio dominio**, con `Secure`, `Path=/`, un `SameSite` dichiarato e una durata |
 | Non fare | niente, quando non arriva nessun segnale di permesso |
 
 Il cookie va emesso dall'endpoint del negozio, non da noi: e' quel dominio a

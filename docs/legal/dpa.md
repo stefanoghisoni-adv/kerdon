@@ -1,4 +1,4 @@
-# Data Processing Agreement (DPA) — CoreWard
+# Data Processing Agreement (DPA) — Kerdon
 
 Last updated: 6 September 2026
 
@@ -11,18 +11,18 @@ Last updated: 6 September 2026
 ## The parties
 
 **Controller**: the merchant, meaning the holder of the Shopify store on which
-CoreWard is installed.
+Kerdon is installed.
 
 **Processor**: Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genoa (GE),
 Italy, VAT IT02705860993, contact support@coreward.app.
 
 The merchant determines the purposes and means of processing its customers' data.
-CoreWard processes that data solely to provide the service, and solely on the
+Kerdon processes that data solely to provide the service, and solely on the
 merchant's instruction.
 
 ## 1. Subject matter and duration
 
-CoreWard synchronises the catalogue, customer and order data of the merchant's
+Kerdon synchronises the catalogue, customer and order data of the merchant's
 Shopify store into a database project held by the merchant, keeps that copy
 current, and computes profitability figures from it.
 
@@ -35,11 +35,11 @@ updating, and controlled reading.
 
 Two things only are written back to Shopify: a **product's cost**, on the
 merchant's request, and a **customer's date of birth** — the value held in the
-merchant's database, written into the customer metafield CoreWard reads it from,
+merchant's database, written into the customer metafield Kerdon reads it from,
 where that metafield is empty and the customer has given marketing consent. No
 other field of the customer record is created or changed.
 
-Where the merchant enables the feature, CoreWard also processes **visitor
+Where the merchant enables the feature, Kerdon also processes **visitor
 recognition** for the store, described in section 3.
 
 Purpose: to let the merchant use its own commercial data to measure the
@@ -63,13 +63,13 @@ discount.
 
 **Visitor recognition data** (only where the merchant enables the feature, and
 only for visitors who have given consent): a pseudonymous browser identifier
-minted by CoreWard, the browser label and the device-type label where the
+minted by Kerdon, the browser label and the device-type label where the
 merchant's endpoint sends them, the first and last time the browser was seen, the
 merging of identifiers found to belong to the same person, and the link to the
 Shopify customer identifier. This is not anonymous data: the identifier stays in
 a person's browser and, once linked to a customer, is attributable to them. To
-write that link, the merchant's endpoint sends CoreWard the email address or
-telephone number the person has just given; CoreWard uses them only to search the
+write that link, the merchant's endpoint sends Kerdon the email address or
+telephone number the person has just given; Kerdon uses them only to search the
 merchant's database and does not retain them.
 
 **Explicit exclusions**: no payment data; no address, email address, telephone
@@ -88,7 +88,7 @@ given marketing consent on Shopify is processed.
 
 ## 4. Obligations of the processor
 
-CoreWard undertakes to:
+Kerdon undertakes to:
 
 a) process the data only on the documented instruction of the merchant, save for
 legal obligations, of which it will give notice unless the law forbids it;
@@ -118,7 +118,7 @@ obligations.
 
 The catalogue and customer database does **not** appear in this table: it is held
 by the merchant, who has a direct contractual relationship with its own provider.
-CoreWard accesses it on the merchant's instruction.
+Kerdon accesses it on the merchant's instruction.
 
 ## 6. Security measures
 
@@ -136,7 +136,7 @@ CoreWard accesses it on the merchant's instruction.
 
 ## 7. Data breaches
 
-CoreWard informs the merchant **without undue delay** and in any event within 72
+Kerdon informs the merchant **without undue delay** and in any event within 72
 hours of becoming aware of a breach affecting its data, stating the nature of the
 event, the data and data subjects concerned, the likely consequences and the
 measures taken.
@@ -145,12 +145,12 @@ The full procedure is set out in `INCIDENT-RESPONSE.md`, available on request.
 
 ## 8. Rights of data subjects
 
-CoreWard acts on the access and erasure requests it receives through the channels
+Kerdon acts on the access and erasure requests it receives through the channels
 Shopify provides.
 
-**Access**: CoreWard collects from the merchant's database the customer's row,
+**Access**: Kerdon collects from the merchant's database the customer's row,
 their orders and those orders' lines, and the rows of the browsers linked to
-them. The resulting export contains personal data and is held on CoreWard's
+them. The resulting export contains personal data and is held on Kerdon's
 systems, where the merchant downloads it inside the app with their own admin
 session, **for at most 30 days**; it is deleted when that period expires.
 
@@ -162,14 +162,14 @@ customer's first and last name.
 
 ## 9. On termination
 
-On uninstall, CoreWard ceases all processing: synchronisation stops and the
+On uninstall, Kerdon ceases all processing: synchronisation stops and the
 Shopify session credentials are deleted.
 
 **Data already synchronised remains in the merchant's database**, of which the
 merchant is the holder, and which the merchant may delete at any time from its
 own project.
 
-That data passes through CoreWard's infrastructure as it is written or read back,
+That data passes through Kerdon's infrastructure as it is written or read back,
 and in four limited cases it remains written there: pending repairs, which carry
 a customer's Shopify identifier and, for the date of birth, the value still to be
 written back; the signed message of a privacy request, until that request closes;
@@ -187,7 +187,7 @@ functions run in the Paris region.
 The synchronisation job queue also resides in the European Union (Frankfurt,
 Germany). Only internal store identifiers pass through it — no personal data.
 
-Every component operated by CoreWard is therefore located in the European Union,
+Every component operated by Kerdon is therefore located in the European Union,
 and the merchant chooses the region of its own database.
 
 The providers listed in section 5 are United States companies delivering the

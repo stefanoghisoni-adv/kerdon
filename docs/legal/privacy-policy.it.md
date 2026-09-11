@@ -1,4 +1,4 @@
-# CoreWard — Informativa sulla privacy
+# Kerdon — Informativa sulla privacy
 
 **Ultimo aggiornamento:** 06-09-2026
 **Versione:** 1.1
@@ -8,11 +8,11 @@
 
 ## 1. Chi siamo
 
-CoreWard è un'applicazione per negozi Shopify, gestita da Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genova (GE), Italia, P. IVA IT02705860993. Puoi scriverci a support@coreward.app.
+Kerdon è un'applicazione per negozi Shopify, gestita da Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genova (GE), Italia, P. IVA IT02705860993. Puoi scriverci a support@coreward.app.
 
 ## 2. Il nostro ruolo e il tuo
 
-CoreWard si installa nel tuo negozio Shopify e copia una parte dei dati del negozio in **un database di cui sei intestatario** — un progetto Supabase collegato al tuo account. È questa distinzione a determinare chi risponde di che cosa.
+Kerdon si installa nel tuo negozio Shopify e copia una parte dei dati del negozio in **un database di cui sei intestatario** — un progetto Supabase collegato al tuo account. È questa distinzione a determinare chi risponde di che cosa.
 
 **Tu sei il titolare del trattamento** dei dati del tuo negozio, compresi i dati personali dei tuoi clienti. Decidi tu perché vengono trattati e per quanto tempo conservati.
 

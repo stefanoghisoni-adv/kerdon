@@ -49,7 +49,7 @@ function call(env: Record<string, string>, visit: Visit = {}) {
 
 const cookiesOf = (response: Response) => response.headers.getSetCookie();
 const idCookie = (response: Response) =>
-  cookiesOf(response).find((c) => c.startsWith('corew_eid=')) ?? null;
+  cookiesOf(response).find((c) => c.startsWith('kerdon_eid=')) ?? null;
 
 let upstream: ReturnType<typeof kerdon>;
 const realFetch = globalThis.fetch;
@@ -107,7 +107,7 @@ describe('il Worker sul dominio del negozio', () => {
       const response = await call(ENV, { search: '?consent=v1.a1.m1' });
       const cookie = idCookie(response)!;
 
-      expect(cookie).toContain(`corew_eid=${ID}`);
+      expect(cookie).toContain(`kerdon_eid=${ID}`);
       expect(cookie).toContain('Path=/');
       expect(cookie).toContain('Secure');
       expect(cookie).toContain('SameSite=Lax');
@@ -116,7 +116,7 @@ describe('il Worker sul dominio del negozio', () => {
     });
 
     it('rimanda a Kerdon l identificativo che il browser ha gia', async () => {
-      await call(ENV, { search: '?consent=v1.a1.m1', cookies: `corew_eid=${ID}` });
+      await call(ENV, { search: '?consent=v1.a1.m1', cookies: `kerdon_eid=${ID}` });
       const init = upstream.mock.calls[0][1] as RequestInit;
       expect(new Headers(init.headers).get('X-CoreW-External-Id')).toBe(ID);
     });
@@ -143,12 +143,12 @@ describe('il Worker sul dominio del negozio', () => {
 
   describe('alla revoca', () => {
     const revoke = () =>
-      call(ENV, { search: '?consent=v1.a0.m0', cookies: `corew_eid=${ID}` });
+      call(ENV, { search: '?consent=v1.a0.m0', cookies: `kerdon_eid=${ID}` });
 
     it('fa scadere il cookie', async () => {
       const cookie = idCookie(await revoke())!;
       expect(cookie).toContain('Max-Age=0');
-      expect(cookie).toContain('corew_eid=;');
+      expect(cookie).toContain('kerdon_eid=;');
     });
 
     it('dice a Kerdon di dimenticare quell identificativo', async () => {
@@ -309,7 +309,7 @@ describe('la chiave di invio', () => {
     // invio esattamente come coniare.
     await call(CON_INVIO, {
       search: '?consent=v1.a0.m1',
-      cookies: `corew_eid=${ID}`,
+      cookies: `kerdon_eid=${ID}`,
     });
 
     expect(inviate().get('X-Kerdon-Key-Id')).toBe(KEY_ID);

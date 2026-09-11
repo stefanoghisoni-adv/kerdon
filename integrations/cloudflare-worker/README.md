@@ -57,7 +57,7 @@ pagina Impostazioni dell'app — la chiave di lettura e quella di invio.
 2. **Se non c'e' nessun segnale**: risponde `[]` e finisce li'. Nessuna
    chiamata, nessun cookie.
 3. **Se c'e' il permesso**: chiede l'identificativo a Kerdon con la chiave —
-   da server a server — e pianta il cookie `corew_eid` sul dominio del negozio,
+   da server a server — e pianta il cookie `kerdon_eid` sul dominio del negozio,
    con `Secure`, `Path=/`, `SameSite=Lax` e un anno di durata richiesta.
 4. **Se il permesso e' stato revocato**: fa scadere il cookie e dice a Kerdon di
    dimenticare quell'identificativo.

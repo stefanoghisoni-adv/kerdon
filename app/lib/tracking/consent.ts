@@ -4,7 +4,7 @@ import { postgrestFilterValue } from './users';
  * Il permesso del visitatore, prima di qualunque identificativo.
  *
  * QUESTO FILE ESISTE PERCHE' L'IDENTIFICATIVO NON E' UN DETTAGLIO TECNICO.
- * `corew_eid` segue lo stesso browser per un anno, viene scritto nel database
+ * `kerdon_eid` segue lo stesso browser per un anno, viene scritto nel database
  * del negozio e serve ad attribuire un acquisto alla campagna che lo ha
  * portato: e' un trattamento, e un trattamento si fa se e' permesso. Prima qui
  * non c'era niente — si guardava il token del negozio e si coniava — e il
@@ -21,7 +21,7 @@ import { postgrestFilterValue } from './users';
  *  - `marketing` — l'attribuzione. E' la ragione per cui l'identificativo dura
  *    un anno invece di una sessione: legare l'acquisto di oggi all'annuncio di
  *    tre settimane fa.
- *  - `sale_of_data` — la condivisione con terzi. CoreWard non vende e non
+ *  - `sale_of_data` — la condivisione con terzi. Kerdon non vende e non
  *    condivide niente: scrive nel database del merchant e basta. Ma
  *    l'identificativo che restituiamo il merchant lo inoltra alle piattaforme
  *    pubblicitarie dal suo container, e quella e' condivisione. Non possiamo

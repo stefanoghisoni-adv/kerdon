@@ -39,7 +39,7 @@
  */
 
 /** I nomi che questo Worker condivide con Kerdon. Cambiarli qui non basta. */
-const ID_COOKIE = 'corew_eid';
+const ID_COOKIE = 'kerdon_eid';
 const CONSENT_COOKIE = 'corew_consent';
 const SHOPIFY_CONSENT_COOKIE = '_tracking_consent';
 const ID_HEADER = 'X-CoreW-External-Id';

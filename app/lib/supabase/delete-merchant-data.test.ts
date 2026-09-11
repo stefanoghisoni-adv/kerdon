@@ -89,7 +89,7 @@ function ownedRows(names: string[]) {
     schemaName: 'public',
     resourceName,
     resourceKind: 'table',
-    createdByCoreWard: true,
+    createdByKerdon: true,
     schemaVersion: 9,
   }));
 }
@@ -212,11 +212,11 @@ describe('cosa NON e nostro non si tocca', () => {
     expect(dropSQL()).toContain('"users"');
   });
 
-  it('il registro viene interrogato con createdByCoreWard true', async () => {
+  it('il registro viene interrogato con createdByKerdon true', async () => {
     await deleteMerchantData('shop-1');
 
     expect(resourceFindMany).toHaveBeenCalledWith({
-      where: { shopId: 'shop-1', projectRef: 'abcdefgh', createdByCoreWard: true },
+      where: { shopId: 'shop-1', projectRef: 'abcdefgh', createdByKerdon: true },
     });
   });
 

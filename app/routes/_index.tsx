@@ -705,7 +705,7 @@ export default function Dashboard() {
   // il "messo in coda" e il momento in cui il database lo conferma. Ma sono
   // memoria del browser, e la corsa no: il job sta su Redis e lo esegue
   // un'invocazione a parte, quindi continua anche cambiando scheda, uscendo da
-  // CoreWard o chiudendo tutto. Riaprendo, di quelle due non resta niente e
+  // Kerdon o chiudendo tutto. Riaprendo, di quelle due non resta niente e
   // l'avviso spariva su una sincronizzazione che stava ancora girando.
   //
   // La terza e' il database: se risulta una corsa in stato "running", sta

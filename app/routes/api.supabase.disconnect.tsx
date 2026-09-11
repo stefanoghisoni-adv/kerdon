@@ -12,7 +12,7 @@ import { deleteMerchantData } from '~/lib/supabase/delete-merchant-data.server';
  *
  * Sono due gesti diversi e vanno tenuti diversi:
  *
- *  - `keepData` (il default) revoca CoreWard e basta. Nessuna tabella viene
+ *  - `keepData` (il default) revoca Kerdon e basta. Nessuna tabella viene
  *    toccata: restano dove sono, con dentro tutto, e si ferma solo la
  *    sincronizzazione. E' anche cio' che succede alla disinstallazione e a
  *    `shop/redact`, che infatti non passano di qui.

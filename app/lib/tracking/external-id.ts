@@ -33,18 +33,24 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 /** Quanti caratteri casuali. 62^32 e' abbastanza da non doverci pensare. */
 export const RANDOM_LENGTH = 32;
 
-export const EXTERNAL_ID_PREFIX = 'corew';
+export const EXTERNAL_ID_PREFIX = 'kerdon';
 
 /**
  * Riconosce un identificativo nostro, e ben formato.
  *
- * Due forme: quella corrente (`corew_` piu' 32 caratteri) e quella con i
- * millisecondi in mezzo, che i browser delle persone hanno ancora.
+ * Tre forme, e si accettano tutte e tre per la stessa ragione per cui si
+ * accettava la seconda: sono nei browser delle persone e nelle righe gia'
+ * scritte, e rifiutarle vorrebbe dire coniare un identificativo nuovo a
+ * chiunque torni — cioe' perdere esattamente cio' per cui esistono.
+ *
+ * Quella corrente (`kerdon_` piu' 32 caratteri), e le due che portano il nome
+ * di prima del cambio: `corew_` piu' 32 caratteri, e `corew_` con i
+ * millisecondi del conio in mezzo.
  */
-export const EXTERNAL_ID_PATTERN = /^corew_(?:\d+_)?[A-Za-z0-9]{32}$/;
+export const EXTERNAL_ID_PATTERN = /^(?:kerdon|corew)_(?:\d+_)?[A-Za-z0-9]{32}$/;
 
 /** La forma vecchia, quella con il momento di conio scritto dentro. */
-export const LEGACY_EXTERNAL_ID_PATTERN = /^corew_\d+_[A-Za-z0-9]{32}$/;
+export const LEGACY_EXTERNAL_ID_PATTERN = /^(?:kerdon|corew)_\d+_[A-Za-z0-9]{32}$/;
 
 export function isExternalId(value: string | null | undefined): boolean {
   return typeof value === 'string' && EXTERNAL_ID_PATTERN.test(value);
@@ -80,7 +86,7 @@ export function newExternalId(): string {
 }
 
 /** Il nome del cookie. */
-export const EXTERNAL_ID_COOKIE = 'corew_eid';
+export const EXTERNAL_ID_COOKIE = 'kerdon_eid';
 
 /**
  * IL TRASPORTO, dichiarato una volta sola perche' finora non lo era.

@@ -377,7 +377,7 @@ describe('identificativo esterno (external ID) — con consenso', () => {
 
     const headerValue = res.headers.get('X-CoreW-External-Id');
     expect(headerValue).toBeTruthy();
-    expect(headerValue).toMatch(/^corew_[A-Za-z0-9]{32}$/);
+    expect(headerValue).toMatch(/^kerdon_[A-Za-z0-9]{32}$/);
   });
 
   it('con cookie esistente → header presente con stesso valore del cookie', async () => {
@@ -386,7 +386,7 @@ describe('identificativo esterno (external ID) — con consenso', () => {
     forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
 
     const res = await call(
-      { authorization: 'Bearer spx_x', cookie: `corew_eid=${existingId}` },
+      { authorization: 'Bearer spx_x', cookie: `kerdon_eid=${existingId}` },
     );
 
     const headerValue = res.headers.get('X-CoreW-External-Id');
@@ -404,7 +404,7 @@ describe('identificativo esterno (external ID) — con consenso', () => {
 
     expect(headerValue).toBeTruthy();
     expect(setCookieHeader).toBeTruthy();
-    expect(setCookieHeader).toContain(`corew_eid=${headerValue}`);
+    expect(setCookieHeader).toContain(`kerdon_eid=${headerValue}`);
   });
 
   // Vedi la nota gemella in rest.v1.tracking_id.test.ts: qui non c'e' CORS, e
@@ -510,10 +510,10 @@ describe('identificativo esterno — consenso del visitatore', () => {
       withdrawn: true,
     });
 
-    const res = await call({ authorization: 'Bearer spx_x', cookie: `corew_eid=${existingId}` });
+    const res = await call({ authorization: 'Bearer spx_x', cookie: `kerdon_eid=${existingId}` });
 
     expect(res.headers.get('X-CoreW-External-Id')).toBeNull();
-    expect(res.headers.get('Set-Cookie')).toContain('corew_eid=');
+    expect(res.headers.get('Set-Cookie')).toContain('kerdon_eid=');
     expect(res.headers.get('Set-Cookie')).toContain('Max-Age=0');
     expect(revokeMock).toHaveBeenCalledWith({ shopId: 's1', externalId: existingId });
   });
@@ -530,7 +530,7 @@ describe('identificativo esterno — consenso del visitatore', () => {
       withdrawn: true,
     });
 
-    const res = await call({ authorization: 'Bearer spx_x', cookie: `corew_eid=${existingId}` });
+    const res = await call({ authorization: 'Bearer spx_x', cookie: `kerdon_eid=${existingId}` });
 
     // La lettura era andata bene, ma un 200 chiuderebbe per sempre una revoca
     // che non e' scritta da nessuna parte, con il cookie gia' scaduto.
@@ -544,7 +544,7 @@ describe('identificativo esterno — consenso del visitatore', () => {
   // La regola trasversale, verificata qui perche' questo e' l'endpoint che la
   // vetrina chiama a ogni pagina: senza permesso non esce un identificativo,
   // ne' nuovo ne' rinnovato.
-  it('senza permesso non si conia e non si rinnova nessun corew_eid', async () => {
+  it('senza permesso non si conia e non si rinnova nessun kerdon_eid', async () => {
     const existingId = 'corew_1234567890_abcdefghijklmnopqrstuvwxyz123456';
     resolveShopReadContext.mockResolvedValueOnce(okCtx());
     forwardRead.mockResolvedValueOnce({ status: 200, body: '[]', contentType: 'application/json' });
@@ -555,7 +555,7 @@ describe('identificativo esterno — consenso del visitatore', () => {
       withdrawn: false,
     });
 
-    const res = await call({ authorization: 'Bearer spx_x', cookie: `corew_eid=${existingId}` });
+    const res = await call({ authorization: 'Bearer spx_x', cookie: `kerdon_eid=${existingId}` });
 
     expect(res.headers.get('Set-Cookie')).toBeNull();
     expect(res.headers.get('X-CoreW-External-Id')).toBeNull();

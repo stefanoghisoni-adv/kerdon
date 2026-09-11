@@ -1,4 +1,4 @@
-# Accordo sul trattamento dei dati (DPA) — CoreWard
+# Accordo sul trattamento dei dati (DPA) — Kerdon
 
 Ultimo aggiornamento: 6 settembre 2026
 
@@ -11,16 +11,16 @@ Ultimo aggiornamento: 6 settembre 2026
 ## Le parti
 
 **Titolare del trattamento**: il merchant, cioè il soggetto intestatario del
-negozio Shopify su cui CoreWard è installata.
+negozio Shopify su cui Kerdon è installata.
 
 **Responsabile del trattamento**: Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148 Genova (GE), contatto support@coreward.app.
 
 Il merchant decide finalità e mezzi del trattamento dei dati dei propri clienti.
-CoreWard li tratta solo per erogare il servizio e solo su sua istruzione.
+Kerdon li tratta solo per erogare il servizio e solo su sua istruzione.
 
 ## 1. Oggetto e durata
 
-CoreWard sincronizza i dati di catalogo, clientela e ordini del negozio Shopify
+Kerdon sincronizza i dati di catalogo, clientela e ordini del negozio Shopify
 del merchant verso un progetto database di cui il merchant è intestatario, ne
 mantiene aggiornata la copia e ne calcola indicatori di redditività.
 
@@ -31,14 +31,14 @@ L'accordo dura quanto l'installazione dell'app e termina con la disinstallazione
 Raccolta da Shopify, trasformazione, scrittura nel database del merchant,
 aggiornamento e lettura controllata.
 
-Verso Shopify CoreWard scrive due sole cose: il **costo di un prodotto**, su
+Verso Shopify Kerdon scrive due sole cose: il **costo di un prodotto**, su
 richiesta del merchant, e la **data di nascita di un cliente** — il valore che
 sta nel database del merchant, riportato nel metafield del cliente da cui
-CoreWard lo legge, quando quel metafield è vuoto e il cliente ha prestato il
+Kerdon lo legge, quando quel metafield è vuoto e il cliente ha prestato il
 consenso al marketing. Nessun altro campo dell'anagrafica del cliente viene
 creato o modificato.
 
-CoreWard tratta inoltre, se il merchant attiva la funzione, il **riconoscimento
+Kerdon tratta inoltre, se il merchant attiva la funzione, il **riconoscimento
 dei visitatori** del negozio, descritto al punto 3.
 
 Finalità: consentire al merchant di usare i propri dati commerciali per misurare
@@ -62,14 +62,14 @@ quantità, prezzo unitario e sconto.
 
 **Dati di riconoscimento dei visitatori** (solo se il merchant attiva la
 funzione, e solo per i visitatori che hanno prestato il consenso): un
-identificativo pseudonimo del browser coniato da CoreWard, l'etichetta del
+identificativo pseudonimo del browser coniato da Kerdon, l'etichetta del
 browser e quella del tipo di dispositivo quando l'endpoint del merchant le
 trasmette, il primo e l'ultimo avvistamento, l'unione fra gli identificativi che
 risultano della stessa persona e il collegamento all'identificativo del cliente
 Shopify. Non è dato anonimo: l'identificativo resta nel browser di una persona e,
 una volta collegato a un cliente, è a lei ricollegabile. Per scrivere il
-collegamento, l'endpoint del merchant trasmette a CoreWard l'indirizzo email o il
-numero di telefono lasciato dalla persona; CoreWard li usa per la sola ricerca
+collegamento, l'endpoint del merchant trasmette a Kerdon l'indirizzo email o il
+numero di telefono lasciato dalla persona; Kerdon li usa per la sola ricerca
 nel database del merchant e non li conserva.
 
 **Esclusioni esplicite**: nessun dato di pagamento; dagli ordini non viene
@@ -89,7 +89,7 @@ chi ha prestato il consenso al marketing su Shopify.
 
 ## 4. Obblighi del responsabile
 
-CoreWard si impegna a:
+Kerdon si impegna a:
 
 a) trattare i dati solo su istruzione documentata del merchant, salvo obblighi di
 legge, dandone comunicazione salvo che la legge lo vieti;
@@ -119,7 +119,7 @@ questi obblighi.
 
 Il database di catalogo e clientela **non** compare in questa tabella: è
 intestato al merchant, che ha un rapporto contrattuale diretto con il proprio
-fornitore. CoreWard vi accede su sua istruzione.
+fornitore. Kerdon vi accede su sua istruzione.
 
 ## 6. Misure di sicurezza
 
@@ -137,7 +137,7 @@ fornitore. CoreWard vi accede su sua istruzione.
 
 ## 7. Violazioni dei dati
 
-CoreWard informa il merchant **senza ingiustificato ritardo** e comunque entro 72
+Kerdon informa il merchant **senza ingiustificato ritardo** e comunque entro 72
 ore dalla scoperta di una violazione che riguardi i suoi dati, indicando natura
 dell'evento, dati e interessati coinvolti, conseguenze probabili e misure
 adottate.
@@ -147,13 +147,13 @@ progetto.
 
 ## 8. Diritti degli interessati
 
-CoreWard dà seguito alle richieste di accesso e cancellazione che riceve
+Kerdon dà seguito alle richieste di accesso e cancellazione che riceve
 attraverso i canali previsti da Shopify.
 
-**Accesso**: CoreWard raccoglie dal database del merchant la riga del cliente, i
+**Accesso**: Kerdon raccoglie dal database del merchant la riga del cliente, i
 suoi ordini e le relative righe, e le righe dei browser a lui collegati.
 L'esportazione così ottenuta contiene dati personali e viene conservata sui
-sistemi di CoreWard, dove il merchant la scarica dentro l'app con la propria
+sistemi di Kerdon, dove il merchant la scarica dentro l'app con la propria
 sessione di amministratore, **per un massimo di 30 giorni**; alla scadenza viene
 cancellata.
 
@@ -165,14 +165,14 @@ dell'identificativo del cliente e del suo nome e cognome.
 
 ## 9. Al termine
 
-Alla disinstallazione dell'app, CoreWard cessa ogni trattamento: la
+Alla disinstallazione dell'app, Kerdon cessa ogni trattamento: la
 sincronizzazione si ferma e le credenziali della sessione Shopify vengono
 cancellate.
 
 **I dati già sincronizzati restano nel database del merchant**, che ne è
 intestatario, e li può cancellare in qualsiasi momento dal proprio progetto.
 
-Sull'infrastruttura di CoreWard quei dati transitano al momento in cui vengono
+Sull'infrastruttura di Kerdon quei dati transitano al momento in cui vengono
 scritti o riletti, e in quattro casi limitati vi restano scritti: le riparazioni
 in sospeso, che portano l'identificativo Shopify di un cliente e, per la data di
 nascita, il valore ancora da riscrivere; il messaggio firmato di una richiesta
@@ -191,7 +191,7 @@ Anche la coda dei lavori di sincronizzazione risiede nell'Unione Europea
 (Francoforte, Germania). Vi transitano peraltro esclusivamente identificatori
 interni di negozio, nessun dato personale.
 
-Ogni componente gestito da CoreWard si trova quindi nell'Unione Europea, e il
+Ogni componente gestito da Kerdon si trova quindi nell'Unione Europea, e il
 merchant sceglie la regione del proprio database.
 
 I fornitori elencati al punto 5 sono società statunitensi che erogano il

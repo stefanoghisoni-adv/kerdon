@@ -31,9 +31,9 @@ const BASE = {
 function created(): Record<string, boolean> {
   return Object.fromEntries(
     create.mock.calls.map((c) => {
-      const data = (c[0] as { data: { resourceName: string; createdByCoreWard: boolean } })
+      const data = (c[0] as { data: { resourceName: string; createdByKerdon: boolean } })
         .data;
-      return [data.resourceName, data.createdByCoreWard];
+      return [data.resourceName, data.createdByKerdon];
     }),
   );
 }
@@ -107,7 +107,7 @@ describe('alla riconnessione', () => {
         id: 'res-1',
         schemaName: MERCHANT_SCHEMA,
         resourceName: 'products',
-        createdByCoreWard: true,
+        createdByKerdon: true,
       },
     ]);
 
@@ -127,7 +127,7 @@ describe('alla riconnessione', () => {
         id: 'res-1',
         schemaName: MERCHANT_SCHEMA,
         resourceName: 'products',
-        createdByCoreWard: false,
+        createdByKerdon: false,
       },
     ]);
 
@@ -139,7 +139,7 @@ describe('alla riconnessione', () => {
 
     expect(update).toHaveBeenCalledWith({
       where: { id: 'res-1' },
-      data: { createdByCoreWard: true, schemaVersion: 9 },
+      data: { createdByKerdon: true, schemaVersion: 9 },
     });
   });
 });
@@ -147,13 +147,13 @@ describe('alla riconnessione', () => {
 describe('cosa si elimina', () => {
   it('solo le righe marcate come nostre', async () => {
     findMany.mockResolvedValue([
-      { schemaName: 'public', resourceName: 'users', createdByCoreWard: true },
+      { schemaName: 'public', resourceName: 'users', createdByKerdon: true },
     ]);
 
     const owned = await ownedResources('shop-1', 'abcdefgh');
 
     expect(findMany).toHaveBeenCalledWith({
-      where: { shopId: 'shop-1', projectRef: 'abcdefgh', createdByCoreWard: true },
+      where: { shopId: 'shop-1', projectRef: 'abcdefgh', createdByKerdon: true },
     });
     expect(owned).toEqual([
       { schemaName: 'public', resourceName: 'users', resourceKind: 'table' },

@@ -1,15 +1,15 @@
-# CoreWard — Privacy Policy
+# Kerdon — Privacy Policy
 
 **Last updated:** 06-09-2026
 **Version:** 1.1
 
 ## 1. Who we are
 
-CoreWard is an application for Shopify stores, operated by Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148, Genoa (GE), Italy, VAT IT02705860993. You can reach us at support@coreward.app.
+Kerdon is an application for Shopify stores, operated by Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148, Genoa (GE), Italy, VAT IT02705860993. You can reach us at support@coreward.app.
 
 ## 2. Our role, and yours
 
-CoreWard installs into your Shopify store and copies part of your store's data into **a database that you own** — a Supabase project connected to your own account. That distinction determines who is responsible for what.
+Kerdon installs into your Shopify store and copies part of your store's data into **a database that you own** — a Supabase project connected to your own account. That distinction determines who is responsible for what.
 
 **You are the data controller** for your store's data, including your customers' personal data. You decide why it is processed and for how long it is kept.
 

@@ -153,7 +153,7 @@ export function buildShopExport(rows: ShopExportRows, generatoIl: Date) {
   return {
     generato_il: generatoIl.toISOString(),
     cosa_e_questo:
-      "Una copia di tutto cio' che CoreWard conserva sul tuo negozio. I dati dei tuoi " +
+      "Una copia di tutto cio' che Kerdon conserva sul tuo negozio. I dati dei tuoi " +
       'clienti, dei prodotti e degli ordini non sono qui: quelli stanno nel database ' +
       'che hai collegato, sono tuoi, e li leggi da li. Le credenziali di accesso sono ' +
       'escluse di proposito.',

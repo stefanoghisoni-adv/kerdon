@@ -54,7 +54,7 @@ export const IDENTITY_EVENT = 'corew_identity';
 export const ENDPOINT_ATTRIBUTE = 'data-kerdon-endpoint';
 
 /** L'attributo del carrello Shopify su cui finisce l'identificativo. */
-export const CART_ATTRIBUTE = 'corew_eid';
+export const CART_ATTRIBUTE = 'kerdon_eid';
 
 /**
  * Lo script, come stringa.
