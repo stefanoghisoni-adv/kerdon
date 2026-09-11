@@ -10,6 +10,20 @@ import { PrismaSessionStorage } from '@shopify/shopify-app-session-storage-prism
 import { prisma } from '~/db.server';
 import { encrypt } from '~/utils/crypto.server';
 import { shopCreateData } from '~/utils/shop.server';
+import { withRequestShop, withShopInMessage } from '~/lib/log/request-shop.server';
+
+/**
+ * I nomi delle gravita', che la libreria passa come numeri.
+ *
+ * Servono a tenere le righe identiche a prima: chi cerca "[shopify-app/INFO]"
+ * nei log di ieri deve trovare la stessa cosa in quelli di oggi.
+ */
+const SEVERITA: Record<number, string> = {
+  0: 'ERROR',
+  1: 'WARNING',
+  2: 'INFO',
+  3: 'DEBUG',
+};
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -54,6 +68,15 @@ const shopify = shopifyApp({
       }
     },
   },
+  // I messaggi della libreria passano di qui per una ragione sola: rimetterci
+  // dentro il negozio. Il suo helper lo cerca nel parametro `?shop=`, che le
+  // chiamate interne dell'app non hanno, e quindi scriveva `{shop: null}` a ogni
+  // richiesta — la riga da cui si comincia a guardare quando qualcosa non va.
+  logger: {
+    log: (severity, message) => {
+      console.log(`[shopify-app/${SEVERITA[severity] ?? severity}] ${withShopInMessage(message)}`);
+    },
+  },
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),
@@ -62,7 +85,25 @@ const shopify = shopifyApp({
 export default shopify;
 export const apiVersion = ApiVersion.July26;
 export const addDocumentResponseHeaders = shopify.addDocumentResponseHeaders;
-export const authenticate = shopify.authenticate;
+/**
+ * `authenticate`, con il negozio disponibile a chi scrive nei log.
+ *
+ * Si avvolge qui e non in ogni loader: i chiamanti sono decine e continuano a
+ * scrivere `authenticate.admin(request)` come prima. Il negozio si legge dalla
+ * richiesta e vive quanto la richiesta — non e' una variabile globale, e due
+ * richieste in volo insieme non si vedono a vicenda.
+ */
+export const authenticate: typeof shopify.authenticate = {
+  ...shopify.authenticate,
+  admin: ((request: Parameters<typeof shopify.authenticate.admin>[0]) =>
+    withRequestShop(request as Request, () =>
+      shopify.authenticate.admin(request),
+    )) as typeof shopify.authenticate.admin,
+  webhook: ((request: Parameters<typeof shopify.authenticate.webhook>[0]) =>
+    withRequestShop(request, () =>
+      shopify.authenticate.webhook(request),
+    )) as typeof shopify.authenticate.webhook,
+};
 export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const registerWebhooks = shopify.registerWebhooks;
