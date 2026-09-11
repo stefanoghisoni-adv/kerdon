@@ -701,11 +701,32 @@ model ComplianceRequest {
   /// 'failed' e' un fallimento da ritentare; 'dead_letter' e' uno a cui non si
   /// riprova piu' da soli, e vuole qualcuno che lo guardi.
   status      String    @default("queued")
+  /// Quanti tentativi sono stati COMINCIATI. La presa lo incrementa e si porta
+  /// indietro il valore nuovo nella stessa istruzione: quel valore e' il numero
+  /// del tentativo in corso, va da 1 a MAX_ATTEMPTS, ed e' l'unico posto da cui
+  /// si legge. Contarlo due volte — una nella presa e una in chi decide la
+  /// lettera morta — fermava la richiesta con un tentativo ancora da fare.
   attempts    Int       @default(0)
   lastError   String?   @map("last_error")
   receivedAt  DateTime  @default(now()) @map("received_at")
   startedAt   DateTime? @map("started_at")
   completedAt DateTime? @map("completed_at")
+
+  /// Da quando la richiesta torna prendibile. Nasce con l'istante di adesso —
+  /// il primo tentativo non aspetta — e dopo ogni fallimento si allontana in
+  /// modo esponenziale, con jitter: quando il progetto di un merchant smette di
+  /// rispondere falliscono insieme tutte le sue richieste, e senza jitter
+  /// tornerebbero pronte nello stesso istante rifacendo la stessa ondata.
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+
+  /// Chi sta lavorando la richiesta, e fino a quando. Un'identita' nuova a ogni
+  /// presa: chi ha perso il possesso — un'invocazione sopravvissuta a un
+  /// deploy — si ripresenta con un nome che sulla riga non c'e' piu', e le sue
+  /// scritture toccano zero righe. Scaduto il lease, la riga rimasta
+  /// 'processing' torna prendibile da sola, senza che nessuno debba riportarla
+  /// a mano in 'failed'.
+  leaseOwner     String?   @map("lease_owner")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
 
   /// L'esportazione pronta, per le sole richieste di accesso. Sta qui e non in
   /// un file su un indirizzo pubblico: si consegna dall'app, al merchant gia'
@@ -723,6 +744,9 @@ model ComplianceRequest {
 
   @@unique([shopDomain, dataRequestId])
   @@index([status, receivedAt])
+  /// L'indice della presa: il drenaggio cerca per stato e per quando la
+  /// richiesta torna dovuta, non per quando e' arrivata.
+  @@index([status, nextAttemptAt])
   @@index([shopDomain, receivedAt(sort: Desc)])
   @@map("compliance_requests")
 }

@@ -34,10 +34,19 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { GdprStep, QueryError } from './steps';
 import { toStep } from './steps';
-import { inBatches, pagedStep, readAllByEq, readAllByIn } from './paged-read';
+import { inBatches, pagedStep, readAllByEq, readAllByIn, type PagedTable } from './paged-read';
 
 /** Il nome e' cablato nella DDL: chi scrive queste righe non lo configura. */
 export const USERS_TABLE = 'users';
+
+/**
+ * La stessa tabella come la vuole l'impaginazione: chi e' per noi, e come si
+ * chiama la' dentro. Qui i due nomi coincidono — e' la tabella dei clienti a
+ * essere configurabile, non questa — ma passare l'identita' logica resta
+ * l'unico modo per cui la colonna di ordinamento arrivi dalla mappa e non da
+ * una stringa scritta qui.
+ */
+const USERS: PagedTable = { id: 'users', name: USERS_TABLE };
 
 /**
  * Quanti salti di `merged_into` si seguono prima di fermarsi.
@@ -92,7 +101,7 @@ export async function resolveIdentityGraph(
   // anni puo' averne molte di piu'. Una lettura che si ferma al tetto di righe
   // del progetto qui non troncherebbe solo un'esportazione: farebbe dichiarare
   // completa una cancellazione che ha lasciato indietro delle righe.
-  const seeds = await readAllByEq(supabase, USERS_TABLE, 'shopify_customer_id', customerId);
+  const seeds = await readAllByEq(supabase, USERS, 'shopify_customer_id', customerId);
   const seedsStep = pagedStep(USERS_TABLE, seeds);
 
   // Si esce su qualunque errore, non solo su quelli fatali: una tabella che non
@@ -137,7 +146,7 @@ export async function resolveIdentityGraph(
     const next: Row[] = [];
 
     if (targets.length > 0) {
-      const parents = await readAllByIn(supabase, USERS_TABLE, 'external_id', targets);
+      const parents = await readAllByIn(supabase, USERS, 'external_id', targets);
       const parentsStep = pagedStep(USERS_TABLE, parents);
       if (parents.error || parentsStep.outcome === 'failed') {
         return {
@@ -150,7 +159,7 @@ export async function resolveIdentityGraph(
       next.push(...(parents.rows as Row[]));
     }
 
-    const children = await readAllByIn(supabase, USERS_TABLE, 'merged_into', frontier);
+    const children = await readAllByIn(supabase, USERS, 'merged_into', frontier);
     const childrenStep = pagedStep(USERS_TABLE, children);
     if (children.error || childrenStep.outcome === 'failed') {
       return {

@@ -302,6 +302,9 @@ CREATE TABLE "compliance_requests" (
     "received_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "started_at" TIMESTAMP(3),
     "completed_at" TIMESTAMP(3),
+    "next_attempt_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lease_owner" TEXT,
+    "lease_expires_at" TIMESTAMP(3),
     "export" JSONB,
     "export_expires_at" TIMESTAMP(3),
     "downloaded_at" TIMESTAMP(3),
@@ -412,6 +415,9 @@ CREATE UNIQUE INDEX "compliance_requests_shop_domain_data_request_id_key" ON "co
 
 -- CreateIndex
 CREATE INDEX "compliance_requests_status_received_at_idx" ON "compliance_requests"("status", "received_at");
+
+-- CreateIndex
+CREATE INDEX "compliance_requests_status_next_attempt_at_idx" ON "compliance_requests"("status", "next_attempt_at");
 
 -- CreateIndex
 CREATE INDEX "compliance_requests_shop_domain_received_at_idx" ON "compliance_requests"("shop_domain", "received_at" DESC);

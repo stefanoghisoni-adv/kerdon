@@ -48,36 +48,63 @@ function fakeSupabase(rows: Row[], failures: Failures = {}, maxRows?: number) {
     });
 
   /**
-   * Una lettura come la restituisce PostgREST: si puo' attendere direttamente,
-   * oppure chiedere una pagina con `.range()`. Il conteggio e' quello vero
-   * della tabella finta, non quello della pagina — e' la differenza che
-   * permette di accorgersi di una lettura fermata a meta'.
+   * Una lettura come la restituisce PostgREST, impaginata per chiave: si filtra,
+   * si dice da quale chiave ripartire (`.gt`), si ordina e si limita. Il
+   * conteggio e' quello vero della tabella finta, non quello della pagina — e'
+   * la differenza che permette di accorgersi di una lettura fermata a meta'.
    *
    * `maxRows` e' il tetto per risposta del progetto: se e' piu' basso della
    * pagina richiesta, il database ne serve meno di quante gliene si chiedono.
+   * E' il caso per cui la lettura non smette su una pagina corta.
    */
   const selectChain = (column: string, values: string[]) => {
     if (failures.select) {
       const failed = { data: null, error: failures.select, count: null };
-      return {
-        ...failed,
-        range: async () => failed,
+      const rotto: any = {
+        gt: () => rotto,
+        order: () => rotto,
+        limit: () => ({
+          ...failed,
+          then: (ok: (v: unknown) => unknown) => Promise.resolve(failed).then(ok),
+        }),
         then: (ok: (v: unknown) => unknown) => Promise.resolve(failed).then(ok),
       };
+      return rotto;
     }
 
-    const hit = match(column, values);
     const cap = maxRows ?? Infinity;
-    const base = { data: hit, error: null, count: hit.length };
+    let after: string | null = null;
+    let chiave = 'external_id';
 
-    return {
-      ...base,
-      range: async (from: number, to: number) => ({
-        ...base,
-        data: hit.slice(from, Math.min(to + 1, from + cap)),
-      }),
-      then: (ok: (v: unknown) => unknown) => Promise.resolve(base).then(ok),
+    const chain: any = {
+      gt: (col: string, valore: unknown) => {
+        chiave = col;
+        after = String(valore);
+        return chain;
+      },
+      order: (col: string) => {
+        chiave = col;
+        return chain;
+      },
+      limit: (quante: number) => {
+        const hit = match(column, values);
+        const ordinate = [...hit].sort((a, b) =>
+          String((a as any)[chiave]).localeCompare(String((b as any)[chiave])),
+        );
+        const dopo =
+          after === null
+            ? ordinate
+            : ordinate.filter((r) => String((r as any)[chiave]) > (after as string));
+        const base = {
+          data: dopo.slice(0, Math.min(quante, cap)),
+          error: null,
+          count: hit.length,
+        };
+        return { ...base, then: (ok: (v: unknown) => unknown) => Promise.resolve(base).then(ok) };
+      },
     };
+
+    return chain;
   };
 
   const client = {

@@ -8,10 +8,34 @@
 // dall'inventario. Ma le due letture hanno lo stesso problema e meritano la
 // stessa risposta: una richiesta GDPR che legge meta' delle righe e' peggio di
 // una che fallisce, perche' si dichiara riuscita.
+//
+// PERCHE' PER CHIAVE E NON PER SCOSTAMENTO, che e' come si faceva prima.
+// `.range(from, to)` senza `ORDER BY` chiede a Postgres la fetta n-esima di un
+// ordine che Postgres non ha promesso: senza ordinamento esplicito il piano puo'
+// cambiare fra una pagina e l'altra, e basta una scrittura in corso perche' la
+// stessa riga esca in due pagine — o non esca affatto. Il confronto con il
+// conteggio non se ne accorgeva, perche' un doppione e una riga persa insieme
+// fanno tornare il totale: l'esportazione risultava completa ed era sbagliata.
+//
+// Adesso ogni pagina dice due cose che prima non diceva: da che colonna e'
+// ordinata, e da quale valore riparte. La colonna arriva da una mappa nostra
+// (`subject-keys`) e mai da fuori — dettagliato li'. L'avanzamento e' "tutto
+// cio' che viene dopo l'ultima chiave vista": una riga inserita prima del
+// cursore non ci fa saltare niente, e una cancellata non fa scorrere indietro
+// la finestra.
+//
+// QUANDO SI SMETTE. Mai perche' una pagina e' arrivata corta: il tetto di righe
+// per risposta e' del progetto, non nostro, e un progetto configurato a cento
+// righe risponde con cento anche quando gliene chiediamo cinquecento. "Corta
+// quindi ultima" avrebbe troncato la lettura al primo giro dichiarandola
+// intera. Si smette quando si sono raccolte tutte le righe che il database
+// aveva dichiarato all'inizio, e — se quel conteggio non e' arrivato — solo
+// davanti a una pagina vuota.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { GdprStep, QueryError } from './steps';
 import { toStep } from './steps';
+import { orderKeyOf, type GdprTableId } from './subject-keys';
 
 /**
  * Quante righe si chiedono per pagina.
@@ -34,14 +58,31 @@ export const PAGE_SIZE = 500;
 export const IDS_BATCH_SIZE = 100;
 
 /**
+ * Una tabella da leggere: chi e' per noi, e come si chiama la' dentro.
+ *
+ * I due nomi sono separati apposta. `name` puo' essere scelto dal merchant — la
+ * tabella dei clienti lo e' — mentre `id` e' un tipo chiuso, ed e' l'unica cosa
+ * da cui si ricava la colonna di ordinamento.
+ */
+export interface PagedTable {
+  id: GdprTableId;
+  name: string;
+}
+
+/**
  * L'esito di una lettura paginata.
  *
- * `expected` e' quante righe il database dice che esistono, quando lo dice:
- * serve a distinguere "ho letto tutto" da "ho smesso di leggere". Se resta
- * null, il conteggio non e' arrivato e ci si affida alla pagina corta.
+ * `keys` sono le chiavi delle righe uscite, nell'ordine in cui sono uscite:
+ * servono a chi deve dimostrare non solo QUANTE righe ha letto ma QUALI — un
+ * conteggio uguale non prova che siano le stesse righe.
+ *
+ * `expected` e' quante righe il database diceva che esistessero quando la
+ * lettura e' cominciata, quando lo dice: serve a distinguere "ho letto tutto"
+ * da "ho smesso di leggere". Se resta null, il conteggio non e' arrivato.
  */
 export interface PagedRead {
   rows: Record<string, unknown>[];
+  keys: string[];
   error: unknown;
   expected: number | null;
 }
@@ -53,94 +94,159 @@ export function inBatches<T>(ids: readonly T[], size: number = IDS_BATCH_SIZE): 
   return batches;
 }
 
+/** Il valore di una chiave, quando c'e' ed e' utilizzabile come cursore. */
+function keyOf(row: Record<string, unknown>, column: string): string | null {
+  const value = row[column];
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
 /**
- * Scorre una lettura pagina per pagina fino a esaurirla.
+ * Scorre una lettura pagina per pagina fino a esaurirla, avanzando per chiave.
  *
- * Il caso che questa funzione esiste per evitare: PostgREST ha un tetto di
- * righe per risposta, e una risposta al tetto sembra identica a una risposta
- * completa. Chi chiedeva una volta sola e prendeva quello che tornava
- * consegnava alla persona un'esportazione troncata dichiarandola intera — e
- * nella cancellazione lasciava indietro righe dichiarando di averle tolte.
+ * `page` riceve l'ultima chiave vista (null alla prima pagina) e deve
+ * restituire le righe che vengono DOPO di quella, ordinate per la stessa
+ * colonna. Chi la scrive non sceglie ne' la colonna ne' l'ordine: glieli passa
+ * questa funzione, che li prende dalla mappa.
  *
- * L'avanzamento e' di quante righe sono davvero arrivate, non di `PAGE_SIZE`:
- * se il progetto ha un tetto piu' basso di quello che chiediamo, saltare di
- * PAGE_SIZE lascerebbe fuori tutto quello che sta in mezzo.
+ * Una riga senza chiave interrompe la lettura con un errore invece di essere
+ * saltata. Non e' pignoleria: senza chiave non c'e' da dove ripartire, quindi
+ * proseguire vorrebbe dire o rileggere in eterno la stessa pagina o saltare
+ * tutto quello che viene dopo — e la seconda finirebbe in un'esportazione
+ * dichiarata completa.
  */
 export async function drainPages(
-  page: (from: number, to: number) => PromiseLike<{
+  table: PagedTable,
+  page: (after: string | null, limit: number) => PromiseLike<{
     data?: unknown;
     error?: unknown;
     count?: number | null;
   }>,
 ): Promise<PagedRead> {
+  const column = orderKeyOf(table.id);
   const rows: Record<string, unknown>[] = [];
-  let offset = 0;
+  const keys: string[] = [];
+  const visti = new Set<string>();
+  let after: string | null = null;
   let expected: number | null = null;
 
   for (;;) {
-    const response = await page(offset, offset + PAGE_SIZE - 1);
-    if (response.error) return { rows, error: response.error, expected };
+    const response = await page(after, PAGE_SIZE);
+    if (response.error) return { rows, keys, error: response.error, expected };
+
+    // Il conteggio della PRIMA pagina, e solo quello: e' la fotografia di
+    // quante righe c'erano quando la lettura e' cominciata. Prendere quello
+    // dell'ultima pagina vorrebbe dire confrontare le righe raccolte in mezz'ora
+    // con un totale di adesso, che e' un confronto fra due istanti diversi.
+    if (expected === null && typeof response.count === 'number') expected = response.count;
 
     const got = (response.data ?? []) as Record<string, unknown>[];
-    rows.push(...got);
-    if (typeof response.count === 'number') expected = response.count;
-
-    // Una pagina vuota e' la fine, sempre: anche se il conteggio dicesse altro,
-    // continuare vorrebbe dire girare a vuoto per sempre.
     if (got.length === 0) break;
-    offset += got.length;
 
-    if (expected !== null ? rows.length >= expected : got.length < PAGE_SIZE) break;
+    let ultima: string | null = null;
+    for (const row of got) {
+      const chiave = keyOf(row, column);
+      if (chiave === null) {
+        return {
+          rows,
+          keys,
+          error: {
+            code: 'GDPR_CHIAVE_MANCANTE',
+            message: `una riga di ${table.name} non ha ${column}: impaginazione non ripetibile`,
+          } satisfies QueryError,
+          expected,
+        };
+      }
+
+      ultima = chiave;
+      // Un doppione non puo' arrivare finche' il cursore e' un `>` stretto, ma
+      // se arrivasse non deve entrare due volte nell'esportazione.
+      if (visti.has(chiave)) continue;
+      visti.add(chiave);
+      rows.push(row);
+      keys.push(chiave);
+    }
+
+    // Nessun avanzamento: la pagina successiva sarebbe identica a questa, e si
+    // girerebbe per sempre. Non deve succedere con un cursore stretto — questa
+    // e' la cintura di sicurezza, non il meccanismo.
+    if (ultima === null || ultima === after) break;
+    after = ultima;
+
+    // Raccolte tutte quelle che il database aveva dichiarato: la pagina dopo
+    // sarebbe vuota, e chiederla e' un'andata e ritorno per sentirselo dire.
+    // Senza conteggio non si indovina — si va avanti fino alla pagina vuota.
+    if (expected !== null && rows.length >= expected) break;
   }
 
-  return { rows, error: null, expected };
+  return { rows, keys, error: null, expected };
 }
 
-/** Tutte le righe di una tabella con `column = value`, paginate. */
-export function readAllByEq(
+/**
+ * Tutte le righe di una tabella con `column = value`, impaginate per chiave.
+ *
+ * `select` esiste per un caso solo, ed e' quello che rende corta la finestra
+ * sotto il lucchetto: la fotografia del soggetto legge le sole chiavi, e leggere
+ * le sole chiavi e' molte volte piu' rapido che leggere le righe intere.
+ */
+export async function readAllByEq(
   supabase: SupabaseClient,
-  table: string,
+  table: PagedTable,
   column: string,
   value: string,
+  select = '*',
 ): Promise<PagedRead> {
-  return drainPages((from, to) =>
-    supabase.from(table).select('*', { count: 'exact' }).eq(column, value).range(from, to),
-  );
+  const key = orderKeyOf(table.id);
+
+  return drainPages(table, (after, limit) => {
+    // I filtri PRIMA di `.order()`: dopo l'ordinamento PostgREST non accetta
+    // piu' condizioni, e la catena non compilerebbe nemmeno.
+    let query = supabase.from(table.name).select(select, { count: 'exact' }).eq(column, value);
+    if (after !== null) query = query.gt(key, after);
+    return query.order(key, { ascending: true }).limit(limit);
+  });
 }
 
 /**
  * Tutte le righe di una tabella con `column IN (...)`, a lotti e ciascun lotto
- * paginato.
+ * impaginato.
  *
  * Due tetti diversi, e servono entrambi: gli id nel filtro finiscono in un URL,
  * che ha una lunghezza massima, e le righe che tornano finiscono in una
  * risposta, che ha un numero massimo di righe. Cento ordini stanno nell'URL ma
- * le loro righe possono essere migliaia, quindi ogni lotto si pagina come una
+ * le loro righe possono essere migliaia, quindi ogni lotto si impagina come una
  * lettura qualsiasi.
  */
 export async function readAllByIn(
   supabase: SupabaseClient,
-  table: string,
+  table: PagedTable,
   column: string,
   values: readonly (string | number)[],
+  select = '*',
 ): Promise<PagedRead> {
+  const key = orderKeyOf(table.id);
   const rows: Record<string, unknown>[] = [];
+  const keys: string[] = [];
   let expected: number | null = 0;
 
   for (const batch of inBatches(values)) {
-    const read = await drainPages((from, to) =>
-      supabase.from(table).select('*', { count: 'exact' }).in(column, batch).range(from, to),
-    );
+    const read = await drainPages(table, (after, limit) => {
+      let query = supabase.from(table.name).select(select, { count: 'exact' }).in(column, batch);
+      if (after !== null) query = query.gt(key, after);
+      return query.order(key, { ascending: true }).limit(limit);
+    });
 
     rows.push(...read.rows);
-    if (read.error) return { rows, error: read.error, expected: null };
+    keys.push(...read.keys);
+    if (read.error) return { rows, keys, error: read.error, expected: null };
 
     // Basta un lotto senza conteggio perche' il totale atteso non sia piu'
     // affidabile: meglio nessun controllo che un controllo su un numero falso.
     expected = expected === null || read.expected === null ? null : expected + read.expected;
   }
 
-  return { rows, error: null, expected };
+  return { rows, keys, error: null, expected };
 }
 
 /**

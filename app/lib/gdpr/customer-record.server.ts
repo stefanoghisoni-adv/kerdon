@@ -87,8 +87,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import type { GdprStep, QueryError } from './steps';
 import { toStep } from './steps';
-import { pagedStep, readAllByEq, readAllByIn } from './paged-read';
-import { collectLinkedBrowsers, eraseBrowsersOfCustomer } from './identity-graph.server';
+import { eraseBrowsersOfCustomer } from './identity-graph.server';
 
 // Il vocabolario dei passi vive in `steps.ts` — ci arriva anche il grafo delle
 // identita', e tenerlo qui avrebbe chiuso un cerchio fra i due moduli. Si
@@ -183,72 +182,15 @@ export function emptyCustomerDataPackage(): CustomerDataPackage {
   return { customer: null, orders: [], order_lines: [], browsers: [] };
 }
 
-/**
- * Raccoglie i dati della persona per una richiesta di accesso.
- *
- * Le stesse tabelle della cancellazione, lette invece che svuotate: se una
- * tabella conta per l'erasure conta anche qui, altrimenti staremmo
- * consegnando meno di quello che teniamo.
- *
- * Le righe d'ordine si raggiungono passando per gli ordini: non hanno l'id del
- * cliente, ma dicono cosa la persona ha comprato, e quella e' informazione che
- * la riguarda.
- *
- * PAGINAZIONE E CONTEGGIO. Ogni lettura pagina fino a esaurimento e confronta
- * il numero di righe attese con quello esportato. Se non coincidono, la
- * richiesta fallisce invece di consegnare un'esportazione parziale che sembra
- * completa: chi la legge crederebbe che il resto non esista.
- */
-export async function collectCustomerData(
-  supabase: SupabaseClient,
-  customersTable: string,
-  customerId: string,
-): Promise<{ data: CustomerDataPackage; steps: GdprStep[] }> {
-  const steps: GdprStep[] = [];
-  const pack: CustomerDataPackage = emptyCustomerDataPackage();
-
-  // Clienti: paginato anche questo, benche' sara' quasi sempre zero o uno. Una
-  // tabella trattata in modo speciale e' una tabella che prima o poi si
-  // dimentica.
-  //
-  // Volutamente senza .single(): una persona che non abbiamo mai sincronizzato
-  // — perche' non ha dato consenso al marketing, o perche' il piano non include
-  // i clienti — non e' un errore da far ritentare a Shopify. E' una risposta
-  // legittima, ed e' "di questa persona non abbiamo niente".
-  const customersRead = await readAllByEq(supabase, customersTable, 'shopify_customer_id', customerId);
-  pack.customer = customersRead.rows[0] ?? null;
-  steps.push(pagedStep(customersTable, customersRead));
-
-  // Ordini: una persona puo' averne centinaia o migliaia.
-  const ordersRead = await readAllByEq(supabase, ORDERS_TABLE, 'shopify_customer_id', customerId);
-  pack.orders = ordersRead.rows;
-  steps.push(pagedStep(ORDERS_TABLE, ordersRead));
-
-  const orderIds = pack.orders
-    .map((order) => order.shopify_order_id)
-    .filter((id): id is string | number => id !== null && id !== undefined);
-
-  if (orderIds.length === 0) {
-    steps.push({
-      table: ORDER_LINES_TABLE,
-      outcome: 'skipped',
-      rows: 0,
-      detail: 'nessun ordine da cui partire',
-    });
-  } else {
-    const linesRead = await readAllByIn(supabase, ORDER_LINES_TABLE, 'shopify_order_id', orderIds);
-    pack.order_lines = linesRead.rows;
-    steps.push(pagedStep(ORDER_LINES_TABLE, linesRead));
-  }
-
-  // I browser: si arriva alle righe indirette seguendo `merged_into`, quindi
-  // non basta la lettura per `shopify_customer_id` che si farebbe d'istinto.
-  const browsers = await collectLinkedBrowsers(supabase, customerId);
-  pack.browsers = browsers.rows;
-  steps.push(browsers.step);
-
-  return { data: pack, steps };
-}
+// LA RACCOLTA PER UNA RICHIESTA DI ACCESSO STA IN `subject-snapshot.server`.
+//
+// Non e' una divisione estetica. Leggere per consegnare non e' la stessa cosa
+// che leggere per cancellare: la cancellazione e' ripetibile e lavora per id,
+// quindi puo' scorrere le tabelle mentre il mondo si muove; l'esportazione deve
+// invece raccontare UN istante, altrimenti mette insieme un cliente di prima e
+// gli ordini di dopo e li presenta come se fossero stati visti insieme. La
+// fotografia sotto lucchetto, l'impaginazione di quella fotografia e il
+// confronto per chiave che la verifica hanno preso un file loro.
 
 /**
  * La stessa cancellazione, nel nostro database.
