@@ -316,7 +316,13 @@ export function DateRangePicker({
                 label={t.dates.start}
                 value={draft.from}
                 placeholder={placeholder}
-                onCommit={(next) => setDraft(orderRange(notInTheFuture(next, todayIso), draft.to))}
+                onCommit={(next) => {
+                  const range = orderRange(notInTheFuture(next, todayIso), draft.to);
+                  setDraft(range);
+                  // Si restituisce la data ACCETTATA, non quella letta: vedi
+                  // il commento su onCommit in DateField.
+                  return range.from;
+                }}
               />
               {/* Una freccia, non un pulsante spento: indica il verso e basta,
                   e un pulsante disabilitato invita a premerlo. Icon senza
@@ -329,7 +335,11 @@ export function DateRangePicker({
                 label={t.dates.end}
                 value={draft.to}
                 placeholder={placeholder}
-                onCommit={(next) => setDraft(orderRange(draft.from, notInTheFuture(next, todayIso)))}
+                onCommit={(next) => {
+                  const range = orderRange(draft.from, notInTheFuture(next, todayIso));
+                  setDraft(range);
+                  return range.to;
+                }}
               />
             </div>
 
@@ -464,7 +474,20 @@ function DateField({
   label: string;
   value: string;
   placeholder: string;
-  onCommit: (value: string) => void;
+  /**
+   * Consegna la data letta e restituisce quella ACCETTATA.
+   *
+   * Non restituiva niente, e da li' nasceva il difetto. Chi riceve la data puo'
+   * cambiarla — il futuro viene riportato a oggi, una fine anteriore all'inizio
+   * fa scambiare i due estremi — e il campo lo scopriva solo di rimbalzo, dal
+   * cambiamento della prop `value`. Quando la data accettata coincideva con
+   * quella che il campo aveva gia', `value` non cambiava, l'effetto non
+   * scattava, e a schermo restava cio' che era stato battuto: il 31 dicembre in
+   * un campo che vale il 26 agosto, accanto a un "Applica" spento che non
+   * spiega perche'. Restituendola, il campo mostra sempre la data che verra'
+   * davvero applicata.
+   */
+  onCommit: (value: string) => string;
 }) {
   const locale = useLocale();
   const [text, setText] = useState(() => formatDayNumeric(value, locale));
@@ -473,12 +496,14 @@ function DateField({
   const commit = () => {
     const parsed = parseDay(text, locale);
     if (parsed) {
-      onCommit(parsed);
-      // Se la data e' la stessa di prima l'effetto non riscatta, e quello che
-      // resta a schermo e' la scrittura battuta — "8/1/26" invece di
-      // "08/01/2026". Si normalizza qui, che e' l'unico punto che sa di aver
-      // appena letto qualcosa.
-      setText(formatDayNumeric(parsed, locale));
+      // Si riscrive sulla data ACCETTATA e non su quella letta. Serve a due
+      // casi diversi che senza questa riga si comportano male allo stesso
+      // modo: la scrittura abbreviata da normalizzare ("8/1/26" invece di
+      // "08/01/2026"), e la data che il selettore ha corretto — riportata a
+      // oggi, o scambiata con l'altro estremo. Nel secondo caso la prop
+      // `value` puo' non cambiare affatto, l'effetto qui sotto non riscatta, e
+      // a schermo resterebbe una data che non verra' mai applicata.
+      setText(formatDayNumeric(onCommit(parsed), locale));
     } else {
       // Non e' una data: si torna a quella buona invece di lasciare a schermo
       // qualcosa che non verrebbe applicato.

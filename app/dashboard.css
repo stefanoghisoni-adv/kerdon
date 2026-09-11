@@ -769,27 +769,33 @@
    invece che come le punte di un intervallo unico. Squadrandoli dal lato che
    guarda dentro, il grigio ci si appoggia contro senza stacco.
 
-   Il raggio va scritto qui e non lasciato a Polaris: la sua regola per il
-   primo giorno vale solo con la classe `--hasRange`, e quella per l'ultimo
-   arrotonda a destra ANCHE quando inizio e fine sono lo stesso giorno. */
+   `--hasRange` NON E' RIDONDANTE, ed e' la correzione di un difetto che stava
+   qui da sempre: Polaris mette quella classe solo quando inizio e fine sono
+   due giorni DIVERSI. Su un periodo di un giorno solo — cioe' su "Oggi" e
+   "Ieri", le due voci piu' usate della colonna — il giorno usciva marcato
+   `--firstInRange` e basta, senza `--lastInRange`: la regola qui sotto lo
+   squadrava a destra, e a schermo restava mezza pastiglia con un lato piatto
+   che non guardava verso niente. La condizione che avrebbe dovuto evitarlo
+   c'era gia' — la si legge qui sotto — ma cercava le due classi INSIEME, e
+   insieme non compaiono mai.
+
+   Il raggio va scritto qui e non lasciato a Polaris: la sua regola per
+   l'ultimo giorno arrotonda a destra anche quando inizio e fine coincidono. */
 .range-picker__calendar
-  .Polaris-DatePicker__Day--firstInRange:not(.Polaris-DatePicker__Day--lastInRange) {
+  .Polaris-DatePicker__Day--firstInRange.Polaris-DatePicker__Day--hasRange {
   border-radius: var(--p-border-radius-200) 0 0 var(--p-border-radius-200);
 }
 
 .range-picker__calendar
-  .Polaris-DatePicker__Day--lastInRange:not(.Polaris-DatePicker__Day--firstInRange) {
+  .Polaris-DatePicker__Day--lastInRange.Polaris-DatePicker__Day--hasRange {
   border-radius: 0 var(--p-border-radius-200) var(--p-border-radius-200) 0;
 }
 
 /* Un giorno solo non ha un dentro e un fuori: e' inizio e fine insieme, e
-   resta tondo da tutte le parti. */
+   resta tondo da tutte le parti. Si riconosce dall'ASSENZA di `--hasRange`,
+   che e' l'unico segno che Polaris lasci per distinguerlo. */
 .range-picker__calendar
-  .Polaris-DatePicker__Day--firstInRange.Polaris-DatePicker__Day--lastInRange,
-.range-picker__calendar
-  .Polaris-DatePicker__Day--selected:not(.Polaris-DatePicker__Day--firstInRange):not(
-    .Polaris-DatePicker__Day--lastInRange
-  ) {
+  .Polaris-DatePicker__Day--selected:not(.Polaris-DatePicker__Day--hasRange) {
   border-radius: var(--p-border-radius-200);
 }
 

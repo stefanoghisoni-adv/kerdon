@@ -1,0 +1,63 @@
+name: E2E notturno
+
+# La matrice dei motori: Chromium, Firefox e WebKit sulla stessa suite.
+#
+# PERCHE' DI NOTTE E NON A OGNI PR. Perche' risponde a una domanda che non
+# riguarda il commit appena fatto. Le prove del selettore del periodo misurano
+# dei pixel — dove cade una freccia, quanto e' larga una casella, dove si spezza
+# una riga — e quelle misure le calcola il motore del browser: due motori
+# possono darne due diverse per un codice identico. E' una cosa da sapere, non
+# da scoprire mentre si aspetta di poter unire una modifica di tre righe.
+#
+# Girando di notte, una differenza fra motori arriva la mattina come una
+# segnalazione da guardare, invece che come una PR bloccata.
+
+on:
+  schedule:
+    # Le 03:00 UTC: la notte in Italia, e nessuno sta aspettando questo esito.
+    - cron: '0 3 * * *'
+  # E a mano, quando si tocca qualcosa che l'impaginazione la cambia davvero.
+  workflow_dispatch:
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_non_esiste?schema=public
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # Tutti e tre insieme, e non tre job: il server di prova si costruisce un
+      # Postgres in WebAssembly all'avvio, e farlo tre volte costerebbe piu' dei
+      # browser. Playwright esegue i tre progetti uno dopo l'altro contro lo
+      # stesso server.
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run the browser matrix
+        run: npm run test:e2e:browsers
+
+      # Come nella CI a ogni PR: si carica solo cio' che e' fallito, e dentro
+      # non c'e' nessun dato personale perche' non ce n'e' mai stato uno — il
+      # database di queste prove nasce vuoto e muore con il processo.
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-fallimenti-matrice
+          path: test-results/
+          retention-days: 14

@@ -57,6 +57,71 @@ jobs:
       - name: Build worker bundle
         run: npm run worker:build
 
+  # Il browser, a ogni PR. Una prova di fumo, non la matrice.
+  #
+  # PERCHE' UN JOB A SE' E NON DENTRO `test`. Perche' costa diverso e risponde a
+  # una domanda diversa. `test` chiede "il codice fa ancora quello che deve?" e
+  # risponde in dodici secondi senza scaricare niente; questo chiede "a schermo
+  # succede ancora quello che deve?" e per rispondere ha bisogno di un Chromium
+  # da centocinquanta megabyte. Tenerli insieme vorrebbe dire far pagare quel
+  # download anche a chi sta solo aspettando di sapere se compila — e, quel che
+  # e' peggio, metterlo dentro `build:verified`, cioe' dentro ogni rilascio.
+  #
+  # SOLO CHROMIUM QUI. Firefox e WebKit girano di notte (e2e-notturno.yml): una
+  # differenza di impaginazione fra motori merita di essere guardata, non di
+  # fermare una PR alle sette di sera.
+  #
+  # NON SERVE NESSUN SERVIZIO. Il server di prova si costruisce da se' un
+  # Postgres in WebAssembly e gli applica le migrazioni del repository: niente
+  # container, niente credenziali, niente chiamate fuori.
+  browser:
+    runs-on: ubuntu-latest
+
+    # `prisma generate` pretende la variabile anche solo per leggere lo schema.
+    # L'indirizzo vero del database di prova se lo scrive il server da solo.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_non_esiste?schema=public
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # `--with-deps` e non il solo browser: su ubuntu-latest mancano le
+      # librerie di sistema che Chromium si aspetta, e senza quelle il browser
+      # si scarica e poi non parte.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npm run test:e2e
+
+      # Tracce, immagini e video li produce solo cio' che e' fallito: se questo
+      # passo non ha niente da caricare, e' perche' e' andato tutto bene.
+      #
+      # Nessun dato personale puo' finirci dentro, e non perche' venga filtrato
+      # dopo: le prove girano su un database che nasce vuoto e muore con il
+      # processo, e ogni negozio, cliente e ordine che compare e' inventato sul
+      # momento. Non c'e' nessun collegamento a un negozio vero da cui qualcosa
+      # possa entrare.
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-fallimenti-chromium
+          path: test-results/
+          retention-days: 7
+
   # Da un database vuoto si arriva davvero allo schema che l'app si aspetta?
   #
   # `owner-bootstrap.sql` e' l'unica strada per ricostruire il database

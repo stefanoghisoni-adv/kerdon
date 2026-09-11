@@ -23,3 +23,12 @@ prisma/migrations/dev.db*
 # L'SBOM lo genera la CI a ogni esecuzione: in repository sarebbe solo
 # rumore che cambia a ogni install.
 sbom.cyclonedx.json
+
+# Playwright: i browser scaricati, i risultati e le tracce di un'esecuzione.
+# Tracce, immagini e video si producono SOLO quando qualcosa fallisce, e sono
+# roba di quell'esecuzione li': in repository sarebbero rumore che cambia a ogni
+# giro.
+test-results/
+playwright-report/
+blob-report/
+.playwright/

@@ -18,6 +18,10 @@
     "consent:replay": "tsx scripts/consent-replay.ts",
     "worker:build": "node build-worker.mjs",
     "build:verified": "prisma generate && npm run typecheck && vitest run && npm run build",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:browsers": "E2E_ALL_BROWSERS=1 playwright test",
+    "e2e:install": "playwright install chromium",
     "audit:gate": "node scripts/audit-gate.mjs",
     "sbom": "npm sbom --sbom-format=cyclonedx > sbom.cyclonedx.json"
   },
@@ -50,12 +54,15 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@playwright/test": "^1.63.0",
     "@remix-run/dev": "^2.17.5",
     "@types/crypto-js": "^4.2.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitest/ui": "^3.2.4",
     "esbuild": "0.28.2",
+    "pg-gateway": "^0.3.0-beta.4",
     "prisma": "^6.19.3",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3",

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Vetrina di prova</title>
+  </head>
+  <body>
+    <!-- e2e/harness/vetrina.html
+
+         La vetrina di un negozio, ridotta a cio' che il ponte del consenso
+         guarda davvero.
+
+         COSA C'E' QUI DENTRO, E PERCHE' SOLO QUESTO. Il ponte
+         (`/tracking/bridge.js`, servito dalla rotta vera) legge tre cose e
+         nient'altro: la Customer Privacy API di Shopify, l'attributo
+         `data-kerdon-endpoint` sul tag che lo carica, e l'evento
+         `visitorConsentCollected`. Tutto il resto di una pagina di negozio —
+         il tema, il carrello, i prodotti — non lo sfiora. Rifarlo qui sarebbe
+         rumore in cui nascondere un difetto.
+
+         IL PERMESSO PARTE NON DICHIARATO, ed e' il caso piu' importante: chi
+         non ha ancora risposto al banner non ha detto di no. Il ponte, davanti
+         a un permesso che nessuno ha espresso, deve TACERE — non chiamare
+         nessuno, non scrivere nessun cookie, non coniare nessun
+         identificativo. La prova comincia da li' e poi fa rispondere il
+         visitatore, con `dichiara()`.
+
+         `dichiara()` fa esattamente quello che fa il banner di Shopify: cambia
+         cio' che la Customer Privacy API risponde, e poi manda l'evento. Non
+         chiama il ponte: il ponte si e' messo in ascolto da solo. -->
+    <script>
+      window.dataLayer = [];
+
+      // Quello che il visitatore ha risposto. Vuoto = non ha ancora risposto,
+      // che NON e' un no.
+      var detto = { analytics: '', marketing: '', preferences: '', sale_of_data: '' };
+
+      function concesso(nome) {
+        return detto[nome] === 'yes';
+      }
+
+      window.Shopify = {
+        customerPrivacy: {
+          currentVisitorConsent: function () {
+            return {
+              analytics: detto.analytics,
+              marketing: detto.marketing,
+              preferences: detto.preferences,
+              sale_of_data: detto.sale_of_data,
+            };
+          },
+          analyticsProcessingAllowed: function () {
+            return concesso('analytics');
+          },
+          marketingAllowed: function () {
+            return concesso('marketing');
+          },
+          preferencesProcessingAllowed: function () {
+            return concesso('preferences');
+          },
+          saleOfDataAllowed: function () {
+            return concesso('sale_of_data');
+          },
+        },
+      };
+
+      /** Il visitatore risponde al banner. */
+      window.dichiara = function (risposte) {
+        for (var chiave in risposte) detto[chiave] = risposte[chiave];
+        document.dispatchEvent(new Event('visitorConsentCollected'));
+      };
+
+      /** Gli eventi finiti sul dataLayer, per nome. */
+      window.eventi = function (nome) {
+        return window.dataLayer.filter(function (riga) {
+          return riga && riga.event === nome;
+        });
+      };
+    </script>
+
+    <p>vetrina di prova</p>
+
+    <!-- L'indirizzo dell'endpoint sta sull'attributo e non dentro il file: e'
+         cosi' che il ponte resta identico per tutti i negozi. Il dominio e'
+         inventato e nella prova viene intercettato. -->
+    <script src="/tracking/bridge.js" data-kerdon-endpoint="https://vetrina-inventata.test/eid"></script>
+  </body>
+</html>
