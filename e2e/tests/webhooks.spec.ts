@@ -27,6 +27,7 @@ import { azzera, db, firmaWebhook, NEGOZIO, seminaNegozio } from './support/serv
 
 interface RigaEvento {
   id: string;
+  webhookId: string;
   topic: string;
   shopDomain: string;
   status: string;
@@ -69,10 +70,32 @@ async function consegna(
   });
 }
 
+/**
+ * La riga di UNA consegna, cercata per il suo identificativo.
+ *
+ * Prendere `eventi()[0]` sembrava equivalente — il beforeEach azzera la tabella,
+ * quindi la riga dovrebbe essere una sola — e invece era la causa di un rosso
+ * che compariva solo eseguendo la suite intera: la lavorazione avviene DOPO la
+ * risposta, quindi il lavoro in volo di una prova precedente puo' scrivere la
+ * sua riga dopo che l'azzeramento e' gia' passato. La prima riga, allora, e' di
+ * qualcun altro.
+ *
+ * Cercare per identificativo toglie l'ordine di mezzo: e' la propria riga o non
+ * c'e' ancora, e non c'e' un terzo caso da interpretare.
+ */
+async function evento(
+  request: APIRequestContext,
+  idConsegna: string,
+): Promise<RigaEvento | undefined> {
+  const righe = await eventi(request);
+  return righe.find((riga) => riga.webhookId === idConsegna);
+}
+
 async function eventi(request: APIRequestContext): Promise<RigaEvento[]> {
   return db<RigaEvento[]>(request, 'webhookEvent', 'findMany', {
     select: {
       id: true,
+      webhookId: true,
       topic: true,
       shopDomain: true,
       status: true,
@@ -220,16 +243,14 @@ prova.describe('la posta in arrivo degli webhook', () => {
     expect(risposta.status()).toBe(200);
 
     await expect
-      .poll(
-        async () => {
-          const righe = await eventi(request);
-          return righe[0]?.status;
-        },
-        { timeout: 10_000 },
-      )
+      .poll(async () => (await evento(request, 'consegna-da-ritentare'))?.status, {
+        timeout: 10_000,
+      })
       .not.toBe('queued');
 
-    const riga = (await eventi(request))[0];
+    const riga = await evento(request, 'consegna-da-ritentare');
+    expect(riga).toBeDefined();
+    if (!riga) return;
     // Non e' rimasta in 'processing' e non e' sparita: e' passata per una
     // lavorazione vera e ne porta il segno.
     expect(riga.attempts).toBeGreaterThanOrEqual(1);
