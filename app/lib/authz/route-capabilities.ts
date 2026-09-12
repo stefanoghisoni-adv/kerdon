@@ -69,6 +69,13 @@ export const DEFAULT_GUARD_CALL = 'requireShopCapability';
 const USCITA_FATTURAZIONE =
   "Via d'uscita: e' con questa che un negozio fermo torna operativo. Chiuderla " +
   'lascerebbe il merchant senza nessuna strada per riaccendere l’app.';
+const USCITA_CANCELLAZIONE =
+  "Via d'uscita: scollegarsi e farsi eliminare i dati non puo’ dipendere " +
+  "dall'avere un abbonamento attivo — sarebbe tenere il merchant chiuso dentro " +
+  'con i propri dati ancora da noi. Due cancellazioni insieme le impedisce il ' +
+  'lucchetto in `deleteMerchantData`, che e’ il posto dove si sa se ce n’e’ ' +
+  'gia’ una in corso.';
+
 const USCITA_PRIVACY =
   "Via d'uscita: i propri dati si scaricano anche — soprattutto — quando l'app " +
   'non si puo’ piu’ usare.';
@@ -129,8 +136,8 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
   // --- Collegamento Supabase: i gesti che creano o collegano -------------
   'api.supabase.create-project': { guard: 'capability', capability: 'use_app', via: 'can(' },
   'api.supabase.create-tables': { guard: 'capability', capability: 'use_app', via: 'can(' },
-  'api.supabase.delete-project': { guard: 'capability', capability: 'use_app', via: 'can(' },
-  'api.supabase.disconnect': { guard: 'capability', capability: 'use_app', via: 'can(' },
+  'api.supabase.delete-project': { guard: 'open', reason: USCITA_CANCELLAZIONE },
+  'api.supabase.disconnect': { guard: 'open', reason: USCITA_CANCELLAZIONE },
   'api.supabase.oauth-url': { guard: 'capability', capability: 'use_app', via: 'can(' },
   'api.supabase.select-project': { guard: 'capability', capability: 'use_app', via: 'can(' },
 

@@ -234,15 +234,22 @@ prova.describe('lo scollegamento di Supabase', () => {
     expect(dopo.configurazioni).toBe(0);
   });
 
-  prova('un negozio sospeso non scollega niente', async ({ request, context }) => {
+  // Un negozio sospeso deve poter uscire. Prima qui c'era un 403: chi non
+  // poteva piu' usare l'app restava chiuso dentro con i propri dati ancora da
+  // noi, e far dipendere la cancellazione dall'avere un abbonamento attivo e'
+  // cio' che il GDPR non ammette.
+  prova('un negozio sospeso scollega lo stesso: e la via d uscita', async ({
+    request,
+    context,
+  }) => {
     const shop = await seminaCollegato(request, { authorization: 'DISABLED' });
 
     const { stato, corpo } = await scollega(context);
 
-    expect(stato).toBe(403);
-    expect(corpo.code).toBe('not_authorized');
+    expect(stato).toBe(200);
+    expect(corpo.ok).toBe(true);
     const dopo = await statoCollegamento(request, shop.id);
-    expect(dopo.configurazioni).toBe(1);
+    expect(dopo.configurazioni).toBe(0);
   });
 
   prova('senza una sessione non si arriva nemmeno alla rotta', async ({ context, request }) => {
@@ -293,10 +300,12 @@ prova.describe('lo scollegamento di Supabase', () => {
       });
       await spostaOrologio(request, 10 * MINUTO);
 
-      // Dopo: la prova e' finita, e nessuna cache la tiene in vita.
+      // Dopo: la prova e' finita. Le funzioni dell'app sono chiuse, ma questa
+      // no — e' la porta da cui si esce, e si esce anche (soprattutto) quando
+      // non si puo' piu' entrare.
       const dopo = await scollega(context);
-      expect(dopo.stato).toBe(403);
-      expect(dopo.corpo.code).toBe('not_authorized');
+      expect(dopo.stato).toBe(200);
+      expect(dopo.corpo.ok).toBe(true);
     },
   );
 });

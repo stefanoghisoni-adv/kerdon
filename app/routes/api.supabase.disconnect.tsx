@@ -35,16 +35,19 @@ export async function action({ request }: ActionFunctionArgs) {
   });
   if (!shop) return json({ ok: false, error: 'Shop non trovato' }, { status: 404 });
   const t = await dictionaryForShop(session.shop);
-  if (!can(await shopCapabilities(shop), 'use_app')) {
-    return json(
-      {
-        ok: false,
-        error: t.errors.suspended,
-        code: 'not_authorized',
-      },
-      { status: 403 },
-    );
-  }
+  // NESSUN CONTROLLO SUL PIANO QUI, ED E' VOLUTO.
+  //
+  // Scollegare il proprio database e farsi eliminare i dati sono le due vie
+  // d'uscita: un merchant con la prova finita, sospeso o che semplicemente non
+  // vuole piu' l'app deve poterle percorrere. Prima serviva `use_app`, quindi
+  // chi non pagava piu' restava chiuso dentro con i suoi dati ancora qui —
+  // condizionare la cancellazione all'avere un abbonamento attivo e' esattamente
+  // cio' che il GDPR non ammette, oltre a essere la prima domanda che si fa chi
+  // valuta l'app.
+  //
+  // Cio' che deve restare impedito — due cancellazioni insieme — lo impedisce il
+  // lucchetto dentro `deleteMerchantData`, che e' il posto giusto: li' si sa se
+  // una cancellazione e' gia' in corso, qui no.
 
   const body = (await request.json().catch(() => ({}))) as { deleteData?: unknown };
   const deleteData = body.deleteData === true;

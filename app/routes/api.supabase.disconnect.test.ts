@@ -179,14 +179,18 @@ describe('scollegare eliminando i dati', () => {
 });
 
 describe('chi non puo chiedere', () => {
-  it('negozio sospeso: nessuna eliminazione e nessuna revoca', async () => {
+  // E' la via d'uscita, e resta aperta anche a chi e' sospeso o non paga piu':
+  // restare chiusi dentro con i propri dati ancora da noi non e' un esito
+  // ammissibile. Cio' che deve restare impedito — due cancellazioni insieme —
+  // lo impedisce il lucchetto dentro `deleteMerchantData`, che e' il posto dove
+  // si sa se ce n'e' gia' una in corso.
+  it('negozio sospeso: l eliminazione si fa lo stesso', async () => {
     findUniqueShop.mockResolvedValue({ ...SHOP, authorization: 'DISABLED' });
 
     const res = await call(true);
 
-    expect(res.status).toBe(403);
-    expect(deleteMerchantData).not.toHaveBeenCalled();
-    expect(configDeleteMany).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(deleteMerchantData).toHaveBeenCalled();
   });
 
   it('negozio sconosciuto: 404', async () => {

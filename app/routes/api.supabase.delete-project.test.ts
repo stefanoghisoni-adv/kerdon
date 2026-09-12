@@ -75,13 +75,17 @@ describe('/api/supabase/delete-project', () => {
     expect(deleteProject).not.toHaveBeenCalled();
   });
 
-  it('a negozio sospeso non si elimina niente', async () => {
+  // Scollegarsi e farsi eliminare i dati sono le vie d'uscita, e restano aperte
+  // anche a chi non paga piu': condizionare la cancellazione all'avere un
+  // abbonamento attivo e' cio' che il GDPR non ammette. Prima qui c'era un 403,
+  // e chi non pagava restava chiuso dentro con i suoi dati ancora da noi.
+  it('anche a negozio sospeso si elimina: e la via d uscita', async () => {
     findUniqueShop.mockResolvedValue({ ...SHOP, authorization: 'DISABLED' });
 
     const res = await call(['altro']);
 
-    expect(res.status).toBe(403);
-    expect(deleteProject).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(deleteProject).toHaveBeenCalled();
   });
 
   it('senza niente selezionato non si fa niente', async () => {
