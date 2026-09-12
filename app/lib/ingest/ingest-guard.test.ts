@@ -94,7 +94,6 @@ vi.mock('~/lib/billing/find-plan.server', () => ({
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createHmac } from 'node:crypto';
 import { hashReadProxyToken } from '~/lib/read-proxy/token.server';
 import {
   INGEST_LEGACY_SUNSET_DEFAULT,
@@ -288,26 +287,42 @@ describe('la separazione fra chi legge e chi scrive', () => {
     expect(logged.join('\n')).toContain('legacy_sunset');
   });
 
-  it('la credenziale di ingest presentata tale e quale non vale, mai', async () => {
-    // Se bastasse mandarla come si manda quella di lettura, la firma non
-    // servirebbe a niente e il segreto tornerebbe a viaggiare sul filo a ogni
-    // richiesta: sarebbe la stessa falla con un nome nuovo.
+  it('la credenziale di ingest vale anche presentata tale e quale', async () => {
+    // La firma resta la forma piu' forte, ma non e' l'unica ammessa: il
+    // container server-side del merchant non puo' firmare — la chiave dovrebbe
+    // stare in un file sul server, e su un provider gestito non si puo' mettere.
+    // Pretenderla avrebbe lasciato tutti sulla chiave di LETTURA, che e' la
+    // falla vera: chi legge non deve poter scrivere. Cosi' il privilegio e'
+    // separato; il replay resta aperto, e sta scritto dov'e' il codice.
     const shopId = negozioSano();
     const credenziale = credenzialeViva(shopId);
 
-    const comeSeFosseUnToken = new Request('https://api.kerdon.io/rest/v1/users', {
+    const comeUnToken = new Request('https://api.kerdon.io/rest/v1/users', {
       method: 'POST',
       headers: { apikey: credenziale.value },
       body: '{}',
     });
 
-    const esito = await chiedi(comeSeFosseUnToken);
+    const esito = await chiedi(comeUnToken);
+    expect(esito.ok).toBe(true);
+    if (!esito.ok) return;
+    expect(esito.credential).toBe('ingest');
+  });
+
+  it('una credenziale revocata non passa nemmeno presentata tale e quale', async () => {
+    const shopId = negozioSano();
+    const revocata = credenzialeViva(shopId, { revokedAt: new Date() });
+
+    const esito = await chiedi(
+      new Request('https://api.kerdon.io/rest/v1/users', {
+        method: 'POST',
+        headers: { apikey: revocata.value },
+        body: '{}',
+      }),
+    );
     expect(esito.ok).toBe(false);
     if (esito.ok) return;
     expect(esito.response.status).toBe(401);
-    // Riconosciuta pero': "l'ho incollata al posto dell'altra" e' l'errore piu'
-    // probabile di tutta questa configurazione, e nel log si distingue.
-    expect(logged.join('\n')).toContain('ingest_key_presented_as_bearer');
   });
 
   it('e nemmeno un valore che somiglia a una credenziale di ingest', async () => {
@@ -323,7 +338,10 @@ describe('la separazione fra chi legge e chi scrive', () => {
     expect(esito.ok).toBe(false);
     if (esito.ok) return;
     expect(esito.response.status).toBe(401);
-    expect(logged.join('\n')).toContain('unknown_credential_shape');
+    // "kin_" ben formato ma sconosciuto: si distingue da una forma che non e'
+    // nemmeno una credenziale, perche' il rimedio e' diverso — qui il merchant
+    // ha incollato una chiave revocata o di un altro negozio.
+    expect(logged.join('\n')).toContain('bearer_key_unknown');
   });
 
   it('ogni rotta chiede solo il proprio ambito', async () => {
@@ -618,13 +636,15 @@ describe('cosa finisce nel log', () => {
 /* -------------------------------------------------------------------------- */
 
 /**
- * La firma, provata da tutte e due le parti nello stesso test.
+ * La credenziale, provata da tutte e due le parti nello stesso test.
  *
- * IL TEMPLATE CHE IL MERCHANT IMPORTA NEL PROPRIO CONTAINER COMPONE LA STRINGA
- * FIRMATA PER CONTO SUO, in un linguaggio che non e' TypeScript, dentro un file
- * che nessun import tiene legato a questo. Sono due meta' della stessa cosa e
- * devono coincidere carattere per carattere: basta un separatore diverso, un
- * pezzo in piu' o un'impronta sbagliata perche' la firma non torni MAI.
+ * IL TEMPLATE CHE IL MERCHANT IMPORTA NEL PROPRIO CONTAINER COMPONE DA SOLO LE
+ * INTESTAZIONI CON CUI SI PRESENTA, in un linguaggio che non e' TypeScript,
+ * dentro un file che nessun import tiene legato a questo. Sono due meta' della
+ * stessa cosa: da una parte si decide in che campo la chiave di invio viaggia,
+ * dall'altra da quale campo si raccoglie e da quale prefisso si capisce quale
+ * delle due credenziali sia arrivata. Basta che una delle due si sposti perche'
+ * il negozio smetta di essere riconosciuto.
  *
  * E il modo in cui si romperebbe e' il peggiore possibile. Non un errore di
  * compilazione, non un test rosso: il tracciamento fermo in un negozio solo —
@@ -633,18 +653,17 @@ describe('cosa finisce nel log', () => {
  * successo con i cookie, e la lezione e' che il container va provato da qui.
  *
  * Quindi il template non si LEGGE, si ESEGUE. Si estrae dal `.tpl` la parte fra
- * i due marcatori, le si danno le poche funzioni del sandbox che usa — con la
- * chiave presa da un finto file di credenziali, esattamente come il container
- * la prenderebbe da `SGTM_CREDENTIALS` — e le intestazioni che produce si
+ * i due marcatori, le si danno le poche cose del sandbox che usa — i campi
+ * compilati e la riga di diagnostica — e le intestazioni che produce si
  * consegnano ad `authorizeIngest`, quello vero.
  *
  * COSA QUESTO TEST NON PUO' DIRE, e va detto qui perche' nessuno lo scopra
- * dopo: non dice che il sandbox di Google esegua quel codice. `hmacSha256` e la
- * disponibilita' di `SGTM_CREDENTIALS` sul container del merchant restano da
- * verificare sul container di anteprima. Quel che dice e' l'altra meta', cioe'
- * la sola che si possa sbagliare in silenzio: che la stringa firmata, l'ordine
- * dei pezzi, la codifica, il prefisso e i nomi delle intestazioni siano gli
- * stessi da una parte e dall'altra.
+ * dopo: non dice che il sandbox di Google esegua quel codice, ne' che il
+ * container inoltri l'intestazione senza toccarla. Quello resta da verificare
+ * sul container di anteprima. Quel che dice e' l'altra meta', cioe' la sola che
+ * si possa sbagliare in silenzio: che il campo, il valore e il prefisso siano
+ * gli stessi da una parte e dall'altra, e che il cancello ci veda una chiave di
+ * invio e non la vecchia.
  */
 
 const TEMPLATE = readFileSync(
@@ -663,26 +682,34 @@ function sezione(nome: string): string {
 }
 
 /**
- * La parte firmante del template, eseguita davvero.
+ * Una costante del template, presa dal template.
+ *
+ * Ricopiarne il valore qui dentro sarebbe comodo e direbbe un'altra cosa: che
+ * il test e' d'accordo con se stesso. Il nome dell'intestazione con cui si
+ * rimanda l'identificativo gia' noto e' del `.tpl`, e di li' deve arrivare.
+ */
+function costanteDelTemplate(nome: string): string {
+  const trovata = new RegExp(`const ${nome} = '([^']*)';`).exec(TEMPLATE);
+  if (!trovata) throw new Error(`il template non dichiara piu' ${nome}`);
+  return trovata[1];
+}
+
+/**
+ * La parte del template che compone le intestazioni, eseguita davvero.
  *
  * I marcatori sono nel `.tpl` apposta: senza, questo test dovrebbe indovinare
- * dove comincia e dove finisce la firma, e il giorno in cui qualcuno sposta una
- * riga proverebbe altro senza accorgersene. Se spariscono, si ferma qui con un
+ * dove comincia e dove finisce, e il giorno in cui qualcuno sposta una riga
+ * proverebbe altro senza accorgersene. Se spariscono, si ferma qui con un
  * messaggio che dice cosa e' successo — non con un confronto che passa a vuoto.
  */
-function templateFirmante(opzioni: {
-  ingestKeyId: string;
-  /** Il file di credenziali del container: nome della chiave → chiave in base64. */
-  credenziali: Record<string, string>;
-  timestampMs: number;
-}) {
-  const APRE = '// FIRMA:INIZIO';
-  const CHIUDE = '// FIRMA:FINE';
+function templateInviante(opzioni: { ingestKey: string }) {
+  const APRE = '// INVIO:INIZIO';
+  const CHIUDE = '// INVIO:FINE';
   const inizio = TEMPLATE.indexOf(APRE);
   const fine = TEMPLATE.indexOf(CHIUDE);
   if (inizio < 0 || fine < inizio) {
     throw new Error(
-      "i marcatori FIRMA:INIZIO/FIRMA:FINE non sono piu' nel template: senza, la firma del container non e' piu' provata da nessuna parte",
+      "i marcatori INVIO:INIZIO/INVIO:FINE non sono piu' nel template: senza, il modo in cui il container si presenta non e' piu' provato da nessuna parte",
     );
   }
   const sorgente = TEMPLATE.slice(inizio + APRE.length, fine);
@@ -691,140 +718,84 @@ function templateFirmante(opzioni: {
 
   const fabbrica = new Function(
     'data',
-    'queryPermission',
-    'hmacSha256',
-    'getTimestampMillis',
-    'generateRandom',
+    'ID_HEADER',
     'logToConsole',
     `${sorgente}
-     return { SIGNING_KEY_ID, EMPTY_BODY_DIGEST, canonicalPayload, signedHeaders };`,
+     return { KEY_HEADER, INGEST_PREFIX, upstreamHeaders };`,
   ) as (...api: unknown[]) => {
-    SIGNING_KEY_ID: string;
-    EMPTY_BODY_DIGEST: string;
-    canonicalPayload: (timestampMs: number, idempotencyKey: string) => string;
-    signedHeaders: () => Record<string, string> | undefined;
+    KEY_HEADER: string;
+    INGEST_PREFIX: string;
+    upstreamHeaders: (existing?: string) => Record<string, string>;
   };
 
   const api = fabbrica(
-    { ingestKeyId: opzioni.ingestKeyId },
-    // Il sandbox concede la chiave solo se e' dichiarata: qui "dichiarata"
-    // vuol dire "c'e' nel file di credenziali", che e' la stessa condizione.
-    (permesso: string, keyId: string) =>
-      permesso === 'use_custom_private_keys' &&
-      Object.prototype.hasOwnProperty.call(opzioni.credenziali, keyId),
-    // Come il container: la chiave si prende dal file per nome, e nel file sta
-    // in base64. Il segreto non passa mai per il codice del template.
-    (payload: string, keyId: string, options: { outputEncoding: string }) =>
-      createHmac('sha256', Buffer.from(opzioni.credenziali[keyId], 'base64'))
-        .update(payload, 'utf8')
-        .digest(options.outputEncoding as 'base64url'),
-    () => opzioni.timestampMs,
-    (min: number, max: number) => min + Math.floor(Math.random() * (max - min + 1)),
+    { ingestKey: opzioni.ingestKey },
+    costanteDelTemplate('ID_HEADER'),
     (riga: string) => void detto.push(riga),
   );
 
   return { ...api, detto };
 }
 
-/**
- * Il file di credenziali come il merchant lo scrive.
- *
- * IL PASSAGGIO CHE SI SBAGLIA, ed e' provato qui apposta: il segreto e' gia'
- * una stringa base64url, ma nel file di `SGTM_CREDENTIALS` i valori sono chiavi
- * HMAC codificate in base64 — quindi si incolla il segreto codificato UN'ALTRA
- * volta, non tale e quale. Il server firma con i byte della stringa; il
- * container firma con i byte che ottiene decodificando il valore del file. Le
- * due cose coincidono solo se quel valore e' il base64 della stringa. Se
- * qualcuno cambiasse questa riga per "semplificare", le firme smetterebbero di
- * tornare e il README direbbe una cosa falsa.
- */
-function fileDiCredenziali(nome: string, secret: string): Record<string, string> {
-  return { [nome]: Buffer.from(secret, 'utf8').toString('base64') };
-}
-
-describe('la firma del container server-side e quella che il cancello si aspetta', () => {
-  it('il template non presenta piu\' la chiave di lettura su una scrittura', () => {
+describe('come il container server-side si presenta, e cosa il cancello ne fa', () => {
+  it("il template non porta piu' la credenziale con cui si leggono i dati", () => {
     // Il rilievo da cui nasce tutto questo: `apikey: data.readToken` su una
     // rotta che CONIA un identificativo e ne scrive la riga. Una credenziale di
-    // sola lettura che scriveva con i privilegi massimi.
+    // sola lettura che scriveva con i privilegi massimi. Il campo resta uno
+    // solo, ma adesso vuole l'altra chiave.
     expect(TEMPLATE).not.toContain('readToken');
-    expect(TEMPLATE).not.toContain('apikey');
+    expect(TEMPLATE).not.toMatch(/chiave di lettura/i);
+
+    const campi = JSON.parse(sezione('TEMPLATE_PARAMETERS')) as Array<{
+      name: string;
+      displayName: string;
+      help?: string;
+    }>;
+    expect(campi.map((c) => c.name)).toEqual([
+      'requestPath',
+      'kerdonUrl',
+      'ingestKey',
+      'storefrontDomain',
+      'cookieMaxAge',
+    ]);
+
+    // Il campo dev'essere leggibile da chi ha due chiavi davanti e deve
+    // sceglierne una: e' l'errore piu' probabile di tutta la configurazione, e
+    // il prefisso e' l'unica cosa che lo rende impossibile da sbagliare in
+    // silenzio.
+    const campo = campi.find((c) => c.name === 'ingestKey')!;
+    expect(campo.displayName.toLowerCase()).toContain('chiave di invio');
+    expect(`${campo.displayName} ${campo.help ?? ''}`).toContain('kin_');
   });
 
-  it('compone la stessa identica stringa che il server ricompone per verificarla', () => {
+  it("manda la chiave di invio intera, nel campo dove il cancello la cerca", () => {
     const shopId = negozioSano();
     const credenziale = credenzialeViva(shopId);
-    const template = templateFirmante({
-      ingestKeyId: credenziale.keyId,
-      credenziali: fileDiCredenziali('kerdon_ingest', credenziale.secret),
-      timestampMs: ORA.getTime(),
-    });
+    const template = templateInviante({ ingestKey: credenziale.value });
 
-    expect(template.canonicalPayload(ORA.getTime(), 'msg-1')).toBe(
-      canonicalIngestPayload({
-        scope: 'ingest:identity',
-        timestampMs: ORA.getTime(),
-        method: 'GET',
-        path: '/rest/v1/tracking_id',
-        bodyDigest: digest(''),
-        idempotencyKey: 'msg-1',
-      }),
-    );
-  });
+    const intestazioni = template.upstreamHeaders();
+    // Una sola intestazione quando non c'e' niente da rimandare: quel che parte
+    // e' esattamente la credenziale, e non un contorno che il cancello
+    // ignorerebbe.
+    expect(Object.keys(intestazioni)).toEqual([template.KEY_HEADER]);
+    expect(intestazioni[template.KEY_HEADER]).toBe(credenziale.value);
+    expect(template.detto).toEqual([]);
 
-  it('l\'impronta del corpo vuoto scritta nel template e\' quella vera', () => {
-    const template = templateFirmante({
-      ingestKeyId: 'qualsiasi',
-      credenziali: fileDiCredenziali('kerdon_ingest', 'segreto'),
-      timestampMs: ORA.getTime(),
-    });
-
-    // E' una costante scritta a mano dentro il `.tpl`, perche' il sandbox non sa
-    // produrre base64url da `sha256Sync`. Una costante sbagliata darebbe una
-    // firma che non torna mai, e nient'altro.
-    expect(template.EMPTY_BODY_DIGEST).toBe(digest(''));
-  });
-
-  it('manda esattamente le quattro intestazioni che il cancello legge', () => {
-    const shopId = negozioSano();
-    const credenziale = credenzialeViva(shopId);
-    const template = templateFirmante({
-      ingestKeyId: credenziale.keyId,
-      credenziali: fileDiCredenziali('kerdon_ingest', credenziale.secret),
-      timestampMs: ORA.getTime(),
-    });
-
-    const intestazioni = template.signedHeaders();
-    expect(intestazioni).toBeDefined();
-    // I nomi esatti, non quelli che il confronto insensibile alle maiuscole
-    // lascerebbe passare qui e che un intermediario potrebbe non normalizzare.
-    expect(Object.keys(intestazioni!).sort()).toEqual(
-      [
-        INGEST_IDEMPOTENCY_HEADER,
-        INGEST_KEY_HEADER,
-        INGEST_SIGNATURE_HEADER,
-        INGEST_TIMESTAMP_HEADER,
-      ].sort(),
-    );
-    // L'identificativo e' pubblico e viaggia in chiaro; il segreto no, e non
-    // deve comparire da nessuna parte in quel che parte.
-    expect(intestazioni![INGEST_KEY_HEADER]).toBe(credenziale.keyId);
-    expect(JSON.stringify(intestazioni)).not.toContain(credenziale.secret);
+    // E l'identificativo gia' noto viaggia con il nome che il template dichiara
+    // in cima a se stesso, non con uno scritto qui.
+    const conEsistente = template.upstreamHeaders(VISITATORE);
+    expect(conEsistente[costanteDelTemplate('ID_HEADER')]).toBe(VISITATORE);
   });
 
   it('le intestazioni che produce passano il cancello vero', async () => {
     const shopId = negozioSano();
     const credenziale = credenzialeViva(shopId);
-    const template = templateFirmante({
-      ingestKeyId: credenziale.keyId,
-      credenziali: fileDiCredenziali('kerdon_ingest', credenziale.secret),
-      timestampMs: ORA.getTime(),
-    });
+    const template = templateInviante({ ingestKey: credenziale.value });
 
     const esito = await authorizeIngest(
       new Request('https://api.kerdon.io/rest/v1/tracking_id?consent=v1.a1.m1', {
         method: 'GET',
-        headers: template.signedHeaders(),
+        headers: template.upstreamHeaders(),
       }),
       { scope: 'ingest:identity', route: '/rest/v1/tracking_id', body: 'none', now: ORA },
     );
@@ -834,70 +805,101 @@ describe('la firma del container server-side e quella che il cancello si aspetta
     // Con la chiave nuova, non tollerata sulla strada vecchia: e' la differenza
     // che il primo dicembre fara' smettere di funzionare tutto il resto.
     expect(esito.credential).toBe('ingest');
+    // E nella forma che non chiude il replay: il log deve poterlo dire, perche'
+    // e' la sola domanda a cui serve rispondere guardando il traffico vero.
+    expect(esito.presentation).toBe('ingest_bearer');
   });
 
-  it('con un segreto diverso il cancello dice di no: il confronto non passa a vuoto', async () => {
+  it('una chiave revocata non passa, per quanto il container sia convinto', async () => {
     const shopId = negozioSano();
-    const credenziale = credenzialeViva(shopId);
-    const template = templateFirmante({
-      ingestKeyId: credenziale.keyId,
-      // Lo stesso nome di chiave, un segreto che non e' quello del negozio: e'
-      // il container configurato con la credenziale di un altro, o con una gia'
-      // ruotata.
-      credenziali: fileDiCredenziali('kerdon_ingest', 'un-altro-segreto-qualsiasi'),
-      timestampMs: ORA.getTime(),
-    });
+    const revocata = credenzialeViva(shopId, { revokedAt: new Date('2026-09-01T00:00:00.000Z') });
+    const template = templateInviante({ ingestKey: revocata.value });
 
     const esito = await authorizeIngest(
       new Request('https://api.kerdon.io/rest/v1/tracking_id', {
         method: 'GET',
-        headers: template.signedHeaders(),
+        headers: template.upstreamHeaders(),
       }),
       { scope: 'ingest:identity', route: '/rest/v1/tracking_id', body: 'none', now: ORA },
     );
 
     expect(esito.ok).toBe(false);
-    expect(logged.join('\n')).toContain('bad_signature');
+    if (esito.ok) return;
+    expect(esito.response.status).toBe(401);
+    // Una chiave revocata che continua ad arrivare e' una notizia, e nel log si
+    // distingue da un valore inventato: e' il container di qualcuno che non ha
+    // ancora ripubblicato.
+    expect(logged.join('\n')).toContain('key_revoked');
   });
 
-  it('un container che non sa firmare non chiama nessuno, e lo scrive', () => {
-    const template = templateFirmante({
-      ingestKeyId: 'qualsiasi',
-      // Nessuna chiave nel file: e' il container su cui `SGTM_CREDENTIALS` non
-      // e' configurato, o il permesso non elenca quel nome.
-      credenziali: {},
-      timestampMs: ORA.getTime(),
-    });
+  it("gli ambiti valgono anche qui: senza `ingest:identity` non si conia niente", async () => {
+    const shopId = negozioSano();
+    // Una credenziale vera dello stesso negozio, emessa per altro. Presentata
+    // intera non diventa piu' potente di com'e' stata emessa: e' la meta' della
+    // separazione che la strada senza firma deve mantenere intatta.
+    const credenziale = credenzialeViva(shopId, {}, ['ingest:browsers']);
+    const template = templateInviante({ ingestKey: credenziale.value });
 
-    // Niente intestazioni vuol dire nessuna chiamata: meglio nessun
-    // riconoscimento che uno preso senza firma.
-    expect(template.signedHeaders()).toBeUndefined();
-    // E una riga che dice cosa manca, altrimenti chi installa vede solo una
-    // risposta vuota e nessun motivo.
-    expect(template.detto.join(' ')).toContain('SGTM_CREDENTIALS');
+    const esito = await authorizeIngest(
+      new Request('https://api.kerdon.io/rest/v1/tracking_id', {
+        method: 'GET',
+        headers: template.upstreamHeaders(),
+      }),
+      { scope: 'ingest:identity', route: '/rest/v1/tracking_id', body: 'none', now: ORA },
+    );
+
+    expect(esito.ok).toBe(false);
+    if (esito.ok) return;
+    // 403 e non 401: la credenziale c'e' ed e' valida, non e' stata emessa per
+    // questo. A chi sta configurando la differenza dice dove guardare.
+    expect(esito.response.status).toBe(403);
+    expect(logged.join('\n')).toContain('key_out_of_scope');
   });
 
-  it('il nome della chiave nel codice e\' quello dichiarato nel permesso', () => {
-    const template = templateFirmante({
-      ingestKeyId: 'qualsiasi',
-      credenziali: fileDiCredenziali('kerdon_ingest', 'segreto'),
-      timestampMs: ORA.getTime(),
-    });
+  it('un campo compilato con la chiave sbagliata parte lo stesso, e lo dice', () => {
+    const template = templateInviante({ ingestKey: TOKEN_LETTURA });
 
-    // Il sandbox blocca `hmacSha256` se il nome chiesto non e' fra quelli
-    // dichiarati. Due posti che devono restare d'accordo, e nessuno dei due
-    // compila: e' esattamente il caso in cui serve un test.
+    // NON si rifiuta: chi ha incollato la credenziale di prima e' ancora dentro
+    // la finestra di convivenza, e spegnergli il tracciamento oggi sarebbe un
+    // danno subito al posto di un avviso.
+    expect(template.upstreamHeaders()[template.KEY_HEADER]).toBe(TOKEN_LETTURA);
+    // L'avviso pero' c'e', in anteprima, e nomina il prefisso: senza, l'unico
+    // segnale arriverebbe il giorno dello spegnimento, sotto forma di dati che
+    // non arrivano piu'.
+    expect(template.detto.join(' ')).toContain(template.INGEST_PREFIX);
+  });
+
+  it('i permessi dichiarati sono quelli che il codice usa davvero', () => {
     const permessi = JSON.parse(sezione('SERVER_PERMISSIONS')) as Array<{
-      instance: { key: { publicId: string }; param?: Array<{ value: { listItem?: Array<{ string?: string }> } }> };
+      instance: {
+        key: { publicId: string };
+        param?: Array<{ key: string; value: { listItem?: Array<{ string?: string }> } }>;
+      };
     }>;
-    const permesso = permessi.find(
-      (p) => p.instance.key.publicId === 'use_custom_private_keys',
-    );
-    expect(permesso, "il template deve dichiarare use_custom_private_keys, altrimenti il sandbox blocca la firma a runtime").toBeDefined();
+    const dichiarati = permessi.map((p) => p.instance.key.publicId);
 
-    const dichiarati = (permesso!.instance.param ?? []).flatMap((par) =>
-      (par.value.listItem ?? []).map((voce) => voce.string),
+    // Il permesso della firma se n'e' andato con la firma. Un permesso in piu'
+    // non e' innocuo: chi importa il modello lo vede e crede che serva, e cerca
+    // di soddisfarlo.
+    expect(dichiarati).not.toContain('use_custom_private_keys');
+    expect(TEMPLATE).not.toContain("require('hmacSha256')");
+    expect(TEMPLATE).not.toContain('SGTM_CREDENTIALS');
+
+    // I cookie invece restano tutti e due, per tutte e due le epoche dei nomi:
+    // in un browser che aveva gia' risposto il permesso sta sotto il nome
+    // vecchio, e non leggerlo vorrebbe dire trattare come silenzio un si' gia'
+    // dato.
+    const cookieLetti = (
+      permessi.find((p) => p.instance.key.publicId === 'get_cookies')!.instance.param ?? []
+    )
+      .filter((par) => par.key === 'cookieNames')
+      .flatMap((par) => (par.value.listItem ?? []).map((voce) => voce.string));
+    expect(cookieLetti).toEqual(
+      expect.arrayContaining(['kerdon_consent', 'corew_consent', '_tracking_consent', 'kerdon_eid', 'corew_eid']),
     );
-    expect(dichiarati).toContain(template.SIGNING_KEY_ID);
+
+    // E la riga di diagnostica ha bisogno del suo, altrimenti chi compila il
+    // campo con la chiave sbagliata non vede niente nemmeno in anteprima.
+    expect(dichiarati).toContain('logging');
   });
 });

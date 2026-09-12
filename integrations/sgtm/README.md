@@ -7,86 +7,66 @@ L'endpoint first-party del negozio, come Client del container server-side.
 - un container server-side già attivo su un sottodominio del negozio (per
   esempio `sgtm.negozio.it` — non un indirizzo `*.run.app`, che non è
   first-party per nessuno);
-- la possibilità di aggiungere **una chiave nel file di credenziali del
-  container**. È il punto che decide se questa strada è percorribile: se il tuo
-  provider non te lo lascia fare, leggi [Se il container non può
-  firmare](#se-il-container-non-può-firmare) prima di cominciare.
+- la **chiave di invio** del negozio, che si crea in Impostazioni → Connessione
+  e credenziali di tracking.
 
-## Le due metà della chiave di invio
+Niente altro: nessun file da caricare sul container, nessuna variabile
+d'ambiente da impostare. Il modello ha tre campi da compilare, e la chiave è uno
+di quelli.
 
-La chiave di invio si vede **una volta sola**, quando la crei in Impostazioni, e
-ha questa forma:
+## Quale chiave, e dove si prende
+
+L'app ne mostra due, e **qui ne va una sola**.
+
+| Chiave | A cosa serve | Va nel container? |
+|---|---|---|
+| **di invio** — comincia con `kin_` | Dire a Kerdon chi sta visitando adesso: conia l'identificativo e scrive la riga | **Sì**, in questo campo |
+| **di lettura** | Farsi restituire dati già raccolti, da un'altra applicazione | No |
+
+La chiave di invio si crea in **Impostazioni → Connessione e credenziali di
+tracking**, e si vede **una volta sola**, nel momento in cui la crei. Ha questa
+forma:
 
 ```
 kin_AbCdEf0123456789.XyZ987...
-    └──────┬───────┘ └───┬───┘
-     identificativo   segreto
 ```
 
-Le due metà vanno in due posti diversi, e non è burocrazia:
+Si incolla **intera**, com'è, punto compreso. Se l'hai persa, non c'è modo di
+rileggerla: se ne crea un'altra, e quella di prima continua a funzionare per due
+giorni — il tempo di ripubblicare il container.
 
-| Metà | Dove va | Perché |
-|---|---|---|
-| **identificativo** (prima del punto, senza `kin_`) | nel campo del client | Non è segreto: dice solo quale credenziale usare. Viaggia in chiaro a ogni chiamata. |
-| **segreto** (dopo il punto) | nel file di credenziali del container | Non entra in nessun campo, non esce dal container e non viaggia mai. Serve a **calcolare una firma**, ed è la firma che parte. |
+**L'errore che si fa più spesso è incollare l'altra chiave.** Il container non
+se ne accorge subito, perché fino al **1 dicembre 2026** anche quella viene
+ancora accettata: il tracciamento funziona, e smette da un giorno all'altro
+quando arriva quella data. Per questo il modello, in anteprima, scrive una riga
+quando il valore non comincia con `kin_`. Se la vedi, hai incollato la chiave
+sbagliata.
 
 ## Installazione
 
-1. **Metti il segreto nel file di credenziali del container.** È un file JSON,
-   indicato dalla variabile d'ambiente `SGTM_CREDENTIALS`, con questa forma:
-
-   ```json
-   {
-     "keys": {
-       "kerdon_ingest": "<il segreto, codificato in base64>"
-     }
-   }
-   ```
-
-   Il nome `kerdon_ingest` non è a scelta: è quello che il modello chiede, e
-   dev'essere scritto esattamente così.
-
-   **Il valore va codificato in base64, non incollato tale e quale.** Il segreto
-   è già una stringa di caratteri; qui dentro i valori sono chiavi codificate in
-   base64, quindi il segreto va codificato un'altra volta. Da terminale:
-
-   ```sh
-   printf '%s' 'XyZ987...' | base64
-   ```
-
-   Se lo incolli senza codificarlo, il container firma con qualcosa che non è la
-   tua chiave e ogni chiamata viene rifiutata.
-
-   Su un container che gestisci tu (Cloud Run, o una macchina tua) il file si
-   monta come un secret e si punta `SGTM_CREDENTIALS` al percorso dove è
-   montato — per esempio `/tmp/kerdon.json`. Il nome del file deve finire in
-   `.json`.
+1. **Crea la chiave di invio**, in Impostazioni → Connessione e credenziali di
+   tracking. Tienila negli appunti: dalla pagina non si rilegge.
 
 2. **Importa il modello.** Nel container server-side: Modelli → Modelli client →
-   Nuovo → menu ⋮ → Importa, e scegli `kerdon-id-client.tpl`.
+   Nuovo → menu ⋮ → Importa, e scegli `kerdon-id-client.tpl`. Poi salva.
 
-3. **Controlla i permessi del modello**, nella scheda Permessi, prima di
-   salvare: sotto **Uses custom private keys** dev'esserci `kerdon_ingest`. Se
-   non c'è, aggiungilo. Senza, il container si rifiuta di firmare e il client
-   risponde sempre a vuoto. Poi salva.
-
-4. **Crea il client.** Client → Nuovo → scegli "Kerdon — Identificativo
+3. **Crea il client.** Client → Nuovo → scegli "Kerdon — Identificativo
    visitatore". Compila:
 
    | Campo | Valore |
    |---|---|
    | Percorso su cui rispondere | `/kerdon/id` |
    | Indirizzo dell'API | quello indicato in Impostazioni |
-   | Identificativo della chiave di invio | la metà prima del punto, senza `kin_` |
+   | Chiave di invio (comincia con `kin_`) | la chiave intera, come l'app l'ha mostrata |
    | Dominio del negozio | `negozio.it`, senza `https://` |
    | Durata del cookie | `31536000` (un anno) |
 
    La priorità del client va lasciata sotto quella dei client di GA4 e di
    Shopify: risponde solo al proprio percorso, ma l'ordine evita sorprese.
 
-5. **Pubblica il container.**
+4. **Pubblica il container.**
 
-6. **Aggiungi lo script alla vetrina**, nel tema (`theme.liquid`, prima di
+5. **Aggiungi lo script alla vetrina**, nel tema (`theme.liquid`, prima di
    `</head>`) o come tag personalizzato del tag manager web:
 
    ```html
@@ -94,7 +74,7 @@ Le due metà vanno in due posti diversi, e non è burocrazia:
            data-kerdon-endpoint="https://sgtm.negozio.it/kerdon/id" async></script>
    ```
 
-7. **Verifica**, dall'app: Impostazioni → Verifica installazione.
+6. **Verifica**, dall'app: Impostazioni → Verifica installazione.
 
 ## Perché il sottodominio deve essere del negozio
 
@@ -104,59 +84,43 @@ risponde. Se quel dominio non è quello della vetrina, il cookie è di terze par
 per evitare. Un container su `sgtm.negozio.it` va bene; uno su un indirizzo di
 Google Cloud no.
 
-## Niente credenziali nel browser, e nemmeno nel container
+## Niente credenziali nel browser
 
-Il segreto non sta in nessun campo del client: sta nel file di credenziali, e il
-container lo usa per calcolare una firma senza mai mostrarlo. Chi apre gli
-strumenti di sviluppo su quel negozio non trova niente, perché niente è mai
-passato di lì; e chi esporta il container non si porta via la chiave, perché nel
-container non c'è.
+La chiave sta in un campo del client, dentro il container, e da lì non esce: chi
+apre gli strumenti di sviluppo su quel negozio non trova niente, perché niente è
+mai passato di lì.
 
 Questa rotta non si limita a leggere: **conia** l'identificativo del visitatore e
-ne registra la riga. Finché per farlo bastava la chiave di lettura, chi ne aveva
-una per consultare i dati poteva anche scriverli. Adesso sono due permessi
-distinti, con due credenziali che si ruotano e si revocano l'una senza toccare
-l'altra.
+ne registra la riga. Finché per farlo bastava la chiave con cui si consultano i
+dati, chi ne aveva una per guardare poteva anche scrivere. Adesso sono due
+permessi distinti, con due credenziali che si ruotano e si revocano l'una senza
+toccare l'altra: se la chiave di invio finisce nelle mani sbagliate la si revoca,
+e chi legge i dati non se ne accorge nemmeno.
 
-## Se il container non può firmare
+## La firma, per chi può farla
 
-Il modello firma con `hmacSha256`, che nel sandbox di Google Tag Manager **non
-accetta un segreto come stringa**: accetta il nome di una chiave dichiarata nel
-file JSON indicato da `SGTM_CREDENTIALS`. Servono quindi due cose che non tutti i
-provider di container danno: poter caricare un file e poter impostare una
-variabile d'ambiente.
+La chiave di invio presentata così com'è chiude la cosa che contava: chi legge
+non scrive. Non chiude tutto. Il valore viaggia a ogni chiamata, e una richiesta
+catturata si potrebbe rigiocare finché quella chiave vive — su TLS non è cosa da
+poco, ma è una differenza vera, e vale la pena saperla.
 
-- **Container che gestisci tu** (Cloud Run, Docker, una macchina tua): si fa, ed
-  è il passo 1 qui sopra.
-- **Stape**: al momento della scrittura la documentazione pubblica di Stape non
-  dice come farlo, e le impostazioni di un container Stape coprono zone, dominio
-  personalizzato, CDN, chiave API e power-up — non variabili d'ambiente del
-  server né caricamento di file. Attenzione a un equivoco: le "variabili" di cui
-  parla la loro guida, nella cartella `[Stape]_Settings`, sono variabili **dentro
-  il container GTM**, non variabili d'ambiente del server, e non servono a
-  questo. **Prima di programmare il passaggio, chiedi conferma al loro
-  supporto.** Se la risposta è no, questa strada su Stape non è percorribile e
-  resta quella qui sotto.
-- **Qualunque altro provider gestito**: stessa domanda, stesso ordine. Se non
-  puoi mettere una chiave nel file di credenziali, il container non può firmare,
-  e non c'è modo di aggirarlo dal modello.
+C'è una forma più forte, ed è **firmare**: il segreto resta fermo dov'è, sul filo
+passa solo il risultato di una HMAC, e ogni chiamata vale una volta sola. Il
+server l'accetta e la preferisce. Questo modello però non la usa, e non per una
+scelta di comodo: nel sandbox di Google Tag Manager `hmacSha256` non accetta un
+segreto come stringa — vuole il nome di una chiave dichiarata in un file JSON che
+il container deve avere sul disco, indicato da una variabile d'ambiente del
+server. Su un container gestito quel file non si può mettere, e un modello che lo
+pretendesse non sarebbe installabile dalla maggior parte dei negozi.
 
-**Cosa resta, se il container non può firmare.** La firma deve avvenire dove la
-chiave può stare. Nella catena del tracciamento il container non è il primo
-anello: davanti c'è già l'endpoint sul dominio del negozio, ed è codice normale,
-senza sandbox e senza vincoli su dove tenere un segreto. Spostare lì la firma è
-una decisione di chi cura il tracciamento del negozio, non qualcosa che questo
-modello possa risolvere: l'app non la impone e non fornisce un pezzo che scavalchi
-il container.
+**Se non firmi non stai facendo niente di sbagliato**: è la strada prevista, ed è
+quella che l'app verifica e supporta.
 
-**Fino al 1 dicembre 2026** le installazioni ancora sulla sola chiave di lettura
-continuano a funzionare, e in Impostazioni compare l'avviso che vanno aggiornate
-ben prima di quella data. Da quella data no.
-
-## La stringa che si firma
-
-È già scritta nel modello, e non c'è niente da comporre a mano. Se ti serve per
-verificare, o per firmare da un altro pezzo, è questa — un pezzo per riga:
+Firmare ha senso per chi ha già un pezzo di codice suo nella catena — un Worker
+di Cloudflare o un endpoint proprio sul dominio del negozio, che di solito sta
+già davanti al container — o un container che gestisce da sé, dove un file di
+credenziali si può montare e un modello proprio si può scrivere. In quel caso la
+firma si calcola su questa stringa, un pezzo per riga:
 
 ```
 v1
@@ -171,9 +135,21 @@ GET
 
 La settima riga è l'impronta SHA-256 del corpo in base64url: questa rotta si
 chiama in GET e non porta corpo, quindi è quella della stringa vuota, sempre
-uguale.
+uguale. La terza è l'ambito della rotta che si sta chiamando.
 
-Il risultato è una HMAC-SHA256 in base64url, e va nelle intestazioni
-`X-Kerdon-Key-Id`, `X-Kerdon-Timestamp`, `X-Kerdon-Signature`
+Il risultato è una HMAC-SHA256 in base64url, calcolata con il **segreto** della
+chiave — la metà dopo il punto — e va nelle intestazioni `X-Kerdon-Key-Id` (la
+metà prima del punto, senza `kin_`), `X-Kerdon-Timestamp`, `X-Kerdon-Signature`
 (`v1=<firma>`) e `X-Kerdon-Idempotency-Key`. La firma vale cinque minuti attorno
-al proprio istante, quindi l'orologio del container deve essere all'ora giusta.
+al proprio istante, quindi l'orologio di chi firma deve essere all'ora giusta.
+
+Le quattro intestazioni si mandano **al posto** della chiave nel campo `apikey`,
+non insieme: chi manda `X-Kerdon-Key-Id` sta chiedendo la strada firmata, e da
+quel momento le altre tre sono obbligatorie.
+
+## Fino al 1 dicembre 2026
+
+Le installazioni ancora sulla sola chiave di lettura continuano a funzionare, e
+in Impostazioni compare l'avviso che vanno aggiornate ben prima di quella data.
+Da quella data no. L'aggiornamento è incollare un valore diverso nello stesso
+campo e ripubblicare il container.

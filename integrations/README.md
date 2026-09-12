@@ -44,10 +44,10 @@ credenziali, e per questo non sta nel browser.
 
 ## Le credenziali sono due, e non e' burocrazia
 
-| Chiave | A cosa serve | Come si presenta |
+| Chiave | A cosa serve | Dove va |
 |---|---|---|
-| **di lettura** | Farsi restituire dati gia' raccolti | Si manda tale e quale |
-| **di invio** | Comunicare chi sta visitando adesso | Non si manda: si usa per **firmare** |
+| **di lettura** | Farsi restituire dati gia' raccolti | Nell'applicazione che legge |
+| **di invio** (`kin_...`) | Comunicare chi sta visitando adesso | Nel Worker o nel container |
 
 Il giro del tracciamento non solo legge: **conia** l'identificativo di un
 visitatore, ne scrive la riga e — quando la persona si rivela — la lega a un
@@ -56,6 +56,17 @@ chi ne aveva una per consultare i dati poteva anche scriverli: creare browser, e
 dichiarare che un browser qualsiasi appartiene a un cliente qualsiasi. Adesso
 sono due permessi distinti, con due credenziali che si ruotano e si revocano
 l'una senza toccare l'altra.
+
+**Come si presenta la chiave di invio.** Dove c'e' un pezzo di codice proprio —
+un Worker, un endpoint sul dominio del negozio — la si usa per **firmare**: il
+segreto resta fermo, sul filo passa solo il risultato di una HMAC e ogni
+chiamata vale una volta sola. Dove quel posto non c'e' — il container
+server-side di un provider gestito, dove il sandbox non ha dove tenere un
+segreto — la si **presenta intera**, su TLS, nello stesso campo dove prima
+andava quella di lettura. La seconda forma non chiude il replay e la prima si',
+e il server le distingue nei propri log; tutte e due chiudono il privilegio, che
+e' il difetto da cui si parte. Chi non puo' firmare non sta facendo niente di
+sbagliato: sta usando la strada prevista per il proprio container.
 
 La chiave di invio **si vede una volta sola**, nel momento in cui la si crea in
 Impostazioni. Se si perde se ne crea un'altra: quella di prima continua a
@@ -72,9 +83,8 @@ riconosce da un avviso in Impostazioni, che compare molto prima.
 1. **L'assenza di segnale e' un no.** Nessun valore di ripiego, nessuna regola
    per paese: se non arriva niente che dica cosa ha risposto il visitatore, non
    si chiama nessuno, non si conia niente, non si pianta nessun cookie.
-2. **Nessuna chiave nel browser.** Tutte e due le chiavi stanno nel Worker o nel
-   container, mai in una pagina. E il segreto di invio non esce nemmeno da li':
-   serve a calcolare una firma, ed e' la firma che viaggia.
+2. **Nessuna chiave nel browser.** La chiave sta nel Worker o nel container, mai
+   in una pagina: lo script servito alla vetrina non ne contiene nessuna.
 3. **Il cookie e' first-party.** Sul dominio da cui si vede la vetrina, con
    `Secure`, `Path=/`, un `SameSite` dichiarato e una durata.
 4. **La revoca disfa.** Al no esplicito il cookie scade e la riga sparisce.

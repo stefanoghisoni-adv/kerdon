@@ -19,10 +19,17 @@
 //    in chiaro nella colonna, ed e' su di lui che si cerca la riga: senza, per
 //    trovare la credenziale bisognerebbe provarle tutte, oppure indicizzare il
 //    segreto — che e' il contrario di quel che si vuole.
-//  - Il SEGRETO non viaggia mai. Non sta nell'intestazione, non sta nella
-//    richiesta, non esce da nessuna risposta dopo il momento in cui e' stato
-//    emesso. Serve a calcolare una firma, e la firma e' l'unica cosa che passa
-//    sul filo.
+//  - Il SEGRETO serve a calcolare una firma, e dove si puo' firmare e' la firma
+//    l'unica cosa che passa sul filo.
+//
+// E DOVE NON SI PUO' FIRMARE. Il container server-side di un provider gestito
+// non ha dove tenere una chiave per `hmacSha256`: li' la credenziale si
+// PRESENTA, intera, su TLS, nello stesso campo dove prima andava quella di
+// lettura. E' una protezione piu' debole della firma — il valore viaggia, e una
+// richiesta catturata si puo' rigiocare — ed e' comunque un'altra cosa rispetto
+// a prima: chi legge non scrive, gli ambiti restano quelli della chiave, e la
+// revoca la spegne in un istante senza toccare la lettura. Le due forme si
+// distinguono nel cancello e nel log, e non si spacciano per equivalenti.
 //
 // PERCHE' IL SEGRETO E' CIFRATO E NON SOLO IMPRONTATO, che e' la domanda giusta
 // da fare a un file come questo. Un'impronta basta per una credenziale
@@ -32,6 +39,11 @@
 // derivata sua — non `ENCRYPTION_SECRET` tale e quale — cosi' chi arrivasse ai
 // token dei negozi non arriva a queste e viceversa.
 //
+// PERCHE' NON BASTA L'IMPRONTA NEMMENO ADESSO che la credenziale si puo'
+// presentare intera: la strada firmata continua a esistere, e per verificare una
+// HMAC bisogna rifarla. Un segreto solo improntato spegnerebbe la firma per
+// tutti, cioe' toglierebbe la protezione migliore a chi ce l'ha.
+//
 // E ALLORA IN CHE SENSO "MOSTRATO UNA VOLTA SOLA". Nel senso che conta: non
 // esiste nessuna strada di lettura che lo riporti al merchant. Il valore intero
 // esiste per l'istante in cui viene emesso, dentro la risposta a chi lo ha
@@ -40,11 +52,10 @@
 // lo perde ne fa uno nuovo: e' un gesto di dieci secondi, e ha una finestra di
 // sovrapposizione apposta perche' non costi un'interruzione.
 //
-// L'IMPRONTA C'E' LO STESSO, e non e' un doppione inutile: e' quella che
-// permette di dire "questa riga e' proprio la credenziale che mi hai dato"
-// senza decifrare niente, ed e' cio' che rende riconoscibile un valore incollato
-// per intero dove non doveva — il caso del merchant che mette la chiave di
-// scrittura al posto di quella di lettura.
+// L'IMPRONTA C'E' LO STESSO, e non e' un doppione inutile: e' quella con cui si
+// verifica un valore PRESENTATO — la si rifa' e si confronta, senza decifrare
+// niente e senza tirare fuori il segreto dalla colonna per un confronto che non
+// ne ha bisogno.
 
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { prisma } from '~/db.server';
@@ -117,10 +128,11 @@ export function generateIngestCredential(): IngestCredential {
 /**
  * Le due meta' di un valore presentato, o niente.
  *
- * Serve a riconoscere un valore intero incollato dove non doveva — tipicamente
- * la chiave di scrittura messa al posto di quella di lettura, che nella card
- * stanno a due righe di distanza. Qui non si autorizza niente: si legge una
- * forma.
+ * QUI NON SI AUTORIZZA NIENTE: si legge una forma, e basta a dire che chi
+ * chiama INTENDEVA presentare una chiave di invio e non quella di lettura. La
+ * verifica viene dopo, e sta in `ingestValueMatches`: tenere separati "che cosa
+ * mi stai mostrando" e "e' davvero tua" e' quel che permette di rifiutare un
+ * valore inventato senza mai farlo passare per un token di lettura sconosciuto.
  */
 export function parseIngestCredential(raw: string | null | undefined): IngestCredential | null {
   if (typeof raw !== 'string') return null;
@@ -256,24 +268,25 @@ export async function findIngestKey(keyId: string): Promise<StoredIngestKey | nu
 }
 
 /**
- * La credenziale che corrisponde a un VALORE intero presentato.
+ * Il valore presentato e' davvero quello di questa riga?
  *
- * Serve a un caso solo, e non e' un caso di autorizzazione: riconoscere una
- * chiave di invio incollata dove andava quella di lettura. Nella card di
- * Impostazioni le due stanno a due righe di distanza, e chi le scambia deve
- * ottenere un rifiuto comprensibile invece di un "non autorizzato" che non
- * spiega niente. E' l'unica cosa per cui esiste `valueHash`.
+ * SI CONFRONTANO LE IMPRONTE, NON I SEGRETI, e non e' un dettaglio: il segreto
+ * della riga sta cifrato, e decifrarlo per un confronto vorrebbe dire tirarlo in
+ * chiaro nella memoria di ogni richiesta di ogni vetrina — cioe' pagare il
+ * rischio maggiore per il controllo piu' semplice. L'impronta del valore intero
+ * c'e' gia' in colonna e risponde alla stessa domanda.
  *
- * QUESTA FUNZIONE NON AUTORIZZA NIENTE, e non deve diventare una scorciatoia
- * per farlo: una credenziale di invio presentata tale e quale e' esattamente
- * cio' che non deve funzionare — se bastasse mandarla, la firma non servirebbe
- * a nulla e il segreto tornerebbe a viaggiare sul filo a ogni richiesta.
+ * `timingSafeEqual` e non `===` per la stessa ragione delle firme: il confronto
+ * ingenuo esce al primo carattere diverso, e su una rotta pubblica che accetta
+ * tentativi a volonta' il tempo che ci mette racconta quanti caratteri erano
+ * giusti. Qui la riga si trova dall'identificativo, che e' pubblico: senza
+ * questo confronto, l'unica cosa che protegge il segreto sarebbe la fortuna.
  */
-export async function findIngestKeyByValue(value: string): Promise<{ shopId: string } | null> {
-  return prisma.trackingIngestKey.findFirst({
-    where: { valueHash: hashIngestValue(value) },
-    select: { shopId: true },
-  });
+export function ingestValueMatches(key: { valueHash: string }, value: string): boolean {
+  const atteso = Buffer.from(key.valueHash);
+  const presentato = Buffer.from(hashIngestValue(value));
+  if (atteso.length !== presentato.length) return false;
+  return timingSafeEqual(atteso, presentato);
 }
 
 /** Le credenziali di un negozio, dalla piu' recente. Il valore non c'e' dentro. */

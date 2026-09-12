@@ -69,9 +69,9 @@ const it: InstallCopy = {
   },
   steps: {
     sgtm: [
+      "Crea la chiave di invio in Connessione e credenziali di tracking, e tienila negli appunti: si vede una volta sola.",
       "Nel container server-side, apri Modelli → Modelli client → Nuovo, e importa il file kerdon-id-client.tpl.",
-      "Metti il segreto della chiave di invio — la metà dopo il punto, codificata in base64 — nel file di credenziali del tuo container, sotto il nome kerdon_ingest. Nel modello non si incolla: serve solo a firmare, e non deve uscire da lì.",
-      "Crea un client con quel modello e compila i campi: il percorso su cui rispondere (/kerdon/id), l’indirizzo dell’app, l’identificativo della chiave di invio — la metà prima del punto, senza kin_ — e il dominio del tuo negozio.",
+      "Crea un client con quel modello e compila i campi: il percorso su cui rispondere (/kerdon/id), l’indirizzo dell’app, la chiave di invio — quella intera, che comincia con kin_ — e il dominio del tuo negozio.",
       "Pubblica il container.",
       "Aggiungi alle pagine del negozio lo script qui sotto, nel tema prima di </head> oppure come tag personalizzato.",
       "Torna qui e premi Verifica installazione.",
@@ -120,7 +120,7 @@ const it: InstallCopy = {
     unreachable: "Nessuna risposta. Controlla che sia pubblicato e che l’indirizzo sia esatto.",
     redirected: "L’indirizzo rimanda altrove. Punta direttamente a dove risponde.",
     no_identifier:
-      "Con il consenso non ha restituito nessun riconoscimento. Controlla che il tuo container sappia firmare: l’identificativo della chiave di invio, e il segreto nel file di credenziali.",
+      "Con il consenso non ha restituito nessun riconoscimento. Controlla la chiave di invio nel client: va incollata intera, ed è quella che comincia con kin_.",
     endpoint_error: "L’endpoint ha risposto con un errore.",
     no_cookie: "Non scrive il riconoscimento nel browser.",
     cookie_not_secure: "Manca l’attributo Secure: senza, il riconoscimento viaggia in chiaro.",
@@ -152,9 +152,9 @@ const en: InstallCopy = {
   },
   steps: {
     sgtm: [
+      "Create the sending key in tracking connection and credentials, and keep it at hand: it is shown only once.",
       "In your server-side container, open Templates → Client Templates → New, and import the kerdon-id-client.tpl file.",
-      "Put the sending key's secret — the half after the dot, base64-encoded — into your container's credentials file, under the name kerdon_ingest. It does not go into the template: it is only used to sign, and it must not leave the container.",
-      "Create a client from that template and fill in the fields: the path it answers on (/kerdon/id), the app address, the sending key's id — the half before the dot, without kin_ — and your store's domain.",
+      "Create a client from that template and fill in the fields: the path it answers on (/kerdon/id), the app address, the sending key — the whole key, the one starting with kin_ — and your store's domain.",
       "Publish the container.",
       "Add the snippet below to your store pages, in the theme before </head> or as a custom tag.",
       "Come back here and press Verify installation.",
@@ -203,7 +203,7 @@ const en: InstallCopy = {
     unreachable: "No answer. Check that it is published and that the address is exact.",
     redirected: "The address redirects elsewhere. Point it straight at where it answers.",
     no_identifier:
-      "With consent it returned no recognition. Check that your container can sign: the sending key's id, and the secret in the credentials file.",
+      "With consent it returned no recognition. Check the sending key in the client: paste it whole, and make sure it is the one starting with kin_.",
     endpoint_error: "The endpoint answered with an error.",
     no_cookie: "It does not write the recognition into the browser.",
     cookie_not_secure: "The Secure attribute is missing: without it the recognition travels in the clear.",
