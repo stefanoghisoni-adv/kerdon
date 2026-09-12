@@ -11,7 +11,6 @@ import {
 } from '@shopify/polaris';
 import { InfoIcon } from '@shopify/polaris-icons';
 import { MetricRow } from './MetricRow';
-import { TrackingInstall } from './TrackingInstall';
 import { IngestKeySection, type IngestKeySummary } from './IngestKeySection';
 import type { InstallPath } from '~/lib/tracking/install';
 import { middleTruncate } from './copy-value';
@@ -271,26 +270,15 @@ export function TrackingCredentialsCard({
           />
         )}
 
-        {/* NASCOSTA FINO ALLA REVISIONE, per scelta del proprietario.
-            
-            Il codice resta intero e provato — rotte, verifica dell'endpoint e i
-            due asset in `integrations/` — perche' quello che manca non e' il
-            lavoro: e' il momento. Mostrare una strada di installazione mentre
-            l'app e' in revisione vuol dire farla guardare a chi la giudica
-            prima che sia stata provata da un merchant vero.
-            
-            Per riaccenderla si toglie `false &&`. Le istruzioni restano legate
-            al progetto collegato: prima i due valori da copiare non esistono, e
-            un elenco di passi che comincia con "copia questo" senza il "questo"
-            e' una strada che finisce contro un muro. */}
-        {false && connected && (
-          <TrackingInstall
-            appUrl={appUrl}
-            path={install.path}
-            endpoint={install.endpoint}
-            verifiedAt={install.verifiedAt}
-          />
-        )}
+        {/* La sezione "Installazione" del tracciamento non e' in questa
+            versione, ed e' una scelta di prodotto: non e' ancora stata provata
+            da un merchant vero, e una strada di installazione che nessuno ha
+            percorso non si consegna — ne' a un merchant ne' a chi valuta l'app.
+
+            Il componente resta nel repository con i suoi test perche' il lavoro
+            e' fatto e non va rifatto; semplicemente non viene montato. Si
+            rimette importando `TrackingInstall` e rendendolo qui, quando sara'
+            stata provata. Vedi `app/components/Dashboard/TrackingInstall.tsx`. */}
       </BlockStack>
     </Card>
   );
