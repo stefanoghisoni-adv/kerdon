@@ -398,6 +398,8 @@ export const it = {
       noOrders: "Nessun ordine questo mese.",
       unavailable:
         "Il profitto sarà disponibile dopo la prima sincronizzazione degli ordini.",
+      reconnect:
+        "Il permesso di accedere al tuo database non è più valido. Ricollegalo dalle Impostazioni: i dati restano dove sono.",
     },
     /** Quanto resta di un ordine medio. */
     margin: {

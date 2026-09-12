@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { authenticate } from '~/shopify.server';
+import { isSupabaseCredentialDead } from '~/lib/supabase-management.server';
 import { prisma } from '~/db.server';
 import { loadShopAverages, loadShopProfit } from '~/lib/customers/profit.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
@@ -73,8 +74,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ]);
     return json({ ...profit, averages });
   } catch (e) {
+    // Credenziale morta e guasto passeggero si dicono in modo diverso al
+    // merchant, perche' sono opposti: il secondo passa da solo, il primo no —
+    // finche' non ricollega, quel numero non tornera' mai, e "sara' disponibile
+    // dopo la prima sincronizzazione" sarebbe una frase falsa.
+    const daRicollegare = isSupabaseCredentialDead(e);
     console.error(
       '[api.stats.profit]',
+      daRicollegare ? 'permesso Supabase non piu valido: serve ricollegare' : '',
       e instanceof Error ? e.message : 'errore sconosciuto',
     );
     // Un guasto qui non deve spegnere la dashboard: si dice che il numero non
@@ -86,7 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       coveredLines: 0,
       totalLines: 0,
       currency: 'EUR',
-      unavailable: 'not_connected' as const,
+      unavailable: (daRicollegare ? 'reconnect' : 'not_connected') as 'reconnect' | 'not_connected',
       averages: {
         aov: null,
         aop: null,

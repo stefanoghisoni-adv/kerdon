@@ -356,6 +356,8 @@ export const en: typeof it = {
       fix: "Fill in the costs",
       noOrders: "No orders this month.",
       unavailable: "Profit becomes available after the first order sync.",
+      reconnect:
+        "Permission to reach your database is no longer valid. Reconnect it from Settings: your data stays where it is.",
     },
     margin: {
       title: "Average margin per order",

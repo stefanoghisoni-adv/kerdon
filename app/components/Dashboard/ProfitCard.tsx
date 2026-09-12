@@ -10,7 +10,7 @@ export interface ProfitCardProps {
   coveredLines: number;
   totalLines: number;
   currency: string;
-  unavailable: 'no_orders_access' | 'not_connected' | null;
+  unavailable: 'no_orders_access' | 'not_connected' | 'reconnect' | null;
   loading?: boolean;
   onFix?: () => void;
   fixLoading?: boolean;
@@ -67,8 +67,13 @@ export function ProfitCard({
           <Text as="span" variant="bodySm" tone={reliability != null && reliability < 100 ? 'caution' : 'subdued'}>
             {loading
               ? '—'
-              : unavailable
-                ? t.dashboard.profit.unavailable
+              : unavailable === 'reconnect'
+                ? // Non e' "non ancora": e' "non piu'", e non si aggiusta da se'.
+                  // Dire "dopo la prima sincronizzazione" qui sarebbe falso — quella
+                  // sincronizzazione non avverra' finche' il merchant non ricollega.
+                  t.dashboard.profit.reconnect
+                : unavailable
+                  ? t.dashboard.profit.unavailable
                 : orders === 0
                   ? t.dashboard.profit.noOrders
                   : reliability != null && reliability < 100

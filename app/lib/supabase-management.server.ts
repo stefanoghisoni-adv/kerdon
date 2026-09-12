@@ -76,6 +76,37 @@ export function buildAuthorizeUrl(params: {
   return url.toString();
 }
 
+/**
+ * Il rinnovo del token Supabase e' fallito, e con quale stato.
+ *
+ * Lo stato non e' un dettaglio da log: separa due situazioni che per il merchant
+ * sono opposte. Un 5xx e' un guasto di Supabase che passa da solo — al giro
+ * dopo il numero torna. Un 401 o un 404 vogliono dire che il permesso che ci
+ * aveva dato non vale piu': revocato dal suo pannello, oppure il refresh token
+ * e' stato invalidato. Li' non c'e' niente da riprovare, e continuare a
+ * riprovare e' il modo di non accorgersene mai.
+ *
+ * Prima erano lo stesso `Error`, e la dashboard mostrava in tutti e due i casi
+ * una card senza numeri e nessuna spiegazione: il merchant vedeva sparire il
+ * profitto e non aveva modo di sapere che bastava ricollegare.
+ */
+export class SupabaseTokenError extends Error {
+  constructor(readonly status: number) {
+    super(`Supabase token error: ${status}`);
+    this.name = 'SupabaseTokenError';
+  }
+
+  /** Il permesso non vale piu': lo deve ridare il merchant, non il tempo. */
+  get credenzialeMorta(): boolean {
+    return this.status === 400 || this.status === 401 || this.status === 403 || this.status === 404;
+  }
+}
+
+/** Riconosce la credenziale morta da qualunque punto della catena. */
+export function isSupabaseCredentialDead(error: unknown): boolean {
+  return error instanceof SupabaseTokenError && error.credenzialeMorta;
+}
+
 async function tokenRequest(
   body: URLSearchParams,
   clientId: string,
@@ -90,7 +121,7 @@ async function tokenRequest(
     },
     body,
   });
-  if (!res.ok) throw new Error(`Supabase token error: ${res.status}`);
+  if (!res.ok) throw new SupabaseTokenError(res.status);
   return (await res.json()) as SupabaseTokenResponse;
 }
 
