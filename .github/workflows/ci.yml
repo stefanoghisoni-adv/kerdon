@@ -26,6 +26,18 @@ jobs:
     # e sarebbe un guaio molto peggiore di una CI che si lamenta.
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_non_esiste?schema=public
+      # Anche questo finto, e anche questo qui invece che nel codice.
+      #
+      # `shopifyApp` vuole un `appUrl`: oggi il codice mette una stringa vuota
+      # quando la variabile manca, e una stringa vuota non fa fallire niente —
+      # fa costruire indirizzi sbagliati in silenzio. In produzione la variabile
+      # c'e' sempre, quindi quel ripiego non serve a nessuno e copre solo il
+      # caso in cui serve accorgersene.
+      #
+      # `.invalid` e' il dominio che le regole di Internet riservano proprio a
+      # questo: non e' registrabile, quindi se una prova provasse davvero a
+      # chiamarlo fallirebbe subito invece di finire su un sito di qualcuno.
+      SHOPIFY_APP_URL: https://ci.invalid
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

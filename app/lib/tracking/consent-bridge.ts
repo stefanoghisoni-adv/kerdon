@@ -156,7 +156,17 @@ export function consentBridgeScript(): string {
   }
 
   function setCookie(name, value, maxAge) {
-    doc.cookie = name + '=' + value + '; Path=/; Max-Age=' + maxAge + '; SameSite=Lax';
+    // Secure quando la pagina e' in https, che in una vetrina vera e' sempre.
+    // Senza, il cookie viaggia in chiaro sul primo collegamento non cifrato che
+    // capita — e quello che c'e' dentro e' la risposta che la persona ha dato
+    // al banner. Non e' un identificativo, ma e' comunque una cosa sua.
+    //
+    // Si guarda il protocollo invece di scriverlo sempre perche' un cookie
+    // Secure su http il browser lo scarta in silenzio: in locale, dove si prova
+    // senza certificato, sparirebbe senza dire niente.
+    var secure = doc.location && doc.location.protocol === 'https:' ? '; Secure' : '';
+    doc.cookie =
+      name + '=' + value + '; Path=/; Max-Age=' + maxAge + '; SameSite=Lax' + secure;
   }
 
   function readCookie(name) {

@@ -22,6 +22,8 @@ interface Storefront {
   noApi?: boolean;
   endpoint?: string | null;
   cookies?: string;
+  /** La pagina serve in chiaro: succede solo in locale, senza certificato. */
+  http?: boolean;
 }
 
 /**
@@ -42,7 +44,12 @@ function run(storefront: Storefront) {
   const fetches: { url: string; init: RequestInit }[] = [];
   const listeners = new Map<string, () => void>();
 
+  const scritti: string[] = [];
   const doc = {
+    // La vetrina vera e' in https, e il ponte ci guarda per decidere se il
+    // cookie puo' essere Secure. Senza questo campo il finto non prova la cosa
+    // che conta.
+    location: { protocol: storefront.http ? 'http:' : 'https:' },
     currentScript: {
       getAttribute: (name: string) =>
         name === ENDPOINT_ATTRIBUTE
@@ -57,6 +64,7 @@ function run(storefront: Storefront) {
     get: () =>
       [...jar.entries()].map(([name, value]) => `${name}=${value}`).join('; '),
     set: (raw: string) => {
+      scritti.push(raw);
       const [pair, ...attributes] = raw.split(';');
       const eq = pair.indexOf('=');
       const name = pair.slice(0, eq).trim();
@@ -104,6 +112,8 @@ function run(storefront: Storefront) {
     events: () => win.dataLayer.map((entry) => entry.event),
     identityCalls: () => fetches.filter((f) => f.url.startsWith(ENDPOINT)),
     cartCalls: () => fetches.filter((f) => f.url === '/cart/update.js'),
+    /** Le righe scritte su document.cookie, con i loro attributi. */
+    cookieWrites: () => scritti,
   };
 }
 
@@ -278,5 +288,35 @@ describe('il ponte in vetrina', () => {
     await page.settle();
 
     expect(page.events()).toContain(CONSENT_WITHDRAWN_EVENT);
+  });
+});
+
+// Quello che sta nel cookie e' la risposta che una persona ha dato al banner.
+// Senza Secure viaggia in chiaro sul primo collegamento non cifrato che capita.
+describe('il cookie del consenso', () => {
+  it('in vetrina e Secure', async () => {
+    const page = run({ analytics: 'yes', marketing: 'yes' });
+    page.consentCollected();
+    await page.settle();
+
+    const consenso = page.cookieWrites().filter((r) => r.startsWith(CONSENT_COOKIE));
+    expect(consenso.length).toBeGreaterThan(0);
+    for (const riga of consenso) {
+      expect(riga).toContain('Secure');
+      expect(riga).toContain('SameSite=Lax');
+      expect(riga).toContain('Path=/');
+    }
+  });
+
+  // Un cookie Secure su http il browser lo scarta in silenzio: in locale, dove
+  // si prova senza certificato, sparirebbe senza dire niente.
+  it('in locale senza certificato non lo e, altrimenti sparirebbe', async () => {
+    const page = run({ analytics: 'yes', marketing: 'yes', http: true });
+    page.consentCollected();
+    await page.settle();
+
+    const consenso = page.cookieWrites().filter((r) => r.startsWith(CONSENT_COOKIE));
+    expect(consenso.length).toBeGreaterThan(0);
+    for (const riga of consenso) expect(riga).not.toContain('Secure');
   });
 });
