@@ -44,10 +44,10 @@ ___TEMPLATE_PARAMETERS___
   },
   {
     "type": "TEXT",
-    "name": "readToken",
-    "displayName": "Chiave di lettura",
+    "name": "ingestKeyId",
+    "displayName": "Identificativo della chiave di invio",
     "simpleValueType": true,
-    "help": "Si copia dalla pagina Impostazioni dell'app. Resta dentro il container e non arriva mai al browser.",
+    "help": "La met\u00e0 prima del punto della chiave di invio, senza il prefisso kin_. Non \u00e8 un segreto: \u00e8 il nome con cui l'app ritrova la credenziale. Il segreto non si incolla qui \u2014 sta nel file di credenziali del container, sotto il nome kerdon_ingest.",
     "valueValidators": [
       {
         "type": "NON_EMPTY"
@@ -91,9 +91,19 @@ ___SANDBOXED_JS_FOR_SERVER___
  * proprio dominio. Questo Client sta su quel dominio: riceve la chiamata dalla
  * vetrina, parla con Kerdon da server a server e scrive il cookie da qui.
  *
- * LA CHIAVE DI LETTURA NON ARRIVA MAI AL BROWSER. Sta in un campo di questo
- * template, dentro il container: chi apre gli strumenti di sviluppo su quel
- * negozio non la trova, perche' non e' mai passata di li'.
+ * SI FIRMA, NON SI PRESENTA UNA CHIAVE. Questa rotta non legge soltanto: conia
+ * l'identificativo del visitatore e ne registra la riga, cioe' SCRIVE. Finche'
+ * di qui passava la chiave di LETTURA, chi ne aveva una per consultare i dati di
+ * un negozio poteva anche riempirgli la tabella dei visitatori — una credenziale
+ * di sola lettura che scriveva con i privilegi massimi. Adesso viaggia una
+ * firma, e il segreto che la calcola non sta in nessun campo di questo template:
+ * vive nel file di credenziali del container (`SGTM_CREDENTIALS`), che il
+ * sandbox sa usare senza mostrarlo. Sul filo passa il risultato di una HMAC, e
+ * da quello il segreto non si ricava.
+ *
+ * NIENTE ARRIVA MAI AL BROWSER, ne' prima ne' adesso: chi apre gli strumenti di
+ * sviluppo su quel negozio non trova nessuna credenziale, perche' non ce n'e'
+ * mai passata una.
  *
  * IL CONSENSO VIENE PRIMA, E L'ASSENZA DI SEGNALE E' UN NO. Nessun valore di
  * ripiego, nessuna regola per paese: se non arriva niente che dica cosa ha
@@ -119,6 +129,11 @@ const returnResponse = require('returnResponse');
 const sendHttpGet = require('sendHttpGet');
 const encodeUriComponent = require('encodeUriComponent');
 const JSON = require('JSON');
+const hmacSha256 = require('hmacSha256');
+const queryPermission = require('queryPermission');
+const getTimestampMillis = require('getTimestampMillis');
+const generateRandom = require('generateRandom');
+const logToConsole = require('logToConsole');
 
 // I nomi che questo Client condivide con Kerdon. Cambiarli qui non basta.
 const ID_COOKIE = 'kerdon_eid';
@@ -397,6 +412,152 @@ function upstreamUrl() {
   return url;
 }
 
+/* ---------------------------------------------------------------------------
+ * LA FIRMA
+ *
+ * Da FIRMA:INIZIO a FIRMA:FINE questa parte non viene solo letta: viene
+ * ESTRATTA da questo file ed ESEGUITA da `app/lib/ingest/ingest-guard.test.ts`
+ * contro il cancello vero del server. Non e' un vezzo. La stringa da firmare e'
+ * composta in due posti — qui e in `app/lib/ingest/ingest-model.ts` — che
+ * nessun import tiene legati, e basta un separatore diverso o un pezzo in piu'
+ * perche' la firma non torni MAI. Il sintomo, senza quella prova, non sarebbe
+ * un errore: sarebbe il tracciamento fermo in un negozio solo, quello che ha
+ * appena aggiornato, senza niente che lo spieghi. I due marcatori servono a
+ * questo — non toglierli, e non portare niente di quel che sta qui dentro
+ * fuori di qui.
+ *
+ * IL SEGRETO NON PASSA DA QUESTO FILE, E NON CI PUO' PASSARE. `hmacSha256` non
+ * accetta un segreto come stringa: accetta il NOME di una chiave dichiarata nel
+ * file JSON indicato dalla variabile d'ambiente `SGTM_CREDENTIALS` del
+ * container. E' un vincolo del sandbox, ed e' anche cio' che rende questa
+ * strada migliore di quella di prima: il valore che firma non e' scritto in
+ * nessun campo del client, non compare in nessuna esportazione del container e
+ * non lo vede nemmeno chi ha accesso al tag manager.
+ * ------------------------------------------------------------------------- */
+
+// FIRMA:INIZIO
+
+/**
+ * Il nome della chiave dentro `SGTM_CREDENTIALS`. Fisso, non configurabile.
+ *
+ * Fisso perche' e' anche l'unica voce dichiarata nel permesso
+ * `use_custom_private_keys` in fondo a questo file: un campo libero
+ * costringerebbe chi installa a tenere d'accordo due posti — il campo e
+ * l'elenco del permesso — e il giorno in cui non lo sono il sandbox si rifiuta
+ * di firmare senza dire perche'. Un nome solo, scritto in un posto solo, che
+ * nel file di credenziali si copia tale e quale.
+ */
+const SIGNING_KEY_ID = 'kerdon_ingest';
+
+// I pezzi della stringa canonica, gli stessi di `ingest-model.ts`. Il perche' di
+// ognuno sta scritto li', dove va letto una volta sola: qui non si improvvisa.
+const SIGNATURE_VERSION = 'v1';
+const SIGNATURE_AUDIENCE = 'ingest';
+const SIGNATURE_SCOPE = 'ingest:identity';
+const INGEST_PATH = '/rest/v1/tracking_id';
+
+/**
+ * L'impronta del corpo vuoto.
+ *
+ * Questa rotta si chiama in GET e non porta nessun corpo, ma la firma copre
+ * l'impronta di un corpo lo stesso — quella della stringa vuota. Un ramo "qui
+ * la firma si fa diversamente" sarebbe un ramo in cui, prima o poi, la firma
+ * non c'e' piu'.
+ *
+ * Costante e non calcolata: `sha256Sync` del sandbox restituisce base64 con il
+ * riempimento, mentre il server si aspetta base64url, e convertire a mano un
+ * valore che non cambia mai vorrebbe dire tre righe in piu' e un modo in piu'
+ * di sbagliare. Che sia il valore giusto lo dice il test, confrontandolo con la
+ * funzione del server.
+ */
+const EMPTY_BODY_DIGEST = '47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU';
+
+/** La stringa su cui si calcola la firma, nell'ordine esatto che il server ricompone. */
+function canonicalPayload(timestampMs, idempotencyKey) {
+  return [
+    SIGNATURE_VERSION,
+    SIGNATURE_AUDIENCE,
+    SIGNATURE_SCOPE,
+    timestampMs,
+    'GET',
+    INGEST_PATH,
+    EMPTY_BODY_DIGEST,
+    idempotencyKey
+  ].join('\n');
+}
+
+/**
+ * L'etichetta che distingue questa chiamata da una sua copia.
+ *
+ * NON DEVE ESSERE IMPREVEDIBILE, e vale la pena dirlo: non e' un segreto, e chi
+ * la indovinasse non ne ricaverebbe niente — senza la firma non passa comunque.
+ * Deve essere DIVERSA a ogni chiamata, perche' e' l'unico pezzo che distingue
+ * due visite identiche nello stesso millisecondo da una sola visita catturata e
+ * rigiocata. Il millisecondo piu' due numeri a caso non si ripetono dentro i
+ * cinque minuti in cui il server ricorda.
+ */
+function newIdempotencyKey(timestampMs) {
+  return 'sgtm.' + timestampMs + '.' + generateRandom(0, 2147483647) + '.' +
+    generateRandom(0, 2147483647);
+}
+
+/**
+ * Le quattro intestazioni della firma, o niente se il container non sa firmare.
+ *
+ * IL PERMESSO SI CHIEDE PRIMA, e non e' una formalita': senza
+ * `use_custom_private_keys` concesso per questo nome di chiave il sandbox
+ * interrompe il template a meta', e chi guarda vede una richiesta che non parte
+ * e nessuna spiegazione. Chiesto prima, un container non configurato risponde
+ * "niente da darti" — la stessa risposta del visitatore senza consenso, cioe'
+ * una che il ponte in vetrina sa gia' gestire — e lascia in anteprima una riga
+ * che dice cosa manca.
+ *
+ * `undefined` e non un oggetto a meta': chi chiama deve essere costretto a
+ * decidere. Un oggetto di intestazioni senza firma dentro sarebbe una chiamata
+ * che parte e si prende un 401 a ogni visita.
+ */
+function signedHeaders() {
+  if (!queryPermission('use_custom_private_keys', SIGNING_KEY_ID)) {
+    logToConsole(
+      'Kerdon: il container non puo\' firmare. Serve una chiave chiamata "' +
+      SIGNING_KEY_ID +
+      '" nel file JSON indicato da SGTM_CREDENTIALS, e il permesso "Uses custom ' +
+      'private keys" del modello deve elencare quello stesso nome.'
+    );
+    return undefined;
+  }
+
+  const timestampMs = getTimestampMillis();
+  const idempotencyKey = newIdempotencyKey(timestampMs);
+  const signature = hmacSha256(
+    canonicalPayload(timestampMs, idempotencyKey),
+    SIGNING_KEY_ID,
+    { outputEncoding: 'base64url' }
+  );
+
+  const headers = {};
+  // L'identificativo PUBBLICO della credenziale: dice al server quale segreto
+  // rifare, e non e' il segreto. Viaggia in chiaro apposta.
+  headers['X-Kerdon-Key-Id'] = data.ingestKeyId;
+  headers['X-Kerdon-Timestamp'] = '' + timestampMs;
+  // Il prefisso viaggia con la firma: il giorno in cui la composizione cambia,
+  // il server puo' accettare le due forme insieme per una finestra invece di
+  // spegnere ogni installazione nello stesso istante.
+  headers['X-Kerdon-Signature'] = SIGNATURE_VERSION + '=' + signature;
+  headers['X-Kerdon-Idempotency-Key'] = idempotencyKey;
+  return headers;
+}
+
+// FIRMA:FINE
+
+/** Le intestazioni della chiamata a Kerdon, con l'identificativo gia' noto se c'e'. */
+function upstreamHeaders(existing) {
+  const headers = signedHeaders();
+  if (!headers) return undefined;
+  if (existing) headers[ID_HEADER] = existing;
+  return headers;
+}
+
 /** L'identificativo dentro la risposta di Kerdon: header o corpo. */
 function identifierFrom(result) {
   const headers = result.headers || {};
@@ -421,9 +582,13 @@ if (!allowed) {
     // sparisce anche la riga. Se quella chiamata non riesce, il cookie resta
     // comunque scaduto: si perde una cancellazione, non si continua a raccogliere.
     plantCookie('', 0);
-    if (existing) {
+    // Senza firma la dimenticanza non si puo' nemmeno chiedere, ma il cookie e'
+    // gia' scaduto qui sopra: si perde una cancellazione, non si continua a
+    // raccogliere. E' l'ordine giusto anche quando qualcosa non va.
+    const revokeHeaders = existing ? upstreamHeaders(existing) : undefined;
+    if (revokeHeaders) {
       sendHttpGet(upstreamUrl(), {
-        headers: { apikey: data.readToken, 'X-Kerdon-External-Id': existing },
+        headers: revokeHeaders,
         timeout: 5000
       }).then(() => {
         empty();
@@ -433,30 +598,37 @@ if (!allowed) {
     }
   }
 } else {
-  sendHttpGet(upstreamUrl(), {
-    headers: existing
-      ? { apikey: data.readToken, 'X-Kerdon-External-Id': existing }
-      : { apikey: data.readToken },
-    timeout: 5000
-  }).then((result) => {
-    const identifier = identifierFrom(result);
-    // Nessun identificativo nella risposta e' una risposta: Kerdon ha deciso di
-    // non coniare. Non e' un errore e non si insiste.
-    if (!identifier) {
-      empty();
-      return;
-    }
+  const headers = upstreamHeaders(existing);
+  // Un container che non sa firmare non conia niente e non pianta niente. Un
+  // identificativo ottenuto senza firma e' esattamente cio' che questa versione
+  // esiste per impedire: meglio nessun riconoscimento che uno preso con una
+  // credenziale di sola lettura.
+  if (!headers) {
+    empty();
+  } else {
+    sendHttpGet(upstreamUrl(), {
+      headers: headers,
+      timeout: 5000
+    }).then((result) => {
+      const identifier = identifierFrom(result);
+      // Nessun identificativo nella risposta e' una risposta: Kerdon ha deciso
+      // di non coniare. Non e' un errore e non si insiste.
+      if (!identifier) {
+        empty();
+        return;
+      }
 
-    setResponseHeader(ID_HEADER, identifier);
-    // Il cookie si riscrive a ogni visita anche quando l'identificativo e' lo
-    // stesso: e' cosi' che l'anno riparte da oggi invece di scadere un anno dopo
-    // la prima volta, che sarebbe il contrario di riconoscere chi torna.
-    plantCookie(identifier, data.cookieMaxAge);
+      setResponseHeader(ID_HEADER, identifier);
+      // Il cookie si riscrive a ogni visita anche quando l'identificativo e' lo
+      // stesso: e' cosi' che l'anno riparte da oggi invece di scadere un anno
+      // dopo la prima volta, che sarebbe il contrario di riconoscere chi torna.
+      plantCookie(identifier, data.cookieMaxAge);
 
-    setResponseStatus(200);
-    setResponseBody(JSON.stringify([{ external_id: identifier }]));
-    returnResponse();
-  });
+      setResponseStatus(200);
+      setResponseBody(JSON.stringify([{ external_id: identifier }]));
+      returnResponse();
+    });
+  }
 }
 
 
@@ -712,6 +884,53 @@ ___SERVER_PERMISSIONS___
   {
     "instance": {
       "key": {
+        "publicId": "use_custom_private_keys",
+        "versionId": "1"
+      },
+      "param": [
+        {
+          "key": "keys",
+          "value": {
+            "type": 2,
+            "listItem": [
+              {
+                "type": 1,
+                "string": "kerdon_ingest"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "clientAnnotations": {
+      "isEditedByUser": true
+    },
+    "isRequired": true
+  },
+  {
+    "instance": {
+      "key": {
+        "publicId": "logging",
+        "versionId": "1"
+      },
+      "param": [
+        {
+          "key": "environments",
+          "value": {
+            "type": 1,
+            "string": "debug"
+          }
+        }
+      ]
+    },
+    "clientAnnotations": {
+      "isEditedByUser": true
+    },
+    "isRequired": true
+  },
+  {
+    "instance": {
+      "key": {
         "publicId": "send_http",
         "versionId": "1"
       },
@@ -757,3 +976,17 @@ che va verificato — che senza consenso non nasca nessun cookie, che con il
 consenso l'identificativo torni, e che la revoca lo tolga — lo controlla la
 verifica dentro l'app, che chiama l'endpoint vero da fuori. Un finto passaggio
 scritto qui direbbe solo che questo file fa quello che questo file dice.
+
+C'e' un'eccezione, ed e' la firma. La parte fra FIRMA:INIZIO e FIRMA:FINE viene
+estratta da questo file ed eseguita dalla suite dell'app
+(`app/lib/ingest/ingest-guard.test.ts`), che le passa le funzioni del sandbox e
+consegna al cancello vero le intestazioni che produce. E' l'unico pezzo che non
+si puo' lasciare al container di anteprima: una stringa canonica che diverge di
+un carattere da quella del server non da' un errore leggibile, da' il
+tracciamento fermo in un negozio solo — quello che ha appena aggiornato.
+
+Il permesso "Uses custom private keys" dichiara `kerdon_ingest` come unico nome
+di chiave ammesso. Chi apre questo modello nel proprio container lo ritrova
+nella scheda Permessi: se quel nome non compare, `hmacSha256` non viene mai
+chiamata e il client risponde con un array vuoto, lasciando in anteprima la riga
+che spiega cosa manca.
