@@ -10,7 +10,11 @@ vi.mock('~/shopify.server', () => ({
   authenticate: { admin: async () => ({ session: { shop: 'test-shop.myshopify.com' } }) },
 }));
 vi.mock('~/db.server', () => ({
-  prisma: { shop: { findUnique: (...a: unknown[]) => findUniqueShop(...a) } },
+  prisma: {
+    shop: { findUnique: (...a: unknown[]) => findUniqueShop(...a) },
+    // Il cancello delle capacita' legge il piano del negozio.
+    plan: { findFirst: async () => ({ planName: 'pro', customersSyncEnabled: true }) },
+  },
 }));
 vi.mock('~/lib/ingest/ingest-key.server', () => ({
   issueIngestKey: (...a: unknown[]) => issueIngestKey(...a),
@@ -38,7 +42,21 @@ const corpo = async (response: Response): Promise<Record<string, unknown>> =>
 
 beforeEach(() => {
   vi.clearAllMocks();
-  findUniqueShop.mockResolvedValue({ id: 'negozio-1' });
+  findUniqueShop.mockResolvedValue({
+    id: 'negozio-1',
+    currentPlan: 'pro',
+  // Le colonne da cui la policy decide: senza, il cancello di `use_app`
+  // rifiuterebbe prima ancora che il test cominci — ed e' proprio quello che
+  // deve fare a un negozio fermo.
+  lifecycleStatus: 'active',
+  uninstalledAt: null,
+  authorization: 'ENABLED',
+  trackingAuthorization: 'ENABLED',
+  scopes: 'read_products,write_products',
+  isInTrial: false,
+  trialEndsAt: null,
+  activeChargeId: null,
+  });
   issueIngestKey.mockResolvedValue({
     value: 'kin_pubblico.segretissimo',
     keyId: 'pubblico',
@@ -109,11 +127,15 @@ describe('cosa la rotta non fa', () => {
     expect(issueIngestKey).not.toHaveBeenCalled();
   });
 
+  // Non piu' 404 ma 403, e non e' un dettaglio: "negozio non trovato" a chi
+  // chiama la rotta a mano racconta, per differenza, quali domini esistono. Un
+  // negozio che non si sa chi sia non puo' fare niente, e il rifiuto e' quello.
   it('un negozio che non conosciamo non emette niente', async () => {
     findUniqueShop.mockResolvedValue(null);
-    const risposta = await call({ intent: 'issue' });
 
-    expect(risposta.status).toBe(404);
+    const risposta = (await call({ intent: 'issue' }).catch((e) => e)) as Response;
+
+    expect(risposta.status).toBe(403);
     expect(issueIngestKey).not.toHaveBeenCalled();
   });
 

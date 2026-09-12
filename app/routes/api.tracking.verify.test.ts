@@ -11,6 +11,9 @@ vi.mock('~/shopify.server', () => ({
 vi.mock('~/db.server', () => ({
   prisma: {
     shop: { findUnique: (...a: unknown[]) => findUniqueShop(...a) },
+    // Il cancello delle capacita' legge il piano del negozio: senza questa
+    // riga la rotta rifiuterebbe per un motivo che non c'entra con la verifica.
+    plan: { findFirst: async () => ({ planName: 'pro', customersSyncEnabled: true }) },
     trackingSetup: {
       findUnique: (...a: unknown[]) => findUniqueSetup(...a),
       update: (...a: unknown[]) => updateSetup(...a),
@@ -48,7 +51,22 @@ const configured = (verifiedAt: Date | null = null) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  findUniqueShop.mockResolvedValue({ id: 'shop-1', primaryDomain: 'negozio.it' });
+  findUniqueShop.mockResolvedValue({
+    id: 'shop-1',
+    primaryDomain: 'negozio.it',
+    currentPlan: 'pro',
+  // Le colonne da cui la policy decide: senza, il cancello di `use_app`
+  // rifiuterebbe prima ancora che il test cominci — ed e' proprio quello che
+  // deve fare a un negozio fermo.
+  lifecycleStatus: 'active',
+  uninstalledAt: null,
+  authorization: 'ENABLED',
+  trackingAuthorization: 'ENABLED',
+  scopes: 'read_products,write_products',
+  isInTrial: false,
+  trialEndsAt: null,
+  activeChargeId: null,
+  });
   findUniqueSetup.mockResolvedValue(configured());
   updateSetup.mockResolvedValue({});
   verifyTrackingEndpoint.mockResolvedValue({ passed: true, checks: [] });

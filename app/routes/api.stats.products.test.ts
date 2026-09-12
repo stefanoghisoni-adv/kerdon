@@ -12,7 +12,11 @@ vi.mock('~/shopify.server', () => ({
   authenticate: { admin: async () => ({ session: { shop: 'test-shop.myshopify.com' } }) },
 }));
 vi.mock('~/db.server', () => ({
-  prisma: { shop: { findUnique: (...a: unknown[]) => findUniqueShop(...a) } },
+  prisma: {
+    shop: { findUnique: (...a: unknown[]) => findUniqueShop(...a) },
+    // Il cancello delle capacita' legge il piano del negozio.
+    plan: { findFirst: async () => ({ planName: 'pro', customersSyncEnabled: true }) },
+  },
 }));
 vi.mock('~/lib/shopify-api.server', () => ({
   ShopifyAPIClient: class {
@@ -44,7 +48,22 @@ const CACHE = { totalProducts: 12, readyCount: 30, problemCount: 2, soldWithoutC
 describe('/api/stats/products', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    findUniqueShop.mockResolvedValue({ id: 'shop-1', shopDomain: 'test-shop.myshopify.com' });
+    findUniqueShop.mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test-shop.myshopify.com',
+      currentPlan: 'pro',
+      // Le colonne da cui la policy decide: senza, il cancello di `use_app`
+      // rifiuterebbe prima ancora che il test cominci — ed e' proprio quello
+      // che deve fare a un negozio fermo.
+      lifecycleStatus: 'active',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
+      trackingAuthorization: 'ENABLED',
+      scopes: 'read_products,write_products',
+      isInTrial: false,
+      trialEndsAt: null,
+      activeChargeId: null,
+    });
     loadSoldVariantIds.mockResolvedValue({ ids: new Set<string>() });
   });
 

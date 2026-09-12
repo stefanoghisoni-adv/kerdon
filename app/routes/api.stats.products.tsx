@@ -1,8 +1,6 @@
 // app/routes/api.stats.products.tsx
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
-import { prisma } from '~/db.server';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   collectProblemVariants,
@@ -14,16 +12,13 @@ import { getReadinessCache, setReadinessCache } from '~/lib/cache/stats-cache.se
 import { upsertTodayEligibilitySnapshot } from '~/lib/stats/eligibility-snapshot.server';
 import { loadSoldVariantIds } from '~/lib/stats/sold-variants.server';
 import { countSoldProblemVariants } from '~/lib/stats/sold-without-cost';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-  if (!shop) {
-    throw new Response('Shop not found', { status: 404 });
-  }
+  // Prima della cache, e non solo prima di Shopify: anche l'ultimo numero noto
+  // e' un dato del negozio, e servirlo a chi non puo' piu' usare l'app sarebbe
+  // lo stesso rifiuto aggirato con un giro piu' corto.
+  const { session, shop } = await requireShopCapability(request, 'use_app');
 
   // Cache-then-refresh: senza ?refresh=1 restituiamo SUBITO l'ultimo valore in
   // cache (riapertura istantanea). Il client, vedendo cached:true, richiama poi

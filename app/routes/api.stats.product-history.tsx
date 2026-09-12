@@ -1,22 +1,17 @@
 // app/routes/api.stats.product-history.tsx
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { buildMonthSeries, monthLabel } from '~/lib/stats/history-series';
 import { localeForShop } from '~/lib/i18n/server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { fromIso, todayIn } from '~/lib/dates/ranges';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-  if (!shop) {
-    throw new Response('Shop not found', { status: 404 });
-  }
+  // La storia del catalogo e' un dato del negozio come gli altri: il permesso
+  // si chiede prima di andarla a leggere, non dopo averla gia' in mano.
+  const { session, shop } = await requireShopCapability(request, 'use_app');
 
   // Quale mese sia "questo" lo decide il calendario del negozio, non quello del
   // server: a un negozio di Los Angeles il 31 agosto alle sei di sera il grafico

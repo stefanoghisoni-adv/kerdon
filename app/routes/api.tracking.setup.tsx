@@ -1,8 +1,8 @@
 import { dictionaryForShop } from '~/lib/i18n/server';
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 import {
   isServerSideAnswer,
   knownPlatforms,
@@ -16,15 +16,13 @@ import {
  * risposta sostituisce la vecchia.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Il permesso prima del corpo della richiesta: quel che il merchant dichiara
+  // qui finisce nella sua configurazione, e la configurazione di un negozio
+  // fermo non si tocca.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   if (request.method !== 'POST') {
     return json({ ok: false, error: 'Richiesta non valida' }, { status: 405 });
-  }
-
-  const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
-  if (!shop) {
-    return json({ ok: false, error: 'Negozio non trovato' }, { status: 404 });
   }
 
   const body = (await request.json()) as { answer?: unknown; platforms?: unknown };
@@ -64,7 +62,10 @@ export async function action({ request }: ActionFunctionArgs) {
       err instanceof Error ? err.message : 'errore sconosciuto',
     );
     return json(
-      { ok: false, error: (await dictionaryForShop(session.shop)).errors.trackingAnswerFailed },
+      {
+        ok: false,
+        error: (await dictionaryForShop(shop.shopDomain)).errors.trackingAnswerFailed,
+      },
       { status: 500 },
     );
   }

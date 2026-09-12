@@ -15,8 +15,6 @@ import {
   Text,
 } from '@shopify/polaris';
 import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
-import { authenticate } from '~/shopify.server';
-import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { feedsDenial } from '~/lib/feeds/feed-access.server';
 import { deleteFeed, listFeeds, PLATFORMS, type Platform } from '~/lib/feeds/feed.server';
@@ -25,16 +23,23 @@ import { MetaLogo } from '~/components/Catalogs/MetaLogo';
 import { GoogleLogo } from '~/components/Catalogs/GoogleLogo';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { useT } from '~/lib/i18n/context';
+import {
+  requireShopCapability,
+  shopCapabilityOutcome,
+} from '~/lib/authz/require-capability.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // `use_app` e non `use_feeds`: le card devono restare visibili anche a chi i
+  // feed non li ha nel piano — servono proprio a fargli vedere che cosa
+  // otterrebbe — mentre un negozio sospeso o con la prova finita non deve
+  // entrarci affatto. Sono due rifiuti diversi e questa e' la riga che li
+  // tiene diversi.
+  const { session, shop } = await requireShopCapability(request, 'use_app', {
+    onDenied: 'redirect',
+  });
   await requireSetupComplete(session.shop);
 
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: { id: true },
-  });
-  const feeds = shop ? await listFeeds(shop.id) : [];
+  const feeds = await listFeeds(shop.id);
 
   // Un solo interrogatorio della policy, due risposte diverse: se i comandi si
   // possono usare, e se il motivo per cui non si possono e' quello che
@@ -57,14 +62,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Eliminare un'integrazione e' un gesto sulla configurazione del negozio: il
+  // permesso prima, e il rifiuto restituito perche' lo legge il fetcher che ha
+  // aperto il modal di conferma.
+  const cancello = await shopCapabilityOutcome(request, 'use_app');
+  if (!cancello.ok) return json({ ok: false }, { status: 403 });
+  const { session, shop } = cancello.grant;
   await requireSetupComplete(session.shop);
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: { id: true },
-  });
-  if (!shop) return json({ ok: false }, { status: 404 });
 
   const form = await request.formData();
   const platform = String(form.get('platform') ?? '');

@@ -893,6 +893,21 @@ export const it = {
     trialEnded:
       "Il periodo di prova è terminato: le funzioni dell’app e le sincronizzazioni sono " +
       "sospese. Aggiorna il piano per riattivarle.",
+    /**
+     * Le tre frasi che restano quando un permesso viene negato per un motivo
+     * che non e' ne' la sospensione ne' la prova finita.
+     *
+     * Dicono al merchant che cosa puo' fare — collegare, aggiornare il piano,
+     * riaprire l'app — e non da dove arriva il rifiuto: di come l'app decide
+     * non gli importa, e leggerlo lo lascerebbe con una frase e nessun gesto.
+     */
+    connectFirst:
+      "Collega il tuo database per usare questa sezione.",
+    planRequiredSection:
+      "Il tuo piano non comprende questa sezione. Aggiorna il piano per usarla.",
+    permissionMissing:
+      "All’app mancano dei permessi su questo negozio. Riapri o reinstalla l’app per " +
+      "concederli, poi riprova.",
     // Supabase
     noOrganization: "Nessuna organizzazione Supabase trovata.",
     createProjectScope:

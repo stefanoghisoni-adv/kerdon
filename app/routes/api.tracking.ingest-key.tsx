@@ -1,7 +1,5 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
-import { prisma } from '~/db.server';
 import {
   issueIngestKey,
   listIngestKeys,
@@ -9,6 +7,7 @@ import {
   revokeIngestKey,
 } from '~/lib/ingest/ingest-key.server';
 import { INGEST_ROTATION_OVERLAP_MS } from '~/lib/ingest/ingest-model';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 /**
  * La chiave di scrittura del negozio: emetterla, ruotarla, chiuderla.
@@ -34,17 +33,15 @@ import { INGEST_ROTATION_OVERLAP_MS } from '~/lib/ingest/ingest-model';
  * ruota: revoca, e quella non ha nessuna finestra.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Da qui escono le credenziali con cui si SCRIVE nel database del merchant.
+  // Se c'e' una rotta a cui il permesso non puo' mancare e' questa: un negozio
+  // sospeso che si fabbrica una chiave nuova si riapre da solo la porta che la
+  // sospensione gli ha chiuso.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   if (request.method !== 'POST') {
     return json({ ok: false, error: 'method_not_allowed' }, { status: 405 });
   }
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: { id: true },
-  });
-  if (!shop) return json({ ok: false, error: 'shop_not_found' }, { status: 404 });
 
   const body = (await request.json().catch(() => null)) as {
     intent?: unknown;

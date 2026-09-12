@@ -22,7 +22,6 @@ import {
 } from '@shopify/polaris';
 import { AlertCircleIcon, CheckCircleIcon } from '@shopify/polaris-icons';
 import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-format';
@@ -54,10 +53,28 @@ import {
   parseMetafieldKey,
 } from '~/lib/customers/birthdate-metafield';
 import { customerMetafieldsUrl, storeHandle } from '~/utils/admin-page';
+import {
+  requireShopCapability,
+  shopCapabilityOutcome,
+} from '~/lib/authz/require-capability.server';
 
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // IL CANCELLO, E VIENE PRIMA DI TUTTO.
+  //
+  // Questa pagina e' la piu' esposta dell'app: sotto ci sono nomi, email e
+  // quanto ogni cliente ha speso. Finche' l'unica condizione era "la
+  // configurazione e' conclusa", un negozio con la prova finita, sospeso o con
+  // la cancellazione GDPR gia' cominciata continuava a leggerseli — bastava
+  // aprire l'indirizzo, senza passare da nessun pulsante.
+  //
+  // Il rifiuto qui e' un ritorno alla dashboard e non un 403: una pagina intera
+  // sostituita da un codice di stato non dice al merchant che cosa puo' fare,
+  // e la dashboard invece glielo dice gia' — con il banner e, quando serve, la
+  // strada per aggiornare il piano.
+  const { session, shop } = await requireShopCapability(request, 'use_app', {
+    onDenied: 'redirect',
+  });
   await requireSetupComplete(session.shop);
 
   // Le date arrivano dalla URL, quindi da fuori: quello che non e' una data si
@@ -74,20 +91,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // nemmeno, e la query falliva con un 400 che arrivava fino a schermo come
   // "Unexpected Server Error" — con la pagina d'errore che, per giunta, torna
   // scura. Meglio entrare e trovare scritto perche' non c'e' niente.
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: {
-      currentPlan: true,
-      ianaTimezone: true,
-      birthdateMetafieldNamespace: true,
-      birthdateMetafieldKey: true,
-    },
-  });
-
   // Il periodo di partenza si sceglie dopo aver letto il negozio, perche' senza
   // il suo fuso "gli ultimi 30 giorni" finiscono nel giorno di qualcun altro.
-  const range = rangeFromUrl ?? defaultRange(shop?.ianaTimezone ?? null);
-  const plan = await findPlanByName(shop?.currentPlan);
+  const range = rangeFromUrl ?? defaultRange(shop.ianaTimezone);
+  const plan = await findPlanByName(shop.currentPlan);
   const customersIncluded = plan?.customersSyncEnabled ?? false;
 
   let upgradePlan: string | null = null;
@@ -103,7 +110,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         priceMonthly: monthlyOf.get(p.planName) ?? 0,
         customersSyncEnabled: p.customersSyncEnabled,
       })),
-      shop?.currentPlan ?? null,
+      shop.currentPlan,
     );
   }
 
@@ -218,19 +225,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
  * non lo e'.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Lo stesso cancello del riquadro, ripetuto qui: quello nasconde i comandi,
+  // questo nega l'azione. Una richiesta non arriva per forza da un pulsante.
+  //
+  // E prima del piano, perche' sono due domande diverse: il piano dice se
+  // questa funzione e' compresa, l'uso dell'app dice se il negozio puo' ancora
+  // toccare la propria configurazione. Un negozio con la prova finita passava
+  // il primo controllo e cambiava da dove si legge la data di nascita dei suoi
+  // clienti come se niente fosse.
+  //
+  // Il rifiuto si RESTITUISCE: lo legge il riquadro che ha mandato la
+  // richiesta, e la pagina resta dov'e'.
+  const cancello = await shopCapabilityOutcome(request, 'use_app');
+  if (!cancello.ok) return cancello.response;
+  const { session, shop } = cancello.grant;
 
   if (request.method !== 'POST') {
     return json({ ok: false as const, error: 'failed' as const }, { status: 405 });
   }
 
-  // Lo stesso cancello del riquadro, ripetuto qui: quello nasconde i comandi,
-  // questo nega l'azione. Una richiesta non arriva per forza da un pulsante.
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: { currentPlan: true },
-  });
-  const plan = await findPlanByName(shop?.currentPlan);
+  const plan = await findPlanByName(shop.currentPlan);
   if (!plan?.customersSyncEnabled) {
     return json({ ok: false as const, error: 'failed' as const }, { status: 403 });
   }

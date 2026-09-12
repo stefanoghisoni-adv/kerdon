@@ -1,6 +1,5 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import {
   isTrackingInstallComplete,
@@ -8,6 +7,7 @@ import {
   readInstallState,
 } from '~/lib/tracking/install';
 import { verifyTrackingEndpoint } from '~/lib/tracking/verify-endpoint.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 /**
  * La verifica del giro, dietro sessione amministratore.
@@ -25,17 +25,13 @@ import { verifyTrackingEndpoint } from '~/lib/tracking/verify-endpoint.server';
  * non si chiude e' peggio che non dire niente.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // La verifica chiama davvero l'indirizzo del merchant e scrive l'esito nella
+  // sua configurazione: il permesso viene prima della chiamata.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   if (request.method !== 'POST') {
     return json({ ok: false, error: 'method_not_allowed' }, { status: 405 });
   }
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: { id: true, primaryDomain: true },
-  });
-  if (!shop) return json({ ok: false, error: 'shop_not_found' }, { status: 404 });
 
   const setup = await prisma.trackingSetup.findUnique({
     where: { shopId: shop.id },

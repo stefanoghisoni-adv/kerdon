@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 /**
  * Il merchant ha guardato cosa sta gia' leggendo il suo negozio, e va avanti.
@@ -17,13 +17,10 @@ import { prisma } from '~/db.server';
  * merchant davanti a due passi aperti, di cui uno che non aveva ancora letto.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: { id: true },
-  });
-  if (!shop) return json({ ok: false }, { status: 404 });
+  // Segna un passo della configurazione come letto: e' un gesto di chi sta
+  // usando l'app, e un negozio fermo non deve poter avanzare nella propria
+  // configurazione come se non lo fosse.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   await prisma.shop.update({
     where: { id: shop.id },

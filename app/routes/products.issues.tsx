@@ -31,7 +31,6 @@ import {
   Pagination,
 } from '@shopify/polaris';
 import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { can } from '~/lib/authz/capabilities';
 import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
@@ -73,21 +72,30 @@ import {
   parseStoredCosts,
   costRatioLabel,
 } from '~/lib/stats/cost-edit';
+import {
+  requireShopCapability,
+  shopCapabilityOutcome,
+} from '~/lib/authz/require-capability.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // IL CANCELLO, PRIMA DI PARLARE CON SHOPIFY.
+  //
+  // Qui sotto si legge il catalogo intero, pagina per pagina, con i costi di
+  // ogni variante. Fino a ieri il permesso si chiedeva DOPO — serviva solo a
+  // spegnere i campi a schermo — e il catalogo era gia' stato letto e spedito
+  // al browser di un negozio che l'app non puo' piu' usare. Un campo spento
+  // non e' un dato negato.
+  //
+  // Rifiuto come ritorno alla dashboard, come per i clienti: e' li' che il
+  // merchant legge che cosa e' successo e che cosa puo' fare.
+  const { session, shop } = await requireShopCapability(request, 'use_app', {
+    onDenied: 'redirect',
+  });
 
   // Questa pagina esiste a configurazione conclusa: prima parlerebbe di dati
   // che non ci sono ancora. Chi ci arriva da un indirizzo salvato torna dove
   // il lavoro e' rimasto.
   await requireSetupComplete(session.shop);
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-  if (!shop) {
-    throw new Response('Shop not found', { status: 404 });
-  }
 
   const client = await ShopifyAPIClient.forShop(shop.shopDomain);
 
@@ -149,7 +157,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     rows,
     error,
     shopDomain: shop.shopDomain,
-    blocked: !can(await shopCapabilities(shop), 'use_app'),
+    // Sempre false da quando il cancello sta in cima: chi arriva qui il
+    // permesso ce l'ha. Resta nel payload perche' i componenti sotto lo
+    // leggono, e toglierlo vorrebbe dire riscrivere la pagina per una
+    // costante.
+    blocked: false,
     readyCount: error ? 0 : computeProductReadiness(allProducts).readyCount,
     planLimit: plan?.maxProducts ?? null,
     // Il filtro e' attivo solo se e' stato chiesto E se si e' potuto applicare:
@@ -315,21 +327,12 @@ async function applyCost(
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    include: { supabaseConfig: true },
-  });
-  if (!shop) {
-    return json({ ok: false, error: 'Negozio non trovato.' }, { status: 404 });
-  }
-  if (!can(await shopCapabilities(shop), 'use_app')) {
-    return json(
-      { ok: false, error: (await dictionaryForShop(session.shop)).errors.suspended },
-      { status: 403 },
-    );
-  }
+  // Il rifiuto si restituisce e non si solleva: lo legge il fetcher che ha
+  // mandato i costi da salvare, e la pagina resta dov'e' invece di lasciare il
+  // posto alla schermata d'errore.
+  const cancello = await shopCapabilityOutcome(request, 'use_app');
+  if (!cancello.ok) return json({ ok: false, error: cancello.message }, { status: 403 });
+  const { session, shop } = cancello.grant;
 
   const body = (await request.json()) as {
     intent?: string;

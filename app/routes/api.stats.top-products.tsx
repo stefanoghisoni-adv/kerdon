@@ -1,11 +1,11 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { loadTopProducts } from '~/lib/customers/top-products.server';
 import { isMetric } from '~/lib/customers/top-products';
 import { isCalendarDate } from '~/lib/customers/customers-query';
 import { defaultRange } from '~/lib/dates/ranges';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 /**
  * I cinque prodotti che hanno reso di piu', per la dashboard.
@@ -31,7 +31,9 @@ async function shopDefaultRange(shopDomain: string): Promise<{ from: string; to:
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Come il profitto: questi cinque nomi vengono dal database del merchant, e
+  // il permesso si chiede prima di andarli a prendere.
+  const { session } = await requireShopCapability(request, 'use_app');
   const params = new URL(request.url).searchParams;
 
   const raw = params.get('metric') ?? 'cm';

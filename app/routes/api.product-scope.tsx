@@ -9,20 +9,14 @@
 // scelta gia' fatta per l'avviso del tetto prodotti.
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
-import { prisma } from '~/db.server';
 import { productScopeSummary } from '~/lib/sync/product-scope.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: { id: true },
-  });
-  if (!shop) {
-    throw new Response('Shop not found', { status: 404 });
-  }
+  // Quanti prodotti si stanno aggiornando e da quando e' lo stato della
+  // sincronizzazione di questo negozio: il permesso prima, come per gli altri
+  // numeri che l'avviso mostra accanto.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   const summary = await productScopeSummary(shop.id);
 

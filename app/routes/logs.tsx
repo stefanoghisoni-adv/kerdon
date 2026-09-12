@@ -4,7 +4,6 @@ import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { Page, Layout, Box, Banner, Text } from '@shopify/polaris';
 import { SettingsIcon } from '@shopify/polaris-icons';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { SyncLog } from '~/components/Dashboard/SyncLog';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
@@ -12,22 +11,25 @@ import { useNavLoading } from '~/components/Dashboard/nav-loading';
 import { useT } from '~/lib/i18n/context';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { nextSyncAt, formatCountdown } from '~/lib/sync/next-sync';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 // Quanti eventi mostrare: la tabella resta una lista unica senza paginazione,
 // quindi teniamo il tetto a 20 righe per non allungarla a dismisura.
 const MAX_JOBS = 20;
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Il registro racconta che cosa e' stato sincronizzato e quando, con i nomi
+  // dei prodotti toccati: e' lo storico del negozio, e si chiede il permesso
+  // prima di aprirlo. Il rifiuto riporta alla dashboard, dove il banner dice
+  // che cosa e' successo.
+  const { session, shop } = await requireShopCapability(request, 'use_app', {
+    onDenied: 'redirect',
+  });
 
   // Questa pagina esiste a configurazione conclusa: prima parlerebbe di dati
   // che non ci sono ancora. Chi ci arriva da un indirizzo salvato torna dove
   // il lavoro e' rimasto.
   await requireSetupComplete(session.shop);
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
 
   if (!shop) {
     return json({ jobs: [], customersEnabled: false, timeZone: null, nextSync: null });

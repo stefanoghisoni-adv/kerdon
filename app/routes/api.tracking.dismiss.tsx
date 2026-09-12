@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 /**
  * "Questa fonte non tocca il tracciamento": il merchant lo dichiara e non gliene
@@ -16,10 +16,9 @@ import { prisma } from '~/db.server';
  * rivedere quell'avviso sarebbe non vederlo mai piu'.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
-
-  const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
-  if (!shop) return json({ ok: false }, { status: 404 });
+  // Scrive un giudizio del merchant sulla configurazione del suo negozio: vale
+  // come gli altri gesti, e chiede lo stesso permesso.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   const form = await request.formData();
   const kind = String(form.get('kind') ?? '').trim();

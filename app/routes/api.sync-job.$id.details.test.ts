@@ -28,6 +28,17 @@ describe('/api/sync-job/:id/details', () => {
       id: 'shop-1',
       shopDomain: 'test-shop.myshopify.com',
       currentPlan: 'pro',
+  // Le colonne da cui la policy decide: senza, il cancello di `use_app`
+    // rifiuterebbe prima ancora che il test cominci — ed e' proprio quello che
+    // deve fare a un negozio fermo.
+    lifecycleStatus: 'active',
+    uninstalledAt: null,
+    authorization: 'ENABLED',
+    trackingAuthorization: 'ENABLED',
+    scopes: 'read_products,write_products',
+    isInTrial: false,
+    trialEndsAt: null,
+    activeChargeId: null,
     });
     findPlanMock.mockResolvedValue({ customersSyncEnabled: true });
   });

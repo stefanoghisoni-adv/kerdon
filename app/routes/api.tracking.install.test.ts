@@ -10,6 +10,8 @@ vi.mock('~/shopify.server', () => ({
 vi.mock('~/db.server', () => ({
   prisma: {
     shop: { findUnique: (...a: unknown[]) => findUniqueShop(...a) },
+    // Il cancello delle capacita' legge il piano del negozio.
+    plan: { findFirst: async () => ({ planName: 'pro', customersSyncEnabled: true }) },
     trackingSetup: {
       findUnique: (...a: unknown[]) => findUniqueSetup(...a),
       upsert: (...a: unknown[]) => upsertSetup(...a),
@@ -46,7 +48,21 @@ const written = () => upsertSetup.mock.calls[0][0].update;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  findUniqueShop.mockResolvedValue({ id: 'shop-1' });
+  findUniqueShop.mockResolvedValue({
+    id: 'shop-1',
+    currentPlan: 'pro',
+  // Le colonne da cui la policy decide: senza, il cancello di `use_app`
+  // rifiuterebbe prima ancora che il test cominci — ed e' proprio quello che
+  // deve fare a un negozio fermo.
+  lifecycleStatus: 'active',
+  uninstalledAt: null,
+  authorization: 'ENABLED',
+  trackingAuthorization: 'ENABLED',
+  scopes: 'read_products,write_products',
+  isInTrial: false,
+  trialEndsAt: null,
+  activeChargeId: null,
+  });
   findUniqueSetup.mockResolvedValue({ installPath: null, endpoint: null, verifiedAt: null });
   upsertSetup.mockImplementation(async (args: { update: Record<string, unknown> }) => ({
     ...args.update,
@@ -110,10 +126,17 @@ describe('salvare la strada di installazione', () => {
     expect(body.endpoint).toBeNull();
   });
 
+  // 403 e non 404: vedi la nota gemella in api.tracking.ingest-key.test.ts —
+  // un negozio che non si e' potuto identificare non si distingue da uno che
+  // non puo'.
   it('un negozio che non c e non scrive niente', async () => {
     findUniqueShop.mockResolvedValue(null);
-    const response = await call({ path: 'sgtm', endpoint: ENDPOINT });
-    expect(response.status).toBe(404);
+
+    const response = (await call({ path: 'sgtm', endpoint: ENDPOINT }).catch(
+      (e) => e,
+    )) as Response;
+
+    expect(response.status).toBe(403);
     expect(upsertSetup).not.toHaveBeenCalled();
   });
 });

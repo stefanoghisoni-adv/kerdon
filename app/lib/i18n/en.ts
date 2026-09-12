@@ -738,6 +738,13 @@ export const en: typeof it = {
     trialEnded:
       "Your trial has ended: the app’s features and syncs are suspended. Upgrade your plan to " +
       "turn them back on.",
+    connectFirst:
+      "Connect your database to use this section.",
+    planRequiredSection:
+      "Your plan doesn’t include this section. Upgrade your plan to use it.",
+    permissionMissing:
+      "The app is missing permissions on this store. Reopen or reinstall the app to grant " +
+      "them, then try again.",
     noOrganization: "No Supabase organisation found.",
     createProjectScope:
       "Not enough permissions to create projects. Reconnect Supabase.",

@@ -1,8 +1,6 @@
 // app/routes/api.stats.customers.tsx
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
-import { prisma } from '~/db.server';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import { countMarketingConsent } from '~/lib/stats/customer-consent-stats';
 import {
@@ -11,14 +9,13 @@ import {
 } from '~/lib/cache/stats-cache.server';
 import type { ShopifyCustomer } from '~/types/shopify';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
-
-  const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
-  if (!shop) {
-    throw new Response('Shop not found', { status: 404 });
-  }
+  // Prima del piano e prima della cache: qui si contano i clienti del negozio
+  // interrogando Shopify pagina per pagina, e un negozio fermo — prova finita,
+  // sospeso, in cancellazione — non deve arrivarci nemmeno per un conteggio.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   // Il piano non include i clienti: nessuna chiamata a Shopify, la card e' bloccata.
   const plan = await findPlanByName(shop.currentPlan);

@@ -1,4 +1,3 @@
-import { dictionaryForShop } from '~/lib/i18n/server';
 import { useT } from '~/lib/i18n/context';
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
@@ -43,8 +42,13 @@ import { SupabaseProjectConnect } from '~/components/Dashboard/SupabaseProjectCo
 import { prisma } from '~/db.server';
 import { getOrCreateShop } from '~/utils/shop.server';
 import { normalizeAuthorization } from '~/utils/authorization.server';
-import { denialOf, trialHasExpired } from '~/lib/authz/capabilities';
-import { capabilityFacts, shopCapabilities } from '~/lib/authz/shop-capabilities.server';
+import { can, denialOf, trialHasExpired } from '~/lib/authz/capabilities';
+import {
+  capabilityFacts,
+  shopCapabilities,
+  shopCapabilitiesWithPlan,
+} from '~/lib/authz/shop-capabilities.server';
+import { capabilityDenialResponse } from '~/lib/authz/require-capability.server';
 import { invalidateReadContextForShop } from '~/lib/read-proxy/context.server';
 import { resolveSyncState } from '~/components/Dashboard/sync-state';
 import { latestBulkJob, lastSyncActivityAt } from '~/lib/sync/latest-jobs.server';
@@ -333,6 +337,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       syncState,
       authorization,
       trackingAuthorization,
+      /**
+       * L'app e' ferma per questo negozio.
+       *
+       * Lo dice la policy e non piu' la colonna `authorization`, che copriva
+       * due casi su quattro: un negozio disinstallato o con la cancellazione
+       * gia' cominciata si legge ancora ENABLED, e la dashboard gli lasciava i
+       * comandi accesi. Le rotte sotto adesso rifiutano comunque — la
+       * sicurezza sta li' — ma un comando che si accende per poi ricevere un
+       * rifiuto e' una promessa che non si mantiene.
+       *
+       * Serve anche a non far partire i caricamenti delle statistiche: non e'
+       * una difesa, e' non chiedere al server cose che gia' si sa che neghera'.
+       */
+      //
+      // Con il piano gia' in mano, che e' quello da cui la prova scade: farlo
+      // rileggere alla policy sarebbe una seconda interrogazione del listino
+      // nella stessa richiesta, e una seconda risposta da tenere d'accordo con
+      // la prima.
+      blocked: !can(shopCapabilitiesWithPlan(shop, plan), 'use_app'),
       planChanged,
       // Il push manuale e' una funzione del piano: senza, il pulsante non
       // compare affatto. Mostrarlo spento sarebbe peggio — inviterebbe a
@@ -455,27 +478,17 @@ export async function action({ request }: ActionFunctionArgs) {
     // Gate autorizzazione: nessuna azione se il negozio non è ENABLED (ban o
     // trial scaduto). Enforcement server-side: vale anche se l'utente riabilita
     // i pulsanti nell'HTML.
+    // Rifiuti diversi, frasi diverse: "sei sospeso" non dice al merchant che
+    // cosa puo' fare, "la prova e' finita" si' — ed e' l'unica strada che gli
+    // indichiamo per tornare operativo, quindi va nominata. Quale frase per
+    // quale motivo non si decide piu' qui: lo dice `denialMessage`, in un
+    // posto solo, insieme a tutte le altre rotte.
+    //
+    // Il rifiuto si RESTITUISCE e non si solleva: la dashboard lavora a
+    // fetcher, e una Response sollevata da qui le toglierebbe lo schermo.
     const denial = denialOf(await shopCapabilities(shop), 'use_app');
     if (denial) {
-      const t = await dictionaryForShop(session.shop);
-      // Rifiuti diversi, frasi diverse: "sei sospeso" non dice al merchant che
-      // cosa puo' fare, "la prova e' finita" si' — ed e' l'unica strada che gli
-      // indichiamo per tornare operativo, quindi va nominata.
-      //
-      // La cancellazione in corso ha una frase sua e non ricade su "sospeso",
-      // che sarebbe falso in tutti e due i sensi: il negozio non e' sospeso, e
-      // non c'e' niente da riattivare — i suoi dati si stanno cancellando.
-      const messaggi: Partial<Record<typeof denial & string, string>> = {
-        trial_expired: t.errors.trialEnded,
-        erasing: t.errors.erasureInProgress,
-      };
-      return json(
-        {
-          error: messaggi[denial] ?? t.errors.suspended,
-          code: denial === 'trial_expired' || denial === 'erasing' ? denial : 'not_authorized',
-        },
-        { status: 403 },
-      );
+      return capabilityDenialResponse(session.shop, denial);
     }
 
     // Due vie arrivano qui, e una sola delle due conferma il piano.
@@ -594,9 +607,8 @@ const MANUAL_SYNC_POLL_MS = 1_500;
 const MANUAL_SYNC_TIMEOUT_MS = 3 * 60_000;
 
 export default function Dashboard() {
-  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
+  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, blocked, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
     useLoaderData<typeof loader>();
-  const blocked = authorization !== 'ENABLED';
   const t = useT();
 
   // Altre fonti di eventi gia' attive sul negozio. Si chiede una volta sola: e'
@@ -614,12 +626,12 @@ export default function Dashboard() {
     themeId?: number | null;
   }>();
   useEffect(() => {
-    if (!supabaseConnected) return;
+    if (blocked || !supabaseConnected) return;
     if (conflictsFetcher.state === 'idle' && !conflictsFetcher.data) {
       conflictsFetcher.load('/api/tracking/conflicts');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabaseConnected]);
+  }, [blocked, supabaseConnected]);
 
   // Pulsante-link Impostazioni: mentre Remix carica la rotta di destinazione
   // mostriamo lo spinner e disabilitiamo il pulsante, così un clic su un DB
@@ -741,12 +753,13 @@ export default function Dashboard() {
   const loadTop = useCallback(
     (metric: Metric, period: DateRange = range) => {
       setTopMetric(metric);
+      if (blocked) return;
       topFetcher.load(
         `/api/stats/top-products?metric=${metric}&from=${period.from}&to=${period.to}`,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [range],
+    [range, blocked],
   );
 
   // Cambiando periodo o confronto si ricaricano le due letture che ne
@@ -754,6 +767,7 @@ export default function Dashboard() {
   // guarda un periodo.
   const reloadForPeriod = useCallback(
     (period: DateRange, compare: ComparisonId) => {
+      if (blocked) return;
       profitFetcher.load(
         `/api/stats/profit?from=${period.from}&to=${period.to}&compare=${compare}`,
       );
@@ -762,32 +776,40 @@ export default function Dashboard() {
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [topMetric],
+    [topMetric, blocked],
   );
 
+  // A negozio fermo i caricamenti non partono affatto.
+  //
+  // NON E' LA DIFESA — quella sta nelle rotte, che rifiutano da sole anche a
+  // chi le chiama a mano. E' l'altra meta': non chiedere al server sei cose
+  // che si sa gia' che rifiutera'. Prima la dashboard le chiedeva comunque,
+  // spegneva i pulsanti e lasciava le card a girare a vuoto; adesso restano
+  // vuote e il banner qui sopra dice perche'.
   useEffect(() => {
+    if (blocked) return;
     countsFetcher.load('/api/stats/counts');
     readinessFetcher.load('/api/stats/products');
     customerStatsFetcher.load('/api/stats/customers');
     reloadForPeriod(range, comparison);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [blocked]);
 
   // Se il primo risultato arriva dalla cache, ricalcola live in background:
   // la card resta piena con i numeri cache e si aggiorna quando il fresco è pronto.
   useEffect(() => {
-    if (readinessFetcher.data?.cached) {
+    if (!blocked && readinessFetcher.data?.cached) {
       readinessRefreshFetcher.load('/api/stats/products?refresh=1');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readinessFetcher.data]);
+  }, [readinessFetcher.data, blocked]);
 
   useEffect(() => {
-    if (customerStatsFetcher.data?.cached) {
+    if (!blocked && customerStatsFetcher.data?.cached) {
       customerStatsRefreshFetcher.load('/api/stats/customers?refresh=1');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customerStatsFetcher.data]);
+  }, [customerStatsFetcher.data, blocked]);
 
   const counts = countsFetcher.data;
   // Il valore live (refresh) vince appena disponibile, altrimenti la cache/primo calcolo.

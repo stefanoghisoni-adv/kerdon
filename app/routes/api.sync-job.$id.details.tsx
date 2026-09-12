@@ -5,9 +5,9 @@
 // truncated per segnalare che le righe mostrate sono meno del totale.
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 export interface SyncDetailRow {
   id: string;
@@ -42,23 +42,15 @@ export interface SyncJobDetailsResponse {
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Dentro c'e' l'elenco dei prodotti toccati da una corsa, con i nomi: e' il
+  // catalogo del negozio raccontato riga per riga, e il permesso viene prima.
+  const { shop } = await requireShopCapability(request, 'use_app');
+
   const jobId = params.id;
 
   if (!jobId) {
     throw new Response(JSON.stringify({ error: 'Richiesta non valida' }), {
       status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-
-  if (!shop) {
-    throw new Response(JSON.stringify({ error: 'Negozio non trovato' }), {
-      status: 404,
       headers: { 'Content-Type': 'application/json' },
     });
   }

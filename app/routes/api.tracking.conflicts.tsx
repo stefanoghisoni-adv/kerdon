@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   detectTrackingChannels,
@@ -19,12 +19,10 @@ import {
  * personalizzati non sono leggibili da nessuna app — e l'interfaccia lo dichiara.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
-
-  const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
-  if (!shop) {
-    return json({ findings: [] as TrackingFinding[], partial: true });
-  }
+  // Due chiamate a Shopify — i canali collegati e i file del tema pubblicato —
+  // e il permesso viene prima di tutt'e due: sono il contenuto della vetrina
+  // del negozio, non un dato di servizio.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   const client = await ShopifyAPIClient.forShop(shop.shopDomain);
   const findings: TrackingFinding[] = [];

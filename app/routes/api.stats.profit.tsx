@@ -1,12 +1,12 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { isSupabaseCredentialDead } from '~/lib/supabase-management.server';
 import { prisma } from '~/db.server';
 import { loadShopAverages, loadShopProfit } from '~/lib/customers/profit.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
 import { defaultRange } from '~/lib/dates/ranges';
 import { comparisonRange, type ComparisonId } from '~/lib/dates/ranges';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 const COMPARISONS: ComparisonId[] = [
   'none',
@@ -39,7 +39,10 @@ async function shopDefaultRange(shopDomain: string): Promise<{ from: string; to:
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Il profitto si legge dal database del merchant: il permesso viene prima di
+  // aprirlo, non dopo. Le date e il confronto si interpretano dopo — leggere
+  // una URL non costa niente e non tira fuori nessun dato.
+  const { session } = await requireShopCapability(request, 'use_app');
 
   // Le date arrivano dalla URL, quindi da fuori: quello che non e' una data si
   // ignora e si torna al mese in corso, invece di far fallire la card.

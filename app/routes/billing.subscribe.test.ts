@@ -128,6 +128,32 @@ describe('/billing/subscribe', () => {
     expect(createAppSubscription).not.toHaveBeenCalled();
   });
 
+  // LA VIA D'USCITA, E DEVE RESTARE APERTA.
+  //
+  // Da quando ogni rotta che serve dati chiede `use_app`, la tentazione e' di
+  // metterlo anche qui per simmetria. Sarebbe il danno peggiore: un negozio con
+  // la prova finita e' fermo proprio perche' non paga, e questa e' l'unica
+  // strada che ha per tornare operativo. Chiuderla vorrebbe dire lasciarlo
+  // spento per sempre.
+  it('prova finita: il merchant puo ancora pagare', async () => {
+    findUniqueShop.mockResolvedValue({
+      ...SHOP,
+      authorization: 'PENDING',
+      isInTrial: true,
+      trialEndsAt: new Date('2020-01-01T00:00:00.000Z'),
+    });
+    findPlanMock.mockResolvedValue({ planName: 'Pro', priceMonthly: 29, trialDays: 7 });
+    createAppSubscription.mockResolvedValue({
+      confirmationUrl: 'https://shopify/confirm/1',
+      subscriptionId: 'gid://shopify/AppSubscription/1',
+    });
+
+    const res = await call('Pro');
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ confirmationUrl: 'https://shopify/confirm/1' });
+  });
+
   it('piano interno senza acquisti (lifetime) → 403', async () => {
     findUniqueShop.mockResolvedValue({ ...SHOP, currentPlan: 'lifetime' });
     const res = await call('Pro');

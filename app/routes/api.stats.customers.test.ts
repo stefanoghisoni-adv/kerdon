@@ -13,6 +13,8 @@ vi.mock('~/shopify.server', () => ({
 vi.mock('~/db.server', () => ({
   prisma: {
     shop: { findUnique: (...a: unknown[]) => findUniqueShop(...a) },
+    // Lo stesso finto risponde anche al cancello delle capacita', che il piano
+    // del negozio lo legge da qui.
     plan: { findFirst: (...a: unknown[]) => findPlanMock(...a) },
   },
 }));
@@ -37,7 +39,23 @@ const call = (url = 'https://app/api/stats/customers') =>
 describe('/api/stats/customers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    findUniqueShop.mockResolvedValue({ id: 'shop-1', shopDomain: 'test-shop.myshopify.com', accessToken: 'enc', currentPlan: 'pro' });
+    findUniqueShop.mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test-shop.myshopify.com',
+      accessToken: 'enc',
+      currentPlan: 'pro',
+  // Le colonne da cui la policy decide: senza, il cancello di `use_app`
+    // rifiuterebbe prima ancora che il test cominci — ed e' proprio quello che
+    // deve fare a un negozio fermo.
+    lifecycleStatus: 'active',
+    uninstalledAt: null,
+    authorization: 'ENABLED',
+    trackingAuthorization: 'ENABLED',
+    scopes: 'read_products,write_products',
+    isInTrial: false,
+    trialEndsAt: null,
+    activeChargeId: null,
+    });
   });
 
   it('piano senza clienti → enabled false e nessuna chiamata a Shopify', async () => {

@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 import {
   isInstallPath,
   isTrackingInstallComplete,
@@ -32,17 +32,13 @@ import {
  * possa dimenticarsene.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Sceglie come questo negozio invia i propri eventi: configurazione, quindi
+  // uso dell'app, quindi permesso prima di tutto il resto.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   if (request.method !== 'POST') {
     return json({ ok: false, error: 'method_not_allowed' }, { status: 405 });
   }
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: { id: true },
-  });
-  if (!shop) return json({ ok: false, error: 'shop_not_found' }, { status: 404 });
 
   const body = (await request.json().catch(() => null)) as {
     path?: unknown;

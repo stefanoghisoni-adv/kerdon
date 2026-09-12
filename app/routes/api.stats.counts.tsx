@@ -5,20 +5,15 @@
 // l'anteprima di sync, senza attendere la paginazione completa della readiness.
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
-import { prisma } from '~/db.server';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { requireShopCapability } from '~/lib/authz/require-capability.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
-
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-  if (!shop) {
-    throw new Response('Shop not found', { status: 404 });
-  }
+  // Il permesso prima di tutto: queste due domande a Shopify parlano del
+  // catalogo e dell'anagrafica del negozio, e un negozio fermo non deve
+  // vederle solo perche' ha chiamato la rotta invece di aprire la dashboard.
+  const { shop } = await requireShopCapability(request, 'use_app');
 
   const plan = await findPlanByName(shop.currentPlan);
   const customersEnabled = plan?.customersSyncEnabled ?? false;

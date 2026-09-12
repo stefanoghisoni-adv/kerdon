@@ -15,8 +15,6 @@ import {
   Page,
   Text,
 } from '@shopify/polaris';
-import { authenticate } from '~/shopify.server';
-import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { shopCanUseFeeds } from '~/lib/feeds/feed-access.server';
 import {
@@ -34,18 +32,22 @@ import { GoogleLogo } from '~/components/Catalogs/GoogleLogo';
 import { RequiredBadge, VariablePicker } from '~/components/Catalogs/VariablePicker';
 import { CopyIconButton } from '~/components/Dashboard/CopyIconButton';
 import { useLocale, useT } from '~/lib/i18n/context';
-
-async function shopId(shopDomain: string): Promise<string | null> {
-  const shop = await prisma.shop.findUnique({ where: { shopDomain }, select: { id: true } });
-  return shop?.id ?? null;
-}
+import {
+  requireShopCapability,
+  shopCapabilityOutcome,
+} from '~/lib/authz/require-capability.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // `use_app` e non `use_feeds`: la pagina resta leggibile a chi i feed non li
+  // ha nel piano, perche' e' qui che vede cosa otterrebbe. A restare fuori e'
+  // il negozio fermo — sospeso, prova finita, cancellazione in corso — e per
+  // quello il rifiuto e' un ritorno alla dashboard, dove c'e' scritto perche'.
+  const { session, shop } = await requireShopCapability(request, 'use_app', {
+    onDenied: 'redirect',
+  });
   await requireSetupComplete(session.shop);
 
-  const id = await shopId(session.shop);
-  if (!id) throw new Response('Not found', { status: 404 });
+  const id = shop.id;
 
   const [feed, mapping] = await Promise.all([getFeed(id, 'google'), loadMapping(id, 'google')]);
 
@@ -66,11 +68,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  // Il rifiuto si restituisce: la pagina dei feed lavora a fetcher, e una
+  // Response sollevata da qui le toglierebbe lo schermo di sotto.
+  const cancello = await shopCapabilityOutcome(request, 'use_app');
+  if (!cancello.ok) return json({ ok: false, error: cancello.denial }, { status: 403 });
+  const { session, shop } = cancello.grant;
   await requireSetupComplete(session.shop);
 
-  const id = await shopId(session.shop);
-  if (!id) return json({ ok: false }, { status: 404 });
+  const id = shop.id;
 
   const form = await request.formData();
   const intent = String(form.get('intent') ?? '');
