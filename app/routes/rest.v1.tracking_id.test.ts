@@ -80,7 +80,7 @@ beforeEach(() => {
         response: new Response(JSON.stringify({ error: rifiuto.error }), { status: rifiuto.status }),
       };
     }
-    return { ok: true, ctx: ingestCtx, body: {}, credential: 'ingest', finish };
+    return { ok: true, ctx: ingestCtx, body: {}, finish };
   });
   recordUserSeen.mockClear();
   forgetVisitor.mockClear();

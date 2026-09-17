@@ -110,15 +110,13 @@ dell'art. 9 GDPR, ma è un dato personale in più, e la direzione della scrittur
 va dichiarata insieme al campo.
 
 **Che la separazione fra lettura e scrittura sia raccontata.** Il token con cui
-il merchant legge i propri dati non è più quello con cui si scrivono le righe del
+il merchant legge i propri dati non è quello con cui si scrivono le righe del
 riconoscimento visitatori: sono due credenziali generate in modo indipendente,
-ognuna con i propri ambiti, la propria rotazione e la propria revoca. Fino al 1º
-dicembre 2026 il token di lettura è ancora accettato sugli endpoint di scrittura,
-perché i negozi già installati non perdano il tracciamento da un giorno all'altro;
-dopo quella data non scrive più niente. Se il modulo chiede quali misure
-proteggono i dati, questa è fra le prime da nominare — ed è anche l'unica
-risposta onesta a «il token di lettura può scrivere?», che oggi è «sì, ancora per
-un po', e c'è una data».
+ognuna con i propri ambiti, la propria rotazione e la propria revoca. Sugli
+endpoint che scrivono vale soltanto la credenziale di invio; il token di lettura
+viene rifiutato. Se il modulo chiede quali misure proteggono i dati, questa è fra
+le prime da nominare — ed è anche la risposta a «il token di lettura può
+scrivere?», che è «no», senza date e senza eccezioni.
 
 **Che i tre documenti dicano la stessa cosa.** Questo file, la privacy policy
 (`privacy-policy.it.md`, `privacy-policy.md`, `privacy-policy.html`) e il DPA

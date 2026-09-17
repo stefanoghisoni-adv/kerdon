@@ -35,12 +35,12 @@ Si incolla **intera**, com'è, punto compreso. Se l'hai persa, non c'è modo di
 rileggerla: se ne crea un'altra, e quella di prima continua a funzionare per due
 giorni — il tempo di ripubblicare il container.
 
-**L'errore che si fa più spesso è incollare l'altra chiave.** Il container non
-se ne accorge subito, perché fino al **1 dicembre 2026** anche quella viene
-ancora accettata: il tracciamento funziona, e smette da un giorno all'altro
-quando arriva quella data. Per questo il modello, in anteprima, scrive una riga
-quando il valore non comincia con `kin_`. Se la vedi, hai incollato la chiave
-sbagliata.
+**L'errore che si fa più spesso è incollare l'altra chiave.** Sulle rotte che
+scrivono serve la chiave di invio, e nient'altro: con la chiave di lettura il
+server rifiuta la chiamata e non torna nessun identificativo. Il modello, in
+anteprima, scrive una riga quando il valore non comincia con `kin_`. Se la vedi,
+hai incollato la chiave sbagliata — ed è quasi sempre quello il motivo per cui
+"non arriva niente".
 
 ## Installazione
 
@@ -146,10 +146,3 @@ al proprio istante, quindi l'orologio di chi firma deve essere all'ora giusta.
 Le quattro intestazioni si mandano **al posto** della chiave nel campo `apikey`,
 non insieme: chi manda `X-Kerdon-Key-Id` sta chiedendo la strada firmata, e da
 quel momento le altre tre sono obbligatorie.
-
-## Fino al 1 dicembre 2026
-
-Le installazioni ancora sulla sola chiave di lettura continuano a funzionare, e
-in Impostazioni compare l'avviso che vanno aggiornate ben prima di quella data.
-Da quella data no. L'aggiornamento è incollare un valore diverso nello stesso
-campo e ripubblicare il container.

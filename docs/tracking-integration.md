@@ -130,7 +130,7 @@ identificativo scelto da lui.
 | | |
 |---|---|
 | Chiamare | `GET <indirizzo dell'API>/rest/v1/tracking_id` |
-| Autenticarsi | la credenziale di **invio**, firmata (vedi sotto). Fino al 1 dicembre 2026 vale ancora il solo header `apikey: <token di lettura>` |
+| Autenticarsi | la credenziale di **invio**: firmata dove si puo' (vedi sotto), altrimenti presentata intera in `apikey`. Il token di lettura qui non vale |
 | Inoltrare | il permesso del visitatore, e `X-CoreW-External-Id` con il valore del cookie first-party quando c'e' |
 | Leggere | l'header `X-CoreW-External-Id` della risposta |
 | Piantare | il cookie `kerdon_eid` **dal proprio dominio**, con `Secure`, `Path=/`, un `SameSite` dichiarato e una durata |
@@ -209,14 +209,22 @@ raffiche. L'indirizzo IP e' un segnale secondario — impedisce a una sola
 provenienza di consumare la quota di tutte — e **non e' mai un'identita'**: non
 autorizza niente e non compare in nessun log.
 
-### La fase di convivenza
+### Il token di lettura, presentato qui
 
-Il token di lettura continua a essere accettato sulle rotte di scrittura **fino
-al 1 dicembre 2026**. Ogni negozio ha due date in `tracking_setups`
-(`ingest_last_signed_at`, `ingest_last_legacy_at`) che dicono con quale delle due
-credenziali ha scritto l'ultima volta: e' da li' che si sa chi va ancora
-aggiornato, e la seconda accende un avviso in Impostazioni molto prima della
-scadenza.
+E' un rifiuto, e non c'e' nessuna data che lo cambi. C'e' stata una fase in cui
+veniva ancora accettato — serviva a non spegnere il tracciamento ai negozi gia'
+installati — ed e' finita senza aver protetto nessuno, perche' negozi installati
+non ce n'erano.
+
+Il rifiuto ha un esito suo nel log, `read_key_on_write_route`, distinto da
+`no_credential`: "il container non manda niente" e "il container manda la chiave
+sbagliata" sono due guasti con due rimedi diversi, e incollare l'una al posto
+dell'altra resta l'errore piu' probabile di tutta la configurazione.
+
+`tracking_setups.ingest_last_signed_at` dice quando da quel negozio e' arrivata
+l'ultima scrittura. La colonna `ingest_last_legacy_at` resta nello schema ma non
+la scrive piu' nessuno: misurava chi era ancora indietro, e indietro non ci si
+puo' piu' stare.
 
 ### Cosa finisce nei log
 

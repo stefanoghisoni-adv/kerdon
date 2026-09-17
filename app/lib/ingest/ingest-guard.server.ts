@@ -11,7 +11,7 @@
 // chiama non ricompone niente: chiede un ambito per nome e riceve o il permesso
 // o la risposta gia' pronta da restituire.
 //
-// TRE MODI DI PRESENTARSI, E NON VALGONO LA STESSA COSA. Il cancello li tiene
+// DUE MODI DI PRESENTARSI, E NON VALGONO LA STESSA COSA. Il cancello li tiene
 // distinti fino in fondo — nella decisione, nel log, in quel che chi chiama
 // riceve — perche' appiattirli vorrebbe dire raccontarsi che la protezione piu'
 // debole sia quella che abbiamo:
@@ -28,8 +28,16 @@
 //      non e' praticabile — `hmacSha256` vuole una chiave in un file puntato da
 //      una variabile d'ambiente del server, che li' non c'e' — e una difesa che
 //      nessuno puo' installare non difende nessuno.
-//   3. `legacy_read_token` — la chiave di LETTURA su una rotta di scrittura.
-//      E' il difetto da cui nasce tutto questo, e ha una data di spegnimento.
+//
+// E UNO SOLO CHE NON C'E' PIU': la chiave di LETTURA su una rotta che scrive.
+// C'e' stata una fase in cui veniva ancora accettata, per non spegnere il
+// tracciamento ai negozi gia' installati mentre aggiornavano il container. Non
+// c'erano negozi da proteggere, e una fase che protegge nessuno tenuta in vita
+// e' solo la promessa che quella strada si riapre cambiando una variabile
+// d'ambiente. Adesso chi presenta la chiave di lettura qui riceve un rifiuto, e
+// il log lo chiama per nome — `read_key_on_write_route` — perche' incollare
+// l'una al posto dell'altra resta l'errore piu' probabile di tutta la
+// configurazione, e chi guarda il log deve riconoscerlo senza indovinare.
 //
 // L'ORDINE DEI CONTROLLI E' LA PARTE CHE CONTA, e non e' arbitrario: ogni passo
 // costa piu' del precedente, e nessun passo caro si paga per una richiesta che
@@ -63,15 +71,13 @@ import { decrypt } from '~/utils/crypto.server';
 import { can } from '~/lib/authz/capabilities';
 import { CAPABILITY_SHOP_SELECT, shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
-import { hashReadProxyToken, extractReadProxyToken } from '~/lib/read-proxy/token.server';
+import { extractReadProxyToken } from '~/lib/read-proxy/token.server';
 import type { Prisma } from '@prisma/client';
 import {
   MAX_IDEMPOTENCY_KEY_LENGTH,
   adoptionNeedsWrite,
   canonicalIngestPayload,
   ingestKeyRefusal,
-  legacySunsetAt,
-  legacyWriteStillAllowed,
   timestampWithinWindow,
   type IngestScope,
 } from './ingest-model';
@@ -115,40 +121,30 @@ export interface ShopIngestContext {
 }
 
 /**
- * QUALE credenziale ha aperto: quella di invio, o quella di lettura.
- *
- * Due valori e non tre, ed e' voluto: a questa domanda rispondono la metrica di
- * adozione e la data di spegnimento, e per tutte e due la chiave di invio vale
- * uguale comunque sia stata presentata — chi la usa, firmata o no, non si
- * spegnera' quel giorno. In che FORMA sia arrivata e' un'altra domanda, e ha un
- * campo suo.
- */
-export type IngestCredentialKind = 'ingest' | 'legacy_read_token';
-
-/**
  * COME la credenziale e' arrivata. E' il campo che non va appiattito.
  *
- * `signed` e `ingest_bearer` usano la stessa chiave e chiudono lo stesso
- * privilegio, ma solo la prima chiude il replay. Tenerle separate qui e nel log
- * e' l'unico modo di sapere, guardando il traffico vero, quanta parte di esso
- * abbia la protezione piena e quanta no.
+ * QUALE credenziale abbia aperto non e' piu' una domanda — ce n'e' una sola che
+ * apra queste rotte — ma COME sia arrivata lo e' ancora: `signed` e
+ * `ingest_bearer` usano la stessa chiave e chiudono lo stesso privilegio, e
+ * solo la prima chiude il replay. Tenerle separate qui e nel log e' l'unico
+ * modo di sapere, guardando il traffico vero, quanta parte di esso abbia la
+ * protezione piena e quanta no.
  */
-export type IngestPresentationKind = 'signed' | 'ingest_bearer' | 'legacy_read_token';
+export type IngestPresentationKind = 'signed' | 'ingest_bearer';
 
 export interface IngestAllowed {
   ok: true;
   ctx: ShopIngestContext;
   /** Il corpo gia' parsato, dentro i due tetti. */
   body: Record<string, unknown>;
-  credential: IngestCredentialKind;
-  /** In quale delle tre forme si e' presentata. */
+  /** In quale delle due forme si e' presentata. */
   presentation: IngestPresentationKind;
   /**
    * Chiude la riga di log con l'esito e la latenza.
    *
    * Sta qui e non nella rotta perche' i campi del log devono essere gli stessi
-   * su tutte e tre: il momento in cui ognuna se li sceglie e' il momento in cui
-   * una di loro ci mette dentro un'email.
+   * su tutte e tre le rotte: il momento in cui ognuna se li sceglie e' il
+   * momento in cui una di loro ci mette dentro un'email.
    */
   finish: (outcome: string, status?: number) => void;
 }
@@ -195,7 +191,11 @@ export async function authorizeIngest(
   // chiamante si era presentato costringe a indovinarlo, ed e' proprio la
   // domanda per cui il log esiste.
   const presentata = readPresentation(request);
-  const via = presentationVia(presentata);
+  // Il nome della forma nel log e' quello del tipo, senza traduzioni in mezzo:
+  // una tabella che mappasse gli uni negli altri sarebbe un posto in piu' da
+  // aggiornare il giorno in cui una forma si aggiunge, e il modo tipico di
+  // dimenticarselo e' che i log continuino a passare senza dire niente.
+  const via: string = presentata.kind;
   const log = (
     outcome: string,
     status: number,
@@ -208,14 +208,20 @@ export async function authorizeIngest(
   if (presentata.kind === 'no_credential') {
     return refuse(log, 'no_credential', 401, { error: 'unauthorized' });
   }
+  if (presentata.kind === 'read_key') {
+    // Un valore c'e', ma non e' una chiave di invio: quasi sempre e' quella di
+    // lettura, incollata nel campo sbagliato. L'esito ha un nome suo apposta —
+    // confuso con `no_credential` costringerebbe a indovinare se il container
+    // non manda niente o manda la chiave sbagliata, che sono due guasti con due
+    // rimedi diversi. Al chiamante esce lo stesso 401 di sempre.
+    return refuse(log, 'read_key_on_write_route', 401, { error: 'unauthorized' });
+  }
 
   // 2/3. Il negozio, la credenziale e il permesso.
   const identificato =
     presentata.kind === 'signed'
       ? await resolveSigned(presentata, params.scope, now)
-      : presentata.kind === 'ingest_bearer'
-        ? await resolveIngestBearer(presentata, params.scope, now)
-        : await resolveLegacy(presentata.token, now);
+      : await resolveIngestBearer(presentata, params.scope, now);
 
   if (!identificato.ok) {
     return refuse(log, identificato.outcome, identificato.status, { error: identificato.error }, {
@@ -224,7 +230,7 @@ export async function authorizeIngest(
       // viene prima della verifica: e' pubblico, e senza di lui non si
       // distingue "una chiave revocata che continua ad arrivare" da "qualcuno
       // prova valori a caso".
-      key: presentata.kind === 'legacy' ? null : presentata.keyId,
+      key: presentata.keyId,
     });
   }
 
@@ -233,10 +239,7 @@ export async function authorizeIngest(
   // 4. La quota. Prima del corpo: rifiutare senza leggere costa meno.
   const quota = takeIngestSlot({
     shopId: shop.shopId,
-    // La strada vecchia ha un secchiello suo, e non quello di una credenziale
-    // che non esiste: sommarle vorrebbe dire che chi ha gia' aggiornato paga la
-    // raffica di chi non l'ha fatto.
-    keyId: identificato.keyId ?? 'legacy',
+    keyId: identificato.keyId,
     source: requestSource(request),
     // Lo stesso istante di tutto il resto della decisione, e non `Date.now()`
     // preso qui dentro: un limite di frequenza che legge l'orologio per conto
@@ -305,29 +308,21 @@ export async function authorizeIngest(
     }
   }
 
-  // La chiave di invio vale `ingest` comunque sia arrivata: e' la stessa
-  // credenziale, con gli stessi ambiti e la stessa revoca, e chi la usa non si
-  // spegnera' alla data. La differenza fra le due forme sta in `via`, che e'
-  // dove la si puo' guardare senza confonderla con "quale chiave".
-  const credential: IngestCredentialKind =
-    presentata.kind === 'legacy' ? 'legacy_read_token' : 'ingest';
-
   // Le due note di servizio: quando questa credenziale e' stata usata l'ultima
-  // volta, e come sta andando il passaggio alla chiave nuova. Nessuna delle due
+  // volta, e quando questo negozio ha scritto l'ultima volta. Nessuna delle due
   // e' attesa — sono scritture che non cambiano la risposta, e far aspettare la
   // vetrina per aggiornare una data sarebbe sbagliare il prezzo delle due cose.
-  if (identificato.keyId && identificato.keyRowId) void touchIngestKey(identificato.keyRowId, now);
-  void recordAdoption(shop, credential, now);
+  void touchIngestKey(identificato.keyRowId, now);
+  void recordAdoption(shop, now);
 
   return {
     ok: true,
     ctx,
     body: corpo.json,
-    credential,
-    // Lo stesso valore che sta in `via`, ricomposto qui dove il tipo e' gia'
-    // ristretto alle tre forme che possono passare: le altre due — malformata e
-    // senza credenziale — sono uscite molto prima.
-    presentation: presentata.kind === 'legacy' ? 'legacy_read_token' : presentata.kind,
+    // Lo stesso valore che sta in `via`, dove il tipo e' gia' ristretto alle due
+    // forme che possono passare: le altre tre — malformata, senza credenziale e
+    // chiave di lettura — sono uscite molto prima.
+    presentation: presentata.kind,
     finish: (outcome: string, status = 200) =>
       log(outcome, status, { shop: shop.shopId, key: identificato.keyId }),
   };
@@ -340,7 +335,7 @@ export async function authorizeIngest(
 type Presentation =
   | { kind: 'signed'; keyId: string; timestampMs: number; signature: string; idempotencyKey: string }
   | { kind: 'ingest_bearer'; keyId: string; value: string }
-  | { kind: 'legacy'; token: string }
+  | { kind: 'read_key' }
   | { kind: 'no_credential' }
   | { kind: 'malformed' };
 
@@ -358,12 +353,13 @@ type Presentation =
  * soli, ed e' esattamente come si costruisce un downgrade: basta far sparire
  * un'intestazione per strada.
  *
- * Poi il valore presentato, che distingue le altre due forme da se': `kin_…` e'
- * la chiave di invio e vale per quello che e', qualunque altra cosa e' la
- * vecchia. Le due si leggono dallo stesso campo — `Authorization: Bearer` o
- * `apikey` — perche' e' l'unico che i container gestiti lascino compilare, ed e'
- * il campo in cui il merchant incollera' l'una al posto dell'altra: il prefisso
- * e' quel che permette di non confonderle mai.
+ * Poi il valore presentato: `kin_…` e' la chiave di invio, qualunque altra cosa
+ * non e' una credenziale per queste rotte. Le due chiavi si leggono dallo stesso
+ * campo — `Authorization: Bearer` o `apikey` — perche' e' l'unico che i
+ * container gestiti lascino compilare, ed e' il campo in cui il merchant
+ * incollera' l'una al posto dell'altra: il prefisso e' quel che permette di non
+ * confonderle mai, e di dire nel log QUALE delle due e' arrivata invece di
+ * scrivere "credenziale non valida" su due guasti diversi.
  */
 function readPresentation(request: Request): Presentation {
   const keyId = request.headers.get(INGEST_KEY_HEADER)?.trim();
@@ -394,12 +390,12 @@ function readPresentation(request: Request): Presentation {
     return { kind: 'ingest_bearer', keyId: credenziale.keyId, value: credenziale.value };
   }
 
-  return { kind: 'legacy', token };
-}
-
-/** Come la forma si chiama nel log. Le cinque, non le tre che passano. */
-function presentationVia(presentata: Presentation): string {
-  return presentata.kind === 'legacy' ? 'legacy_read_token' : presentata.kind;
+  // Un valore c'e' ma non ha il prefisso della chiave di invio. Non si guarda
+  // se sia una chiave di lettura viva — non servirebbe a niente, perche' qui
+  // non aprirebbe comunque — e soprattutto non si va a cercarla nel database:
+  // interrogarlo per poi rifiutare lo stesso vorrebbe dire pagare una lettura
+  // per ogni valore a caso che arriva su una rotta pubblica.
+  return { kind: 'read_key' };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -410,16 +406,15 @@ interface Identified {
   ok: true;
   shop: ShopRow;
   ctx: ShopIngestContext;
-  /** L'identificativo pubblico della credenziale. null sulla strada vecchia. */
-  keyId: string | null;
-  keyRowId: string | null;
+  /** L'identificativo pubblico della credenziale. */
+  keyId: string;
+  keyRowId: string;
   /**
    * Il segreto in chiaro, per verificare la firma.
    *
    * Vuoto dove non c'e' nessuna firma da verificare — la chiave presentata
-   * intera e la strada vecchia — e non e' un ripiego: decifrare un segreto che
-   * nessuno usera' vorrebbe dire tirarlo in chiaro nella memoria di ogni
-   * richiesta per niente.
+   * intera — e non e' un ripiego: decifrare un segreto che nessuno usera'
+   * vorrebbe dire tirarlo in chiaro nella memoria di ogni richiesta per niente.
    */
   secret: string;
 }
@@ -547,32 +542,7 @@ async function resolveIngestBearer(
   return { ...caricato, keyId: key.keyId, keyRowId: key.id, secret: '' };
 }
 
-/**
- * La strada vecchia: il token di lettura su una rotta di scrittura.
- *
- * VALE FINO A UNA DATA E POI NON PIU'. E' la fase di convivenza, e ha una data
- * scritta per la ragione spiegata in `ingest-model`.
- *
- * Passata la data, un token di sola lettura non scrive piu' niente — che e'
- * tutto il punto di questo lavoro. E adesso che la chiave di invio si puo'
- * presentare nello stesso identico campo, restare qui non e' piu' il prezzo di
- * un container che non sa firmare: e' solo una configurazione da cambiare, e il
- * cambio e' incollare un valore diverso dove ce n'e' gia' uno.
- */
-async function resolveLegacy(token: string, now: Date): Promise<Identified | NotIdentified> {
-  if (!legacyWriteStillAllowed(now, legacySunsetAt(process.env.INGEST_LEGACY_SUNSET))) {
-    // 401 e non 403: dopo lo spegnimento quel token, su questa rotta, non e'
-    // piu' una credenziale — non e' una credenziale a cui manca un permesso.
-    return { ok: false, outcome: 'legacy_sunset', status: 401, error: 'unauthorized' };
-  }
-
-  const caricato = await loadIngestContext({ readProxyTokenHash: hashReadProxyToken(token) }, now);
-  if (!caricato.ok) return caricato;
-
-  return { ...caricato, keyId: null, keyRowId: null, secret: '' };
-}
-
-/** Il negozio caricato, con i due fatti che servono alla metrica di adozione. */
+/** Il negozio caricato, con i due fatti che servono alla nota di adozione. */
 interface LoadedShop {
   ok: true;
   shop: ShopRow;
@@ -582,7 +552,6 @@ interface LoadedShop {
 interface ShopRow {
   shopId: string;
   ingestLastSignedAt: Date | null;
-  ingestLastLegacyAt: Date | null;
   hasTrackingSetup: boolean;
 }
 
@@ -614,7 +583,7 @@ async function loadIngestContext(
           supabaseServiceRoleKey: true,
         },
       },
-      trackingSetup: { select: { ingestLastSignedAt: true, ingestLastLegacyAt: true } },
+      trackingSetup: { select: { ingestLastSignedAt: true } },
     },
   });
 
@@ -648,7 +617,6 @@ async function loadIngestContext(
     shop: {
       shopId: shop.id,
       ingestLastSignedAt: shop.trackingSetup?.ingestLastSignedAt ?? null,
-      ingestLastLegacyAt: shop.trackingSetup?.ingestLastLegacyAt ?? null,
       hasTrackingSetup: shop.trackingSetup != null,
     },
     ctx: {
@@ -699,18 +667,25 @@ function verifySignature(
 }
 
 /* -------------------------------------------------------------------------- */
-/* La metrica di adozione                                                      */
+/* La nota di adozione                                                         */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Quando questo negozio ha scritto l'ultima volta, e con quale delle due chiavi.
+ * Quando questo negozio ha scritto l'ultima volta.
+ *
+ * NASCE PER MISURARE UN PASSAGGIO, E IL PASSAGGIO E' FINITO. Erano due date, e
+ * la domanda era "chi scrive ancora con la chiave di lettura?": la sorella
+ * `ingestLastLegacyAt` la teneva. Adesso quella strada non esiste piu' e quella
+ * data non puo' piu' essere scritta da nessuno — la colonna resta dov'e', ma il
+ * guardiano non la nomina, perche' un ramo che aggiorna una colonna morta e' un
+ * ramo che racconta una distinzione che non c'e'.
+ *
+ * Quel che resta ha ancora un mestiere: e' l'unica riga che dica "da questo
+ * negozio sta arrivando qualcosa", senza guardare quale delle sue chiavi.
  *
  * E' UNA DATA E NON UN CONTATORE. Un contatore vorrebbe dire una scrittura sul
  * database owner a ogni visita di ogni vetrina per rispondere a una domanda che
- * si fa una volta a settimana: "chi ha ancora bisogno della chiave vecchia?".
- * Due date aggiornate al massimo ogni dieci minuti rispondono alla stessa
- * domanda, e sono anche quello che il merchant vede in Impostazioni — non un
- * numero, ma "l'installazione e' aggiornata" oppure "va aggiornata".
+ * si fa una volta a settimana.
  *
  * `updateMany` e non `upsert`: un negozio che non e' mai passato dal
  * tracciamento non ha quella riga, e inventargliene una — con una risposta che
@@ -718,21 +693,14 @@ function verifySignature(
  * Quella riga esiste per ogni negozio che ha installato il ponte, che sono tutti
  * e soli quelli che arrivano qui.
  */
-async function recordAdoption(
-  shop: ShopRow,
-  credential: IngestCredentialKind,
-  now: Date,
-): Promise<void> {
+async function recordAdoption(shop: ShopRow, now: Date): Promise<void> {
   if (!shop.hasTrackingSetup) return;
-
-  const ultima = credential === 'ingest' ? shop.ingestLastSignedAt : shop.ingestLastLegacyAt;
-  if (!adoptionNeedsWrite(ultima, now)) return;
+  if (!adoptionNeedsWrite(shop.ingestLastSignedAt, now)) return;
 
   try {
     await prisma.trackingSetup.updateMany({
       where: { shopId: shop.shopId },
-      data:
-        credential === 'ingest' ? { ingestLastSignedAt: now } : { ingestLastLegacyAt: now },
+      data: { ingestLastSignedAt: now },
     });
   } catch {
     // Una statistica non fa fallire una scrittura legittima.
@@ -790,12 +758,15 @@ function logIngest(riga: {
   key?: string | null;
   limit?: string;
   /**
-   * Con quale delle tre forme il chiamante si e' presentato.
+   * In che forma il chiamante si e' presentato, comprese quelle che non passano.
    *
-   * E' il campo da cui si legge l'adozione, e serve a una domanda sola: chi sta
-   * ancora scrivendo con la chiave di lettura? Senza, le tre forme finiscono
-   * indistinguibili nella stessa riga e il passaggio si fa alla cieca — si
-   * scoprirebbe di aver spento qualcosa solo quando il merchant se ne accorge.
+   * Risponde a due domande che nessun altro campo risponde: quanta parte del
+   * traffico e' FIRMATA — cioe' quanta ha anche la difesa dal replay e non solo
+   * la separazione dei privilegi — e chi sta ancora arrivando con la chiave di
+   * LETTURA nel campo della chiave di invio, che non apre piu' niente ma e'
+   * l'errore di configurazione piu' probabile. Senza questo campo le forme
+   * finiscono indistinguibili nella stessa riga, e un merchant fermo per un
+   * valore incollato male sembra identico a uno che non chiama affatto.
    */
   via?: string;
 }): void {

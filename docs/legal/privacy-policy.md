@@ -115,11 +115,9 @@ Access tokens and database keys are encrypted at rest with AES-256-GCM. The priv
 
 Tables created by the app in your database have row-level security enabled with no public policies: they cannot be read with a public key.
 
-The read interface requires a token issued to your store, and refuses requests for customers who have withdrawn consent.
+The read interface requires a token issued to your store, is limited to reading, and refuses requests for customers who have withdrawn consent.
 
 **Reading and writing are two separate credentials.** The token that reads your data is not the one that writes the visitor-recognition rows: the two are generated independently, and neither can be worked out from the other. Handing your read token to an agency hands them reading, and nothing else. The writing credential is shown to you once, is rotated and revoked without touching the read one, and carries its own permissions — minting a browser identifier, writing the browser and device labels, and linking a browser to a customer are three distinct permissions, and each endpoint asks only for the one it needs. Where the caller can sign its requests, the credential itself never travels: what travels is a signature, valid for a few minutes and for this recipient only.
-
-Until **1 December 2026** — a date we can bring forward, never postpone — the read token is still accepted on those writing endpoints, so that stores which have not yet updated their tracking container do not lose tracking overnight. After that date a read token reads, and writes nothing.
 
 Requests from Shopify are verified by signature before being acted upon.
 

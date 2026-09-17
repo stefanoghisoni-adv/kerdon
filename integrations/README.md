@@ -74,9 +74,11 @@ funzionare per due giorni, il tempo di ripubblicare il container o il Worker.
 Chi invece sospetta che sia finita nelle mani sbagliate non la sostituisce, la
 **revoca** — e quella non ha nessuna finestra.
 
-**Fino al 1 dicembre 2026** le installazioni con la sola chiave di lettura
-continuano a funzionare. Da quella data no. Un'installazione ancora indietro si
-riconosce da un avviso in Impostazioni, che compare molto prima.
+**La chiave di lettura non apre le rotte che scrivono.** Non c'e' nessuna
+finestra e nessuna data: un container rimasto su quel valore riceve un rifiuto,
+e il log del server lo chiama per nome invece di confonderlo con una chiamata
+senza credenziale — perche' incollare l'una al posto dell'altra e' l'errore piu'
+probabile di tutta la configurazione.
 
 ## Le regole che nessuna delle due versioni puo' rompere
 

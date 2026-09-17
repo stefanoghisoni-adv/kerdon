@@ -93,7 +93,7 @@ beforeEach(() => {
       };
     }
     try {
-      return { ok: true, ctx: ingestCtx, body: await request.json(), credential: 'ingest', finish };
+      return { ok: true, ctx: ingestCtx, body: await request.json(), finish };
     } catch {
       return {
         ok: false,

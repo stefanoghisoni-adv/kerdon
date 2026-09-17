@@ -35,15 +35,14 @@ const scrittureAdozione: Array<Record<string, unknown>> = [];
 
 const prisma = {
   shop: {
-    findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
-      if (typeof where.id === 'string') return negozi.get(where.id) ?? null;
-      if (typeof where.readProxyTokenHash === 'string') {
-        for (const negozio of negozi.values()) {
-          if (negozio.readProxyTokenHash === where.readProxyTokenHash) return negozio;
-        }
-      }
-      return null;
-    }),
+    // SOLO PER IDENTIFICATIVO. Il negozio si trovava anche dal codice di
+    // controllo del token di LETTURA, ed era la strada vecchia. Il database
+    // finto non sa piu' rispondere a quella domanda apposta: se qualcuno la
+    // rifacesse, questi test direbbero "negozio sconosciuto" invece di passare
+    // in silenzio.
+    findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+      typeof where.id === 'string' ? (negozi.get(where.id) ?? null) : null,
+    ),
   },
   trackingIngestKey: {
     findUnique: vi.fn(async ({ where }: { where: { keyId: string } }) =>
@@ -96,7 +95,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { hashReadProxyToken } from '~/lib/read-proxy/token.server';
 import {
-  INGEST_LEGACY_SUNSET_DEFAULT,
   INGEST_BUCKET_CAPACITY,
   INGEST_SIGNATURE_WINDOW_MS,
   MAX_INGEST_BODY_BYTES,
@@ -138,7 +136,7 @@ function negozioSano(id = 'negozio-1') {
       supabaseProjectRef: 'abcdefghijkl',
       supabaseServiceRoleKey: 'cifrata:chiave-di-servizio-segretissima',
     },
-    trackingSetup: { ingestLastSignedAt: null, ingestLastLegacyAt: null },
+    trackingSetup: { ingestLastSignedAt: null },
   });
   return id;
 }
@@ -222,7 +220,15 @@ function digest(raw: string): string {
   return require('crypto').createHash('sha256').update(raw, 'utf8').digest('base64url');
 }
 
-/** La richiesta della strada vecchia: il solo token di lettura. */
+/**
+ * La richiesta come la manda un container rimasto sulla chiave di LETTURA.
+ *
+ * Non e' il ricordo di una strada che c'era: e' il campo compilato con la chiave
+ * sbagliata, che resta l'errore piu' probabile di tutta la configurazione — le
+ * due chiavi si copiano dalla stessa card, a pochi centimetri l'una dall'altra.
+ * Quel che questi test provano e' che da qui non si scrive, e che il log lo dice
+ * in un modo che chi guarda riconosce.
+ */
 function conTokenDiLettura(body = JSON.stringify({ external_id: VISITATORE })): Request {
   return new Request('https://api.kerdon.io/rest/v1/users', {
     method: 'POST',
@@ -251,12 +257,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   logged = [];
   vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void logged.push(a.join(' ')));
-  delete process.env.INGEST_LEGACY_SUNSET;
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
-  delete process.env.INGEST_LEGACY_SUNSET;
 });
 
 describe('la separazione fra chi legge e chi scrive', () => {
@@ -268,23 +272,77 @@ describe('la separazione fra chi legge e chi scrive', () => {
 
     expect(esito.ok).toBe(true);
     if (!esito.ok) return;
-    expect(esito.credential).toBe('ingest');
+    expect(esito.presentation).toBe('signed');
     expect(esito.ctx.shopId).toBe(shopId);
   });
 
-  it('un token di sola lettura non scrive piu niente, passata la data', async () => {
+  it('un token di sola lettura non scrive, e non c e nessuna data che lo permetta', async () => {
     // E' il buco da cui si parte, chiuso: chi ha una credenziale per farsi
-    // SERVIRE i dati non puo' piu' crearne.
+    // SERVIRE i dati non puo' crearne. C'e' stata una fase in cui qui passava
+    // fino a una data; questo test e' quel che resta di quella fase, ed e'
+    // girato — vale OGGI, non "dopo il primo dicembre".
     negozioSano();
 
-    const esito = await chiedi(conTokenDiLettura(), {
-      now: new Date(new Date(INGEST_LEGACY_SUNSET_DEFAULT).getTime() + 1_000),
-    });
+    const esito = await chiedi(conTokenDiLettura());
 
     expect(esito.ok).toBe(false);
     if (esito.ok) return;
     expect(esito.response.status).toBe(401);
-    expect(logged.join('\n')).toContain('legacy_sunset');
+  });
+
+  it('il rifiuto si riconosce nel log: e la chiave sbagliata, non l assenza di chiave', async () => {
+    // Fra "il container non manda niente" e "il container manda la chiave di
+    // lettura" ci sono due rimedi diversi, e chi legge il log deve poterli
+    // distinguere senza indovinare: e' il guasto di configurazione piu'
+    // probabile che ci sia.
+    negozioSano();
+
+    await chiedi(conTokenDiLettura());
+    const conChiave = logged.join('\n');
+
+    await chiedi(
+      new Request('https://api.kerdon.io/rest/v1/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      }),
+    );
+    const senzaChiave = logged.join('\n').slice(conChiave.length);
+
+    expect(conChiave).toContain('read_key_on_write_route');
+    expect(conChiave).toContain('"via":"read_key"');
+    expect(senzaChiave).toContain('no_credential');
+    expect(senzaChiave).not.toContain('read_key_on_write_route');
+  });
+
+  it('nessuna variabile d ambiente riapre la strada vecchia', async () => {
+    // La fase di convivenza si spegneva a una data, e la data si poteva
+    // anticipare da `INGEST_LEGACY_SUNSET`. Il rischio di aver solo spostato la
+    // data e' che quella leva resti: questo test dice che non c'e' piu' niente
+    // da spostare, e fallisce il giorno in cui qualcuno rimette il ramo.
+    negozioSano();
+    process.env.INGEST_LEGACY_SUNSET = '2099-01-01T00:00:00.000Z';
+
+    try {
+      const esito = await chiedi(conTokenDiLettura());
+      expect(esito.ok).toBe(false);
+      if (esito.ok) return;
+      expect(esito.response.status).toBe(401);
+    } finally {
+      delete process.env.INGEST_LEGACY_SUNSET;
+    }
+  });
+
+  it('il database non viene nemmeno interrogato per una chiave che non e di invio', async () => {
+    // Un valore a caso su una rotta pubblica non deve costare una lettura: il
+    // prefisso si guarda sulle stringhe, e chi non ce l'ha esce prima di
+    // toccare il negozio. Senza questo, chi mitraglia valori qualsiasi si
+    // comprerebbe una interrogazione per ognuno.
+    negozioSano();
+
+    await chiedi(conTokenDiLettura());
+
+    expect(prisma.shop.findUnique).not.toHaveBeenCalled();
   });
 
   it('la credenziale di ingest vale anche presentata tale e quale', async () => {
@@ -306,7 +364,7 @@ describe('la separazione fra chi legge e chi scrive', () => {
     const esito = await chiedi(comeUnToken);
     expect(esito.ok).toBe(true);
     if (!esito.ok) return;
-    expect(esito.credential).toBe('ingest');
+    expect(esito.presentation).toBe('ingest_bearer');
   });
 
   it('una credenziale revocata non passa nemmeno presentata tale e quale', async () => {
@@ -546,8 +604,8 @@ describe('rotazione e revoca', () => {
   });
 });
 
-describe('la metrica di adozione', () => {
-  it('segna quale delle due chiavi ha scritto', async () => {
+describe('la nota di adozione', () => {
+  it('segna che da questo negozio e arrivato qualcosa', async () => {
     const shopId = negozioSano();
     const credenziale = credenzialeViva(shopId);
 
@@ -557,16 +615,17 @@ describe('la metrica di adozione', () => {
     expect(scrittureAdozione).toContainEqual({ ingestLastSignedAt: ORA });
   });
 
-  it('la strada vecchia si conta a parte: e la lista di chi va aggiornato', async () => {
+  it('la strada vecchia non lascia piu niente da contare', async () => {
+    // `ingestLastLegacyAt` misurava chi era ancora indietro. Adesso indietro non
+    // ci si puo' stare — si e' fermi — e la colonna non deve piu' ricevere
+    // niente: una data che continuasse ad aggiornarsi direbbe che quella strada
+    // esiste ancora.
     negozioSano();
 
-    const esito = await chiedi(conTokenDiLettura());
-    expect(esito.ok).toBe(true);
-    if (!esito.ok) return;
-    expect(esito.credential).toBe('legacy_read_token');
-
+    await chiedi(conTokenDiLettura());
     await Promise.resolve();
-    expect(scrittureAdozione).toContainEqual({ ingestLastLegacyAt: ORA });
+
+    expect(scrittureAdozione).toEqual([]);
   });
 });
 
@@ -802,11 +861,8 @@ describe('come il container server-side si presenta, e cosa il cancello ne fa', 
 
     expect(esito.ok).toBe(true);
     if (!esito.ok) return;
-    // Con la chiave nuova, non tollerata sulla strada vecchia: e' la differenza
-    // che il primo dicembre fara' smettere di funzionare tutto il resto.
-    expect(esito.credential).toBe('ingest');
-    // E nella forma che non chiude il replay: il log deve poterlo dire, perche'
-    // e' la sola domanda a cui serve rispondere guardando il traffico vero.
+    // Nella forma che non chiude il replay: il log deve poterlo dire, perche' e'
+    // la sola domanda a cui serve rispondere guardando il traffico vero.
     expect(esito.presentation).toBe('ingest_bearer');
   });
 
@@ -856,17 +912,35 @@ describe('come il container server-side si presenta, e cosa il cancello ne fa', 
     expect(logged.join('\n')).toContain('key_out_of_scope');
   });
 
-  it('un campo compilato con la chiave sbagliata parte lo stesso, e lo dice', () => {
+  it('un campo compilato con la chiave sbagliata parte lo stesso, e viene rifiutato', async () => {
+    // Il negozio c'e' ed e' sano, e quel token di lettura e' davvero il suo:
+    // il rifiuto non arriva da un negozio che non esiste.
+    negozioSano();
     const template = templateInviante({ ingestKey: TOKEN_LETTURA });
 
-    // NON si rifiuta: chi ha incollato la credenziale di prima e' ancora dentro
-    // la finestra di convivenza, e spegnergli il tracciamento oggi sarebbe un
-    // danno subito al posto di un avviso.
+    // La chiamata parte: fermarla nel container non salverebbe niente — il
+    // tracciamento e' fermo comunque — e toglierebbe a chi installa la sola
+    // prova che puo' guardare, cioe' la risposta del server accanto alla riga
+    // in anteprima.
     expect(template.upstreamHeaders()[template.KEY_HEADER]).toBe(TOKEN_LETTURA);
-    // L'avviso pero' c'e', in anteprima, e nomina il prefisso: senza, l'unico
-    // segnale arriverebbe il giorno dello spegnimento, sotto forma di dati che
-    // non arrivano piu'.
+    // L'avviso in anteprima nomina il prefisso, che e' quel che distingue le due
+    // chiavi nella card da cui si copiano.
     expect(template.detto.join(' ')).toContain(template.INGEST_PREFIX);
+
+    const esito = await authorizeIngest(
+      new Request('https://api.kerdon.io/rest/v1/tracking_id?consent=v1.a1.m1', {
+        method: 'GET',
+        headers: template.upstreamHeaders(),
+      }),
+      { scope: 'ingest:identity', route: '/rest/v1/tracking_id', body: 'none', now: ORA },
+    );
+
+    // E il cancello la rifiuta, con l'esito che dice quale dei due guasti e':
+    // la chiave sbagliata, non la chiave mancante.
+    expect(esito.ok).toBe(false);
+    if (esito.ok) return;
+    expect(esito.response.status).toBe(401);
+    expect(logged.join('\n')).toContain('read_key_on_write_route');
   });
 
   it('i permessi dichiarati sono quelli che il codice usa davvero', () => {

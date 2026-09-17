@@ -118,11 +118,9 @@ I token di accesso e le chiavi del database sono cifrati a riposo con AES-256-GC
 
 Le tabelle create dall'app nel tuo database hanno la row-level security attiva e nessuna policy pubblica: con una chiave pubblica non sono leggibili.
 
-L'interfaccia di lettura richiede un token emesso per il tuo negozio e rifiuta le richieste relative a clienti che hanno revocato il consenso.
+L'interfaccia di lettura richiede un token emesso per il tuo negozio, è limitata alla sola lettura e rifiuta le richieste relative a clienti che hanno revocato il consenso.
 
 **Leggere e scrivere sono due credenziali distinte.** Il token con cui si leggono i tuoi dati non è quello con cui si scrivono le righe del riconoscimento visitatori: sono generati in modo indipendente e dall'uno non si ricava l'altro. Dare il token di lettura a un'agenzia le dà la lettura, e nient'altro. La credenziale di scrittura ti viene mostrata una volta sola, si ruota e si revoca senza toccare quella di lettura, e porta con sé i propri permessi — coniare l'identificativo di un browser, scrivere le etichette di browser e dispositivo e collegare un browser a un cliente sono tre permessi distinti, e ogni endpoint chiede soltanto quello che gli serve. Dove chi chiama sa firmare le proprie richieste, la credenziale non viaggia affatto: viaggia una firma, valida per pochi minuti e per il solo destinatario a cui è rivolta.
-
-Fino al **1º dicembre 2026** — una data che possiamo anticipare, mai rimandare — il token di lettura viene ancora accettato su quegli endpoint di scrittura, perché i negozi che non hanno ancora aggiornato il proprio container di tracciamento non perdano il tracciamento da un giorno all'altro. Dopo quella data un token di lettura legge, e non scrive niente.
 
 Le richieste provenienti da Shopify sono verificate per firma prima di essere eseguite.
 

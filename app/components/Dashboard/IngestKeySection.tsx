@@ -22,10 +22,6 @@ export interface IngestKeySummary {
 
 export interface IngestKeySectionProps {
   keys: IngestKeySummary[];
-  /** L'ultima volta che l'installazione ha inviato con la chiave vecchia. */
-  legacyLastAt: string | null;
-  /** Quando la chiave vecchia smettera' di funzionare sull'invio. */
-  sunset: string;
 }
 
 interface Risposta {
@@ -57,7 +53,7 @@ interface Risposta {
  * pulsante diverso e una conferma, perche' e' la risposta a "e' finita nelle
  * mani sbagliate" e non a "voglio cambiarla".
  */
-export function IngestKeySection({ keys, legacyLastAt, sunset }: IngestKeySectionProps) {
+export function IngestKeySection({ keys }: IngestKeySectionProps) {
   const t = useT();
 
   const [elenco, setElenco] = useState(keys);
@@ -108,17 +104,11 @@ export function IngestKeySection({ keys, legacyLastAt, sunset }: IngestKeySectio
         }}
       />
 
-      {/* Quando l'installazione invia ancora con la chiave vecchia, la data di
-          spegnimento e' l'unica cosa che il merchant deve sapere — e va detta
-          molto prima che qualcosa smetta di funzionare, non dopo. */}
-      {legacyLastAt && (
-        <Banner tone="warning">
-          <Text as="p" variant="bodyMd">
-            {t.database.writeKeyUpdateNeeded(giorno(sunset))}
-          </Text>
-        </Banner>
-      )}
-      {!legacyLastAt && neHaGia && (
+      {/* Nessun avviso che conti i giorni a una scadenza: non ce n'e' piu' una.
+          Chi ha una chiave viva e' a posto, e chi ha incollato quella sbagliata
+          nel container lo vede dalla riga qui sotto — nessun dato ricevuto —
+          molto piu' in fretta che da un banner. */}
+      {neHaGia && (
         <Text as="p" variant="bodySm" tone="subdued">
           {t.database.writeKeyUpToDate}
         </Text>

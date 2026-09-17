@@ -219,7 +219,7 @@ export function TrackingCredentialsCard({
    */
   install: { path: InstallPath | null; endpoint: string | null; verifiedAt: string | null };
   /**
-   * Le credenziali di invio del negozio, e come sta andando il passaggio.
+   * Le credenziali di invio del negozio.
    *
    * Stanno in questa card e non in una loro perche' si copiano nello stesso
    * momento delle due righe qui sopra, dentro lo stesso container: chi installa
@@ -227,8 +227,6 @@ export function TrackingCredentialsCard({
    */
   ingest: {
     keys: IngestKeySummary[];
-    legacyLastAt: string | null;
-    sunset: string;
   };
 }) {
   const t = useT();
@@ -263,11 +261,7 @@ export function TrackingCredentialsCard({
             si copiano nello stesso momento, e una accanto all'altra si vede a
             colpo d'occhio che sono due cose diverse. */}
         {connected && (
-          <IngestKeySection
-            keys={ingest.keys}
-            legacyLastAt={ingest.legacyLastAt}
-            sunset={ingest.sunset}
-          />
+          <IngestKeySection keys={ingest.keys} />
         )}
 
         {/* La sezione "Installazione" del tracciamento non e' in questa

@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   INGEST_AUDIENCE,
   INGEST_BUCKET_CAPACITY,
-  INGEST_LEGACY_SUNSET_DEFAULT,
   INGEST_SCOPES,
   MAX_INGEST_JSON_DEPTH,
   adoptionNeedsWrite,
@@ -10,8 +9,6 @@ import {
   ingestKeyRefusal,
   isIngestScope,
   jsonDepthWithin,
-  legacySunsetAt,
-  legacyWriteStillAllowed,
   takeToken,
   timestampWithinWindow,
 } from './ingest-model';
@@ -216,32 +213,7 @@ describe('il secchiello', () => {
   });
 });
 
-describe('la data di spegnimento della strada vecchia', () => {
-  it('senza configurazione vale quella scritta nel codice', () => {
-    expect(legacySunsetAt(undefined).toISOString()).toBe(INGEST_LEGACY_SUNSET_DEFAULT);
-    expect(legacySunsetAt('non e una data').toISOString()).toBe(INGEST_LEGACY_SUNSET_DEFAULT);
-  });
-
-  it('l ambiente puo solo anticiparla', () => {
-    // Poterla spostare in avanti vorrebbe dire rimandare la fine della fase di
-    // convivenza con una riga di configurazione: e' cosi' che una fase breve
-    // diventa permanente.
-    expect(legacySunsetAt('2026-10-01T00:00:00.000Z').toISOString()).toBe(
-      '2026-10-01T00:00:00.000Z',
-    );
-    expect(legacySunsetAt('2030-01-01T00:00:00.000Z').toISOString()).toBe(
-      INGEST_LEGACY_SUNSET_DEFAULT,
-    );
-  });
-
-  it('prima della data il token di lettura scrive ancora, dopo no', () => {
-    const spegnimento = new Date('2026-12-01T00:00:00.000Z');
-    expect(legacyWriteStillAllowed(new Date('2026-11-30T23:59:59.000Z'), spegnimento)).toBe(true);
-    expect(legacyWriteStillAllowed(spegnimento, spegnimento)).toBe(false);
-  });
-});
-
-describe('la metrica di adozione', () => {
+describe('la nota di adozione', () => {
   it('la prima volta si scrive sempre', () => {
     expect(adoptionNeedsWrite(null, ORA)).toBe(true);
   });

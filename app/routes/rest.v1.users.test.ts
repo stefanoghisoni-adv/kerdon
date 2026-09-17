@@ -20,7 +20,7 @@ vi.mock('~/lib/ingest/ingest-guard.server', () => ({
       };
     }
     try {
-      return { ok: true, ctx: ingestCtx, body: await request.json(), credential: 'ingest', finish };
+      return { ok: true, ctx: ingestCtx, body: await request.json(), finish };
     } catch {
       // Il corpo illeggibile lo rifiuta il cancello, che e' anche l'unico posto
       // dove il corpo viene letto.

@@ -145,8 +145,8 @@ ore dalla scoperta di una violazione che riguardi i suoi dati, indicando natura
 dell'evento, dati e interessati coinvolti, conseguenze probabili e misure
 adottate.
 
-La procedura completa è pubblica: `INCIDENT-RESPONSE.md` nel repository del
-progetto.
+La procedura completa è descritta in `INCIDENT-RESPONSE.md`, che forniamo su
+richiesta.
 
 ## 8. Diritti degli interessati
 

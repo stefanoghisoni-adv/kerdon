@@ -457,13 +457,12 @@ const INGEST_PREFIX = 'kin_';
  * SI PARTE ANCHE CON UN VALORE CHE NON SOMIGLIA A UNA CHIAVE DI INVIO, e la
  * scelta va spiegata perche' non e' quella che verrebbe da fare. Incollare la
  * credenziale sbagliata e' l'errore piu' probabile di tutta la configurazione, e
- * chi lo commette sta ancora dentro la finestra di convivenza che il server
- * concede: fermarlo qui gli spegnerebbe il tracciamento oggi per un difetto che
- * ha gia' la sua data, cioe' un danno subito al posto di un avviso. Quel che si
- * fa e' dirlo dove chi installa lo legge — l'anteprima del container — mentre la
- * chiamata parte lo stesso. Tacere sarebbe il peggio dei due: l'unico segnale
- * arriverebbe il giorno dello spegnimento, sotto forma di dati che non arrivano
- * piu'.
+ * il server la rifiuta: da un valore che non comincia con `kin_` non arriva
+ * nessun identificativo, oggi e sempre. Fermare la chiamata qui non salverebbe
+ * niente — il tracciamento e' fermo comunque — e toglierebbe l'unica prova che
+ * chi installa puo' guardare: la risposta del server, con il suo 401, accanto
+ * alla riga qui sotto nell'anteprima del container. Le due insieme dicono dove
+ * mettere le mani; il silenzio non direbbe niente.
  */
 function upstreamHeaders(existing) {
   const key = data.ingestKey || '';
@@ -472,7 +471,7 @@ function upstreamHeaders(existing) {
       'Kerdon: il campo "Chiave di invio" non contiene una chiave di invio. ' +
       'Quella giusta comincia con "' + INGEST_PREFIX + '", ha un punto in mezzo, e si ' +
       'copia da Impostazioni nel momento in cui la si crea. Con un altro valore ' +
-      'il tracciamento funziona ancora per un po\', poi smette.'
+      'il tracciamento non funziona: il server rifiuta la chiamata.'
     );
   }
 

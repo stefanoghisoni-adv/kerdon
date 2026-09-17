@@ -390,59 +390,14 @@ export function takeToken(
 }
 
 /**
- * Fino a quando le rotte di scrittura accettano ancora il token di lettura.
+ * Ogni quanto si riscrive "questo negozio ha scritto".
  *
- * LA FASE DI CONVIVENZA, e perche' ha una data e non un interruttore. Il valore
- * di lettura sta incollato dentro il container o il Worker di ogni negozio gia'
- * installato: spegnerlo il giorno del rilascio vorrebbe dire spegnere il
- * tracciamento a tutti insieme, e il merchant se ne accorgerebbe dai dati che
- * non arrivano piu', non da un messaggio. Tenerlo per sempre vorrebbe dire non
- * aver chiuso niente: la falla resta aperta esattamente quanto la buona volonta'
- * di chi deve aggiornare.
- *
- * Quindi una data, scritta, con l'adozione misurata mentre si avvicina. Chi ha
- * gia' aggiornato non se ne accorgera'; chi non l'ha fatto lo legge in
- * Impostazioni molto prima che smetta di funzionare.
- *
- * Si sposta da qui e da nessun altro posto. `INGEST_LEGACY_SUNSET` in ambiente
- * la anticipa (mai la posticipa: vedi `legacySunsetAt`), ed e' cosi' che si
- * prova la giornata dopo senza aspettarla.
- */
-export const INGEST_LEGACY_SUNSET_DEFAULT = '2026-12-01T00:00:00.000Z';
-
-/**
- * La data di spegnimento davvero in vigore.
- *
- * Una variabile d'ambiente puo' solo ANTICIPARLA. Poterla spostare in avanti
- * vorrebbe dire che la scadenza della fase di convivenza si rimanda con una
- * riga di configurazione — ed e' esattamente cosi' che una fase breve diventa
- * permanente. Un valore illeggibile vale come nessun valore.
- */
-export function legacySunsetAt(raw?: string | null): Date {
-  const standard = new Date(INGEST_LEGACY_SUNSET_DEFAULT);
-  if (!raw) return standard;
-
-  const richiesta = new Date(raw);
-  if (Number.isNaN(richiesta.getTime())) return standard;
-
-  return richiesta.getTime() < standard.getTime() ? richiesta : standard;
-}
-
-/** Il token di lettura vale ancora sulle rotte di scrittura? */
-export function legacyWriteStillAllowed(now: Date, sunset: Date): boolean {
-  return now.getTime() < sunset.getTime();
-}
-
-/**
- * Ogni quanto si riscrive "questo negozio ha scritto con la chiave nuova".
- *
- * La metrica di adozione e' una data, non un contatore, e questa e' la ragione:
- * un contatore vorrebbe dire una scrittura sul database owner a ogni richiesta
- * di ogni negozio — su una rotta pubblica chiamata a ogni visita — per
- * rispondere a una domanda che si fa una volta a settimana. Una data aggiornata
- * al massimo ogni dieci minuti risponde alla stessa domanda ("chi ha ancora
- * bisogno della vecchia?") al costo di una scrittura ogni dieci minuti per
- * negozio.
+ * E' UNA DATA E NON UN CONTATORE, e questa e' la ragione: un contatore vorrebbe
+ * dire una scrittura sul database owner a ogni richiesta di ogni negozio — su
+ * una rotta pubblica chiamata a ogni visita — per rispondere a una domanda che
+ * si fa una volta a settimana. Una data aggiornata al massimo ogni dieci minuti
+ * risponde alla stessa domanda ("da questo negozio sta ancora arrivando
+ * qualcosa?") al costo di una scrittura ogni dieci minuti per negozio.
  */
 export const INGEST_ADOPTION_THROTTLE_MS = 10 * 60 * 1000;
 

@@ -20,7 +20,6 @@ import { hasOrdersAccess } from '~/lib/sync/orders-access';
 import { getReadProxyTokenForDisplay } from '~/lib/read-proxy/token.server';
 import { readInstallState } from '~/lib/tracking/install';
 import { listIngestKeys } from '~/lib/ingest/ingest-key.server';
-import { legacySunsetAt } from '~/lib/ingest/ingest-model';
 import { AccountCard } from '~/components/Dashboard/AccountCard';
 import { DatabaseCard, TrackingCredentialsCard } from '~/components/Dashboard/DatabaseCard';
 import { DataRequestsCard } from '~/components/Dashboard/DataRequestsCard';
@@ -187,17 +186,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     verifiedAt: state.verifiedAt?.toISOString() ?? null,
   };
 
-  // Le credenziali di invio, e come sta andando il passaggio a quella nuova.
+  // Le credenziali di invio del negozio.
   //
   // MAI IL VALORE E MAI IL SEGRETO: da qui escono l'identificativo pubblico e
-  // le date, che sono tutto cio' che serve a dire "ce n'e' una, l'hai usata
-  // ieri, e la tua installazione va aggiornata entro il tal giorno". Il valore
-  // esiste solo nella risposta alla chiamata che lo emette — e' quella la
-  // differenza con la chiave di lettura, che invece si rilegge da qui ogni
-  // volta.
+  // le date, che sono tutto cio' che serve a dire "ce n'e' una, e l'hai usata
+  // ieri". Il valore esiste solo nella risposta alla chiamata che lo emette —
+  // e' quella la differenza con la chiave di lettura, che invece si rilegge da
+  // qui ogni volta.
   //
-  // `ingestLastLegacyAt` e' la sola cosa che dica al merchant che c'e'
-  // qualcosa da fare, e va detta molto prima che smetta di funzionare.
+  // Non esce piu' nessuna data di spegnimento, perche' non c'e' piu' niente da
+  // spegnere: sulle rotte che scrivono serve la chiave di invio, e un'installazione
+  // rimasta indietro si vede da `lastUsedAt` che non si muove, non da un avviso
+  // che conta i giorni.
   const ingest = {
     keys: shop
       ? (await listIngestKeys(shop.id)).map((chiave) => ({
@@ -208,8 +208,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
           lastUsedAt: chiave.lastUsedAt?.toISOString() ?? null,
         }))
       : [],
-    legacyLastAt: shop?.trackingSetup?.ingestLastLegacyAt?.toISOString() ?? null,
-    sunset: legacySunsetAt(process.env.INGEST_LEGACY_SUNSET).toISOString(),
   };
 
   const config = shop?.supabaseConfig;
