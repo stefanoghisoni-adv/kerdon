@@ -1,6 +1,6 @@
 # Data Processing Agreement (DPA) — Kerdon
 
-Last updated: 6 September 2026
+Last updated: 17 September 2026
 
 > This agreement is accepted together with the terms of service, when the app is
 > installed.
@@ -114,7 +114,7 @@ obligations.
 |---|---|---|
 | Vercel Inc. | Running the application | Data in transit during processing |
 | Supabase Inc. | The application's database | Configuration, encrypted credentials, records |
-| Upstash Inc. | Job queue | Internal store identifiers only |
+| Upstash Inc. | Cache of the counts shown in the app | Internal store identifier and aggregate counts only |
 
 The catalogue and customer database does **not** appear in this table: it is held
 by the merchant, who has a direct contractual relationship with its own provider.
@@ -127,8 +127,9 @@ Kerdon accesses it on the merchant's instruction.
 - Encryption at rest and encrypted backups on the application's database
 - Row Level Security enabled on all of the application's tables, with no public
   access policies
-- Read-only access to the merchant's data, limited to the tables covered by the
-  plan
+- The read interface is limited to reading, and to the tables covered by the plan
+- Separate credentials for reading and for writing, generated independently, each
+  rotated and revoked without touching the other, and each carrying its own scopes
 - Verification of consent on every read of customer data
 - A record of every access to personal data, retained for 12 months
 - Separate development and production environments, on distinct databases
@@ -184,8 +185,10 @@ The application's database resides in the European Union (Paris, France), and
 processing likewise takes place in the European Union: the application's
 functions run in the Paris region.
 
-The synchronisation job queue also resides in the European Union (Frankfurt,
-Germany). Only internal store identifiers pass through it — no personal data.
+The synchronisation job queue lives in the application's own database, and so in
+the same region. The cache of the counts shown in the app resides in the European
+Union too (Frankfurt, Germany): it holds an internal store identifier and
+aggregate counts — no personal data.
 
 Every component operated by Kerdon is therefore located in the European Union,
 and the merchant chooses the region of its own database.

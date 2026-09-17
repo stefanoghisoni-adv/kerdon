@@ -8,8 +8,9 @@ con quanto scrivono privacy policy e DPA. Il revisore confronta le tre cose, e
 una differenza fra loro è un motivo di rifiuto anche quando il comportamento
 dell'app è ineccepibile.
 
-Ultimo allineamento: settembre 2026, con la data di nascita riscritta verso
-Shopify e il riconoscimento dei visitatori.
+Ultimo allineamento: 17 settembre 2026, con la data di nascita riscritta verso
+Shopify, il riconoscimento dei visitatori e la separazione fra la credenziale
+che legge e quella che scrive.
 
 ## Livello richiesto
 
@@ -23,7 +24,7 @@ tratta nome, email, telefono e indirizzo, che sono campi protetti a sé stanti.
 | Nome e cognome | Identificare il cliente negli elenchi di redditività che il merchant consulta nell'app. |
 | Indirizzo email | Chiave con cui il merchant riconosce i propri clienti negli strumenti di marketing collegati al proprio database. |
 | Telefono | Stessa funzione dell'email come chiave di riconoscimento, per le piattaforme che la usano. |
-| Indirizzo (via, CAP, regione, paese) | Paese e CAP sono i campi con cui le piattaforme pubblicitarie riconoscono i clienti fra i propri utenti: senza, il pubblico costruito dal merchant risulta più piccolo del reale. |
+| Indirizzo (via, città, CAP, regione, paese) | Paese e CAP sono i campi con cui le piattaforme pubblicitarie riconoscono i clienti fra i propri utenti: senza, il pubblico costruito dal merchant risulta più piccolo del reale. |
 | Data di nascita (metafield del cliente) | Le piattaforme pubblicitarie la confrontano nel formato `AAAAMMGG` per riconoscere i clienti. L'app la legge dal metafield indicato dal merchant e, quando il merchant ha il dato e Shopify no, **la riscrive nel metafield del cliente su Shopify**. |
 
 **Va dichiarata anche la scrittura verso Shopify.** Sono due, e sono le uniche:
@@ -98,7 +99,7 @@ Sui nostri sistemi restano i conteggi delle sincronizzazioni, il registro degli
 accessi all'interfaccia di lettura (solo esito e stato HTTP, 12 mesi) e le
 quattro eccezioni elencate sopra, ciascuna con la propria scadenza.
 
-## Due cose da verificare prima di ogni invio
+## Tre cose da verificare prima di ogni invio
 
 **Che la dichiarazione copra le due scritture verso Shopify.** `date_of_birth` ed
 `external_id` non sono più colonne vuote: la prima si legge dal metafield indicato
@@ -107,6 +108,17 @@ il riconoscimento dei visitatori, con l'identificativo del browser da cui la
 persona sta navigando. La data di nascita non è categoria particolare ai sensi
 dell'art. 9 GDPR, ma è un dato personale in più, e la direzione della scrittura
 va dichiarata insieme al campo.
+
+**Che la separazione fra lettura e scrittura sia raccontata.** Il token con cui
+il merchant legge i propri dati non è più quello con cui si scrivono le righe del
+riconoscimento visitatori: sono due credenziali generate in modo indipendente,
+ognuna con i propri ambiti, la propria rotazione e la propria revoca. Fino al 1º
+dicembre 2026 il token di lettura è ancora accettato sugli endpoint di scrittura,
+perché i negozi già installati non perdano il tracciamento da un giorno all'altro;
+dopo quella data non scrive più niente. Se il modulo chiede quali misure
+proteggono i dati, questa è fra le prime da nominare — ed è anche l'unica
+risposta onesta a «il token di lettura può scrivere?», che oggi è «sì, ancora per
+un po', e c'è una data».
 
 **Che i tre documenti dicano la stessa cosa.** Questo file, la privacy policy
 (`privacy-policy.it.md`, `privacy-policy.md`, `privacy-policy.html`) e il DPA

@@ -1,7 +1,7 @@
 # Kerdon — Privacy Policy
 
-**Last updated:** 06-09-2026
-**Version:** 1.1
+**Last updated:** 17-09-2026
+**Version:** 1.2
 
 ## 1. Who we are
 
@@ -33,7 +33,7 @@ Cost per item is the reason the app exists: it is what allows profit to be calcu
 
 The app synchronises **only customers who have given marketing consent** in your store. For those customers it processes: Shopify customer ID, email address, phone number, first and last name, consent state and opt-in level, total spent, number of orders, customer state, tags, note, verified-email and tax-exempt flags, and creation/update timestamps.
 
-It also processes the customer's **default address** — street, postcode, region and country — the **date of birth**, and an **external identifier**. Those last two do not stay empty: the app writes them, and how it writes them is set out below.
+It also processes the customer's **default address** — street, city, postcode, region and country — the **date of birth**, and an **external identifier**. Those last two do not stay empty: the app writes them, and how it writes them is set out below.
 
 **The date of birth.** Shopify does not expose it as a customer field: it lives in a customer metafield. The app reads the field you point it at — Shopify's standard `facts.birth_date` field, or a date metafield that already exists in your store — and copies its value into your database. From the Customers tab you can also ask the app to enable the standard `facts.birth_date` definition for you: that is what the customer write permission the app requests at install is for.
 
@@ -61,7 +61,7 @@ The customer address described in 3.3 is a different thing: it is the default ad
 
 If you enable visitor recognition, the app keeps a `users` table in **your** database, with **one row per browser**. Each row holds:
 
-- a **pseudonymous browser identifier**, minted by the app (the prefix `corew_` followed by 32 random characters) and kept in a cookie issued by your own domain;
+- a **pseudonymous browser identifier**, minted by the app (the prefix `kerdon_` followed by 32 random characters) and kept in a cookie issued by your own domain. Identifiers minted under the app's former name, with the prefix `corew_`, remain valid and are still accepted: refusing them would mean minting a new identifier for everyone who comes back;
 - the **browser label** and the **device-type label** — "Chrome", "mobile" and the like — when your tracking endpoint sends them;
 - the **first and last time** that browser was seen;
 - the **link to the Shopify customer**, written when the person identifies themselves by leaving an email address or phone number, or when they buy and the browser identifier arrives with the order;
@@ -101,7 +101,7 @@ What we keep about **customers** is very largely counts: the synchronisation doe
 | Shopify | Source of store, product, customer and order data; billing | As per Shopify's own terms |
 | Supabase | Your database, and our own database | European Union |
 | Vercel | Application hosting | European Union |
-| Upstash | Job queue used to run synchronisations | European Union |
+| Upstash | Cache of the counts the app shows you — products ready, customers, and the like | European Union |
 
 **We do not sell data.** Not yours, not your customers', to anyone, in any form. And we do not use it to train models.
 
@@ -115,7 +115,11 @@ Access tokens and database keys are encrypted at rest with AES-256-GCM. The priv
 
 Tables created by the app in your database have row-level security enabled with no public policies: they cannot be read with a public key.
 
-The read interface requires a token issued to your store, is limited to reading, and refuses requests for customers who have withdrawn consent.
+The read interface requires a token issued to your store, and refuses requests for customers who have withdrawn consent.
+
+**Reading and writing are two separate credentials.** The token that reads your data is not the one that writes the visitor-recognition rows: the two are generated independently, and neither can be worked out from the other. Handing your read token to an agency hands them reading, and nothing else. The writing credential is shown to you once, is rotated and revoked without touching the read one, and carries its own permissions — minting a browser identifier, writing the browser and device labels, and linking a browser to a customer are three distinct permissions, and each endpoint asks only for the one it needs. Where the caller can sign its requests, the credential itself never travels: what travels is a signature, valid for a few minutes and for this recipient only.
+
+Until **1 December 2026** — a date we can bring forward, never postpone — the read token is still accepted on those writing endpoints, so that stores which have not yet updated their tracking container do not lose tracking overnight. After that date a read token reads, and writes nothing.
 
 Requests from Shopify are verified by signature before being acted upon.
 
@@ -123,7 +127,7 @@ Requests from Shopify are verified by signature before being acted upon.
 
 Data in **your** database is kept for as long as you decide. The app does not delete it on a schedule, with one exception: rows for browsers never linked to a customer are deleted 90 days after they were last seen.
 
-**In our own database**: access records for the read interface are kept for 12 months and then deleted; exports prepared for an access request for at most 30 days; repair rows and privacy requests until they close, as described in 3.6.
+**In our own database**: access records for the read interface are kept for 12 months and then deleted; exports prepared for an access request for at most 30 days; repair rows and privacy requests until they close, as described in 3.6. Webhook events delivered by Shopify are deleted 7 days after they complete. A withdrawal of recognition consent is deleted 7 days after it has been applied; where one gets stuck and is never applied, its encrypted content is cleared after 30 days and only the unreadable proof of it remains.
 
 **When you uninstall the app**, your data stays where it is — in your database, which remains yours — and our session with your store ends. We keep our operational and billing records for as long as required for accounting and legal purposes.
 

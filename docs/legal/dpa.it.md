@@ -1,6 +1,6 @@
 # Accordo sul trattamento dei dati (DPA) — Kerdon
 
-Ultimo aggiornamento: 6 settembre 2026
+Ultimo aggiornamento: 17 settembre 2026
 
 > Questo accordo si accetta insieme ai termini di servizio, all'installazione
 > dell'app.
@@ -115,7 +115,7 @@ questi obblighi.
 |---|---|---|
 | Vercel Inc. | Esecuzione dell'applicazione | Dati in transito durante l'elaborazione |
 | Supabase Inc. | Database dell'applicazione | Configurazione, credenziali cifrate, registri |
-| Upstash Inc. | Coda dei lavori | Solo identificatori interni di negozio |
+| Upstash Inc. | Cache dei conteggi mostrati nell'app | Solo identificatore interno di negozio e conteggi aggregati |
 
 Il database di catalogo e clientela **non** compare in questa tabella: è
 intestato al merchant, che ha un rapporto contrattuale diretto con il proprio
@@ -128,8 +128,11 @@ fornitore. Kerdon vi accede su sua istruzione.
 - Cifratura a riposo e backup cifrati sul database dell'applicazione
 - Row Level Security attiva su tutte le tabelle dell'applicazione, senza policy
   di accesso pubblico
-- Accesso in sola lettura ai dati del merchant, limitato alle tabelle previste
+- L'interfaccia di lettura è limitata alla sola lettura e alle tabelle previste
   dal piano
+- Credenziali distinte per la lettura e per la scrittura, generate in modo
+  indipendente, ciascuna ruotabile e revocabile senza toccare l'altra, ciascuna
+  con i propri ambiti
 - Verifica del consenso a ogni lettura di dati dei clienti
 - Registrazione di ogni accesso a dati personali, conservata 12 mesi
 - Ambienti di sviluppo e produzione separati, su database distinti
@@ -187,9 +190,10 @@ Il database dell'applicazione risiede nell'Unione Europea (Parigi, Francia), e
 nell'Unione Europea avviene anche l'elaborazione: le funzioni dell'applicazione
 sono eseguite nella regione di Parigi.
 
-Anche la coda dei lavori di sincronizzazione risiede nell'Unione Europea
-(Francoforte, Germania). Vi transitano peraltro esclusivamente identificatori
-interni di negozio, nessun dato personale.
+La coda dei lavori di sincronizzazione vive nel database dell'applicazione,
+quindi nella stessa regione. Anche la cache dei conteggi mostrati nell'app
+risiede nell'Unione Europea (Francoforte, Germania): vi stanno un identificatore
+interno di negozio e dei conteggi aggregati, nessun dato personale.
 
 Ogni componente gestito da Kerdon si trova quindi nell'Unione Europea, e il
 merchant sceglie la regione del proprio database.

@@ -346,8 +346,8 @@
     <h1>Privacy Policy</h1>
     <p class="standfirst">Kerdon copies part of your Shopify store into a database you own, and works out what your orders and customers actually earn you. This page says exactly what it touches — and what it deliberately leaves alone.</p>
     <div class="stamp">
-      <span>Last updated <b>6 September 2026</b></span>
-      <span>Version <b>1.1</b></span>
+      <span>Last updated <b>17 September 2026</b></span>
+      <span>Version <b>1.2</b></span>
     </div>
   </header>
 
@@ -396,7 +396,7 @@
 
       <h3>Customer data — only with marketing consent</h3>
       <p>The app synchronises <strong>only customers who have given marketing consent</strong> in your store. For those customers it processes: Shopify customer ID, email address, phone number, first and last name, consent state and opt-in level, total spent, number of orders, customer state, tags, note, verified-email and tax-exempt flags, and creation and update timestamps.</p>
-      <p>It also processes the customer's <strong>default address</strong> — street, postcode, region and country — the <strong>date of birth</strong>, and an <strong>external identifier</strong>. Those last two do not stay empty: the app writes them, and how it writes them is set out below.</p>
+      <p>It also processes the customer's <strong>default address</strong> — street, city, postcode, region and country — the <strong>date of birth</strong>, and an <strong>external identifier</strong>. Those last two do not stay empty: the app writes them, and how it writes them is set out below.</p>
       <p><strong>The date of birth.</strong> Shopify does not expose it as a customer field: it lives in a customer metafield. The app reads the field you point it at — Shopify's standard <code>facts.birth_date</code> field, or a date metafield that already exists in your store — and copies its value into your database. From the Customers tab you can also ask the app to enable the standard <code>facts.birth_date</code> definition for you: that is what the customer write permission the app requests at install is for.</p>
       <p class="keystone">The date of birth is also written back to Shopify. Where your database holds a date and the Shopify metafield is empty, the app writes that value into the very metafield it reads from. This applies only to customers who have given marketing consent, only if you have pointed the app at a field to read the date from, and only if that field is a date field. The app never overwrites a value Shopify already holds, writes nothing when what it finds in your database is not a date, and touches no other field on the customer record: it does not create customers and does not change their name, email, phone or address. It is still the writing of personal data back to Shopify, and it is declared here because that is what it is.</p>
       <p><strong>The external identifier.</strong> It is written by the visitor recognition described below: when a browser is linked to a customer, that customer's row records the identifier of the browser the person is browsing from at that moment.</p>
@@ -413,7 +413,7 @@
       <h3>Visitor recognition</h3>
       <p>If you enable visitor recognition, the app keeps a <code>users</code> table in <strong>your</strong> database, with <strong>one row per browser</strong>. Each row holds:</p>
       <ul>
-        <li>a <strong>pseudonymous browser identifier</strong>, minted by the app (the prefix <code>corew_</code> followed by 32 random characters) and kept in a cookie issued by your own domain;</li>
+        <li>a <strong>pseudonymous browser identifier</strong>, minted by the app (the prefix <code>kerdon_</code> followed by 32 random characters) and kept in a cookie issued by your own domain. Identifiers minted under the app's former name, with the prefix <code>corew_</code>, remain valid and are still accepted: refusing them would mean minting a new identifier for everyone who comes back;</li>
         <li>the <strong>browser label</strong> and the <strong>device-type label</strong> — "Chrome", "mobile" and the like — when your tracking endpoint sends them;</li>
         <li>the <strong>first and last time</strong> that browser was seen;</li>
         <li>the <strong>link to the Shopify customer</strong>, written when the person identifies themselves by leaving an email address or phone number, or when they buy and the browser identifier arrives with the order;</li>
@@ -453,7 +453,7 @@
             <tr><td>Shopify</td><td>Source of store, product, customer and order data; billing</td><td>As per Shopify's own terms</td></tr>
             <tr><td>Supabase</td><td>Your database, and our own database</td><td>European Union</td></tr>
             <tr><td>Vercel</td><td>Application hosting</td><td>European Union</td></tr>
-            <tr><td>Upstash</td><td>Job queue used to run synchronisations</td><td>European Union</td></tr>
+            <tr><td>Upstash</td><td>Cache of the counts the app shows you — products ready, customers, and the like</td><td>European Union</td></tr>
           </tbody>
         </table>
       </div>
@@ -466,14 +466,16 @@
       <h2><span class="num">06</span>Security</h2>
       <p>Access tokens and database keys are encrypted at rest with AES-256-GCM. The privileged key to your database is never sent to a browser.</p>
       <p>Tables created by the app in your database have row-level security enabled with no public policies: they cannot be read with a public key.</p>
-      <p>The read interface requires a token issued to your store, is limited to reading, and refuses requests for customers who have withdrawn consent.</p>
+      <p>The read interface requires a token issued to your store, and refuses requests for customers who have withdrawn consent.</p>
+      <p><strong>Reading and writing are two separate credentials.</strong> The token that reads your data is not the one that writes the visitor-recognition rows: the two are generated independently, and neither can be worked out from the other. Handing your read token to an agency hands them reading, and nothing else. The writing credential is shown to you once, is rotated and revoked without touching the read one, and carries its own permissions — minting a browser identifier, writing the browser and device labels, and linking a browser to a customer are three distinct permissions, and each endpoint asks only for the one it needs. Where the caller can sign its requests, the credential itself never travels: what travels is a signature, valid for a few minutes and for this recipient only.</p>
+      <p>Until <strong>1 December 2026</strong> — a date we can bring forward, never postpone — the read token is still accepted on those writing endpoints, so that stores which have not yet updated their tracking container do not lose tracking overnight. After that date a read token reads, and writes nothing.</p>
       <p>Requests from Shopify are verified by signature before being acted upon.</p>
     </section>
 
     <section id="retention">
       <h2><span class="num">07</span>How long data is kept</h2>
       <p>Data in <strong>your</strong> database is kept for as long as you decide. The app does not delete it on a schedule, with one exception: rows for browsers never linked to a customer are deleted 90 days after they were last seen.</p>
-      <p><strong>In our own database</strong>: access records for the read interface are kept for 12 months and then deleted; exports prepared for an access request for at most 30 days; repair rows and privacy requests until they close, as described above.</p>
+      <p><strong>In our own database</strong>: access records for the read interface are kept for 12 months and then deleted; exports prepared for an access request for at most 30 days; repair rows and privacy requests until they close, as described above. Webhook events delivered by Shopify are deleted 7 days after they complete. A withdrawal of recognition consent is deleted 7 days after it has been applied; where one gets stuck and is never applied, its encrypted content is cleared after 30 days and only the unreadable proof of it remains.</p>
       <p><strong>When you uninstall the app</strong>, your data stays where it is — in your database, which remains yours — and our session with your store ends. We keep our operational and billing records for as long as required for accounting and legal purposes.</p>
       <p><strong>When Shopify asks us to erase your store</strong> — the shop redaction request sent 48 hours after uninstall — we delete your store configuration, credentials and operational records from our systems. We do not touch your own database: it is not ours to delete.</p>
       <p>One row survives that erasure, and it is the proof that it happened: it holds a one-way fingerprint of the store domain, counts of what was deleted, and when. The fingerprint leads back to no store; someone holding the domain, however, can recompute it and confirm the erasure took place.</p>

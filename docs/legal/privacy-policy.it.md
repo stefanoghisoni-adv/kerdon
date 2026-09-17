@@ -1,7 +1,7 @@
 # Kerdon — Informativa sulla privacy
 
-**Ultimo aggiornamento:** 06-09-2026
-**Versione:** 1.1
+**Ultimo aggiornamento:** 17-09-2026
+**Versione:** 1.2
 
 > Traduzione di cortesia. Il testo che vincola le parti è la versione inglese,
 > `privacy-policy.md`; in caso di discrepanza prevale quella.
@@ -36,7 +36,7 @@ Il costo per articolo è la ragione per cui l'app esiste: è ciò che consente d
 
 L'app sincronizza **unicamente i clienti che hanno prestato il consenso al marketing** nel tuo negozio. Di quei clienti tratta: identificativo Shopify, indirizzo email, numero di telefono, nome e cognome, stato e livello del consenso, totale speso, numero di ordini, stato cliente, tag, note, indicatori di email verificata ed esenzione fiscale, date di creazione e aggiornamento.
 
-Tratta inoltre l'**indirizzo predefinito** del cliente — via, CAP, regione e paese — la **data di nascita** e un **identificativo esterno**. Questi ultimi due non restano vuoti: li scrive l'app, e come li scrive è detto qui sotto.
+Tratta inoltre l'**indirizzo predefinito** del cliente — via, città, CAP, regione e paese — la **data di nascita** e un **identificativo esterno**. Questi ultimi due non restano vuoti: li scrive l'app, e come li scrive è detto qui sotto.
 
 **La data di nascita.** Shopify non la espone come campo dell'anagrafica: vive in un metafield del cliente. L'app legge il campo che indichi tu — il campo standard di Shopify `facts.birth_date`, oppure un metafield di tipo data che esiste già nel tuo negozio — e ne copia il valore nel tuo database. Dalla tab Clienti puoi anche chiedere all'app di attivare per te la definizione standard `facts.birth_date`: è a questo che serve il permesso di scrittura sui clienti che l'app richiede all'installazione.
 
@@ -64,7 +64,7 @@ L'indirizzo del cliente descritto al punto 3.3 è cosa diversa: è l'indirizzo p
 
 Se attivi il riconoscimento dei visitatori, l'app tiene nel **tuo** database una tabella `users` con **una riga per browser**. Ogni riga contiene:
 
-- un **identificativo pseudonimo del browser**, coniato dall'app (il prefisso `corew_` seguito da 32 caratteri casuali) e conservato in un cookie emesso dal tuo dominio;
+- un **identificativo pseudonimo del browser**, coniato dall'app (il prefisso `kerdon_` seguito da 32 caratteri casuali) e conservato in un cookie emesso dal tuo dominio. Gli identificativi coniati sotto il nome precedente dell'app, con il prefisso `corew_`, restano validi e vengono ancora accettati: rifiutarli vorrebbe dire coniarne uno nuovo a chiunque torni;
 - l'**etichetta del browser** e quella del **tipo di dispositivo** — per esempio «Chrome», «mobile» — quando il tuo endpoint di tracciamento le trasmette;
 - il **primo e l'ultimo avvistamento** di quel browser;
 - il **collegamento al cliente Shopify**, scritto quando la persona si identifica lasciando un'email o un numero di telefono, oppure quando compra e l'identificativo del browser arriva insieme all'ordine;
@@ -104,7 +104,7 @@ Quanto ai **clienti**, ciò che teniamo è in larghissima parte fatto di contegg
 | Shopify | Origine dei dati di negozio, prodotti, clienti e ordini; fatturazione | Secondo i termini di Shopify |
 | Supabase | Il tuo database e il nostro | Unione Europea |
 | Vercel | Hosting dell'applicazione | Unione Europea |
-| Upstash | Coda dei lavori di sincronizzazione | Unione Europea |
+| Upstash | Cache dei conteggi che l'app ti mostra — prodotti pronti, clienti e simili | Unione Europea |
 
 **Non vendiamo dati.** Né i tuoi, né quelli dei tuoi clienti, a nessuno e in nessuna forma. E non li usiamo per addestrare modelli.
 
@@ -118,7 +118,11 @@ I token di accesso e le chiavi del database sono cifrati a riposo con AES-256-GC
 
 Le tabelle create dall'app nel tuo database hanno la row-level security attiva e nessuna policy pubblica: con una chiave pubblica non sono leggibili.
 
-L'interfaccia di lettura richiede un token emesso per il tuo negozio, è limitata alla sola lettura e rifiuta le richieste relative a clienti che hanno revocato il consenso.
+L'interfaccia di lettura richiede un token emesso per il tuo negozio e rifiuta le richieste relative a clienti che hanno revocato il consenso.
+
+**Leggere e scrivere sono due credenziali distinte.** Il token con cui si leggono i tuoi dati non è quello con cui si scrivono le righe del riconoscimento visitatori: sono generati in modo indipendente e dall'uno non si ricava l'altro. Dare il token di lettura a un'agenzia le dà la lettura, e nient'altro. La credenziale di scrittura ti viene mostrata una volta sola, si ruota e si revoca senza toccare quella di lettura, e porta con sé i propri permessi — coniare l'identificativo di un browser, scrivere le etichette di browser e dispositivo e collegare un browser a un cliente sono tre permessi distinti, e ogni endpoint chiede soltanto quello che gli serve. Dove chi chiama sa firmare le proprie richieste, la credenziale non viaggia affatto: viaggia una firma, valida per pochi minuti e per il solo destinatario a cui è rivolta.
+
+Fino al **1º dicembre 2026** — una data che possiamo anticipare, mai rimandare — il token di lettura viene ancora accettato su quegli endpoint di scrittura, perché i negozi che non hanno ancora aggiornato il proprio container di tracciamento non perdano il tracciamento da un giorno all'altro. Dopo quella data un token di lettura legge, e non scrive niente.
 
 Le richieste provenienti da Shopify sono verificate per firma prima di essere eseguite.
 
@@ -126,7 +130,7 @@ Le richieste provenienti da Shopify sono verificate per firma prima di essere es
 
 I dati nel **tuo** database restano per il tempo che decidi tu. L'app non li cancella a scadenza, con una sola eccezione: le righe dei browser mai collegati a un cliente, che vengono cancellate dopo 90 giorni dall'ultimo avvistamento.
 
-**Nel nostro database**: i registri di accesso all'interfaccia di lettura si conservano 12 mesi, poi vengono cancellati; le esportazioni preparate per una richiesta di accesso al massimo 30 giorni; le righe di riparazione e le richieste privacy fino alla loro chiusura, come descritto al punto 3.6.
+**Nel nostro database**: i registri di accesso all'interfaccia di lettura si conservano 12 mesi, poi vengono cancellati; le esportazioni preparate per una richiesta di accesso al massimo 30 giorni; le righe di riparazione e le richieste privacy fino alla loro chiusura, come descritto al punto 3.6. Gli eventi webhook consegnati da Shopify vengono cancellati 7 giorni dopo essere stati conclusi. Una revoca del consenso al riconoscimento viene cancellata 7 giorni dopo essere stata applicata; se una revoca resta bloccata e non viene mai applicata, il suo contenuto cifrato viene azzerato dopo 30 giorni e resta la sola prova, non leggibile, che una revoca c'era stata.
 
 **Quando disinstalli l'app**, i tuoi dati restano dove sono — nel tuo database, che rimane tuo — e la nostra sessione con il negozio termina. Conserviamo i nostri registri operativi e di fatturazione per il tempo richiesto dagli obblighi contabili e di legge.
 
