@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { costScopeEffect, costToFreeze, isCostScope } from './cost-scope';
+import {
+  costScopeEffect,
+  costToFreeze,
+  isCostScope,
+  needsCostScopeChoice,
+} from './cost-scope';
 
 describe('la scelta su fin dove arriva un costo', () => {
   it('riconosce le due strade e rifiuta tutto il resto', () => {
@@ -10,12 +15,41 @@ describe('la scelta su fin dove arriva un costo', () => {
     expect(isCostScope('futuro')).toBe(false);
   });
 
-  it('da adesso in avanti: le righe gia scritte chiudono il conto', () => {
-    expect(costScopeEffect('future')).toEqual({ freezeExisting: true, clearFrozen: false });
+  it('da adesso in avanti: le righe gia scritte chiudono il conto sul costo di prima', () => {
+    expect(costScopeEffect('future', 4)).toEqual({ freezeExisting: true, clearFrozen: false });
+    expect(costScopeEffect('future', '4.50')).toEqual({ freezeExisting: true, clearFrozen: false });
+    // Zero e' un costo vero: merce regalata resta merce con un costo dichiarato.
+    expect(costScopeEffect('future', 0)).toEqual({ freezeExisting: true, clearFrozen: false });
+  });
+
+  // IL BUG. Congelare un'assenza lasciava la riga senza valore ma con la data
+  // del congelamento sopra: per il profitto vuol dire "conto chiuso", e nessun
+  // costo inserito dopo poteva piu' riportarla dentro. Il merchant compilava il
+  // costo che l'app gli chiedeva e ritrovava profitto zero.
+  it('senza un costo precedente non si congela niente: non c e nessun passato da proteggere', () => {
+    expect(costScopeEffect('future', null)).toEqual({ freezeExisting: false, clearFrozen: false });
+    expect(costScopeEffect('future', undefined)).toEqual({ freezeExisting: false, clearFrozen: false });
+    expect(costScopeEffect('future', '')).toEqual({ freezeExisting: false, clearFrozen: false });
+    // Un valore insensato non e' un costo: non si congela, e non diventa zero.
+    expect(costScopeEffect('future', 'abc')).toEqual({ freezeExisting: false, clearFrozen: false });
+    expect(costScopeEffect('future', -1)).toEqual({ freezeExisting: false, clearFrozen: false });
   });
 
   it('tutti: le righe tornano a seguire il costo corrente, come e sempre stato', () => {
-    expect(costScopeEffect('all')).toEqual({ freezeExisting: false, clearFrozen: true });
+    expect(costScopeEffect('all', 4)).toEqual({ freezeExisting: false, clearFrozen: true });
+    expect(costScopeEffect('all', null)).toEqual({ freezeExisting: false, clearFrozen: true });
+  });
+});
+
+describe('quando la domanda va fatta e quando no', () => {
+  it('almeno un costo precedente vero: la scelta cambia i numeri gia letti', () => {
+    expect(needsCostScopeChoice([4])).toBe(true);
+    expect(needsCostScopeChoice([null, '', 0])).toBe(true);
+  });
+
+  it('nessun costo precedente: le due risposte fanno la stessa cosa, non si chiede', () => {
+    expect(needsCostScopeChoice([])).toBe(false);
+    expect(needsCostScopeChoice([null, undefined, '', 'abc'])).toBe(false);
   });
 });
 

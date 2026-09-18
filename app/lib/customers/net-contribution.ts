@@ -64,11 +64,17 @@ export const LINE_COST_BASIS = `${LINE_UNIT_COST} * l.current_quantity`;
  * mancare sulle righe scritte prima che questa colonna esistesse, finche' la
  * corsa periodica non le rilegge.
  *
- * Il costo si guarda dopo il COALESCE, quindi una riga a cui e' stata fissata
- * l'ASSENZA di costo — la vendita avvenuta quando un costo non c'era ancora —
- * resta fuori dal conto anche dopo che il merchant quel costo l'ha inserito.
- * E' voluto: quella merce e' stata venduta senza che si sapesse quanto fosse
- * costata, e un valore deciso mesi dopo non lo cambia.
+ * Il costo si guarda dopo il COALESCE, quindi una riga con il conto chiuso
+ * risponde col valore fissato e non col costo di listino: e' tutto il senso del
+ * congelamento.
+ *
+ * Attenzione a cosa vuol dire per una riga senza valore fissato ma con la data
+ * del congelamento sopra: sparisce dal conto e non ci rientra piu', qualunque
+ * costo il merchant inserisca. Quella combinazione oggi non si crea — si
+ * congela solo un costo precedente vero (`lib/products/cost-scope`) — e le
+ * righe che se l'erano presa le sblocca il passo 11 di `merchant-migrations`.
+ * Va ricordato qui perche' e' qui che il danno si vedeva: profitto zero su una
+ * vendita vera, senza niente da premere per uscirne.
  */
 export const LINE_MEASURABLE = `${LINE_UNIT_COST} IS NOT NULL AND l.line_net_total IS NOT NULL`;
 

@@ -254,10 +254,15 @@ const ORDER_LINES_COLUMNS: Column[] = [
   // in uso quando il merchant decide di cambiarlo.
   //
   // COME SI LEGGONO. `unit_cost_frozen_at` valorizzata vuol dire che per questa
-  // riga il conto e' chiuso: vale `unit_cost_at_sale`, e se e' NULL vuol dire
-  // che quando quella vendita e' stata registrata un costo non c'era. In quel
-  // caso la riga resta fuori dal profitto, invece di adottare un costo deciso
-  // dopo — che sarebbe inventarle un passato.
+  // riga il conto e' chiuso: vale `unit_cost_at_sale`, che in quel caso c'e'
+  // sempre. Le due colonne si riempiono insieme o non si riempiono affatto.
+  //
+  // LA COMBINAZIONE CHE NON ESISTE: data del congelamento senza valore. Vorrebbe
+  // dire "abbiamo fissato niente", e in pratica voleva dire togliere quella
+  // vendita dal profitto per sempre — nessun costo inserito dopo poteva piu'
+  // farla rientrare. L'app l'ha prodotta finche' congelava anche l'assenza di un
+  // costo precedente (vedi `lib/products/cost-scope`); le righe rimaste cosi'
+  // le sblocca il passo 11 di `merchant-migrations`.
   //
   // Le righe senza `unit_cost_frozen_at` seguono il costo corrente, che e' il
   // comportamento di sempre: e' giusto cosi' fino al primo cambio, perche' fino
