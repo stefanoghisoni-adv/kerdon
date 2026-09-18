@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { recentRunLabel, recentRunRows } from './recent-runs';
+import { PENDING_RUN_ID, recentRunLabel, recentRunRows, withPendingRun } from './recent-runs';
 // Alias: `it` e' anche il nome del caso di test in vitest.
 import { it as itDict } from '~/lib/i18n/it';
 
@@ -88,5 +88,101 @@ describe('recentRunRows', () => {
 
   it('senza corse non inventa righe', () => {
     expect(recentRunRows([], itDict)).toEqual([]);
+  });
+});
+
+describe('withPendingRun', () => {
+  const corsa = (
+    id: string,
+    jobType: string,
+    status: string,
+    startedAt = '2026-08-13T10:00:00.000Z',
+  ) => ({ id, jobType, status, startedAt });
+
+  const CHIESTA_ALLE = '2026-08-13T11:00:00.000Z';
+
+  it('mentre il lavoro e in volo la card non mostra in cima una corsa gia chiusa', () => {
+    // E' IL SECONDO DEI DUE DIFETTI SEGNALATI. Fra il clic e la partenza del
+    // lavoro nessuna riga nuova esiste in `sync_job`: in cima restava quella
+    // PRECEDENTE, con il badge "Completato", mentre l'avviso sopra diceva che
+    // si stava lavorando. Il merchant leggeva due cose opposte nella stessa
+    // schermata.
+    const righe = withPendingRun([corsa('prima', 'initial_bulk', 'completed')], {
+      since: CHIESTA_ALLE,
+    });
+
+    expect(righe[0].status).toBe('running');
+    expect(righe[0].startedAt).toBe(CHIESTA_ALLE);
+    // La corsa precedente non sparisce: e' avvenuta davvero, ed e' l'unica cosa
+    // che il merchant ha da guardare mentre aspetta.
+    expect(righe.map((r) => r.id)).toContain('prima');
+  });
+
+  it('la riga anteposta si legge "In corso", come dice l avviso', () => {
+    const righe = recentRunRows(
+      withPendingRun([corsa('prima', 'initial_bulk', 'completed')], { since: CHIESTA_ALLE }),
+      itDict,
+    );
+
+    expect(righe[0].badge).toEqual({ tone: 'info', label: 'In corso' });
+    expect(righe[0].label).toBe('Sincronizzazione');
+  });
+
+  it('quando la riga vera esiste non se ne aggiunge una seconda', () => {
+    // Quella vera e' migliore: ha l'id del job e l'ora d'inizio esatta.
+    const righe = withPendingRun(
+      [corsa('vera', 'initial_bulk', 'running'), corsa('prima', 'initial_bulk', 'completed')],
+      { since: CHIESTA_ALLE },
+    );
+
+    expect(righe.map((r) => r.id)).toEqual(['vera', 'prima']);
+  });
+
+  it('a lavoro finito la card non resta a dire "in corso"', () => {
+    // Una riga rimasta su 'running' con la coda che dice che nessuno la sta
+    // facendo e' un'invocazione stroncata, non una corsa viva: tenerla farebbe
+    // dire alla card l'esatto contrario dell'avviso spento, che e' il
+    // disaccordo da cui questa correzione e' partita.
+    const righe = withPendingRun(
+      [corsa('appesa', 'initial_bulk', 'running'), corsa('prima', 'initial_bulk', 'completed')],
+      null,
+    );
+
+    expect(righe.map((r) => r.id)).toEqual(['prima']);
+  });
+
+  it('card e avviso non possono dirsi cose diverse, in nessuna delle due direzioni', () => {
+    // La prova che conta: la card mostra una corsa completa in corso SE E SOLO
+    // SE l'avviso e' acceso. Le due spie leggono lo stesso valore, e qui si
+    // verifica che nessuna combinazione le faccia divergere.
+    const casi = [
+      [] as ReturnType<typeof corsa>[],
+      [corsa('a', 'initial_bulk', 'completed')],
+      [corsa('b', 'initial_bulk', 'running')],
+      [corsa('c', 'initial_bulk', 'running'), corsa('d', 'initial_bulk', 'failed')],
+      [corsa('e', 'periodic_check', 'completed')],
+    ];
+
+    for (const corse of casi) {
+      for (const pending of [null, { since: CHIESTA_ALLE }]) {
+        const righe = withPendingRun(corse, pending);
+        const mostraInCorso = righe.some(
+          (r) => r.jobType === 'initial_bulk' && r.status === 'running',
+        );
+        expect(mostraInCorso).toBe(pending !== null);
+      }
+    }
+  });
+
+  it('i controlli periodici restano quelli che sono', () => {
+    // Sono lavoro automatico e non c'entrano con il pulsante: la card continua
+    // a raccontarli come li trova, in un verso e nell'altro.
+    const periodico = [corsa('p', 'periodic_check', 'running')];
+
+    expect(withPendingRun(periodico, null)).toEqual(periodico);
+    expect(withPendingRun(periodico, { since: CHIESTA_ALLE }).map((r) => r.id)).toEqual([
+      PENDING_RUN_ID,
+      'p',
+    ]);
   });
 });
