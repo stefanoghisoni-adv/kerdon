@@ -78,6 +78,10 @@ export const it = {
     error: "Non siamo riusciti a preparare la copia. Riprova fra poco.",
     confirm: "Scarica",
     cancel: "Annulla",
+    // Il link all'informativa sta qui e non in una pagina sua: chi apre questo
+    // riquadro sta gia' pensando ai propri dati, ed e' il momento in cui la
+    // domanda "ma voi cosa ne fate?" se la sta ponendo davvero.
+    policyLink: "Leggi l'informativa sulla privacy",
   },
   dataRequests: {
     title: "Copie dei dati da consegnare",

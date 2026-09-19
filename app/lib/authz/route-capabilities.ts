@@ -284,6 +284,16 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
       'File statico servito alla vetrina. Non contiene dati: il permesso lo ' +
       'chiedono le rotte che lo script poi interroga.',
   },
+  'privacy-policy': {
+    guard: 'open',
+    reason:
+      "E' l'informativa sulla privacy, e un'informativa che per essere letta " +
+      "chiede di autenticarsi non e' un'informativa: la leggono il revisore " +
+      'Shopify prima che l’app sia installata da nessuno, e chiunque riceva ' +
+      'il link. Non c’e’ nessun negozio da identificare e non esce di qui ' +
+      'nessun dato: e’ lo stesso documento per tutti, lo stesso che sta in ' +
+      '`docs/legal/`.',
+  },
   '[robots.txt]': {
     guard: 'open',
     reason:

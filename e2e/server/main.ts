@@ -63,6 +63,10 @@ const ROTTE: { pattern: RegExp; modulo: string; tipo: 'loader' | 'action'; param
   { pattern: /^\/webhooks\/orders$/, modulo: '/app/routes/webhooks.orders.tsx', tipo: 'action' },
   { pattern: /^\/webhooks\/app\/uninstalled$/, modulo: '/app/routes/webhooks.app.uninstalled.tsx', tipo: 'action' },
   { pattern: /^\/tracking\/bridge\.js$/, modulo: '/app/routes/tracking.bridge[.]js.tsx', tipo: 'loader' },
+  // L'informativa: l'unica pagina di questo host che si legge da fuori, e la
+  // sola prova che puo' dire se si legge DAVVERO senza sessione — qui il
+  // browser arriva come ci arriva il revisore Shopify, senza niente addosso.
+  { pattern: /^\/privacy-policy$/, modulo: '/app/routes/privacy-policy.tsx', tipo: 'loader' },
   {
     pattern: /^\/privacy\/export\/([^/]+)$/,
     modulo: '/app/routes/privacy.export.$id.tsx',

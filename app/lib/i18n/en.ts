@@ -73,6 +73,7 @@ export const en: typeof it = {
     error: "We couldn't prepare your copy. Please try again shortly.",
     confirm: "Download",
     cancel: "Cancel",
+    policyLink: "Read the privacy policy",
   },
   dataRequests: {
     title: "Data copies to hand over",
