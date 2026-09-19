@@ -1,7 +1,7 @@
 # Kerdon — Privacy Policy
 
-**Last updated:** 17-09-2026
-**Version:** 1.2
+**Last updated:** 18-09-2026
+**Version:** 1.3
 
 ## 1. Who we are
 
@@ -92,6 +92,16 @@ What we keep about **customers** is very largely counts: the synchronisation doe
 
 **Your data lives in your own database.** The Supabase project connected during setup belongs to your Supabase account, in the region you chose. We do not own it, cannot transfer it, and cannot access it after you disconnect the app.
 
+**A paused project, though, the app can restart on its own initiative.** A free Supabase project nobody touches for a while is paused: all the data stays where it is, but the database stops answering and synchronisation halts. From then on time matters, because the pause does not last forever: **once the restore window closes the project can no longer be recovered**, and all that is left of your data is backups to download.
+
+The app notices in two ways: when a read of your database fails, and through a periodic check covering shops whose database has shown no sign of life for a while — so even if you never open the app. It tells you with a notice and offers you a button to restart it. If you do not press that button, **before the restore window closes we make the request ourselves**, using the credentials you granted us when you connected your Supabase account, and we tell you so. The notice lives inside the app: we do not send you email.
+
+**Restarting is not reading.** For this action the app asks Supabase to bring the project back up, and nothing else: it does not open your tables, and reads, writes and deletes nothing of what they hold. When the database answers again, synchronisation resumes on its own, and that is once more the processing described above.
+
+**It is not a promise that your database will be saved, and we do not do it for everyone.** If Supabase refuses the request — because our access lacks the permission, because the link with your account is no longer valid, or because the window has already closed — the database stays down, and restarting it from your project's own page remains something only you can do. We do not act on the database of a store that has uninstalled the app, of one Shopify has asked us to erase, or of one whose link to the Supabase account has lapsed: there we have neither the mandate nor the credentials.
+
+**You can switch it off.** Settings → Database holds a toggle for automatic restarting. With it off, the notice and the button stay where they are: all that changes is that if you do not press it, nobody does.
+
 **Our own database** holds the operational records in section 3.6, along with your store configuration and encrypted credentials. It is hosted in the European Union.
 
 ## 5. Who else is involved
@@ -118,6 +128,8 @@ Tables created by the app in your database have row-level security enabled with 
 The read interface requires a token issued to your store, is limited to reading, and refuses requests for customers who have withdrawn consent.
 
 **Reading and writing are two separate credentials.** The token that reads your data is not the one that writes the visitor-recognition rows: the two are generated independently, and neither can be worked out from the other. Handing your read token to an agency hands them reading, and nothing else. The writing credential is shown to you once, is rotated and revoked without touching the read one, and carries its own permissions — minting a browser identifier, writing the browser and device labels, and linking a browser to a customer are three distinct permissions, and each endpoint asks only for the one it needs. Where the caller can sign its requests, the credential itself never travels: what travels is a signature, valid for a few minutes and for this recipient only.
+
+**The credentials of your Supabase account** — the ones you granted us when you connected it — are encrypted like all the others. With them the app prepares your project, reads its status and, when it is found down, asks for it to be restarted. That last one is the only thing the app does to your project without you having asked it each time, and it is also why it can be switched off: see section 4.
 
 Requests from Shopify are verified by signature before being acted upon.
 

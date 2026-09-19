@@ -1,7 +1,7 @@
 # Kerdon — Informativa sulla privacy
 
-**Ultimo aggiornamento:** 17-09-2026
-**Versione:** 1.2
+**Ultimo aggiornamento:** 18-09-2026
+**Versione:** 1.3
 
 > Traduzione di cortesia. Il testo che vincola le parti è la versione inglese,
 > `privacy-policy.md`; in caso di discrepanza prevale quella.
@@ -95,6 +95,16 @@ Quanto ai **clienti**, ciò che teniamo è in larghissima parte fatto di contegg
 
 **I tuoi dati vivono in un database tuo.** Il progetto Supabase collegato in configurazione appartiene al tuo account Supabase, nella regione che hai scelto. Non ne siamo intestatari, non possiamo trasferirlo e non possiamo accedervi dopo che hai scollegato l'app.
 
+**Un progetto in pausa, però, l'app può riaccenderlo di sua iniziativa.** Un progetto Supabase gratuito che nessuno tocca per un po' viene messo in pausa: i dati restano tutti dove sono, ma il database smette di rispondere e la sincronizzazione si ferma. Da lì in poi il tempo conta, perché la pausa non dura per sempre: **quando la finestra di riattivazione si chiude il progetto non è più recuperabile**, e dei tuoi dati restano soltanto i backup da scaricare.
+
+L'app se ne accorge in due modi: quando una lettura del tuo database fallisce, e con un controllo periodico che riguarda i negozi il cui database non dà segni di vita da un po' — quindi anche se tu l'app non la apri. Te lo segnala con un avviso e ti offre un pulsante per riaccenderlo. Se quel pulsante non lo premi, **prima che la finestra di riattivazione si chiuda la richiesta la facciamo noi**, con le credenziali che ci hai concesso collegando il tuo account Supabase, e te lo diciamo. L'avviso vive dentro l'app: non ti mandiamo email.
+
+**Riaccendere non è leggere.** Per questo gesto l'app chiede a Supabase di far ripartire il progetto, e nient'altro: non apre le tue tabelle, non legge, non scrive e non cancella niente di ciò che c'è dentro. Quando il database torna a rispondere la sincronizzazione riparte da sola, ed è di nuovo il trattamento descritto qui sopra.
+
+**Non è una promessa di salvataggio, e non lo facciamo per tutti.** Se Supabase rifiuta la richiesta — perché al nostro accesso manca il permesso, perché il collegamento con il tuo account non vale più, o perché la finestra si è già chiusa — il database resta fermo, e riaccenderlo dalla pagina del tuo progetto resta una cosa che puoi fare solo tu. Non interveniamo sul database di un negozio che ha disinstallato l'app, di uno di cui Shopify ci ha chiesto la cancellazione, o di uno il cui collegamento all'account Supabase è decaduto: lì non ne abbiamo né il mandato né le credenziali.
+
+**Puoi spegnerlo.** In Impostazioni → Database c'è un interruttore per la riattivazione automatica. Spento, l'avviso e il pulsante restano dove sono: cambia solo che, se non premi tu, non preme nessuno.
+
 **Il nostro database** conserva i registri operativi descritti sopra, insieme alla configurazione del negozio e alle credenziali cifrate. È ospitato nell'Unione Europea.
 
 ## 5. Chi altro è coinvolto
@@ -121,6 +131,8 @@ Le tabelle create dall'app nel tuo database hanno la row-level security attiva e
 L'interfaccia di lettura richiede un token emesso per il tuo negozio, è limitata alla sola lettura e rifiuta le richieste relative a clienti che hanno revocato il consenso.
 
 **Leggere e scrivere sono due credenziali distinte.** Il token con cui si leggono i tuoi dati non è quello con cui si scrivono le righe del riconoscimento visitatori: sono generati in modo indipendente e dall'uno non si ricava l'altro. Dare il token di lettura a un'agenzia le dà la lettura, e nient'altro. La credenziale di scrittura ti viene mostrata una volta sola, si ruota e si revoca senza toccare quella di lettura, e porta con sé i propri permessi — coniare l'identificativo di un browser, scrivere le etichette di browser e dispositivo e collegare un browser a un cliente sono tre permessi distinti, e ogni endpoint chiede soltanto quello che gli serve. Dove chi chiama sa firmare le proprie richieste, la credenziale non viaggia affatto: viaggia una firma, valida per pochi minuti e per il solo destinatario a cui è rivolta.
+
+**Le credenziali del tuo account Supabase** — quelle che ci hai concesso collegandolo — sono cifrate come tutte le altre. Con esse l'app prepara il tuo progetto, ne legge lo stato e, quando risulta fermo, ne chiede la riattivazione. Quest'ultima è l'unica cosa che l'app fa sul tuo progetto senza che tu gliel'abbia chiesta di volta in volta, ed è anche per questo che si può spegnere: vedi il punto 4.
 
 Le richieste provenienti da Shopify sono verificate per firma prima di essere eseguite.
 

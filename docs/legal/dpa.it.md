@@ -1,6 +1,6 @@
 # Accordo sul trattamento dei dati (DPA) — Kerdon
 
-Ultimo aggiornamento: 17 settembre 2026
+Ultimo aggiornamento: 18 settembre 2026
 
 > Questo accordo si accetta insieme ai termini di servizio, all'installazione
 > dell'app.
@@ -40,6 +40,12 @@ creato o modificato.
 
 Kerdon tratta inoltre, se il merchant attiva la funzione, il **riconoscimento
 dei visitatori** del negozio, descritto al punto 3.
+
+Kerdon può inoltre agire sul progetto database del merchant per riaccenderlo
+quando il fornitore lo ha messo in pausa. Non è un trattamento nuovo di dati
+personali — nessun dato viene letto, scritto o cancellato per farlo — ma è
+un'azione automatica sull'infrastruttura del titolare, ed è descritta al punto
+6.
 
 Finalità: consentire al merchant di usare i propri dati commerciali per misurare
 la redditività degli ordini e della clientela.
@@ -137,6 +143,33 @@ fornitore. Kerdon vi accede su sua istruzione.
 - Registrazione di ogni accesso a dati personali, conservata 12 mesi
 - Ambienti di sviluppo e produzione separati, su database distinti
 - Accesso ai sistemi di produzione limitato al solo responsabile
+- Ripristino della disponibilità del database del merchant: quando il progetto
+  risulta in pausa, Kerdon ne chiede la riattivazione prima che la finestra di
+  riattivazione si chiuda
+
+**La riattivazione automatica del database del merchant** va detta per intero,
+perché è l'unica azione che Kerdon compie sull'infrastruttura del titolare
+senza una sua richiesta puntuale. Un progetto database gratuito lasciato
+inattivo viene messo in pausa, e dalla pausa non si esce per sempre: chiusa la
+finestra di riattivazione il progetto non è più recuperabile e dei dati restano
+i soli backup. Kerdon se ne accorge quando una lettura del database fallisce,
+lo segnala al merchant dentro l'app e gli offre di riaccenderlo; se il merchant
+non lo fa, prima che quella finestra si chiuda la richiesta la inoltra Kerdon,
+con le credenziali che il merchant gli ha concesso collegando il proprio
+account presso il fornitore. La richiesta riguarda il solo stato del progetto:
+nessun dato personale viene letto, scritto o cancellato per effetto di quel
+gesto.
+
+Vale come misura di ripristino tempestivo della disponibilità e dell'accesso ai
+dati ai sensi dell'art. 32(1), lettera c), GDPR, ed è dichiarata qui perché
+valga anche come istruzione documentata del titolare ai sensi dell'art. 28(3),
+lettera a): accettando questo accordo il merchant istruisce Kerdon a compierla.
+Il merchant può revocare l'istruzione in qualsiasi momento, dall'interruttore
+in Impostazioni → Database; l'avviso e il pulsante restano, e sono suoi. Kerdon
+non interviene sul database di un negozio che ha disinstallato l'app, di uno di
+cui Shopify ha chiesto la cancellazione, o di uno il cui collegamento
+all'account del fornitore è decaduto: in quei casi non ne ha né il mandato né
+le credenziali.
 
 ## 7. Violazioni dei dati
 
