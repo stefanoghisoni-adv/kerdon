@@ -198,6 +198,29 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
       'Nessun dato del negozio, e serve a rifare un collegamento rotto — che e’ ' +
       'un gesto di riparazione, non di uso.',
   },
+  'api.supabase.database-pause': {
+    guard: 'open',
+    reason:
+      "Dice se il database del merchant e' fermo, e chiede a Supabase di " +
+      'riaccenderlo. Nessun dato del negozio esce di qui: si legge uno stato e ' +
+      'si preme un pulsante su un progetto che e’ suo. Aperta per la stessa ' +
+      'ragione di `api.supabase.migrate`: e’ manutenzione del suo database, ' +
+      "non uso dell'app — e un negozio fermo per qualunque motivo deve poter " +
+      'riaccendere il proprio database, tanto piu’ perche’ oltre una certa ' +
+      'data Supabase non lo riaccende piu’.',
+  },
+  'api.supabase.auto-resume': {
+    guard: 'open',
+    reason:
+      "E' l'interruttore con cui il merchant dice se l'app debba riaccendere da " +
+      'sola il suo database prima della scadenza. Aperta per la ragione opposta ' +
+      'a quella solita: non e’ una funzione che si concede, e’ un NO che si deve ' +
+      'poter dire sempre. Un negozio sospeso, con la prova finita o in ' +
+      'cancellazione e’ proprio quello a cui l’app non deve toccare ' +
+      'l’infrastruttura, e negargli questa rotta vorrebbe dire lasciarlo senza ' +
+      'il modo di impedirlo. Non legge e non scrive nessun dato del negozio: ' +
+      'solo la sua scelta.',
+  },
   'api.supabase.link-status': {
     guard: 'open',
     reason: "Dice soltanto se il collegamento c'e'. Nessun dato del negozio.",

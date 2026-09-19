@@ -23,6 +23,7 @@ import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { runQuery, runQueryRows } from '~/lib/supabase-management.server';
 import { runWithShopLease, type ShopLease } from '~/lib/queue/shop-lock.server';
 import { clearShopStatsCache } from '~/lib/cache/stats-cache.server';
+import { clearDatabasePauseState } from '~/lib/cache/database-pause-cache.server';
 import { InvalidIdentifierError } from './identifiers';
 import {
   buildDropTransactionSQL,
@@ -285,6 +286,12 @@ async function runDeletion(
   // effort: scadrebbero da soli, ma un giorno intero di numeri credibili e
   // falsi e' peggio di nessun numero.
   await clearShopStatsCache(shopId);
+  // E per la stessa ragione anche l'eventuale avviso di database in pausa: si
+  // riferisce a un progetto che questo negozio non ha piu'. Lasciarlo li'
+  // vorrebbe dire far comparire un allarme — con tanto di pulsante — sopra un
+  // database appena scollegato, o sopra quello nuovo che il merchant collega
+  // subito dopo.
+  await clearDatabasePauseState(shopId);
 
   return { status: 'completed', attempted, remaining: [], retryable: false };
 }

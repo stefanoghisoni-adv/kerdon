@@ -98,6 +98,25 @@ export const it = {
     readKeyHelp: "È la chiave API pubblica che ti servirà per leggere le informazioni da Google Tag Manager server-side",
     notConfigured: "Non configurato",
     ownerUrl: "URL Database proprietario",
+
+    /**
+     * L'interruttore della riattivazione automatica, e la spiegazione che gli
+     * sta accanto.
+     *
+     * La spiegazione non e' un di piu': il merchant deve sapere che l'app fa
+     * questa cosa PRIMA che la faccia, non trovarsela raccontata dopo. E dice
+     * solo cosa succede ai suoi dati e cosa puo' fare lui — niente di come
+     * funziona dentro.
+     */
+    autoResume: {
+      label: "Riaccendi il database da solo prima della scadenza",
+      help:
+        "Se il tuo database viene messo in pausa, lo riaccendiamo noi prima che sia troppo tardi: " +
+        "passata la data limite non è più possibile riaccenderlo e dei tuoi dati restano soltanto " +
+        "le copie da scaricare. Ti avvisiamo dopo averlo fatto. Se preferisci occupartene tu, " +
+        "togli la spunta: non lo tocchiamo.",
+      failed: "Non è stato possibile salvare questa scelta. Riprova fra qualche minuto.",
+    },
     trackingTitle: "Connessione e credenziali di tracking",
     open: "Vai al database",
     copy: "Copia",
@@ -745,6 +764,87 @@ export const it = {
     noHistory:
       "Shopify conserva soltanto il costo attuale di un prodotto, non quelli precedenti: per gli ordini già registrati non possiamo sapere quanto ti costava davvero quel prodotto il giorno della vendita, e non lo inventiamo.",
     cancel: "Annulla",
+  },
+
+  // Il database del merchant e' in pausa, o sta ripartendo.
+  //
+  // Il tono resta WARNING per tutta la vicenda, riattivazione compresa: finche'
+  // il database non risponde la sincronizzazione e' ferma e i numeri che il
+  // merchant guarda sono vecchi. E' un problema in corso, e non diventa
+  // un'informazione solo perche' lui ha gia' premuto il pulsante. Si esce dal
+  // warning quando il database e' tornato davvero attivo — e li' l'avviso
+  // sparisce, non si ammorbidisce.
+  //
+  // LA DATA. Il merchant ha un tempo limitato per riaccendere il database, e
+  // passato quello non torna piu': e' l'informazione che non puo' permettersi
+  // di non vedere. La data esatta pero' non la sappiamo — la pagina del suo
+  // database la scrive, a noi nessuno la dice — e inventarla sarebbe peggio che
+  // non darla. Quindi si dice che il tempo e' limitato, si dice dove la data e'
+  // scritta, e si dice che cosa succede dopo.
+  databasePaused: {
+    title: "Il tuo database è in pausa",
+    dataSafe:
+      "I tuoi dati sono tutti al sicuro: non è stato perso niente, né i dati né le copie di sicurezza.",
+    syncStopped:
+      "Finché resta in pausa la sincronizzazione è ferma: i numeri che vedi nell’app restano quelli dell’ultimo aggiornamento e non cambiano.",
+    deadline:
+      "Puoi riaccenderlo solo entro una certa data, che trovi scritta sulla pagina del tuo database: dopo quella data non è più possibile riaccenderlo, e i dati restano soltanto da scaricare. Non aspettare.",
+    action: "Riattiva database",
+    openDashboard: "Apri la pagina del tuo database",
+
+    /**
+     * Quel che l'app fara' se il merchant non fa niente.
+     *
+     * Detto QUI, cioe' mentre il database e' ancora in pausa e prima che
+     * l'app intervenga: e' l'unico momento in cui e' un avviso e non una
+     * giustificazione. Compare solo quando l'interruttore e' davvero acceso e
+     * l'app e' davvero in grado di farlo.
+     */
+    willAutoResume:
+      "Se non lo riaccendi tu, lo riaccendiamo noi prima che scada il tempo per farlo. " +
+      "Puoi disattivarlo dalle Impostazioni, nella sezione Database.",
+
+    /**
+     * L'abbiamo riacceso noi.
+     *
+     * Resta dentro l'avviso warning, e non e' una svista: finche' il database
+     * non risponde la sincronizzazione e' ferma e i numeri sono vecchi. Non e'
+     * una bella notizia, e' un problema in corso a cui abbiamo tolto la parte
+     * irreversibile.
+     */
+    autoResumed: {
+      title: "Abbiamo riacceso il tuo database",
+      body:
+        "Il tuo database era in pausa e si stava avvicinando al momento oltre il quale non " +
+        "sarebbe più stato possibile riaccenderlo: lo abbiamo riacceso noi per non fartelo " +
+        "perdere. I tuoi dati sono tutti al sicuro.",
+      stillStopped:
+        "Ci vogliono alcuni minuti: finché non è tornato attivo la sincronizzazione resta ferma " +
+        "e i numeri non si aggiornano. Puoi chiudere questa pagina: quando il database riparte, " +
+        "la sincronizzazione riprende da sola. Se preferisci che non lo riaccendiamo noi, puoi " +
+        "disattivarlo dalle Impostazioni, nella sezione Database.",
+    },
+
+    // Riattivazione chiesta: parte, ma non è fatta.
+    resuming: {
+      title: "Riattivazione del database in corso",
+      body:
+        "Abbiamo chiesto di riaccendere il tuo database: ci vogliono alcuni minuti. I tuoi dati sono al sicuro.",
+      stillStopped:
+        "Fino a quando non è tornato attivo la sincronizzazione resta ferma e i numeri non si aggiornano. Puoi chiudere questa pagina: quando il database riparte, la sincronizzazione riprende da sola.",
+    },
+
+    // Quando il pulsante non può funzionare, la strada è un’altra.
+    errors: {
+      noPermission:
+        "Non possiamo riaccendere il database al posto tuo. Aprilo dalla sua pagina e riaccendilo da lì: i dati sono tutti dove li hai lasciati.",
+      reconnect:
+        "Il collegamento al tuo account database non è più valido. Ricollegalo dalle Impostazioni, oppure riaccendi il database dalla sua pagina.",
+      rateLimited:
+        "Sono state fatte troppe richieste in poco tempo. Aspetta qualche minuto e riprova.",
+      failed:
+        "Non siamo riusciti a chiedere la riattivazione. Riprova fra qualche minuto, oppure riaccendi il database dalla sua pagina.",
+    },
   },
 
   // Aggiornamento delle tabelle del merchant, in attesa.

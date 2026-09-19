@@ -759,6 +759,33 @@ CREATE INDEX "product_scope_shop_id_in_scope_idx" ON "product_scope"("shop_id", 
 ALTER TABLE "product_scope" ADD CONSTRAINT "product_scope_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- CreateTable
+CREATE TABLE "supabase_auto_resume" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "enabled" BOOLEAN DEFAULT true,
+    "last_attempt_at" TIMESTAMP(3),
+    "attempts" INTEGER NOT NULL DEFAULT 0,
+    "auto_resumed_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "supabase_auto_resume_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "supabase_auto_resume_shop_id_key" ON "supabase_auto_resume"("shop_id");
+
+-- AddForeignKey
+ALTER TABLE "supabase_auto_resume" ADD CONSTRAINT "supabase_auto_resume_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Se il merchant vuole che l'app riaccenda da sola il suo database prima che non
+-- sia piu' riaccendibile, e cosa abbiamo gia' provato. `enabled` e' nullable di
+-- proposito: "non ha scelto" e "ha scelto no" sono due cose diverse, e solo la
+-- seconda deve fermare l'app. CASCADE come per l'ambito dei prodotti: un negozio
+-- che se ne va non lascia dietro di se' il permesso di toccare
+-- un'infrastruttura che non e' piu' sua.
+
+-- CreateTable
 CREATE TABLE "tracking_ingest_keys" (
     "id" TEXT NOT NULL,
     "shop_id" TEXT NOT NULL,

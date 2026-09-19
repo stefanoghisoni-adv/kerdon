@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { useFetcher } from '@remix-run/react';
 import {
   Card,
   BlockStack,
+  Checkbox,
   Icon,
   InlineStack,
   Text,
@@ -34,6 +36,16 @@ export interface DatabaseCardProps {
    * giusto: prima dell'indirizzo, perche' dicono a cosa si riferisce.
    */
   header?: ReactNode;
+  /**
+   * La riattivazione automatica del database, come sta adesso.
+   *
+   * `available: false` = non c'e' ancora nessun posto dove scrivere la scelta
+   * del merchant, e l'interruttore non si mostra: un comando che non puo'
+   * salvare niente e' peggio di nessun comando. Assente del tutto per chi monta
+   * questa card senza quel dato (i test, e le schermate di configurazione che
+   * un database ancora non ce l'hanno).
+   */
+  autoResume?: { available: boolean; enabled: boolean } | null;
 }
 
 /**
@@ -160,13 +172,74 @@ function DatabaseAddress({ url, openUrl }: { url: string; openUrl: string }) {
   );
 }
 
+/** Dove si salva la scelta sulla riattivazione automatica. */
+const AUTO_RESUME_PATH = '/api/supabase/auto-resume';
+
+/**
+ * L'interruttore con cui il merchant decide se l'app debba riaccendere da sola
+ * il suo database prima che non sia piu' riaccendibile.
+ *
+ * PERCHE' UN Checkbox. In questa card non c'era ancora nessuna opzione a
+ * interruttore, quindi non c'era un modello da seguire: fra i componenti
+ * Polaris, `Checkbox` e' quello che porta con se' `helpText` — cioe' il posto in
+ * cui la spiegazione sta ATTACCATA al comando invece che sopra o sotto di esso.
+ * Qui la spiegazione non e' un contorno: e' il modo in cui il merchant scopre
+ * che l'app fa questa cosa prima che la faccia, e un componente che la tenesse
+ * altrove renderebbe possibile leggere l'interruttore senza leggerla.
+ *
+ * Il pulsante di conferma non c'e' apposta: una spunta che si salva da sola e'
+ * il modo in cui il resto dell'admin si comporta, e un "Salva" qui vorrebbe
+ * dire che un merchant che spegne e chiude la scheda non ha spento niente.
+ */
+function AutoResumeToggle({ enabled }: { enabled: boolean }) {
+  const t = useT();
+  const salva = useFetcher<{ ok: boolean; enabled?: boolean }>();
+
+  // Quel che il merchant vede mentre la scelta sta viaggiando e' quel che ha
+  // appena scelto: senza, la spunta tornerebbe indietro per un istante e la
+  // sensazione sarebbe che il clic non sia stato preso.
+  const inVolo = salva.formData?.get('enabled');
+  const spuntato =
+    inVolo != null
+      ? inVolo === 'true'
+      : salva.data?.ok
+        ? salva.data.enabled === true
+        : enabled;
+
+  // Non salvato: la spunta torna a com'era davvero e il motivo si legge sotto.
+  // Lasciarla dov'e' vorrebbe dire far credere a un merchant che ha detto "non
+  // toccare il mio database" che glielo abbiamo sentito dire.
+  const fallito = salva.state === 'idle' && salva.data?.ok === false;
+
+  return (
+    <Checkbox
+      label={t.database.autoResume.label}
+      helpText={t.database.autoResume.help}
+      checked={spuntato}
+      disabled={salva.state !== 'idle'}
+      error={fallito ? t.database.autoResume.failed : undefined}
+      onChange={(valore) =>
+        salva.submit(
+          { enabled: String(valore) },
+          { method: 'post', action: AUTO_RESUME_PATH },
+        )
+      }
+    />
+  );
+}
+
 export function DatabaseCard({
   connected,
   databaseUrl,
   dashboardUrl,
   header,
+  autoResume,
 }: DatabaseCardProps) {
   const t = useT();
+  // Senza database collegato non c'e' niente da riaccendere: l'interruttore
+  // resta fuori, come ogni altra riga di questa card che esiste solo a
+  // collegamento avvenuto.
+  const mostraAutoResume = connected && autoResume?.available === true;
   return (
     <Card>
       <BlockStack gap="300">
@@ -181,6 +254,14 @@ export function DatabaseCard({
         )}
         {connected && databaseUrl && (
           <DatabaseAddress url={databaseUrl} openUrl={dashboardUrl ?? databaseUrl} />
+        )}
+        {mostraAutoResume && (
+          <>
+            {/* In fondo alla card e staccato: e' l'unica cosa qui dentro che
+                cambia un comportamento invece di mostrare un valore. */}
+            <Divider />
+            <AutoResumeToggle enabled={autoResume.enabled} />
+          </>
         )}
       </BlockStack>
     </Card>

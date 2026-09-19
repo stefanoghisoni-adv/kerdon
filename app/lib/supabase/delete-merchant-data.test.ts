@@ -12,6 +12,7 @@ const deletionUpdate = vi.fn();
 const runQuery = vi.fn();
 const runQueryRows = vi.fn();
 const clearShopStatsCache = vi.fn();
+const clearDatabasePauseState = vi.fn();
 
 // Il lucchetto vero e' una riga su Postgres: qui si simula solo la domanda che
 // conta — l'ho preso o no? Il `lease` che si passa al lavoro e' quello che il
@@ -65,6 +66,9 @@ vi.mock('~/lib/queue/shop-lock.server', () => ({
 vi.mock('~/lib/cache/stats-cache.server', () => ({
   clearShopStatsCache: (...a: unknown[]) => clearShopStatsCache(...a),
 }));
+vi.mock('~/lib/cache/database-pause-cache.server', () => ({
+  clearDatabasePauseState: (...a: unknown[]) => clearDatabasePauseState(...a),
+}));
 
 import { deleteMerchantData } from './delete-merchant-data.server';
 
@@ -116,6 +120,7 @@ beforeEach(() => {
   // Verifica: nessuna tabella superstite.
   runQueryRows.mockResolvedValue([]);
   clearShopStatsCache.mockResolvedValue(undefined);
+  clearDatabasePauseState.mockResolvedValue(undefined);
 });
 
 describe('installazione completa', () => {
@@ -191,6 +196,10 @@ describe('installazione completa', () => {
       }),
     );
     expect(clearShopStatsCache).toHaveBeenCalledWith('shop-1');
+    // E anche l'avviso di database in pausa: parla di un progetto che questo
+    // negozio non ha piu', e resterebbe acceso — con il pulsante — sopra un
+    // database appena scollegato.
+    expect(clearDatabasePauseState).toHaveBeenCalledWith('shop-1');
     expect(shopUpdate).toHaveBeenCalledWith({
       where: { id: 'shop-1' },
       data: { setupCompletedAt: null },

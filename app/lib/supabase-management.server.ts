@@ -528,6 +528,39 @@ export async function getProject(
   return { status: String(data.status ?? 'UNKNOWN') };
 }
 
+/**
+ * Chiede a Supabase di far ripartire un progetto in pausa.
+ *
+ * Non e' un'operazione istantanea e non risponde con un esito: risponde `{}` e
+ * un 200, che vuol dire "richiesta accettata". Il progetto ci mette dei minuti
+ * a tornare su, e chi chiama deve continuare a guardare `getProject` per sapere
+ * quando e' davvero tornato — mai dare per fatto quello che e' solo partito.
+ *
+ * L'errore porta con se' lo stato, e qui conta piu' che altrove: 403 vuol dire
+ * che all'app manca il permesso di riaccendere progetti su quell'account, 429
+ * che si e' chiesto troppo in fretta. Sono due cose opposte per chi legge —
+ * "vai a farlo dalla tua dashboard" contro "riprova fra poco" — e distinguerle
+ * e' l'unico modo per non mandare il merchant a cercare un guasto che non c'e'.
+ */
+export async function restoreProject(accessToken: string, ref: string): Promise<void> {
+  const res = await fetch(`${MGMT_BASE}/v1/projects/${ref}/restore`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new SupabaseApiError(
+      `Supabase restore project error: ${res.status}`,
+      res.status,
+      body,
+    );
+  }
+}
+
 export async function resetDbPassword(
   accessToken: string,
   ref: string,

@@ -205,6 +205,7 @@ model Shop {
   consentRevocations       ConsentRevocation[]
   productScope             ProductScopeEntry[]
   trackingIngestKeys       TrackingIngestKey[]
+  autoResume               SupabaseAutoResume?
 
   @@index([shopDomain])
   @@map("shops")
@@ -370,6 +371,59 @@ model SupabaseConfig {
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("supabase_configs")
+}
+
+/// La riattivazione automatica del database del merchant: se la vuole, e cosa
+/// abbiamo gia' provato.
+///
+/// PERCHE' UNA TABELLA E NON TRE COLONNE SU `supabase_configs`. Perche' questo
+/// codice va in produzione PRIMA che la migrazione venga eseguita a mano su Live
+/// e Test, e nella finestra fra le due cose le colonne non ci sono ancora.
+/// Prisma elenca per nome ogni colonna del modello: una colonna nuova su
+/// `supabase_configs` farebbe fallire ogni `include: { supabaseConfig: true }`
+/// del repository — cioe' le Impostazioni, il cron e la dashboard — con un
+/// errore su una colonna che non esiste. Una TABELLA nuova invece la interroga
+/// solo chi la conosce: finche' non c'e', quella sola lettura fallisce, viene
+/// intercettata, e la riattivazione automatica resta spenta mentre tutto il
+/// resto dell'app continua a funzionare. Vedi `auto-resume-setting.server.ts`.
+///
+/// E' anche un'entita' vera e non un campo sparso: "cosa il merchant ha scelto
+/// e cosa abbiamo gia' tentato" e' una cosa sola, ed e' quella che il freno
+/// contro le richieste ripetute deve poter leggere in modo durevole. Tenere il
+/// freno in cache voleva dire non averlo la sera in cui la cache non risponde.
+model SupabaseAutoResume {
+  id     String @id @default(uuid())
+  shopId String @unique @map("shop_id")
+
+  /// L'interruttore in Impostazioni. NULL = mai toccato, e vale acceso: e' il
+  /// comportamento che l'app dichiara accanto all'interruttore e nel banner,
+  /// prima che accada. Spento e' una scelta esplicita del merchant e si
+  /// rispetta — il database e' suo.
+  enabled Boolean? @default(true)
+
+  /// L'ultima volta che il giro automatico si e' occupato di questo negozio:
+  /// e' il freno, e sta qui e non in cache perche' un freno che sparisce non e'
+  /// un freno.
+  lastAttemptAt DateTime? @map("last_attempt_at")
+
+  /// Quante riattivazioni abbiamo gia' chiesto per la pausa in corso. Si azzera
+  /// quando il progetto risulta di nuovo attivo: una pausa successiva ha il suo
+  /// budget, non gli avanzi della precedente.
+  attempts Int @default(0)
+
+  /// Quando l'app ha riacceso il database al posto del merchant.
+  ///
+  /// E' il fatto da dirgli, e il punto di aggancio per l'avviso via email il
+  /// giorno in cui ci sara' un provider: senza una data scritta da qualche
+  /// parte, "glielo abbiamo gia' detto?" non ha risposta.
+  autoResumedAt DateTime? @map("auto_resumed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("supabase_auto_resume")
 }
 
 /// Un piano: cosa concede, non quanto costa.

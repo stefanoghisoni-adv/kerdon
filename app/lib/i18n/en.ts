@@ -93,6 +93,16 @@ export const en: typeof it = {
     readKeyHelp: "The public API key you will need to read the information from server-side Google Tag Manager",
     notConfigured: "Not configured",
     ownerUrl: "Your database URL",
+
+    autoResume: {
+      label: "Bring the database back on its own before the deadline",
+      help:
+        "If your database is paused, we bring it back before it is too late: once the deadline " +
+        "has passed it can no longer be brought back, and only downloadable copies of your data " +
+        "are left. We tell you once we have done it. If you would rather handle it yourself, " +
+        "clear this box: we won’t touch it.",
+      failed: "We couldn’t save this choice. Try again in a few minutes.",
+    },
     trackingTitle: "Tracking connection and credentials",
     open: "Open database",
     copy: "Copy",
@@ -634,6 +644,53 @@ export const en: typeof it = {
     noHistory:
       "Shopify only keeps a product's current cost, not the previous ones: for orders already recorded we cannot know what that product actually cost you on the day of the sale, and we do not make it up.",
     cancel: "Cancel",
+  },
+
+  databasePaused: {
+    title: "Your database is paused",
+    dataSafe:
+      "All of your data is safe: nothing has been lost, neither the data nor the backups.",
+    syncStopped:
+      "While it stays paused syncing is stopped: the numbers you see in the app are the ones from the last update and will not change.",
+    deadline:
+      "You can only bring it back before a certain date, which is written on your database page: after that date it can no longer be brought back, and the data is only left to download. Don’t wait.",
+    action: "Resume database",
+    openDashboard: "Open your database page",
+
+    willAutoResume:
+      "If you don’t bring it back yourself, we will bring it back before the time to do so runs " +
+      "out. You can turn this off in Settings, in the Database section.",
+
+    autoResumed: {
+      title: "We brought your database back",
+      body:
+        "Your database was paused and was getting close to the point where it could no longer be " +
+        "brought back: we brought it back so you wouldn’t lose it. All of your data is safe.",
+      stillStopped:
+        "It takes a few minutes: until it is active again syncing stays stopped and the numbers " +
+        "will not update. You can close this page: once the database is back, syncing starts " +
+        "again on its own. If you would rather we didn’t bring it back for you, you can turn " +
+        "that off in Settings, in the Database section.",
+    },
+
+    resuming: {
+      title: "Bringing your database back",
+      body:
+        "We have asked for your database to be brought back: it takes a few minutes. Your data is safe.",
+      stillStopped:
+        "Until it is active again syncing stays stopped and the numbers will not update. You can close this page: once the database is back, syncing starts again on its own.",
+    },
+
+    errors: {
+      noPermission:
+        "We can’t bring the database back for you. Open its page and bring it back from there: your data is exactly where you left it.",
+      reconnect:
+        "The link to your database account is no longer valid. Reconnect it from Settings, or bring the database back from its page.",
+      rateLimited:
+        "Too many requests were made in a short time. Wait a few minutes and try again.",
+      failed:
+        "We couldn’t ask for the database to be brought back. Try again in a few minutes, or bring it back from its page.",
+    },
   },
 
   schemaUpdate: {
