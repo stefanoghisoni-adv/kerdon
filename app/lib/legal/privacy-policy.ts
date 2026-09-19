@@ -134,7 +134,7 @@ export function versioneEData(sorgente: string): { versione: string; data: strin
 
 /** L'indirizzo pubblico della pagina, con la lingua scritta dentro. */
 export function indirizzoInformativa(base: string, locale: Locale): string {
-  return `${base.replace(/\/+$/, '')}/privacy-policy?lang=${locale}`;
+  return `${base.replace(/\/+$/, '')}/policies/privacy-policy?lang=${locale}`;
 }
 
 /** Il testo, gia' innocuo, dentro un attributo. */

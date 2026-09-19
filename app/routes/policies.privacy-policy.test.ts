@@ -23,9 +23,9 @@ vi.mock('~/shopify.server', () => ({
 }));
 vi.mock('~/db.server', () => ({ prisma: {} }));
 
-import { loader } from './privacy-policy';
+import { loader } from './policies.privacy-policy';
 import { versioneEData, SORGENTI } from '~/lib/legal/privacy-policy';
-import * as rotta from './privacy-policy';
+import * as rotta from './policies.privacy-policy';
 
 const chiedi = (url: string, intestazioni: Record<string, string> = {}) =>
   loader({
@@ -36,7 +36,7 @@ const chiedi = (url: string, intestazioni: Record<string, string> = {}) =>
 
 describe('senza nessuna sessione', () => {
   it('risponde 200 con il documento, e non autentica nessuno', async () => {
-    const risposta = await chiedi('https://api.kerdon.io/privacy-policy');
+    const risposta = await chiedi('https://api.kerdon.io/policies/privacy-policy');
 
     expect(risposta.status).toBe(200);
     expect(risposta.headers.get('Content-Type')).toBe('text/html; charset=utf-8');
@@ -57,7 +57,7 @@ describe('senza nessuna sessione', () => {
 
 describe('le due lingue', () => {
   it('il link che nomina la lingua vince su quella del browser', async () => {
-    const italiana = await chiedi('https://api.kerdon.io/privacy-policy?lang=it', {
+    const italiana = await chiedi('https://api.kerdon.io/policies/privacy-policy?lang=it', {
       'accept-language': 'en-US,en;q=0.9',
     });
 
@@ -67,7 +67,7 @@ describe('le due lingue', () => {
   });
 
   it('senza parametro si segue il browser', async () => {
-    const italiana = await chiedi('https://api.kerdon.io/privacy-policy', {
+    const italiana = await chiedi('https://api.kerdon.io/policies/privacy-policy', {
       'accept-language': 'it-IT,it;q=0.9,en;q=0.8',
     });
 
@@ -75,7 +75,7 @@ describe('le due lingue', () => {
   });
 
   it('il revisore, che arriva senza dichiarare niente, legge in inglese', async () => {
-    const corpo = await (await chiedi('https://api.kerdon.io/privacy-policy')).text();
+    const corpo = await (await chiedi('https://api.kerdon.io/policies/privacy-policy')).text();
 
     expect(corpo).toContain('<html lang="en">');
     expect(corpo).toContain('Who we are');
@@ -84,7 +84,7 @@ describe('le due lingue', () => {
   it('dichiara di variare con la lingua del browser', async () => {
     // Senza, la prima copia finita in una cache condivisa verrebbe servita a
     // tutti: l'italiano al revisore, o l'inglese al merchant italiano.
-    const risposta = await chiedi('https://api.kerdon.io/privacy-policy');
+    const risposta = await chiedi('https://api.kerdon.io/policies/privacy-policy');
 
     expect(risposta.headers.get('Vary')).toBe('Accept-Language');
   });
@@ -93,7 +93,7 @@ describe('le due lingue', () => {
 describe('quel che la pagina pubblica dichiara', () => {
   it('porta la versione e la data del documento', async () => {
     const { versione, data } = versioneEData(SORGENTI.en);
-    const corpo = await (await chiedi('https://api.kerdon.io/privacy-policy?lang=en')).text();
+    const corpo = await (await chiedi('https://api.kerdon.io/policies/privacy-policy?lang=en')).text();
 
     expect(corpo).toContain(versione);
     expect(corpo).toContain(data);

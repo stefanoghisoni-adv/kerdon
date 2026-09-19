@@ -72,7 +72,7 @@ export function PrivacyModal({ open, onClose }: Props) {
               perdere la pagina da cui si veniva. `lang` nella URL perche' il
               documento sta fuori dall'app: li' non c'e' nessuna sessione da cui
               dedurre la lingua, e chi parte da qui la lingua l'ha gia' scelta. */}
-          <Link url={`/privacy-policy?lang=${locale}`} external target="_blank">
+          <Link url={`/policies/policies/privacy-policy?lang=${locale}`} external target="_blank">
             {t.privacy.policyLink}
           </Link>
         </BlockStack>

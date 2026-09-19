@@ -4,17 +4,19 @@ import { linguaDellaPagina, paginaInformativa } from '~/lib/legal/privacy-policy
 /**
  * L'informativa sulla privacy, a un indirizzo pubblico e stabile.
  *
- * PERCHE' `/privacy-policy` E NON `/privacy`. Perche' in Remix il punto nel
- * nome del file crea una gerarchia: accanto a `privacy.export.$id.tsx` e
- * `privacy.my-data.tsx`, un file `privacy.tsx` non sarebbe una pagina — sarebbe
- * il LAYOUT di quelle due. Diventerebbero rotte figlie di un modulo con un
- * proprio loader, che verrebbe eseguito a ogni loro richiesta, e le due cose
- * che quelle rotte fanno — consegnare un file JSON con un `Content-Disposition`
- * addosso, e farlo solo a chi ha la sessione giusta — passerebbero attraverso
- * un genitore che non le conosce. Sono le due vie d'uscita con cui un merchant
- * si porta via i propri dati: non si mettono a rischio per un indirizzo piu'
- * corto. `privacy-policy` non ha punti, quindi non tocca niente, e per giunta
- * si chiama come il file da cui nasce.
+ * L'INDIRIZZO NON LO SCEGLIAMO NOI: e' `/policies/privacy-policy` perche' e'
+ * quello gia' dichiarato nella Partner Dashboard, dove l'app e' in revisione.
+ * Su `kerdon.io` c'e' un rimando che conserva il percorso e porta qui, quindi
+ * quel che il revisore apre arriva a questa rotta. Cambiare il percorso senza
+ * cambiare la dichiarazione vorrebbe dire far trovare al revisore una pagina
+ * che non c'e' — ed e' esattamente quello che succedeva prima, con un 410.
+ *
+ * `policies.privacy-policy` non tocca `privacy.export.$id.tsx` ne'
+ * `privacy.my-data.tsx`: sono un altro ramo. Va ricordato perche' il punto, in
+ * Remix, crea una gerarchia — un file `privacy.tsx` non sarebbe una pagina ma
+ * il LAYOUT di quelle due, e quelle due sono le vie con cui un merchant si
+ * porta via i propri dati, una con un `Content-Disposition` addosso e solo a
+ * chi ha la sessione giusta. Non si mettono di mezzo a un documento pubblico.
  *
  * PERCHE' NON C'E' NESSUN COMPONENTE, SOLO UN `loader`. Perche' una pagina
  * normale di questa app passa dal `loader` di `root.tsx`, che autentica

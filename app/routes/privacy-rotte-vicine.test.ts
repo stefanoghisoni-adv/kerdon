@@ -13,7 +13,7 @@ import { join } from 'node:path';
  * si porta via i propri dati: quella che consegna la copia del negozio e quella
  * che consegna l'esportazione chiesta da un suo cliente.
  *
- * La pagina si chiama quindi `privacy-policy`, che non ha punti e non crea
+ * La pagina sta quindi su `policies.privacy-policy`, un altro ramo che non crea
  * nessuna gerarchia. Ma una scelta del genere si dimentica: fra un anno
  * qualcuno potrebbe "accorciare l'indirizzo" e rinominare il file. Qui si
  * scrive che non si puo', e si verifica che le due rotte facciano ancora quel
@@ -57,7 +57,7 @@ describe('nessun layout si e messo davanti alle rotte privacy.*', () => {
     // Le due che devono restare dove sono, e la pagina nuova che non le tocca.
     expect(file).toContain('privacy.my-data.tsx');
     expect(file).toContain('privacy.export.$id.tsx');
-    expect(file).toContain('privacy-policy.tsx');
+    expect(file).toContain('policies.privacy-policy.tsx');
   });
 });
 

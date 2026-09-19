@@ -15,7 +15,7 @@ import type { LoaderFunctionArgs } from '@remix-run/node';
  */
 export async function loader(_args: LoaderFunctionArgs) {
   return new Response(
-    'User-agent: *\nDisallow: /\nAllow: /privacy-policy\n',
+    'User-agent: *\nDisallow: /\nAllow: /policies/privacy-policy\n',
     {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',

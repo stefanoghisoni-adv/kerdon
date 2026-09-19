@@ -23,11 +23,11 @@ import { expect, test as prova } from './support/prova';
 
 prova.describe("l'informativa sulla privacy", () => {
   prova('si apre senza sessione e senza cookie', async ({ page }) => {
-    const risposta = await page.goto('/privacy-policy');
+    const risposta = await page.goto('/policies/privacy-policy');
 
     expect(risposta?.status()).toBe(200);
     // Nessun rimando verso l'autenticazione: si e' rimasti dove si era chiesto.
-    expect(new URL(page.url()).pathname).toBe('/privacy-policy');
+    expect(new URL(page.url()).pathname).toBe('/policies/privacy-policy');
     // Il browser di prova dichiara `it-IT` (vedi `playwright.config.ts`), e la
     // pagina gli risponde nella sua lingua: qui si guarda che si APRA, non in
     // che lingua — la lingua ha le sue due prove qui sotto.
@@ -38,7 +38,7 @@ prova.describe("l'informativa sulla privacy", () => {
 
 
   prova('il link che nomina la lingua porta al documento italiano', async ({ page }) => {
-    await page.goto('/privacy-policy?lang=it');
+    await page.goto('/policies/privacy-policy?lang=it');
 
     await expect(page.locator('html')).toHaveAttribute('lang', 'it');
     await expect(page.locator('h1')).toHaveText('Informativa sulla privacy');
@@ -46,7 +46,7 @@ prova.describe("l'informativa sulla privacy", () => {
   });
 
   prova("l'indice porta dove dice di portare", async ({ page }) => {
-    await page.goto('/privacy-policy?lang=en');
+    await page.goto('/policies/privacy-policy?lang=en');
 
     const voci = page.locator('.rail a');
     await expect(voci).toHaveCount(10);
@@ -65,7 +65,7 @@ prova.describe("l'informativa sulla privacy", () => {
     const verso: string[] = [];
     page.on('request', (richiesta) => verso.push(richiesta.url()));
 
-    await page.goto('/privacy-policy?lang=it');
+    await page.goto('/policies/privacy-policy?lang=it');
 
     // Una sola richiesta, quella del documento: nessun font, nessuno script,
     // nessuna immagine. Su una pagina che spiega quali dati raccogliamo, una
@@ -75,7 +75,7 @@ prova.describe("l'informativa sulla privacy", () => {
   });
 
   prova('si passa da una lingua all altra', async ({ page }) => {
-    await page.goto('/privacy-policy?lang=en');
+    await page.goto('/policies/privacy-policy?lang=en');
     await page.getByRole('link', { name: 'Italiano' }).click();
 
     await expect(page.locator('html')).toHaveAttribute('lang', 'it');
@@ -94,7 +94,7 @@ prova.describe("l'informativa letta da chi parla inglese", () => {
   // guardata leggerebbe un documento in italiano, e un'informativa che il
   // revisore non legge vale quanto non averla.
   prova("riceve l'inglese senza doverlo chiedere", async ({ page }) => {
-    await page.goto('/privacy-policy');
+    await page.goto('/policies/privacy-policy');
 
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     await expect(page.locator('h1')).toHaveText('Privacy Policy');

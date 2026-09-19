@@ -284,7 +284,7 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
       'File statico servito alla vetrina. Non contiene dati: il permesso lo ' +
       'chiedono le rotte che lo script poi interroga.',
   },
-  'privacy-policy': {
+  'policies.privacy-policy': {
     guard: 'open',
     reason:
       "E' l'informativa sulla privacy, e un'informativa che per essere letta " +
