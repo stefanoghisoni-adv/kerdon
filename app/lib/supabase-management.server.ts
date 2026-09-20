@@ -81,24 +81,54 @@ export function buildAuthorizeUrl(params: {
  *
  * Lo stato non e' un dettaglio da log: separa due situazioni che per il merchant
  * sono opposte. Un 5xx e' un guasto di Supabase che passa da solo — al giro
- * dopo il numero torna. Un 401 o un 404 vogliono dire che il permesso che ci
- * aveva dato non vale piu': revocato dal suo pannello, oppure il refresh token
- * e' stato invalidato. Li' non c'e' niente da riprovare, e continuare a
+ * dopo il numero torna. Un 400, un 401 o un 403 vogliono dire che il permesso
+ * che ci aveva dato non vale piu': revocato dal suo pannello, oppure il refresh
+ * token e' stato invalidato. Li' non c'e' niente da riprovare, e continuare a
  * riprovare e' il modo di non accorgersene mai.
  *
  * Prima erano lo stesso `Error`, e la dashboard mostrava in tutti e due i casi
  * una card senza numeri e nessuna spiegazione: il merchant vedeva sparire il
  * profitto e non aveva modo di sapere che bastava ricollegare.
+ *
+ * IL 404 STA A META', E CI E' COSTATO UN FALSO ALLARME.
+ *
+ * Il 12 settembre un 404 sul rinnovo sembrava il permesso revocato, e per
+ * questo era finito qui dentro insieme agli altri. Il 20 settembre i log hanno
+ * raccontato un'altra storia: alle 15:56 sei chiamate della dashboard partite
+ * nello stesso secondo trovano il token scaduto, rinnovano tutte con lo stesso
+ * refresh token, e siccome Supabase lo ruota a ogni uso solo la prima vince —
+ * le altre presentano un refresh token gia' consumato e si prendono un 404.
+ * Due minuti dopo, senza che nessuno avesse toccato niente, le stesse rotte
+ * rispondevano pulite con lo stesso collegamento OAuth. "Serve ricollegare"
+ * era falso, e chiedere al merchant di rifare l'autorizzazione e' un costo
+ * vero: si paga in fiducia, e si paga anche quando non serviva.
+ *
+ * Quindi il 404 da solo non basta piu' a dire "ricollega": lo dice solo se
+ * `confermatoDallaRilettura`, cioe' se chi ha fatto il rinnovo ha gia'
+ * riletto la riga del token dal database e NON ci ha trovato niente di valido
+ * (vedi `getValidAccessToken`). Se invece nel frattempo qualcun altro aveva
+ * salvato un token buono, quel 404 era una corsa persa e non arriva nemmeno
+ * qui. E' la stessa distinzione di prima — "non si aggiusta da se'" contro
+ * "passa da solo" — fatta sul fatto invece che sul numero.
  */
 export class SupabaseTokenError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    /**
+     * Chi ha ricevuto l'errore e' gia' tornato a leggere la riga del token e
+     * non ha trovato nessun token valido: il dubbio sulla corsa e' sciolto.
+     */
+    readonly confermatoDallaRilettura = false,
+  ) {
     super(`Supabase token error: ${status}`);
     this.name = 'SupabaseTokenError';
   }
 
   /** Il permesso non vale piu': lo deve ridare il merchant, non il tempo. */
   get credenzialeMorta(): boolean {
-    return this.status === 400 || this.status === 401 || this.status === 403 || this.status === 404;
+    if (this.status === 400 || this.status === 401 || this.status === 403) return true;
+    if (this.status === 404) return this.confermatoDallaRilettura;
+    return false;
   }
 }
 

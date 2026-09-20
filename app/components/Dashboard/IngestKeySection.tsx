@@ -161,9 +161,14 @@ export function IngestKeySection({ keys }: IngestKeySectionProps) {
         )}
       </InlineStack>
 
-      {neHaGia && (
+      {/* Solo quando un invio c'e' stato davvero. Prima diceva "nessun invio
+          ricevuto finora", che e' vero anche un istante dopo aver creato la
+          chiave: chi ha appena finito leggeva un'assenza al posto di un esito,
+          e non c'era niente da fare per cambiarla. Un'assenza non e' una
+          notizia — la riga compare quando ha qualcosa da dire. */}
+      {neHaGia && ultimoInvio(vive) && (
         <Text as="p" variant="bodySm" tone="subdued">
-          {ultimoInvio(vive) ? t.database.writeKeyLastUsed(giorno(ultimoInvio(vive)!)) : t.database.writeKeyNeverUsed}
+          {t.database.writeKeyLastUsed(giorno(ultimoInvio(vive)!))}
         </Text>
       )}
 

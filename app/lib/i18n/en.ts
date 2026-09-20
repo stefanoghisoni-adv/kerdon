@@ -127,7 +127,6 @@ export const en: typeof it = {
       "From now on your installation stops sending data until you publish a new key. Do this if you think the key has ended up in the wrong hands.",
     writeKeyRevoked: "Revoked.",
     writeKeyLastUsed: (when: string) => `Last data received on ${when}`,
-    writeKeyNeverUsed: "No data received yet",
     writeKeyUpdateNeeded: (when: string) =>
       `Your installation still sends data with the read key. Update it by ${when}, or it will stop working on that date.`,
     writeKeyUpToDate: "Installation up to date",
@@ -369,6 +368,8 @@ export const en: typeof it = {
       unavailable: "Profit becomes available after the first order sync.",
       reconnect:
         "Permission to reach your database is no longer valid. Reconnect it from Settings: your data stays where it is.",
+      temporary:
+        "Profit isn’t available right now. Reload in a moment: there’s nothing to fix.",
     },
     margin: {
       title: "Average margin per order",

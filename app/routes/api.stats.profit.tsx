@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { isSupabaseCredentialDead } from '~/lib/supabase-management.server';
+import { isRinnovoPermessoInCorso } from '~/lib/supabase-oauth.server';
 import { noteDatabaseUnreachableForShop } from '~/lib/supabase/database-pause.server';
 import { prisma } from '~/db.server';
 import { loadShopAverages, loadShopProfit } from '~/lib/customers/profit.server';
@@ -83,9 +84,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // finche' non ricollega, quel numero non tornera' mai, e "sara' disponibile
     // dopo la prima sincronizzazione" sarebbe una frase falsa.
     const daRicollegare = isSupabaseCredentialDead(e);
+    // Il permesso si sta rinnovando su un'altra richiesta: non e' un guasto ed
+    // e' gia' finito quando il merchant ricarica. Se non lo distinguessimo qui
+    // finirebbe nel ramo generico, che gli direbbe "dopo la prima
+    // sincronizzazione" — una frase falsa per un negozio che sincronizza da
+    // mesi.
+    const rinnovoInCorso = isRinnovoPermessoInCorso(e);
     console.error(
       '[api.stats.profit]',
-      daRicollegare ? 'permesso Supabase non piu valido: serve ricollegare' : '',
+      daRicollegare
+        ? 'permesso Supabase non piu valido: serve ricollegare'
+        : rinnovoInCorso
+          ? 'permesso Supabase in rinnovo su un altra richiesta: passeggero'
+          : '',
       e instanceof Error ? e.message : 'errore sconosciuto',
     );
 
@@ -110,7 +121,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Un negozio con la credenziale morta non ci entra: quello e' un altro
     // guasto, con un'altra frase, e interrogare Supabase con un permesso che
     // non vale piu' non direbbe niente di nuovo.
-    if (!daRicollegare) {
+    //
+    // E non ci entra nemmeno il rinnovo in corso, per il motivo opposto: li'
+    // il database del merchant non e' stato nemmeno interrogato: ci siamo
+    // fermati prima, in fila per il permesso. Chiedere a Supabase come sta il
+    // progetto vorrebbe dire pagare una chiamata di rete per rispondere a una
+    // domanda che nessuno ha fatto — e la pagherebbe con lo stesso permesso
+    // che in quel momento non e' disponibile.
+    if (!daRicollegare && !rinnovoInCorso) {
       await noteDatabaseUnreachableForShop(session.shop);
     }
     // Un guasto qui non deve spegnere la dashboard: si dice che il numero non
@@ -122,7 +140,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       coveredLines: 0,
       totalLines: 0,
       currency: 'EUR',
-      unavailable: (daRicollegare ? 'reconnect' : 'not_connected') as 'reconnect' | 'not_connected',
+      unavailable: (daRicollegare
+        ? 'reconnect'
+        : rinnovoInCorso
+          ? 'temporary'
+          : 'not_connected') as 'reconnect' | 'temporary' | 'not_connected',
       averages: {
         aov: null,
         aop: null,

@@ -154,7 +154,6 @@ export const it = {
       "Da questo momento la tua installazione smette di inviare dati, finché non pubblichi una chiave nuova. Fallo se pensi che la chiave sia finita nelle mani sbagliate.",
     writeKeyRevoked: "Revocata.",
     writeKeyLastUsed: (when: string) => `Ultimo invio ricevuto il ${when}`,
-    writeKeyNeverUsed: "Nessun invio ricevuto finora",
     /**
      * Il passaggio alla chiave nuova, come lo vede il merchant: una cosa da
      * fare entro una data, non un dettaglio di funzionamento.
@@ -423,6 +422,8 @@ export const it = {
         "Il profitto sarà disponibile dopo la prima sincronizzazione degli ordini.",
       reconnect:
         "Il permesso di accedere al tuo database non è più valido. Ricollegalo dalle Impostazioni: i dati restano dove sono.",
+      temporary:
+        "Il profitto non è disponibile in questo momento. Ricarica fra qualche istante: non c’è niente da sistemare.",
     },
     /** Quanto resta di un ordine medio. */
     margin: {

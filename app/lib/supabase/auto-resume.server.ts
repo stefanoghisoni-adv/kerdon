@@ -18,7 +18,7 @@ import { can } from '~/lib/authz/capabilities';
 import { shopCapabilitiesWithPlan, CAPABILITY_SHOP_SELECT } from '~/lib/authz/shop-capabilities.server';
 import { samePlanName } from '~/lib/billing/plan-name';
 import { getDatabasePauseState } from '~/lib/cache/database-pause-cache.server';
-import { getValidAccessToken } from '~/lib/supabase-oauth.server';
+import { getValidAccessToken, isRinnovoPermessoInCorso } from '~/lib/supabase-oauth.server';
 import {
   SupabaseApiError,
   isSupabaseCredentialDead,
@@ -319,6 +319,18 @@ async function chiediRiattivazione(
     const token = await getValidAccessToken(shop.id);
     await restoreProject(token, ref);
   } catch (e) {
+    // Il permesso lo stava rinnovando un'altra richiesta e non ha fatto in
+    // tempo: qui non e' stato rifiutato niente, non si e' nemmeno bussato.
+    // Contarlo come rifiuto farebbe scattare il freno di sei ore per una fila
+    // di qualche centinaio di millisecondi — e il margine per riaccendere il
+    // database, che e' cio' che questo giro difende, si consuma intanto.
+    if (isRinnovoPermessoInCorso(e)) {
+      console.warn(
+        `[auto-resume] ${shop.shopDomain}: permesso in rinnovo altrove, si riprova al giro dopo`,
+      );
+      return;
+    }
+
     report.rifiutati++;
     // Il contatore sale anche sul rifiuto: un errore che non conta lascerebbe
     // l'app a bussare ogni sei ore per tutto il margine.

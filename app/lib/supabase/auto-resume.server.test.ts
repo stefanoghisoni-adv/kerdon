@@ -46,7 +46,10 @@ vi.mock('./database-pause.server', () => ({
   noteResumeRequested: (...a: unknown[]) => noteResumeRequested(...a),
   noteResumeBlocked: (...a: unknown[]) => noteResumeBlocked(...a),
 }));
-vi.mock('~/lib/supabase-oauth.server', () => ({
+vi.mock('~/lib/supabase-oauth.server', async (importOriginal) => ({
+  // `isRinnovoPermessoInCorso` e la sua classe restano quelli veri: qui si
+  // prova come il giro reagisce a quell'errore, non come lo si riconosce.
+  ...(await importOriginal<typeof import('~/lib/supabase-oauth.server')>()),
   getValidAccessToken: (...a: unknown[]) => getValidAccessToken(...a),
 }));
 vi.mock('~/lib/supabase-management.server', async (importOriginal) => ({
@@ -58,6 +61,7 @@ vi.mock('./auto-resume-notice.server', () => ({
 }));
 
 import { SupabaseApiError, SupabaseTokenError } from '~/lib/supabase-management.server';
+import { RinnovoPermessoInCorsoError } from '~/lib/supabase-oauth.server';
 import { runAutoResume } from './auto-resume.server';
 
 const ORA = new Date('2026-09-18T12:00:00.000Z');
@@ -316,6 +320,18 @@ describe('quando Supabase rifiuta', () => {
 
     expect(noteResumeBlocked).toHaveBeenCalledWith('shop-1', 'reconnect');
     expect(noteAutoResumeFailed).toHaveBeenCalledWith('shop-1', ORA);
+  });
+
+  it('permesso in rinnovo altrove: non e un rifiuto, e il freno di sei ore non scatta', async () => {
+    getValidAccessToken.mockRejectedValue(new RinnovoPermessoInCorsoError());
+
+    const report = await runAutoResume(ORA);
+
+    expect(report.rifiutati).toBe(0);
+    // Il margine per riaccendere il database si consuma: bruciare sei ore per
+    // una fila di qualche centinaio di millisecondi sarebbe pagarla cara.
+    expect(noteAutoResumeFailed).not.toHaveBeenCalled();
+    expect(noteResumeBlocked).not.toHaveBeenCalled();
   });
 
   it('un negozio che fallisce non ferma gli altri', async () => {
