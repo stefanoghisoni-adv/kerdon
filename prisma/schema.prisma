@@ -206,6 +206,7 @@ model Shop {
   productScope             ProductScopeEntry[]
   trackingIngestKeys       TrackingIngestKey[]
   autoResume               SupabaseAutoResume?
+  birthdateNotice          BirthdateNoticeDismissal?
 
   @@index([shopDomain])
   @@map("shops")
@@ -424,6 +425,45 @@ model SupabaseAutoResume {
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("supabase_auto_resume")
+}
+
+/// Per quale campo il merchant ha chiuso l'avviso della data di nascita.
+///
+/// E' una preferenza, non una configurazione del negozio, e fino a ieri viveva
+/// nel browser. Non ha retto: `localStorage` e' legato all'indirizzo da cui la
+/// pagina arriva, e il giorno in cui l'app e' passata da `api.coreward.app` a
+/// `api.kerdon.io` ogni avviso gia' chiuso e' tornato su. Non e' nemmeno un
+/// caso limite: dentro l'admin l'app sta in un iframe di un'altra origine, e
+/// quello e' storage di terze parti — Safari lo blocca, Chrome lo partiziona.
+/// Una preferenza espressa con un gesto esplicito ("non mostrarmelo piu'") non
+/// puo' vivere in un posto che qualcun altro puo' svuotare o rifiutare: sta
+/// qui, accanto alle altre cose che riguardano il negozio.
+///
+/// Una TABELLA e non una colonna su `shops` per la stessa ragione di
+/// `SupabaseAutoResume`: le migrazioni le lancia una persona a mano, e fra il
+/// rilascio del codice e quel momento la colonna non esiste. Una colonna nuova
+/// su `shops` farebbe fallire OGNI lettura del negozio — cioe' tutta l'app,
+/// autenticazione compresa — perche' Prisma le elenca per nome. Una tabella
+/// nuova la interroga solo chi la conosce.
+///
+/// La memoria e' PER CAMPO e non un si'/no: cambiando il campo da cui si legge
+/// la data di nascita c'e' una conferma nuova da dare, e un "non mostrare piu'"
+/// secco avrebbe zittito anche quella.
+model BirthdateNoticeDismissal {
+  id     String @id @default(uuid())
+  shopId String @unique @map("shop_id")
+
+  /// Il campo per cui l'avviso e' stato chiuso, per intero: `facts.birth_date`.
+  /// La stessa forma che il negozio ha salvato, perche' il confronto e'
+  /// un'uguaglianza esatta: `namespace.chiave`, sempre, mai la chiave nuda.
+  dismissedFor String @map("dismissed_for")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("birthdate_notice_dismissals")
 }
 
 /// Un piano: cosa concede, non quanto costa.

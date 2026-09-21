@@ -778,6 +778,23 @@ CREATE UNIQUE INDEX "supabase_auto_resume_shop_id_key" ON "supabase_auto_resume"
 -- AddForeignKey
 ALTER TABLE "supabase_auto_resume" ADD CONSTRAINT "supabase_auto_resume_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- CreateTable
+CREATE TABLE "birthdate_notice_dismissals" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "dismissed_for" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "birthdate_notice_dismissals_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "birthdate_notice_dismissals_shop_id_key" ON "birthdate_notice_dismissals"("shop_id");
+
+-- AddForeignKey
+ALTER TABLE "birthdate_notice_dismissals" ADD CONSTRAINT "birthdate_notice_dismissals_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 -- Se il merchant vuole che l'app riaccenda da sola il suo database prima che non
 -- sia piu' riaccendibile, e cosa abbiamo gia' provato. `enabled` e' nullable di
 -- proposito: "non ha scelto" e "ha scelto no" sono due cose diverse, e solo la
