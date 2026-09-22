@@ -129,7 +129,6 @@ export const en: typeof it = {
     writeKeyLastUsed: (when: string) => `Last data received on ${when}`,
     writeKeyUpdateNeeded: (when: string) =>
       `Your installation still sends data with the read key. Update it by ${when}, or it will stop working on that date.`,
-    writeKeyUpToDate: "Installation up to date",
   },
 
   logs: {

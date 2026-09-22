@@ -160,7 +160,6 @@ export const it = {
      */
     writeKeyUpdateNeeded: (when: string) =>
       `La tua installazione invia ancora i dati con la chiave di lettura. Aggiornala entro il ${when}, altrimenti da quella data smetterà di funzionare.`,
-    writeKeyUpToDate: "Installazione aggiornata",
   },
 
   logs: {

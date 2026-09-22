@@ -102,18 +102,17 @@ export function IngestKeySection({ keys }: IngestKeySectionProps) {
           tone: neHaGia ? 'success' : undefined,
           content: neHaGia ? t.database.writeKeyActive(vive.length) : t.database.writeKeyNone,
         }}
+        action={!neHaGia ? (
+          <Button onClick={() => chiama('issue')} loading={inCorso} disabled={inCorso}>
+            {t.database.writeKeyCreate}
+          </Button>
+        ) : undefined}
       />
 
       {/* Nessun avviso che conti i giorni a una scadenza: non ce n'e' piu' una.
           Chi ha una chiave viva e' a posto, e chi ha incollato quella sbagliata
           nel container lo vede dalla riga qui sotto — nessun dato ricevuto —
           molto piu' in fretta che da un banner. */}
-      {neHaGia && (
-        <Text as="p" variant="bodySm" tone="subdued">
-          {t.database.writeKeyUpToDate}
-        </Text>
-      )}
-
       {appena && (
         <Banner tone="info">
           <BlockStack gap="200">
@@ -145,11 +144,11 @@ export function IngestKeySection({ keys }: IngestKeySectionProps) {
         </Banner>
       )}
 
-      <InlineStack gap="200" blockAlign="center">
-        <Button onClick={() => chiama('issue')} loading={inCorso} disabled={inCorso}>
-          {neHaGia ? t.database.writeKeyRotate : t.database.writeKeyCreate}
-        </Button>
-        {neHaGia && (
+      {neHaGia && (
+        <InlineStack gap="200" blockAlign="center">
+          <Button onClick={() => chiama('issue')} loading={inCorso} disabled={inCorso}>
+            {t.database.writeKeyRotate}
+          </Button>
           <Button
             tone="critical"
             variant="plain"
@@ -158,8 +157,8 @@ export function IngestKeySection({ keys }: IngestKeySectionProps) {
           >
             {t.database.writeKeyRevoke}
           </Button>
-        )}
-      </InlineStack>
+        </InlineStack>
+      )}
 
       {/* Solo quando un invio c'e' stato davvero. Prima diceva "nessun invio
           ricevuto finora", che e' vero anche un istante dopo aver creato la
