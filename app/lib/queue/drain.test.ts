@@ -360,6 +360,19 @@ describe('il ricalcolo dei costi logistici', () => {
     expect(shopId).toBe('shop-1');
     expect(typeof ctx.lease.assertHeld).toBe('function');
     expect(ctx.signal).toBeInstanceOf(AbortSignal);
+    expect(ctx.jobId).toBe('item-1');
+    expect(ctx.cursor).toBeNull();
+  });
+
+  it('passa al processor il cursore della continuazione', async () => {
+    const coda = codaInMemoria([
+      riga({ type: 'logistics-recompute', shopId: 'shop-1', payload: { cursor: '5499' } }),
+    ]);
+
+    await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
+
+    const [, ctx] = (processLogisticsRecompute as any).mock.calls[0];
+    expect(ctx.cursor).toBe('5499');
   });
 
   it('negozio occupato: torna in coda senza consumare un tentativo', async () => {

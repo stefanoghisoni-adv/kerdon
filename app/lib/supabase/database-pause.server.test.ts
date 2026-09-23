@@ -13,6 +13,7 @@ const getProject = vi.fn();
 const getValidAccessToken = vi.fn();
 const enqueueManualSync = vi.fn();
 const triggerSyncDrain = vi.fn();
+const enqueueLogisticsRecompute = vi.fn();
 
 vi.mock('~/db.server', () => ({
   prisma: {
@@ -31,6 +32,9 @@ vi.mock('~/lib/supabase-oauth.server', () => ({
 vi.mock('~/lib/queue/trigger.server', () => ({
   enqueueManualSync: (...a: unknown[]) => enqueueManualSync(...a),
   triggerSyncDrain: (...a: unknown[]) => triggerSyncDrain(...a),
+}));
+vi.mock('~/lib/shipping/recompute-enqueue.server', () => ({
+  enqueueLogisticsRecompute: (...a: unknown[]) => enqueueLogisticsRecompute(...a),
 }));
 vi.mock('~/lib/supabase-management.server', async (importOriginal) => ({
   // `isSupabaseCredentialDead` e `SupabaseTokenError` restano quelli veri: qui
@@ -149,6 +153,23 @@ describe('il ritorno del database', () => {
     expect(clearState).toHaveBeenCalledWith('shop-1');
   });
 
+  it('al ritorno riaccoda anche il ricalcolo dei costi logistici', async () => {
+    // Un salvataggio delle tariffe fatto a database fermo ha visto il suo
+    // ricalcolo saltare: la sincronizzazione che riparte riscrive solo gli
+    // ordini cambiati, e lo storico resterebbe con i costi vecchi.
+    getState.mockResolvedValue({
+      status: 'INACTIVE',
+      availability: 'in-pausa',
+      checkedAt: new Date(Date.now() - 120_000).toISOString(),
+      resumeRequestedAt: null,
+    });
+    getProject.mockResolvedValue({ status: 'ACTIVE_HEALTHY' });
+
+    await readDatabasePause('shop-1');
+
+    expect(enqueueLogisticsRecompute).toHaveBeenCalledWith('shop-1');
+  });
+
   it('un database che era gia attivo non accoda niente', async () => {
     getState.mockResolvedValue(null);
 
@@ -156,6 +177,7 @@ describe('il ritorno del database', () => {
 
     expect(getProject).not.toHaveBeenCalled();
     expect(enqueueManualSync).not.toHaveBeenCalled();
+    expect(enqueueLogisticsRecompute).not.toHaveBeenCalled();
   });
 
   it('finche resta fermo si ricontrolla, ma non piu di una volta al minuto', async () => {

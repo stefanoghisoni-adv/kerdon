@@ -96,8 +96,17 @@ export const defaultHandlers: Record<SyncRequestType, Handler> = {
     }
     await processComplianceRequest(requestId);
   },
-  'logistics-recompute': (row, ctx) =>
-    processLogisticsRecompute(row.shopId!, { lease: ctx.lease, signal: ctx.signal }),
+  'logistics-recompute': (row, ctx) => {
+    // Una continuazione porta nel payload il punto da cui riprendere; un
+    // ricalcolo da salvataggio non porta niente e parte da zero.
+    const cursor = (row.payload as { cursor?: unknown } | null)?.cursor;
+    return processLogisticsRecompute(row.shopId!, {
+      lease: ctx.lease,
+      signal: ctx.signal,
+      jobId: row.id,
+      cursor: typeof cursor === 'string' ? cursor : null,
+    });
+  },
 };
 
 /**

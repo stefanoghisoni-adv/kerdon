@@ -6,20 +6,31 @@ import type { LogisticsConfig } from './types';
 // La coda vera (queue-store) gira sopra un Prisma finto che rispetta l'indice
 // unico su `dedupKey`: e' quell'indice a fare la deduplica, quindi e' lui che
 // va imitato, non la funzione di accodamento.
-const righeCoda = new Map<string, { id: string; status: string; dedupKey: string }>();
+const righeCoda = new Map<
+  string,
+  { id: string; status: string; dedupKey: string; payload: unknown }
+>();
+
+async function createManyInMemoria({ data }: any) {
+  const [riga] = data;
+  if (righeCoda.has(riga.dedupKey)) return { count: 0 };
+  righeCoda.set(riga.dedupKey, {
+    id: riga.id,
+    status: riga.status,
+    dedupKey: riga.dedupKey,
+    payload: riga.payload,
+  });
+  return { count: 1 };
+}
+
+async function findUniqueInMemoria({ where }: any) {
+  return righeCoda.get(where.dedupKey) ?? null;
+}
 
 vi.mock('~/db.server', () => ({
   prisma: {
     shop: { findUnique: vi.fn() },
-    syncRequest: {
-      createMany: vi.fn(async ({ data }: any) => {
-        const [riga] = data;
-        if (righeCoda.has(riga.dedupKey)) return { count: 0 };
-        righeCoda.set(riga.dedupKey, { id: riga.id, status: riga.status, dedupKey: riga.dedupKey });
-        return { count: 1 };
-      }),
-      findUnique: vi.fn(async ({ where }: any) => righeCoda.get(where.dedupKey) ?? null),
-    },
+    syncRequest: { createMany: vi.fn(), findUnique: vi.fn() },
   },
 }));
 
@@ -92,6 +103,10 @@ function scritture(): string[] {
 beforeEach(() => {
   vi.clearAllMocks();
   righeCoda.clear();
+  // Ripristinate a ogni prova: `clearAllMocks` non toglie le implementazioni
+  // che una prova ha cambiato, e la coda finta deve ripartire identica.
+  (prisma.syncRequest.createMany as any).mockImplementation(createManyInMemoria);
+  (prisma.syncRequest.findUnique as any).mockImplementation(findUniqueInMemoria);
   (prisma.shop.findUnique as any).mockResolvedValue({
     id: 'shop-1',
     currentPlan: 'pro',
@@ -247,7 +262,67 @@ describe('processLogisticsRecompute', () => {
   });
 });
 
+describe('a tappe sui negozi grandi', () => {
+  it('a budget esaurito dopo la pagina 1 accoda la continuazione dal suo ultimo id', async () => {
+    const pagina1 = Array.from({ length: RECOMPUTE_PAGE_SIZE }, (_, i) =>
+      ordine({ shopify_order_id: String(5000 + i) }),
+    );
+    const ultimo = String(5000 + RECOMPUTE_PAGE_SIZE - 1);
+    (runQueryRows as any).mockResolvedValueOnce(pagina1);
+    // L'orologio: la corsa parte a 0, dopo la prima pagina sono passati 2 s su
+    // un budget di 1 s.
+    const istanti = [0, 2_000];
+    const clock = () => istanti.shift() ?? 2_000;
+
+    await processLogisticsRecompute('shop-1', { jobId: 'job-1', budgetMs: 1_000, clock });
+
+    // Una pagina letta e scritta, poi si ferma invece di andare avanti.
+    expect(runQueryRows).toHaveBeenCalledTimes(1);
+    expect(scritture()).toHaveLength(1);
+    const continuazione = [...righeCoda.values()].find((r) => r.dedupKey.includes(':continua:'));
+    expect(continuazione?.payload).toEqual({ cursor: ultimo });
+    expect(triggerSyncDrain).toHaveBeenCalledWith('shop-1');
+
+    // Il tentativo dopo riparte da li', non da zero.
+    vi.clearAllMocks();
+    (runQueryRows as any).mockResolvedValueOnce([ordine({ shopify_order_id: '9000' })]);
+    await processLogisticsRecompute('shop-1', {
+      jobId: continuazione!.id,
+      cursor: (continuazione!.payload as { cursor: string }).cursor,
+    });
+    const prima = (runQueryRows as any).mock.calls[0][2] as string;
+    expect(prima).toContain(`shopify_order_id > ${ultimo}`);
+  });
+
+  it('se la continuazione non si accoda, solleva: la coda ritenta invece di perdere il resto', async () => {
+    (runQueryRows as any).mockResolvedValueOnce(
+      Array.from({ length: RECOMPUTE_PAGE_SIZE }, (_, i) => ordine({ shopify_order_id: String(1 + i) })),
+    );
+    (prisma.syncRequest.createMany as any).mockRejectedValueOnce(new Error('db giu\''));
+    const istanti = [0, 2_000];
+
+    await expect(
+      processLogisticsRecompute('shop-1', {
+        jobId: 'job-1',
+        budgetMs: 1_000,
+        clock: () => istanti.shift() ?? 2_000,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('un cursore malformato nel payload riparte da zero', async () => {
+    await processLogisticsRecompute('shop-1', { jobId: 'job-1', cursor: '1 OR 1=1' });
+
+    const prima = (runQueryRows as any).mock.calls[0][2] as string;
+    expect(prima).not.toContain('WHERE');
+  });
+});
+
 describe('recomputeUpdateSQL', () => {
+  it('un costo negativo diventa zero', () => {
+    expect(recomputeUpdateSQL([{ id: '7', cost: -5 }])).toContain('(7::bigint, 0.00::numeric)');
+  });
+
   it('rifiuta un id che non e\' un intero', () => {
     expect(() => recomputeUpdateSQL([{ id: "1; DROP TABLE orders", cost: 1 }])).toThrow();
   });
@@ -285,6 +360,31 @@ describe('enqueueLogisticsRecompute', () => {
     await enqueueLogisticsRecompute('shop-1');
 
     expect(righeCoda.size).toBe(2);
+  });
+
+  it('il ricalcolo accodato dopo un salvataggio riparte da zero, senza cursore', async () => {
+    await enqueueLogisticsRecompute('shop-1');
+    [...righeCoda.values()][0].status = 'processing';
+
+    await enqueueLogisticsRecompute('shop-1');
+
+    const seguito = [...righeCoda.values()][1];
+    expect(seguito.dedupKey).toContain(':dopo:');
+    expect((seguito.payload as { cursor?: unknown } | null)?.cursor).toBeUndefined();
+  });
+
+  it('catena esaurita: niente accodato, e lo dice con un ALLARME', async () => {
+    // Ogni chiave e' gia' presa da un ricalcolo partito.
+    (prisma.syncRequest.createMany as any).mockResolvedValue({ count: 0 });
+    let n = 0;
+    (prisma.syncRequest.findUnique as any).mockImplementation(async () => ({
+      id: `r${n++}`,
+      status: 'processing',
+    }));
+
+    await enqueueLogisticsRecompute('shop-1');
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('ALLARME'));
   });
 
   it('negozi diversi non si deduplicano fra loro', async () => {

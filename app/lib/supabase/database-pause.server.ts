@@ -29,6 +29,7 @@ import {
   setDatabasePauseState,
 } from '~/lib/cache/database-pause-cache.server';
 import { enqueueManualSync, triggerSyncDrain } from '~/lib/queue/trigger.server';
+import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute-enqueue.server';
 import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { getProject, isSupabaseCredentialDead } from '~/lib/supabase-management.server';
 import {
@@ -111,6 +112,12 @@ export async function refreshDatabasePauseState(
     await enqueueManualSync(shopId).catch((e) =>
       console.error('[database-pause] ripartenza della sincronizzazione non accodata:', e),
     );
+    // Anche il ricalcolo dei costi logistici: un salvataggio delle tariffe
+    // fatto a database fermo ha visto il suo ricalcolo saltare, e la
+    // sincronizzazione riscrive solo gli ordini cambiati — lo storico
+    // resterebbe con i costi vecchi. Senza tariffe configurate il ricalcolo
+    // scrive zero dove c'e' gia' zero, cioe' niente. Non solleva mai.
+    await enqueueLogisticsRecompute(shopId);
     triggerSyncDrain(shopId);
   }
 

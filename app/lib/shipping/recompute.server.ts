@@ -23,9 +23,8 @@ import { databaseIsStopped, effectiveAvailability } from '~/lib/supabase/databas
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
 import { can } from '~/lib/authz/capabilities';
-import { dedupKeyFor, redactError } from '~/lib/queue/queue-model';
-import { enqueueSyncRequest } from '~/lib/queue/queue-store.server';
-import { triggerSyncDrain } from '~/lib/queue/trigger.server';
+import { redactError } from '~/lib/queue/queue-model';
+import { enqueueLogisticsContinuation } from './recompute-enqueue.server';
 import { computeLogisticsCost } from './logistics-cost';
 import { loadLogisticsConfigStrict } from './load-config.server';
 import type { OrderLogisticsInput } from './types';
@@ -34,14 +33,15 @@ import type { OrderLogisticsInput } from './types';
 export const RECOMPUTE_PAGE_SIZE = 500;
 
 /**
- * Quante volte si segue la catena dei ricalcoli gia' partiti.
+ * Quanto lavora una corsa prima di passare il testimone a una continuazione.
  *
- * Ogni anello e' un ricalcolo che ha gia' letto le tariffe: la catena cresce
- * di uno solo quando un salvataggio arriva mentre l'ultimo sta lavorando,
- * quindi nella pratica e' lunga uno o due. Il tetto c'e' solo perche' un ciclo
- * senza tetto e' un ciclo che prima o poi non finisce.
+ * Sotto il tetto del tipo (270 s in queue-model) con margine per l'ultima
+ * pagina e per l'accodamento del seguito. Senza tappe, un negozio con
+ * centinaia di migliaia di ordini toccherebbe il tetto a ogni tentativo,
+ * ripartirebbe da zero ogni volta e finirebbe in lettera morta senza aver mai
+ * finito.
  */
-const MAX_CATENA = 5;
+export const RECOMPUTE_BUDGET_MS = 200_000;
 
 /** Il tetto di NUMERIC(10,2): oltre, Postgres rifiuterebbe l'intera pagina. */
 const MAX_COSTO = 99_999_999.99;
@@ -52,52 +52,9 @@ interface LeaseLike {
   assertHeld(): Promise<void>;
 }
 
-/**
- * Mette in coda il ricalcolo per un negozio. Da chiamare DOPO aver salvato.
- *
- * LA DEDUPLICA. La stessa delle sincronizzazioni (tipo + negozio + finestra di
- * un minuto): dieci salvataggi di fila fanno un ricalcolo solo. Con una
- * differenza che qui conta: un salvataggio si puo' fondere in un ricalcolo solo
- * se quello non ha ancora letto le tariffe, cioe' se e' ancora 'queued'. Se e'
- * gia' partito (o finito) le ha lette vecchie, e fondersi in lui vorrebbe dire
- * lasciare sugli ordini i costi di prima del salvataggio. Allora se ne accoda
- * uno "dopo di lui", con una chiave legata al suo id: i salvataggi successivi
- * si fondono in quello, finche' non parte a sua volta.
- *
- * NON SOLLEVA. Chi chiama ha gia' salvato: far fallire la sua action per un
- * guasto della coda mostrerebbe un errore su un salvataggio riuscito. Il guasto
- * finisce nei log come ALLARME, e il prossimo salvataggio riaccoda.
- */
-export async function enqueueLogisticsRecompute(shopId: string): Promise<void> {
-  try {
-    const base = dedupKeyFor('logistics-recompute', shopId, new Date());
-    let chiave = base;
-
-    for (let anello = 0; anello < MAX_CATENA; anello++) {
-      const esito = await enqueueSyncRequest({
-        type: 'logistics-recompute',
-        shopId,
-        dedupKey: chiave,
-      });
-      if (!esito.duplicate) break;
-
-      const esistente = await prisma.syncRequest.findUnique({
-        where: { dedupKey: chiave },
-        select: { id: true, status: true },
-      });
-      // Ancora da prendere: leggera' le tariffe appena salvate. Basta lui.
-      if (!esistente || esistente.status === 'queued') break;
-
-      chiave = `${base}:dopo:${esistente.id}`;
-    }
-
-    triggerSyncDrain(shopId);
-  } catch (error) {
-    console.error(
-      `[logistics-recompute] ALLARME ricalcolo non accodato per il negozio ${shopId}: ${redactError(error)}`,
-    );
-  }
-}
+// L'accodamento vive in un file suo (vedi li' il perche'); lo si riesporta da
+// qui perche' e' questo il punto d'ingresso che le rotte delle tariffe usano.
+export { enqueueLogisticsRecompute } from './recompute-enqueue.server';
 
 /** Una riga letta dal database del merchant, come la restituisce la Management API. */
 interface OrderRow {
@@ -150,10 +107,12 @@ function idSicuro(valore: string | number): string {
  * blocca la pagina intera per un ordine solo.
  */
 function costoSicuro(valore: number): string {
-  if (!Number.isFinite(valore) || Math.abs(valore) > MAX_COSTO) return '0.00';
+  // Un costo negativo non ha senso (nessuno paga noi per spedire): se esce
+  // dal calcolo e' un dato sbagliato in configurazione, e non deve gonfiare il
+  // profitto.
+  if (!Number.isFinite(valore) || valore < 0 || valore > MAX_COSTO) return '0.00';
   const arrotondato = Math.round(valore * 100) / 100;
-  // `Object.is` per non scrivere "-0.00".
-  return (Object.is(arrotondato, -0) ? 0 : arrotondato).toFixed(2);
+  return arrotondato.toFixed(2);
 }
 
 /** La lettura di una pagina di ordini, dopo l'ultimo id visto. */
@@ -208,10 +167,26 @@ async function databaseFermo(shopId: string): Promise<boolean> {
  *   "vuota" azzererebbe costi giusti.
  * - qualunque altro guasto del database acceso: si solleva, la coda ritenta.
  */
+export interface RecomputeContext {
+  lease?: LeaseLike;
+  signal?: AbortSignal;
+  /** L'id dell'item in coda: lega la chiave della continuazione a questa corsa. */
+  jobId?: string;
+  /** Da dove riprendere, se questa e' una continuazione. null = da zero. */
+  cursor?: string | null;
+  /** Iniettabili per le prove: il budget di una tappa e l'orologio in ms. */
+  budgetMs?: number;
+  clock?: () => number;
+}
+
 export async function processLogisticsRecompute(
   shopId: string,
-  ctx: { lease?: LeaseLike; signal?: AbortSignal } = {},
+  ctx: RecomputeContext = {},
 ): Promise<void> {
+  const orologio = ctx.clock ?? (() => Date.now());
+  const partenza = orologio();
+  const budget = ctx.budgetMs ?? RECOMPUTE_BUDGET_MS;
+
   const shop = await prisma.shop.findUnique({
     where: { id: shopId },
     include: { supabaseConfig: true },
@@ -292,8 +267,16 @@ export async function processLogisticsRecompute(
     }
   };
 
+  // Il cursore arriva dal payload della coda: lo si valida come qualunque altro
+  // valore che finisce nell'SQL. Se e' malformato si riparte da zero, che
+  // costa tempo ma non sbaglia niente.
   let dopoId: string | null = null;
+  if (ctx.cursor != null) {
+    if (ID_VALIDO.test(ctx.cursor)) dopoId = ctx.cursor;
+    else console.warn(`[logistics-recompute] cursore non valido per il negozio ${shopId}: si riparte da zero`);
+  }
   let aggiornati = 0;
+  let passaggio: string | null = null;
 
   try {
     for (;;) {
@@ -319,10 +302,29 @@ export async function processLogisticsRecompute(
 
       if (righe.length < RECOMPUTE_PAGE_SIZE) break;
       dopoId = idSicuro(righe[righe.length - 1].shopify_order_id);
+
+      // Budget finito: ci si ferma su un confine di pagina, con tutto quel che
+      // e' stato letto gia' scritto, e si passa il cursore a una continuazione.
+      // Questa corsa si chiude completata; il seguito riparte in
+      // un'invocazione nuova, con il suo budget intero.
+      if (orologio() - partenza >= budget) {
+        passaggio = dopoId;
+        break;
+      }
     }
   } catch (error) {
     if (error instanceof Salta) return;
     throw error;
+  }
+
+  if (passaggio !== null) {
+    // Solleva se non entra in coda: meglio ritentare questa corsa che
+    // dichiararla finita lasciando indietro il resto degli ordini.
+    await enqueueLogisticsContinuation(shopId, ctx.jobId ?? 'senza-item', passaggio);
+    console.log(
+      `[logistics-recompute] negozio ${shopId}: ${aggiornati} ordini ricalcolati, si prosegue dopo l'ordine ${passaggio}`,
+    );
+    return;
   }
 
   console.log(`[logistics-recompute] negozio ${shopId}: ${aggiornati} ordini ricalcolati`);
