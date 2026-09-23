@@ -73,6 +73,8 @@ const ROTTE: { pattern: RegExp; modulo: string; tipo: 'loader' | 'action'; param
     tipo: 'loader',
     parametri: ['id'],
   },
+  // Le azioni della pagina Spedizioni: salvataggio tariffe e packaging.
+  { pattern: /^\/spedizioni$/, modulo: '/app/routes/spedizioni.tsx', tipo: 'action' },
 ];
 
 const vite: ViteDevServer = await createViteServer({
