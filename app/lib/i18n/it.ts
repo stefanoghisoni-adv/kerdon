@@ -410,7 +410,7 @@ export const it = {
     /** Il numero per cui il merchant apre l'app. */
     profit: {
       title: "Profitto del mese",
-      hint: "Quanto resta dopo i costi di prodotto, spedizione e packaging, sugli ordini di questo mese.",
+      hint: "Quanto resta dopo i costi di prodotto, spedizione, packaging e resi, sugli ordini di questo mese.",
       orders: (n: number) => `${n} ${n === 1 ? "ordine" : "ordini"}`,
       reliability: (percent: number) =>
         `Calcolato sul ${percent}% delle righe d’ordine`,
@@ -429,7 +429,7 @@ export const it = {
       title: "Margine medio per ordine",
       detail: (profit: string, value: string) =>
         `${profit} su ${value} per ordine`,
-      hint: "Quanto resta di un ordine medio dopo i costi di prodotto, spedizione e packaging.",
+      hint: "Quanto resta di un ordine medio dopo i costi di prodotto, spedizione, packaging e resi.",
       noOrders: "Ancora nessun ordine da cui calcolarlo.",
     },
     /** Quanto di cio' che si incassa resta. */
@@ -1088,7 +1088,7 @@ export const it = {
     },
     title: "Clienti",
     intro:
-      "Quanto rende ogni cliente, al netto dei costi di prodotto, spedizione e packaging.",
+      "Quanto rende ogni cliente, al netto dei costi di prodotto, spedizione, packaging e resi.",
     range: "Periodo",
     apply: "Applica",
     columns: {

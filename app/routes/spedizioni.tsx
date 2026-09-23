@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useActionData, useFetcher, useLoaderData } from '@remix-run/react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Banner,
   BlockStack,
@@ -171,9 +171,32 @@ export default function ShippingPage() {
   const t = useT();
 
   const [editingZone, setEditingZone] = useState<typeof zones[0] | null>(null);
-  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
 
-  const isSyncing = fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'sync-zones';
+  const isSyncing = fetcher.state !== 'idle' && (fetcher.formData as FormData | undefined)?.get('intent') === 'sync-zones';
+
+  // Mostra toast solo dopo risposta del server
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcher.data) {
+      const formData = fetcher.formData as FormData | undefined;
+      const intent = formData?.get('intent')?.toString();
+
+      if (fetcher.data.success) {
+        if (intent === 'sync-zones') {
+          setSuccessToast(t.shipping.syncSuccess);
+        } else if (intent === 'save-zone-rates') {
+          setSuccessToast(t.shipping.modal.saveSuccess);
+        }
+      } else if ('error' in fetcher.data && fetcher.data.error !== 'scope_error') {
+        if (intent === 'sync-zones') {
+          setErrorToast(t.shipping.syncError);
+        } else if (intent === 'save-zone-rates') {
+          setErrorToast(t.shipping.modal.saveError);
+        }
+      }
+    }
+  }, [fetcher.state, fetcher.data, t]);
 
   const handleSync = () => {
     fetcher.submit({ intent: 'sync-zones' }, { method: 'post' });
@@ -203,7 +226,6 @@ export default function ShippingPage() {
 
     fetcher.submit(formData, { method: 'post' });
     setEditingZone(null);
-    setShowSuccessToast(true);
   };
 
   // Mostra errore di scope se presente
@@ -249,16 +271,25 @@ export default function ShippingPage() {
 
         {editingZone && (
           <EditZoneModal
+            key={editingZone.id}
             zone={editingZone}
             onClose={handleModalClose}
             onSave={handleModalSave}
           />
         )}
 
-        {showSuccessToast && (
+        {successToast && (
           <Toast
-            content={t.shipping.modal.saveSuccess}
-            onDismiss={() => setShowSuccessToast(false)}
+            content={successToast}
+            onDismiss={() => setSuccessToast(null)}
+          />
+        )}
+
+        {errorToast && (
+          <Toast
+            content={errorToast}
+            error
+            onDismiss={() => setErrorToast(null)}
           />
         )}
       </BlockStack>

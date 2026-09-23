@@ -1,6 +1,5 @@
 import { Button, DataTable } from '@shopify/polaris';
 import { useT, useLocale } from '~/lib/i18n/context';
-import type { RateBracket } from '~/lib/shipping/types';
 import { formatMoney } from '~/lib/billing/money';
 
 interface Zone {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   BlockStack,
   InlineStack,
+  Box,
   Button,
   TextField,
   Checkbox,
@@ -29,19 +30,12 @@ export function BracketsEditor({ initialBrackets = [], onChange }: BracketsEdito
     value: string
   ) => {
     const newBrackets = [...brackets];
-    const numValue = value === '' ? 0 : parseFloat(value);
+    const numValue = parseFloat(value) || 0;
 
-    if (field === 'weightFromKg' || field === 'weightToKg') {
-      newBrackets[index] = {
-        ...newBrackets[index],
-        [field]: value === '' ? null : numValue,
-      };
-    } else {
-      newBrackets[index] = {
-        ...newBrackets[index],
-        cost: numValue,
-      };
-    }
+    newBrackets[index] = {
+      ...newBrackets[index],
+      [field]: value === '' && field !== 'cost' ? null : numValue,
+    };
 
     setBrackets(newBrackets);
     onChange(newBrackets);
@@ -83,7 +77,7 @@ export function BracketsEditor({ initialBrackets = [], onChange }: BracketsEdito
       {brackets.map((bracket, index) => (
         <BlockStack key={index} gap="200">
           <InlineStack gap="200" align="start" blockAlign="start">
-            <div style={{ flex: 1 }}>
+            <Box width="100%">
               <TextField
                 label={t.shipping.modal.bracketWeightFrom}
                 type="number"
@@ -93,9 +87,9 @@ export function BracketsEditor({ initialBrackets = [], onChange }: BracketsEdito
                 min={0}
                 step={0.1}
               />
-            </div>
+            </Box>
 
-            <div style={{ flex: 1 }}>
+            <Box width="100%">
               <TextField
                 label={t.shipping.modal.bracketWeightTo}
                 type="number"
@@ -106,9 +100,9 @@ export function BracketsEditor({ initialBrackets = [], onChange }: BracketsEdito
                 min={0}
                 step={0.1}
               />
-            </div>
+            </Box>
 
-            <div style={{ flex: 1 }}>
+            <Box width="100%">
               <TextField
                 label={t.shipping.modal.bracketCost}
                 type="number"
@@ -118,14 +112,14 @@ export function BracketsEditor({ initialBrackets = [], onChange }: BracketsEdito
                 min={0}
                 step={0.01}
               />
-            </div>
+            </Box>
 
             {brackets.length > 1 && (
-              <div style={{ paddingTop: '26px' }}>
+              <Box paddingBlockStart="600">
                 <Button onClick={() => handleRemoveBracket(index)} tone="critical">
                   {t.shipping.modal.removeBracket}
                 </Button>
-              </div>
+              </Box>
             )}
           </InlineStack>
 

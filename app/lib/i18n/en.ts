@@ -358,7 +358,7 @@ export const en: typeof it = {
   dashboard: {
     profit: {
       title: "Profit this month",
-      hint: "What’s left after product, shipping and packaging costs, on this month’s orders.",
+      hint: "What’s left after product, shipping, packaging and return costs, on this month’s orders.",
       orders: (n: number) => `${n} ${n === 1 ? "order" : "orders"}`,
       reliability: (percent: number) => `Based on ${percent}% of order lines`,
       complete: "Based on every order line",
@@ -374,7 +374,7 @@ export const en: typeof it = {
       title: "Average margin per order",
       detail: (profit: string, value: string) =>
         `${profit} of ${value} per order`,
-      hint: "What’s left of an average order after product, shipping and packaging costs.",
+      hint: "What’s left of an average order after product, shipping, packaging and return costs.",
       noOrders: "No orders to work from yet.",
     },
     profitability: {
@@ -865,7 +865,7 @@ export const en: typeof it = {
       help: "Information integrated using customer metafields",
     },
     title: "Customers",
-    intro: "What each customer is worth, after product, shipping and packaging costs.",
+    intro: "What each customer is worth, after product, shipping, packaging and return costs.",
     range: "Period",
     apply: "Apply",
     columns: {

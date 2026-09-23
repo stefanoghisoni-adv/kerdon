@@ -11,6 +11,27 @@ import { BracketsEditor } from './BracketsEditor';
 import { validateBrackets } from './brackets';
 import type { RateBracket } from '~/lib/shipping/types';
 
+// Mappa tipizzata degli errori di validazione alle chiavi i18n
+function getValidationErrorMessage(
+  errorCode: string | null,
+  t: ReturnType<typeof useT>
+): string | null {
+  if (!errorCode) return null;
+
+  const errorMap: Record<string, string> = {
+    'shipping.errors.atLeastOneBracket': t.shipping.errors.atLeastOneBracket,
+    'shipping.errors.firstBracketMustStartAtZero': t.shipping.errors.firstBracketMustStartAtZero,
+    'shipping.errors.bracketsHaveGaps': t.shipping.errors.bracketsHaveGaps,
+    'shipping.errors.bracketsOverlap': t.shipping.errors.bracketsOverlap,
+    'shipping.errors.onlyLastBracketCanBeUnlimited': t.shipping.errors.onlyLastBracketCanBeUnlimited,
+    'shipping.errors.costMustBeNonNegative': t.shipping.errors.costMustBeNonNegative,
+    'shipping.errors.weightFromGreaterThanWeightTo': t.shipping.errors.weightFromGreaterThanWeightTo,
+    'shipping.errors.invalidLinearCost': t.shipping.errors.invalidLinearCost,
+  };
+
+  return errorMap[errorCode] ?? t.shipping.modal.saveError;
+}
+
 interface Zone {
   id: string;
   zoneName: string;
@@ -150,7 +171,7 @@ export function EditZoneModal({ zone, onClose, onSave }: EditZoneModalProps) {
 
           {validationError && validationError !== 'shipping.errors.invalidLinearCost' && (
             <Text as="p" tone="critical">
-              {(t.shipping.errors as any)[validationError.split('.').pop()!]}
+              {getValidationErrorMessage(validationError, t)}
             </Text>
           )}
         </BlockStack>
