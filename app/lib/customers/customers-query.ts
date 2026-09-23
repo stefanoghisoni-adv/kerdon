@@ -20,6 +20,12 @@
  * ognuna di queste query, con dei confini che il fuso del negozio non lo
  * conoscevano: sta in `dates/order-window`, dove c'e' scritto anche perche' un
  * giorno non duri sempre ventiquattro ore.
+ *
+ * E vale per il COSTO LOGISTICO: ogni `profit` qui e' `ORDER_PROFIT_SUM`, cioe'
+ * contributo delle righe meno spedizione, imballo e rientro dell'ordine. La
+ * giuntura con `order_lines` ripete l'ordine una volta per riga, e sommare il
+ * costo "normalmente" lo toglierebbe tante volte quante righe: il frammento lo
+ * conta sulla prima riga soltanto, e il perche' sta accanto a lui.
  */
 
 
@@ -27,9 +33,9 @@ import { placedAtWindowSQL } from '~/lib/dates/order-window';
 import { comparisonRange } from '~/lib/dates/ranges';
 import {
   COVERED_LINES,
-  NET_CONTRIBUTION_SUM,
   NET_REVENUE_SUM,
   ORDER_COUNTS_AS_SALE,
+  ORDER_PROFIT_SUM,
   TOTAL_LINES,
 } from './net-contribution';
 
@@ -83,7 +89,7 @@ SELECT
   MAX(o.customer_first_name) AS first_name,
   MAX(o.customer_last_name) AS last_name,
   COUNT(DISTINCT o.shopify_order_id) AS orders,
-  ${NET_CONTRIBUTION_SUM} AS profit,
+  ${ORDER_PROFIT_SUM} AS profit,
   ${COVERED_LINES} AS covered_lines,
   ${TOTAL_LINES} AS total_lines,
   -- La valuta con cui il negozio vende, non quella con cui paga noi: il
@@ -125,7 +131,7 @@ export function lifetimeProfitSQL(limit = 500): string {
 SELECT
   o.shopify_customer_id AS customer_id,
   COUNT(DISTINCT o.shopify_order_id) AS orders,
-  ${NET_CONTRIBUTION_SUM} AS profit
+  ${ORDER_PROFIT_SUM} AS profit
 FROM orders o
 JOIN order_lines l ON l.shopify_order_id = o.shopify_order_id
 LEFT JOIN products p ON p.shopify_variant_id = l.shopify_variant_id
@@ -173,7 +179,7 @@ export function shopProfitSQL(input: QueryRange): string {
   return `
 SELECT
   COUNT(DISTINCT o.shopify_order_id) AS orders,
-  ${NET_CONTRIBUTION_SUM} AS profit,
+  ${ORDER_PROFIT_SUM} AS profit,
   ${COVERED_LINES} AS covered_lines,
   ${TOTAL_LINES} AS total_lines,
   MAX(o.currency) AS currency
@@ -212,7 +218,7 @@ SELECT
   COUNT(DISTINCT o.shopify_customer_id) FILTER (WHERE o.shopify_customer_id IS NOT NULL)
     AS customers,
   ${NET_REVENUE_SUM} AS revenue,
-  ${NET_CONTRIBUTION_SUM} AS profit,
+  ${ORDER_PROFIT_SUM} AS profit,
   -- Su quante righe d'ordine il profitto si e' potuto calcolare davvero.
   --
   -- Il profitto qui sopra somma SOLO le righe il cui prodotto ha un costo noto,

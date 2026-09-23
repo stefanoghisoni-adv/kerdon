@@ -141,12 +141,63 @@ export const ORDER_CURRENCY_CONSISTENT = `NOT EXISTS (
 export const ORDER_COUNTS_AS_SALE = `o.cancelled_at IS NULL\n  AND ${ORDER_CURRENCY_CONSISTENT}`;
 
 /**
+ * Il costo logistico degli ordini (spedizione, imballo, rientro), contato UNA
+ * volta per ordine.
+ *
+ * PERCHE' NON BASTA UN SUM. Il costo sta sull'ordine (`o.logistics_cost`), ma
+ * le query del profitto uniscono `orders` a `order_lines`: ogni ordine compare
+ * tante volte quante sono le sue righe. `SUM(o.logistics_cost)` toglierebbe 40
+ * a un ordine di quattro righe con 10 di spedizione. E `SUM(DISTINCT ...)` non
+ * e' la cura: due ordini diversi con lo stesso costo varrebbero uno.
+ *
+ * COME. Si somma il costo solo sulla PRIMA riga dell'ordine — quella con lo
+ * `shopify_line_id` piu' basso, che e' UNIQUE NOT NULL, quindi c'e' sempre ed
+ * e' una sola. La sottoquery e' correlata come quella della valuta qui sopra, e
+ * cammina sull'indice `idx_order_lines_order`. Scelta per leggibilita': dice
+ * esattamente "una volta per ordine" senza costringere ogni query a diventare
+ * una sottoquery per ordine piu' un'aggregazione esterna.
+ *
+ * Funziona in qualunque raggruppamento in cui un ordine cade intero in un
+ * gruppo solo (per cliente, per negozio): e' il caso di tutte le query della
+ * tab Clienti, che non escludono mai singole righe. Una query che un giorno
+ * filtrasse le righe (per prodotto, per variante) potrebbe scartare proprio la
+ * prima e perdere il costo: li' serve un'altra forma, ed e' anche il motivo per
+ * cui il profitto per prodotto il costo logistico non lo porta.
+ *
+ * `logistics_cost` NULL — gli ordini scritti prima che la colonna esistesse —
+ * vale 0: un profitto NULL cancellerebbe tutto il resto del conto. Il
+ * COALESCE esterno copre il gruppo senza nessuna riga.
+ *
+ * Non filtra da se' gli ordini che non sono vendite: si usa SOLO in una query
+ * con `ORDER_COUNTS_AS_SALE` nel WHERE, come la somma dei contributi. Un ordine
+ * annullato o in valute discordi non arriva nemmeno al FILTER, e non sottrae
+ * niente.
+ */
+export const ORDER_LOGISTICS_SUM = `COALESCE(SUM(COALESCE(o.logistics_cost, 0)) FILTER (WHERE l.shopify_line_id = (
+    SELECT MIN(fl.shopify_line_id) FROM order_lines fl
+    WHERE fl.shopify_order_id = o.shopify_order_id
+  )), 0)`;
+
+/**
+ * Il profitto degli ordini: contributo delle righe meno il costo logistico.
+ *
+ * Tutte le query della tab Clienti scrivono il profitto cosi', da qui: la
+ * sottrazione in un posto solo, per la stessa ragione del contributo netto.
+ */
+export const ORDER_PROFIT_SUM = `(${NET_CONTRIBUTION_SUM} - ${ORDER_LOGISTICS_SUM})`;
+
+/**
  * Il contributo netto di una riga, fuori dall'SQL: stessa formula, stesso ordine.
  *
  * `unitCostAtSale` ha la precedenza come nell'SQL, ed e' un parametro a se' e
  * non un valore gia' risolto dal chiamante: risolverlo fuori vorrebbe dire due
  * posti in cui ricordarsi quale dei due costi vince, che e' esattamente cio' che
  * questo file esiste per impedire.
+ *
+ * Il costo logistico qui NON c'e', e di proposito: e' un costo dell'ordine, non
+ * della riga, e una funzione per riga non ha modo di contarlo una volta sola.
+ * Nell'SQL lo toglie `ORDER_LOGISTICS_SUM`; chi somma righe in TypeScript
+ * (oggi nessuno fuori dai test: `profit.ts`) deve toglierlo per ordine.
  */
 export function netContribution(input: {
   lineNetTotal: number | null;

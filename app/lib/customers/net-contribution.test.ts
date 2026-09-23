@@ -7,10 +7,11 @@ import {
   NET_REVENUE_SUM,
   ORDER_COUNTS_AS_SALE,
   ORDER_CURRENCY_CONSISTENT,
+  ORDER_LOGISTICS_SUM,
   netContribution,
 } from './net-contribution';
 import { averagesSQL, customersInRangeSQL, lifetimeProfitSQL, shopProfitSQL } from './customers-query';
-import { topProductsSQL } from './top-products';
+import { METRICS, topProductsSQL } from './top-products';
 
 const RANGE = { from: '2026-08-01', to: '2026-08-31', timeZone: 'Europe/Rome' };
 
@@ -154,5 +155,41 @@ describe('il costo fissato vince su quello corrente', () => {
     expect(
       netContribution({ lineNetTotal: 100, unitCost: null, unitCostAtSale: null, currentQuantity: 2 }),
     ).toBeNull();
+  });
+});
+
+describe('il costo logistico dell ordine', () => {
+  it('conta ogni ordine una volta sola: solo sulla sua prima riga', () => {
+    expect(ORDER_LOGISTICS_SUM).toContain('FILTER (WHERE l.shopify_line_id = (');
+    expect(ORDER_LOGISTICS_SUM).toContain('MIN(fl.shopify_line_id)');
+    expect(ORDER_LOGISTICS_SUM).toContain('fl.shopify_order_id = o.shopify_order_id');
+  });
+
+  it('un costo mancante vale zero, e una somma vuota pure', () => {
+    expect(ORDER_LOGISTICS_SUM).toContain('COALESCE(o.logistics_cost, 0)');
+    expect(ORDER_LOGISTICS_SUM.startsWith('COALESCE(SUM(')).toBe(true);
+    expect(ORDER_LOGISTICS_SUM.endsWith(', 0)')).toBe(true);
+  });
+
+  it('ogni profitto della tab Clienti lo sottrae, e solo dove gli ordini sono vendite', () => {
+    const queries = [
+      customersInRangeSQL(RANGE),
+      lifetimeProfitSQL(),
+      shopProfitSQL(RANGE),
+      averagesSQL(RANGE),
+      averagesSQL(),
+    ];
+    for (const sql of queries) {
+      expect(sql).toContain(`(${NET_CONTRIBUTION_SUM} - ${ORDER_LOGISTICS_SUM}) AS profit`);
+      // Il frammento non filtra da se' gli annullati: si affida al WHERE.
+      expect(sql).toContain(`WHERE ${ORDER_COUNTS_AS_SALE}`);
+    }
+  });
+
+  it('il profitto per prodotto resta senza costo logistico', () => {
+    // E' un costo dell'ordine, non del prodotto (spec rev. 1.1 punto 2).
+    for (const metric of METRICS) {
+      expect(topProductsSQL({ ...RANGE, metric })).not.toContain('logistics_cost');
+    }
   });
 });
