@@ -170,6 +170,24 @@ describe('tabelle degli ordini', () => {
   });
 });
 
+describe('ordini: i dati di spedizione', () => {
+  const sql = buildOrdersSchemaSQL();
+
+  it('le sette colonne arrivano anche ai database gia esistenti', () => {
+    for (const column of [
+      'fulfillment_status TEXT',
+      'shipping_country_code TEXT',
+      'total_weight_grams INTEGER',
+      'item_count INTEGER',
+      'returned_at TIMESTAMP',
+      'packaging_category TEXT',
+      'logistics_cost NUMERIC(10, 2)',
+    ]) {
+      expect(sql).toContain(`ADD COLUMN IF NOT EXISTS ${column}`);
+    }
+  });
+});
+
 describe('buildMerchantSchemaSQL', () => {
   it('gli ordini si creano solo quando li si potra riempire', () => {
     expect(buildMerchantSchemaSQL(true)).not.toContain('CREATE TABLE IF NOT EXISTS orders');

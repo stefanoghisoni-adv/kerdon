@@ -81,6 +81,11 @@ describe('numero di versione e cio che promette', () => {
     expect(LATEST_SCHEMA_VERSION).not.toBe(3);
   });
 
+  it('la 12 porta sugli ordini i dati di spedizione', () => {
+    // Solo colonne aggiunte: basta alzare il numero, la DDL additiva fa il resto.
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(12);
+  });
+
   it('l aggiornamento porta le colonne dell indirizzo del cliente', () => {
     // Sono aggiunte, quindi non hanno un passo esplicito: le porta la DDL
     // idempotente, che pero' viaggia solo se il numero di versione e' salito.

@@ -249,6 +249,17 @@ interface GqlOrder {
   currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
   customer: { id: string; firstName: string | null; lastName: string | null } | null;
   lineItems: GqlConnection<GqlOrderLineItem>;
+  // I campi di spedizione. Tutti facoltativi: una risposta che non li porta
+  // (un finto nei test, un ordine letto con una query vecchia) non deve
+  // rompere la mappatura, solo lasciare vuote le colonne.
+  displayFulfillmentStatus?: string | null;
+  /** Una lista, non una connessione: `first` e' un argomento, non ci sono `nodes`. */
+  fulfillments?: { trackingInfo: { number: string | null }[] | null }[] | null;
+  shippingAddress?: { countryCodeV2: string | null } | null;
+  /** UnsignedInt64, in grammi: in JSON arriva come stringa. */
+  totalWeight?: string | number | null;
+  returns?: { nodes: { status: string | null; createdAt: string | null }[] | null } | null;
+  metafield?: { value: string | null } | null;
 }
 
 /**
@@ -264,11 +275,59 @@ function orderNodeFields(lineItemsFirst: number): string {
     id name createdAt updatedAt cancelledAt displayFinancialStatus
     currentTotalPriceSet { shopMoney { amount currencyCode } }
     customer { id firstName lastName }
+    displayFulfillmentStatus
+    fulfillments(first: 10) { trackingInfo { number } }
+    shippingAddress { countryCodeV2 }
+    totalWeight
+    returns(first: 5) { nodes { status createdAt } }
+    metafield(namespace: "custom", key: "packaging_category") { value }
     lineItems(first: ${lineItemsFirst}) {
       pageInfo { hasNextPage endCursor }
       nodes { ${LINE_ITEM_FIELDS} }
     }
   `;
+}
+
+/** Un reso annullato o rifiutato non e' un pacco rientrato. */
+const RESO_NON_AVVENUTO = new Set(['CANCELED', 'DECLINED']);
+
+/**
+ * Dai campi di spedizione GraphQL a quelli che si scrivono sull'ordine.
+ *
+ * Il tracking vince sullo stato: un ordine reso Shopify lo mostra RESTOCKED, ma
+ * il pacco all'andata e' partito e il corriere l'ha fatturato. Se non si
+ * guardasse il tracking, il reso cancellerebbe il costo dell'andata proprio
+ * nell'ordine che e' costato di piu'.
+ *
+ * Il peso viene arrotondato all'intero: Shopify lo dichiara in grammi, e
+ * `total_weight_grams` e' INTEGER. Un valore non numerico resta NULL — il costo
+ * ripiega sul peso di default per articolo — invece di diventare zero.
+ */
+function mapOrderLogistics(o: GqlOrder): Pick<
+  ShopifyOrder,
+  | 'fulfillment_status'
+  | 'shipping_country_code'
+  | 'total_weight_grams'
+  | 'returned_at'
+  | 'packaging_category'
+> {
+  const tracciato = (o.fulfillments ?? []).some((f) =>
+    (f.trackingInfo ?? []).some((t) => !!t.number),
+  );
+
+  const peso = o.totalWeight == null ? NaN : Number(o.totalWeight);
+
+  const reso = (o.returns?.nodes ?? []).find(
+    (r) => !RESO_NON_AVVENUTO.has((r.status ?? '').toUpperCase()),
+  );
+
+  return {
+    fulfillment_status: tracciato ? 'FULFILLED' : (o.displayFulfillmentStatus ?? null),
+    shipping_country_code: o.shippingAddress?.countryCodeV2 ?? null,
+    total_weight_grams: Number.isFinite(peso) ? Math.round(peso) : null,
+    returned_at: reso?.createdAt ?? null,
+    packaging_category: o.metafield?.value || null,
+  };
 }
 
 /**
@@ -1407,6 +1466,7 @@ export class ShopifyAPIClient {
       // Adesso serve davvero: le righe non si aggiungono piu' soltanto, chi
       // scrive cancella quelle sparite — ma solo con questo bit a `true`.
       lines_complete: linesComplete,
+      ...mapOrderLogistics(o),
     };
   }
 

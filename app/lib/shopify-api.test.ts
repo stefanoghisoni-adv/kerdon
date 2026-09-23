@@ -867,6 +867,114 @@ describe('Paginazione delle connessioni annidate', () => {
   });
 });
 
+describe('ordini: i dati di spedizione', () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+
+  const orderNode = (over: Record<string, unknown> = {}) => ({
+    id: 'gid://shopify/Order/700',
+    name: '#1700',
+    createdAt: '2026-08-01T00:00:00Z',
+    updatedAt: '2026-08-02T00:00:00Z',
+    cancelledAt: null,
+    displayFinancialStatus: 'PAID',
+    currentTotalPriceSet: { shopMoney: { amount: '50.00', currencyCode: 'EUR' } },
+    customer: null,
+    displayFulfillmentStatus: 'UNFULFILLED',
+    fulfillments: [],
+    shippingAddress: { countryCodeV2: 'IT' },
+    // UnsignedInt64: in JSON arriva come stringa.
+    totalWeight: '1250',
+    returns: { nodes: [] },
+    metafield: { value: 'Scatola' },
+    lineItems: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+    ...over,
+  });
+
+  it('chiede i campi di spedizione nella stessa query dell ordine', async () => {
+    (global.fetch as any).mockResolvedValueOnce(ok({ order: orderNode() }));
+    await client().getOrderById(700);
+    const query: string = sentBody().query;
+    for (const field of [
+      'displayFulfillmentStatus',
+      'trackingInfo { number }',
+      'countryCodeV2',
+      'totalWeight',
+      'returns(first: 5)',
+      'key: "packaging_category"',
+    ]) {
+      expect(query).toContain(field);
+    }
+  });
+
+  it('paese, peso e imballo arrivano nella forma che serve al costo', async () => {
+    (global.fetch as any).mockResolvedValueOnce(ok({ order: orderNode() }));
+    const order = await client().getOrderById(700);
+    expect(order).toMatchObject({
+      fulfillment_status: 'UNFULFILLED',
+      shipping_country_code: 'IT',
+      total_weight_grams: 1250,
+      returned_at: null,
+      packaging_category: 'Scatola',
+    });
+  });
+
+  it('un tracking vuol dire spedito, qualunque cosa dica lo stato', async () => {
+    // Un ordine reso torna RESTOCKED, ma il pacco all'andata e' partito e il
+    // corriere l'ha fatturato.
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({
+        order: orderNode({
+          displayFulfillmentStatus: 'RESTOCKED',
+          fulfillments: [{ trackingInfo: [] }, { trackingInfo: [{ number: 'TRK1' }] }],
+        }),
+      }),
+    );
+    const order = await client().getOrderById(700);
+    expect(order?.fulfillment_status).toBe('FULFILLED');
+  });
+
+  it('un reso annullato o rifiutato non e un pacco rientrato', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({
+        order: orderNode({
+          returns: {
+            nodes: [
+              { status: 'CANCELED', createdAt: '2026-08-03T00:00:00Z' },
+              { status: 'DECLINED', createdAt: '2026-08-04T00:00:00Z' },
+              { status: 'OPEN', createdAt: '2026-08-05T00:00:00Z' },
+            ],
+          },
+        }),
+      }),
+    );
+    const order = await client().getOrderById(700);
+    expect(order?.returned_at).toBe('2026-08-05T00:00:00Z');
+  });
+
+  it('solo resi annullati: nessun rientro', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ order: orderNode({ returns: { nodes: [{ status: 'CANCELED', createdAt: '2026-08-03T00:00:00Z' }] } }) }),
+    );
+    const order = await client().getOrderById(700);
+    expect(order?.returned_at).toBeNull();
+  });
+
+  it('senza indirizzo, peso o metafield i campi restano vuoti', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ order: orderNode({ shippingAddress: null, totalWeight: null, metafield: null, fulfillments: null, returns: null }) }),
+    );
+    const order = await client().getOrderById(700);
+    expect(order).toMatchObject({
+      shipping_country_code: null,
+      total_weight_grams: null,
+      packaging_category: null,
+      returned_at: null,
+    });
+  });
+});
+
 // Una versione storta non fallisce in modo riconoscibile: Shopify serve
 // comunque qualcosa — la piu' vecchia ancora supportata — e l'app gira per mesi
 // su una versione che nessuno ha scelto.

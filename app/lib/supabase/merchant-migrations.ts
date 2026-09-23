@@ -325,8 +325,15 @@ END $$;
  * vendite dal profitto del cliente per sempre. Il passo rimette a NULL la data
  * dove un valore fissato non c'e': solo li', perche' e' l'unica combinazione
  * che non puo' voler dire niente di sensato.
+ *
+ * La 12 porta sugli ordini i dati di spedizione — stato di evasione, paese,
+ * peso, articoli, data del reso, imballo — e il costo logistico gia' calcolato.
+ * Solo aggiunte, quindi nessun passo esplicito: le porta la DDL. Nemmeno un
+ * riempimento dello storico: restano NULL finche' l'ordine non viene riscritto
+ * dalla sincronizzazione o dal ricalcolo. Chi li legge deve trattare NULL come
+ * zero: e' il profitto di prima, non un ordine senza profitto.
  */
-export const LATEST_SCHEMA_VERSION = 11;
+export const LATEST_SCHEMA_VERSION = 12;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

@@ -94,3 +94,24 @@ function validateFallbackRules(json: unknown): FallbackRule[] {
     );
   });
 }
+
+/**
+ * La configurazione per chi scrive ordini: mai un'eccezione.
+ *
+ * `loadLogisticsConfig` gia' non solleva, ma chi scrive ordini non deve
+ * dipendere da questa promessa: un guasto sulle tariffe non puo' far perdere
+ * l'ordine, al massimo lo scrive con costo logistico zero — che il ricalcolo
+ * in background sistema appena le tariffe tornano leggibili. Si chiama una
+ * volta per corsa o per evento, mai per ordine.
+ */
+export async function loadLogisticsConfigForWrite(shopId: string): Promise<LogisticsConfig | null> {
+  try {
+    return await loadLogisticsConfig(shopId);
+  } catch (error) {
+    console.warn(
+      `[logistics] configurazione non caricata per lo shop ${shopId}: costo logistico a zero`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}

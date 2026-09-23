@@ -180,6 +180,19 @@ const ORDERS_COLUMNS: Column[] = [
   { name: 'placed_at', type: 'TIMESTAMP' },
   { name: 'updated_at', type: 'TIMESTAMP' },
   { name: 'synced_at', type: 'TIMESTAMP DEFAULT NOW()' },
+  // Cio' che serve a dire quanto e' costato far arrivare l'ordine e, se e'
+  // tornato, farlo rientrare. Il paese e non l'indirizzo: per la tariffa basta
+  // la zona, e un dato personale in piu' non serve a nessun conto.
+  { name: 'fulfillment_status', type: 'TEXT' },
+  { name: 'shipping_country_code', type: 'TEXT' },
+  { name: 'total_weight_grams', type: 'INTEGER' },
+  { name: 'item_count', type: 'INTEGER' },
+  { name: 'returned_at', type: 'TIMESTAMP' },
+  { name: 'packaging_category', type: 'TEXT' },
+  // Il costo gia' calcolato, e non le tariffe: quelle vivono sul database
+  // dell'app, e il profitto si fa in SQL qui, dove non si possono unire.
+  // Si sottrae una volta per ordine, mai una per riga.
+  { name: 'logistics_cost', type: 'NUMERIC(10, 2)' },
 ];
 
 const ORDERS_INDEXES = [
