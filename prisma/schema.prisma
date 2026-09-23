@@ -1636,3 +1636,48 @@ model ProductScopeEntry {
   @@index([shopId, inScope])
   @@map("product_scope")
 }
+
+model ShippingZone {
+  id          String         @id @default(uuid())
+  shopId      String         @map("shop_id")
+  zoneName    String         @map("zone_name")
+  countries   String[]
+  restOfWorld Boolean        @default(false) @map("rest_of_world")
+  rateType    String         @default("linear") @map("rate_type")
+  syncedAt    DateTime       @default(now()) @map("synced_at")
+  rates       ShippingRate[]
+
+  @@unique([shopId, zoneName])
+  @@index([shopId])
+  @@map("shipping_zones")
+}
+
+model ShippingRate {
+  id         String       @id @default(uuid())
+  zoneId     String       @map("zone_id")
+  weightFrom Decimal?     @map("weight_from") @db.Decimal(10, 3)
+  weightTo   Decimal?     @map("weight_to") @db.Decimal(10, 3)
+  cost       Decimal      @db.Decimal(10, 2)
+  zone       ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@index([zoneId])
+  @@map("shipping_rates")
+}
+
+model PackagingConfig {
+  shopId               String   @id @map("shop_id")
+  categories           Json     @default("[]")
+  fallbackRules        Json     @default("[]") @map("fallback_rules")
+  defaultWeightPerItem Decimal? @map("default_weight_per_item") @db.Decimal(10, 3)
+  returnCost           Decimal? @map("return_cost") @db.Decimal(10, 2)
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("packaging_config")
+}
+
+model ShippingAlertDismissal {
+  shopId      String   @id @map("shop_id")
+  dismissedAt DateTime @default(now()) @map("dismissed_at")
+
+  @@map("shipping_alert_dismissals")
+}
