@@ -26,6 +26,7 @@ import { can } from '~/lib/authz/capabilities';
 import { redactError } from '~/lib/queue/queue-model';
 import { enqueueLogisticsContinuation } from './recompute-enqueue.server';
 import { computeLogisticsCost } from './logistics-cost';
+import { clampLogisticsCost } from './cost-clamp';
 import { loadLogisticsConfigStrict } from './load-config.server';
 import type { OrderLogisticsInput } from './types';
 
@@ -42,9 +43,6 @@ export const RECOMPUTE_PAGE_SIZE = 500;
  * finito.
  */
 export const RECOMPUTE_BUDGET_MS = 200_000;
-
-/** Il tetto di NUMERIC(10,2): oltre, Postgres rifiuterebbe l'intera pagina. */
-const MAX_COSTO = 99_999_999.99;
 
 const ID_VALIDO = /^[0-9]{1,19}$/;
 
@@ -102,17 +100,12 @@ function idSicuro(valore: string | number): string {
 /**
  * Il costo come letterale numerico a due decimali.
  *
- * Un valore non finito o fuori dal tetto della colonna diventa zero: e' la
- * stessa scelta di chi scrive gli ordini quando il costo non si sa, e non
- * blocca la pagina intera per un ordine solo.
+ * La regola (non finito, negativo o oltre il tetto della colonna diventa zero)
+ * e' quella di `clampLogisticsCost`, la stessa di chi scrive gli ordini: un
+ * ordine deve avere lo stesso costo chiunque l'abbia scritto per ultimo.
  */
 function costoSicuro(valore: number): string {
-  // Un costo negativo non ha senso (nessuno paga noi per spedire): se esce
-  // dal calcolo e' un dato sbagliato in configurazione, e non deve gonfiare il
-  // profitto.
-  if (!Number.isFinite(valore) || valore < 0 || valore > MAX_COSTO) return '0.00';
-  const arrotondato = Math.round(valore * 100) / 100;
-  return arrotondato.toFixed(2);
+  return clampLogisticsCost(valore).toFixed(2);
 }
 
 /** La lettura di una pagina di ordini, dopo l'ultimo id visto. */

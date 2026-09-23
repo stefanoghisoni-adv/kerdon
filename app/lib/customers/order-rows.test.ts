@@ -312,6 +312,16 @@ describe('orderToRows — dati di spedizione e costo logistico', () => {
     expect(orderToRows(spedito(), SYNCED)!.order.logistics_cost).toBe(0);
   });
 
+  it('un costo oltre il tetto della colonna diventa zero invece di far fallire la scrittura', () => {
+    // 1,5 kg a un miliardo al kg esce da NUMERIC(10,2): scritto cosi',
+    // Postgres rifiuterebbe l'intero upsert dell'ordine, non solo il costo.
+    const assurda: LogisticsConfig = {
+      ...config,
+      zones: [{ ...config.zones[0], rates: [{ weightFromKg: null, weightToKg: null, cost: 1e9 }] }],
+    };
+    expect(orderToRows(spedito(), SYNCED, assurda)!.order.logistics_cost).toBe(0);
+  });
+
   it('un ordine letto prima di questi campi non si rompe', () => {
     const rows = orderToRows(order(), SYNCED, config)!;
     expect(rows.order.fulfillment_status).toBeNull();

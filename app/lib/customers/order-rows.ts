@@ -29,6 +29,7 @@
  */
 
 import { computeLogisticsCost } from '~/lib/shipping/logistics-cost';
+import { clampLogisticsCost } from '~/lib/shipping/cost-clamp';
 import type { LogisticsConfig } from '~/lib/shipping/types';
 
 export interface ShopifyOrderLine {
@@ -193,7 +194,10 @@ export function orderToRows(
       updated_at: order.updated_at,
       synced_at,
       ...logistics,
-      logistics_cost: computeLogisticsCost(logistics, logisticsConfig).total,
+      // Passa dallo stesso filtro del ricalcolo: un costo fuori dal tetto di
+      // NUMERIC(10,2) farebbe fallire l'upsert dell'intero ordine, non solo
+      // questa colonna.
+      logistics_cost: clampLogisticsCost(computeLogisticsCost(logistics, logisticsConfig).total),
     },
     // Le righe senza id restano fuori per la stessa ragione dell'ordine: non
     // sarebbero riconoscibili, e a ogni corsa se ne aggiungerebbe una copia.

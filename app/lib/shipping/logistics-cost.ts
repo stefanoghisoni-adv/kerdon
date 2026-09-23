@@ -30,11 +30,18 @@ export function resolvePackagingCategory(
   return regola?.category ?? null;
 }
 
+/**
+ * La zona di un paese; `null` quando il paese non c'e'.
+ *
+ * Senza paese non si ripiega sul resto del mondo: un ordine senza indirizzo di
+ * spedizione (ritiro in negozio, POS, prodotto digitale) non ha preso nessun
+ * corriere, e addebitargli la tariffa piu' cara del listino abbasserebbe il
+ * profitto di un costo mai pagato.
+ */
 export function findZone(zones: ZoneConfig[], country: string | null): ZoneConfig | null {
-  if (country) {
-    const esplicita = zones.find((z) => z.countries.includes(country));
-    if (esplicita) return esplicita;
-  }
+  if (!country) return null;
+  const esplicita = zones.find((z) => z.countries.includes(country));
+  if (esplicita) return esplicita;
   return zones.find((z) => z.restOfWorld) ?? null;
 }
 
@@ -57,8 +64,12 @@ export function computeLogisticsCost(
   let shipping = 0;
   let packaging = 0;
 
-  // Un ordine mai partito non ha pagato ne' corriere ne' scatola.
-  if (isShipped(order.fulfillment_status)) {
+  // Un ordine mai partito non ha pagato ne' corriere ne' scatola. Nemmeno uno
+  // evaso senza indirizzo di spedizione: ritiro in negozio, POS e prodotti
+  // digitali risultano FULFILLED ma non hanno viaggiato, quindi niente
+  // spedizione e niente imballo. Il reso invece resta: se la merce torna
+  // indietro, il rientro lo si paga comunque.
+  if (isShipped(order.fulfillment_status) && order.shipping_country_code) {
     const weightKg = resolveWeightKg(order, config.defaultWeightPerItemKg);
     const zone = findZone(config.zones, order.shipping_country_code);
     if (zone && weightKg != null) shipping = centesimi(shippingFor(zone, weightKg));

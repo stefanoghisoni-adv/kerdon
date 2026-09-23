@@ -72,6 +72,11 @@ describe('findZone', () => {
   it('senza resto del mondo: null', () => {
     expect(findZone(config.zones.slice(0, 2), 'US')).toBeNull();
   });
+  it('senza paese non si cade nel resto del mondo: null', () => {
+    // Ritiro in negozio, POS, prodotti digitali: nessun indirizzo, nessun corriere.
+    expect(findZone(config.zones, null)).toBeNull();
+    expect(findZone(config.zones, '')).toBeNull();
+  });
 });
 
 describe('computeLogisticsCost', () => {
@@ -102,6 +107,18 @@ describe('computeLogisticsCost', () => {
   it('categoria non piu configurata: packaging 0, nessun errore', () => {
     const c = computeLogisticsCost({ ...base, packaging_category: 'XL' }, config);
     expect(c.packaging).toBe(0);
+  });
+  it('evaso senza indirizzo (ritiro, POS, digitale): niente spedizione ne packaging', () => {
+    const c = computeLogisticsCost({ ...base, shipping_country_code: null }, config);
+    expect(c).toEqual({ shipping: 0, packaging: 0, returns: 0, total: 0 });
+  });
+  it('evaso senza indirizzo con reso: resta solo il rientro', () => {
+    const c = computeLogisticsCost({ ...base, shipping_country_code: null, returned_at: '2026-09-20T10:00:00Z' }, config);
+    expect(c).toEqual({ shipping: 0, packaging: 0, returns: 5, total: 5 });
+  });
+  it('paese vuoto conta come nessun indirizzo', () => {
+    const c = computeLogisticsCost({ ...base, shipping_country_code: '' }, config);
+    expect(c.total).toBe(0);
   });
   it('nessuna configurazione: tutto 0', () => {
     expect(computeLogisticsCost(base, null).total).toBe(0);
