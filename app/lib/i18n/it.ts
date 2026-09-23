@@ -566,6 +566,14 @@ export const it = {
       keptBody:
         "Il collegamento è stato rimosso. Le tabelle e i dati sincronizzati restano nel progetto: ricollegandolo, la sincronizzazione riparte da lì.",
     },
+    weightMissingAlert: {
+      title: (count: number) =>
+        count === 1
+          ? "1 ordine spedito non ha un peso"
+          : `${count} ordini spediti non hanno un peso`,
+      body: "Senza il peso, il costo di spedizione resta a zero e il profitto risulta più alto del reale. Indica un peso medio per articolo e il calcolo diventa preciso.",
+      action: "Vai a Spedizioni",
+    },
   },
 
   plan: {

@@ -482,6 +482,14 @@ export const en: typeof it = {
       keptBody:
         "The connection has been removed. The tables and the synced data stay in the project: reconnect it and the sync picks up from there.",
     },
+    weightMissingAlert: {
+      title: (count: number) =>
+        count === 1
+          ? "1 shipped order has no weight"
+          : `${count} shipped orders have no weight`,
+      body: "Without the weight, the shipping cost stays at zero and the profit is higher than actual. Set an average weight per item and the calculation becomes accurate.",
+      action: "Go to Shipping",
+    },
   },
 
   plan: {

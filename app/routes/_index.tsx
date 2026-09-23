@@ -69,6 +69,8 @@ import { DatabasePausedBanner } from '~/components/Dashboard/DatabasePausedBanne
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { ProductScopeBanner } from '~/components/Dashboard/ProductScopeBanner';
 import { suggestPlanForProducts } from '~/components/Dashboard/plan-suggestion';
+import { WeightMissingBanner } from '~/components/Dashboard/WeightMissingBanner';
+import { shouldShowWeightAlert, dismissWeightAlert } from '~/lib/shipping/weight-alert.server';
 import type { TrackingFinding } from '~/lib/tracking/detect';
 import { needsSchemaUpdate } from '~/lib/supabase/merchant-migrations';
 import { triggerMerchantSchemaUpdate } from '~/lib/supabase/apply-schema-update.server';
@@ -145,7 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // il loader costa due round-trip in profondità invece di tre. Su Vercel il
     // DB è remoto, quindi ogni round-trip risparmiato è latenza in meno sul TTFB
     // — che è ciò che domina l'LCP di questa pagina.
-    const [plans, recentJobs, latestBulk, lastActivityAt, customersTableJob, oauthToken, syncRuns, partnerPrices, trackingSetup, queuedSyncRequests] = await Promise.all([
+    const [plans, recentJobs, latestBulk, lastActivityAt, customersTableJob, oauthToken, syncRuns, partnerPrices, trackingSetup, queuedSyncRequests, weightAlert] = await Promise.all([
       // Tutti i piani, non solo quello in uso: quando i clienti restano fuori
       // serve anche sapere quale piano li rimetterebbe dentro, e leggerli tutti
       // costa come leggerne uno (la tabella e' di poche righe).
@@ -203,6 +205,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // spiegata sopra: su Vercel il database e' remoto, e un round-trip in
       // piu' in fila sarebbe latenza sul TTFB, cioe' sull'LCP di questa pagina.
       pendingSyncRequests(shop.id),
+      // Ordini senza peso: avviso chiudibile, torna se il problema resta.
+      shouldShowWeightAlert(shop.id, session.shop),
     ]);
 
     // La valuta che il merchant si aspetta: la sua scelta, o quella che di
@@ -499,6 +503,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         maxCustomers: p.maxCustomers,
         customersSyncEnabled: p.customersSyncEnabled,
       })),
+      // Ordini senza peso: avviso che torna se il problema resta.
+      weightAlert: {
+        show: weightAlert.show,
+        count: weightAlert.count,
+      },
     });
   } catch (err) {
     // Le Response (redirect di auth, 404) devono passare intatte.
@@ -545,7 +554,15 @@ export async function action({ request }: ActionFunctionArgs) {
     // sincronizzare. Se segnasse anche la conferma del piano, premerlo durante
     // la configurazione chiuderebbe un passo che il merchant non ha fatto.
     const form = await request.formData().catch(() => null);
-    const manualOnly = String(form?.get('intent') ?? '') === 'sync';
+    const intent = String(form?.get('intent') ?? '');
+
+    // Chiusura dell'avviso "ordini senza peso".
+    if (intent === 'dismiss-weight-alert') {
+      const dismissed = await dismissWeightAlert(shop.id);
+      return json({ ok: dismissed });
+    }
+
+    const manualOnly = intent === 'sync';
 
     // Il push manuale e' una funzione del piano: chi non ce l'ha non deve
     // poterlo far partire nemmeno riabilitando il pulsante nell'HTML.
@@ -658,7 +675,7 @@ interface ProductHistoryResponse {
 const MANUAL_SYNC_POLL_MS = 4_000;
 
 export default function Dashboard() {
-  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, blocked, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, syncPendingSince, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
+  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, blocked, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, syncPendingSince, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms, weightAlert } =
     useLoaderData<typeof loader>();
   const t = useT();
 
@@ -1723,6 +1740,11 @@ export default function Dashboard() {
             Compare solo se c'e' davvero qualcosa di fermo. */}
         {planConfirmed && <ProductScopeBanner timeZone={shop.ianaTimezone} />}
 
+        {/* Ordini senza peso: il costo di spedizione resta a zero e il profitto
+            risulta piu' alto del vero. Compare solo se ci sono ordini in quella
+            condizione e non c'e' un peso di default configurato. Chiudibile, e
+            torna se il problema resta. */}
+        {planConfirmed && weightAlert.show && <WeightMissingBanner count={weightAlert.count} />}
 
         {/* L'avviso sul cambio di piano parla di una configurazione che gira
             gia': confronta il piano di adesso con quello dell'ultima
