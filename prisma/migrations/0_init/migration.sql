@@ -844,6 +844,71 @@ ALTER TABLE "tracking_ingest_keys" ADD CONSTRAINT "tracking_ingest_keys_shop_id_
 -- distinguere "non riscritto perche' non esiste piu'" da "non riscritto perche'
 -- non l'ho nemmeno chiesto".
 
+-- CreateTable
+CREATE TABLE "shipping_zones" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "zone_name" TEXT NOT NULL,
+    "countries" TEXT[],
+    "rest_of_world" BOOLEAN NOT NULL DEFAULT false,
+    "rate_type" TEXT NOT NULL DEFAULT 'linear',
+    "synced_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "shipping_zones_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "shipping_zones_shop_id_zone_name_key" ON "shipping_zones"("shop_id", "zone_name");
+
+-- CreateIndex
+CREATE INDEX "shipping_zones_shop_id_idx" ON "shipping_zones"("shop_id");
+
+-- AddForeignKey
+ALTER TABLE "shipping_zones" ADD CONSTRAINT "shipping_zones_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "shipping_rates" (
+    "id" TEXT NOT NULL,
+    "zone_id" TEXT NOT NULL,
+    "weight_from" DECIMAL(10,3),
+    "weight_to" DECIMAL(10,3),
+    "cost" DECIMAL(10,2) NOT NULL,
+
+    CONSTRAINT "shipping_rates_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "shipping_rates_zone_id_idx" ON "shipping_rates"("zone_id");
+
+-- AddForeignKey
+ALTER TABLE "shipping_rates" ADD CONSTRAINT "shipping_rates_zone_id_fkey" FOREIGN KEY ("zone_id") REFERENCES "shipping_zones"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "packaging_config" (
+    "shop_id" TEXT NOT NULL,
+    "categories" JSONB NOT NULL DEFAULT '[]',
+    "fallback_rules" JSONB NOT NULL DEFAULT '[]',
+    "default_weight_per_item" DECIMAL(10,3),
+    "return_cost" DECIMAL(10,2),
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "packaging_config_pkey" PRIMARY KEY ("shop_id")
+);
+
+-- AddForeignKey
+ALTER TABLE "packaging_config" ADD CONSTRAINT "packaging_config_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "shipping_alert_dismissals" (
+    "shop_id" TEXT NOT NULL,
+    "dismissed_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "shipping_alert_dismissals_pkey" PRIMARY KEY ("shop_id")
+);
+
+-- AddForeignKey
+ALTER TABLE "shipping_alert_dismissals" ADD CONSTRAINT "shipping_alert_dismissals_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 -- I piani: cinque righe copiate dal database owner in uso.
 --
 -- Non si generano dallo schema perche' non sono struttura, sono scelte:
