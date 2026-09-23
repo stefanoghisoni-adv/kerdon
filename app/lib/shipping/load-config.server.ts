@@ -9,6 +9,29 @@ import type {
 
 export async function loadLogisticsConfig(shopId: string): Promise<LogisticsConfig | null> {
   try {
+    return await loadLogisticsConfigStrict(shopId);
+  } catch (error) {
+    // Qui arrivano solo i guasti veri (il P2021 lo assorbe gia' la variante
+    // severa): si loggano ma non fanno fallire chi legge.
+    console.warn('[loadLogisticsConfig] Errore durante il caricamento:', error);
+    return null;
+  }
+}
+
+/**
+ * La configurazione, distinguendo "non c'e'" da "non si e' potuta leggere".
+ *
+ * Serve al ricalcolo in background, dove i due casi portano a scritture
+ * opposte: senza tariffe il costo giusto e' zero su tutti gli ordini, mentre
+ * con le tariffe illeggibili per un guasto di rete non si deve scrivere niente
+ * — altrimenti un singhiozzo del database azzererebbe costi corretti. Quindi:
+ * null quando la configurazione manca (anche con le tabelle owner non ancora
+ * create, P2021), eccezione per qualunque altro errore.
+ */
+export async function loadLogisticsConfigStrict(
+  shopId: string,
+): Promise<LogisticsConfig | null> {
+  try {
     // Leggi zone con tariffe
     const zones = await prisma.shippingZone.findMany({
       where: { shopId },
@@ -57,9 +80,7 @@ export async function loadLogisticsConfig(shopId: string): Promise<LogisticsConf
       return null;
     }
 
-    // Altri errori vengono loggati ma non fanno fallire la funzione
-    console.warn('[loadLogisticsConfig] Errore durante il caricamento:', error);
-    return null;
+    throw error;
   }
 }
 

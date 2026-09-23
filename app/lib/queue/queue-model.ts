@@ -30,6 +30,9 @@ export const SYNC_REQUEST_TYPES = [
   'initial-bulk-sync',
   'periodic-sync-check',
   'compliance-request',
+  // Riscrive `orders.logistics_cost` su tutti gli ordini quando il merchant
+  // cambia zone, tariffe o packaging (app/lib/shipping/recompute.server.ts).
+  'logistics-recompute',
 ] as const;
 
 export type SyncRequestType = (typeof SYNC_REQUEST_TYPES)[number];
@@ -130,6 +133,9 @@ export const MAX_RUN_MS: Record<SyncRequestType, number> = {
   // Piu' corto: qui non si scarica un catalogo, si leggono o si cancellano le
   // righe di una persona sola.
   'compliance-request': 120_000,
+  // Come le sincronizzazioni: si legge e si riscrive tutto lo storico ordini a
+  // pagine, e su un negozio grande serve lo stesso margine.
+  'logistics-recompute': 270_000,
 };
 
 /**

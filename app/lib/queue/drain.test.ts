@@ -10,10 +10,12 @@ vi.mock('~/lib/gdpr/process-compliance.server', () => ({
   processComplianceRequest: vi.fn(),
 }));
 vi.mock('./shop-lock.server', () => ({ runWithShopLease: vi.fn() }));
+vi.mock('~/lib/shipping/recompute.server', () => ({ processLogisticsRecompute: vi.fn() }));
 
 import { drainSyncRequests, type Handler } from './drain.server';
 import { runWithShopLease } from './shop-lock.server';
 import { processManualSync } from '~/lib/workers/processors.server';
+import { processLogisticsRecompute } from '~/lib/shipping/recompute.server';
 import type { QueueStore } from './queue-store.server';
 import {
   LEASE_TTL_MS,
@@ -338,6 +340,36 @@ describe('il lucchetto del negozio', () => {
     const [shopId, , lease] = (processManualSync as any).mock.calls[0];
     expect(shopId).toBe('shop-1');
     expect(typeof lease.assertHeld).toBe('function');
+  });
+});
+
+describe('il ricalcolo dei costi logistici', () => {
+  /**
+   * Sotto il lucchetto del negozio come le sincronizzazioni: due ricalcoli
+   * sovrapposti potrebbero finire nell'ordine sbagliato, e l'ultimo a scrivere
+   * sarebbe quello con le tariffe vecchie.
+   */
+  it('gira sotto il lucchetto del negozio e riceve possesso e segnale', async () => {
+    const coda = codaInMemoria([riga({ type: 'logistics-recompute', shopId: 'shop-1' })]);
+
+    const esito = await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
+
+    expect(esito.completed).toBe(1);
+    expect(runWithShopLease).toHaveBeenCalledWith('shop-1', expect.any(Function), expect.anything());
+    const [shopId, ctx] = (processLogisticsRecompute as any).mock.calls[0];
+    expect(shopId).toBe('shop-1');
+    expect(typeof ctx.lease.assertHeld).toBe('function');
+    expect(ctx.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('negozio occupato: torna in coda senza consumare un tentativo', async () => {
+    (runWithShopLease as any).mockResolvedValue('occupato');
+    const coda = codaInMemoria([riga({ type: 'logistics-recompute', shopId: 'shop-1' })]);
+
+    const esito = await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
+
+    expect(esito.skippedLocked).toBe(1);
+    expect(coda.trova('item-1').attempts).toBe(0);
   });
 });
 

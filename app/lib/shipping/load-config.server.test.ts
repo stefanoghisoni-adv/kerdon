@@ -11,7 +11,7 @@ vi.mock('~/db.server', () => ({
   },
 }));
 
-const { loadLogisticsConfig } = await import('./load-config.server');
+const { loadLogisticsConfig, loadLogisticsConfigStrict } = await import('./load-config.server');
 
 /** L'errore che Prisma solleva quando la tabella non c'e' ancora. */
 function tabellaMancante(): Error {
@@ -187,5 +187,40 @@ describe('loadLogisticsConfig', () => {
       weightToKg: null,
       cost: 10,
     });
+  });
+});
+
+/**
+ * La variante severa serve al ricalcolo in background: li' "nessuna tariffa" e
+ * "tariffe illeggibili" portano a scritture opposte (zero su tutti gli ordini
+ * contro nessuna scrittura), quindi i due casi non possono confondersi.
+ */
+describe('loadLogisticsConfigStrict', () => {
+  it('ritorna null quando la configurazione non esiste', async () => {
+    findMany.mockResolvedValue([]);
+    findUnique.mockResolvedValue(null);
+
+    await expect(loadLogisticsConfigStrict('shop-1')).resolves.toBeNull();
+  });
+
+  it('ritorna null su P2021: tabelle owner non ancora create vuol dire nessuna tariffa', async () => {
+    findMany.mockRejectedValue(tabellaMancante());
+    findUnique.mockResolvedValue(null);
+
+    await expect(loadLogisticsConfigStrict('shop-1')).resolves.toBeNull();
+  });
+
+  it('solleva su un guasto transitorio invece di fingere che non ci siano tariffe', async () => {
+    findMany.mockRejectedValue(new Error('connection reset'));
+    findUnique.mockResolvedValue(null);
+
+    await expect(loadLogisticsConfigStrict('shop-1')).rejects.toThrow('connection reset');
+  });
+
+  it('la variante tollerante resta tollerante sullo stesso guasto', async () => {
+    findMany.mockRejectedValue(new Error('connection reset'));
+    findUnique.mockResolvedValue(null);
+
+    await expect(loadLogisticsConfig('shop-1')).resolves.toBeNull();
   });
 });
