@@ -1427,6 +1427,7 @@ export const it = {
         ruleWeightNegative: "Il peso massimo deve essere maggiore o uguale a 0",
         multipleUnlimitedRules: "Può esserci al massimo una regola \"tutto il resto\"",
         unlimitedRuleMustBeLast: "La regola \"tutto il resto\" deve essere l'ultima",
+        categoryStillReferenced: "Questa categoria è usata da una regola. Rimuovi prima le regole che la usano.",
       },
     },
   },

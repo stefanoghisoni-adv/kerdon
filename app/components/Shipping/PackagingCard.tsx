@@ -5,8 +5,10 @@ import {
   TextField,
   Button,
   InlineStack,
+  InlineGrid,
   Text,
   Select,
+  Banner,
 } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
 import { validatePackaging } from './packaging';
@@ -17,6 +19,7 @@ interface PackagingCardProps {
   initialRules: FallbackRule[];
   initialDefaultWeight: number | null;
   initialReturnCost: number | null;
+  configKey: string;
   onSave: (data: {
     categories: PackagingCategory[];
     rules: FallbackRule[];
@@ -50,6 +53,7 @@ export function PackagingCard({
   initialRules,
   initialDefaultWeight,
   initialReturnCost,
+  configKey,
   onSave,
   isSaving,
 }: PackagingCardProps) {
@@ -68,6 +72,7 @@ export function PackagingCard({
     initialReturnCost !== null ? initialReturnCost.toString() : ''
   );
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [deleteBlockedIndex, setDeleteBlockedIndex] = useState<number | null>(null);
 
   const handleAddCategory = useCallback(() => {
     setCategories([...categories, { name: '', cost: 0 }]);
@@ -75,10 +80,26 @@ export function PackagingCard({
 
   const handleRemoveCategory = useCallback(
     (index: number) => {
+      const categoryToRemove = categories[index].name;
+
+      // Check if any rule references this category
+      const referencingRules = rules.filter((rule) => rule.category === categoryToRemove);
+
+      if (referencingRules.length > 0 && categoryToRemove !== '') {
+        setDeleteBlockedIndex(index);
+        return;
+      }
+
       const newCategories = categories.filter((_, i) => i !== index);
       setCategories(newCategories);
+      setDeleteBlockedIndex(null);
+
+      // Remove rules that reference the deleted category (for empty names)
+      const newRules = rules.filter((rule) => rule.category !== categoryToRemove);
+      setRules(newRules);
+
       // Re-validate after removing
-      const error = validatePackaging({ categories: newCategories, rules });
+      const error = validatePackaging({ categories: newCategories, rules: newRules });
       setValidationError(error);
     },
     [categories, rules]
@@ -86,12 +107,26 @@ export function PackagingCard({
 
   const handleCategoryNameChange = useCallback(
     (index: number, value: string) => {
+      const oldName = categories[index].name;
       const newCategories = [...categories];
       newCategories[index] = { ...newCategories[index], name: value };
       setCategories(newCategories);
-      // Re-validate
-      const error = validatePackaging({ categories: newCategories, rules });
-      setValidationError(error);
+      setDeleteBlockedIndex(null);
+
+      // Update rules that reference the old name
+      if (oldName !== value) {
+        const newRules = rules.map((rule) =>
+          rule.category === oldName ? { ...rule, category: value } : rule
+        );
+        setRules(newRules);
+        // Re-validate with updated rules
+        const error = validatePackaging({ categories: newCategories, rules: newRules });
+        setValidationError(error);
+      } else {
+        // Re-validate
+        const error = validatePackaging({ categories: newCategories, rules });
+        setValidationError(error);
+      }
     },
     [categories, rules]
   );
@@ -109,14 +144,18 @@ export function PackagingCard({
     [categories, rules]
   );
 
+  const hasNonEmptyCategory = categories.some((cat) => cat.name.trim() !== '');
+
   const handleAddRule = useCallback(() => {
-    setRules([...rules, { weightMaxKg: 0, category: categories[0]?.name ?? '' }]);
+    const firstNonEmptyCategory = categories.find((cat) => cat.name.trim() !== '');
+    setRules([...rules, { weightMaxKg: 0, category: firstNonEmptyCategory?.name ?? '' }]);
   }, [rules, categories]);
 
   const handleRemoveRule = useCallback(
     (index: number) => {
       const newRules = rules.filter((_, i) => i !== index);
       setRules(newRules);
+      setDeleteBlockedIndex(null);
       // Re-validate
       const error = validatePackaging({ categories, rules: newRules });
       setValidationError(error);
@@ -169,10 +208,12 @@ export function PackagingCard({
     });
   };
 
-  const categoryOptions = categories.map((cat) => ({
-    label: cat.name || t.shipping.packaging.categoryNamePlaceholder,
-    value: cat.name,
-  }));
+  const categoryOptions = categories
+    .filter((cat) => cat.name.trim() !== '')
+    .map((cat) => ({
+      label: cat.name,
+      value: cat.name,
+    }));
 
   return (
     <Card>
@@ -191,8 +232,8 @@ export function PackagingCard({
           </Text>
 
           {categories.map((category, index) => (
-            <InlineStack key={index} gap="200" align="start" blockAlign="start">
-              <div style={{ flex: 2 }}>
+            <BlockStack key={index} gap="200">
+              <InlineGrid columns={['twoThirds', 'oneThird']} gap="200">
                 <TextField
                   label=""
                   value={category.name}
@@ -201,24 +242,29 @@ export function PackagingCard({
                   autoComplete="off"
                   labelHidden
                 />
-              </div>
-              <div style={{ flex: 1 }}>
-                <TextField
-                  label=""
-                  type="number"
-                  value={category.cost.toString()}
-                  onChange={(value) => handleCategoryCostChange(index, value)}
-                  placeholder={t.shipping.packaging.categoryCostPlaceholder}
-                  autoComplete="off"
-                  min={0}
-                  step={0.01}
-                  labelHidden
-                />
-              </div>
-              <Button onClick={() => handleRemoveCategory(index)}>
-                {t.shipping.packaging.removeCategory}
-              </Button>
-            </InlineStack>
+                <InlineStack gap="200" blockAlign="start">
+                  <TextField
+                    label=""
+                    type="number"
+                    value={category.cost.toString()}
+                    onChange={(value) => handleCategoryCostChange(index, value)}
+                    placeholder={t.shipping.packaging.categoryCostPlaceholder}
+                    autoComplete="off"
+                    min={0}
+                    step={0.01}
+                    labelHidden
+                  />
+                  <Button onClick={() => handleRemoveCategory(index)}>
+                    {t.shipping.packaging.removeCategory}
+                  </Button>
+                </InlineStack>
+              </InlineGrid>
+              {deleteBlockedIndex === index && (
+                <Banner tone="warning" onDismiss={() => setDeleteBlockedIndex(null)}>
+                  {t.shipping.packaging.errors.categoryStillReferenced}
+                </Banner>
+              )}
+            </BlockStack>
           ))}
 
           <div>
@@ -239,29 +285,26 @@ export function PackagingCard({
             </Text>
 
             {rules.map((rule, index) => (
-              <InlineStack key={index} gap="200" align="start" blockAlign="start">
-                <div style={{ flex: 1 }}>
-                  <TextField
-                    label=""
-                    type="number"
-                    value={rule.weightMaxKg !== null ? rule.weightMaxKg.toString() : ''}
-                    onChange={(value) => handleRuleWeightChange(index, value)}
-                    placeholder={t.shipping.packaging.ruleUnlimited}
-                    autoComplete="off"
-                    min={0}
-                    step={0.001}
-                    labelHidden
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Select
-                    label=""
-                    options={categoryOptions}
-                    value={rule.category}
-                    onChange={(value) => handleRuleCategoryChange(index, value)}
-                    labelHidden
-                  />
-                </div>
+              <InlineStack key={index} gap="200" blockAlign="start">
+                <TextField
+                  label=""
+                  type="number"
+                  value={rule.weightMaxKg !== null ? rule.weightMaxKg.toString() : ''}
+                  onChange={(value) => handleRuleWeightChange(index, value)}
+                  placeholder={t.shipping.packaging.ruleUnlimited}
+                  autoComplete="off"
+                  min={0}
+                  step={0.001}
+                  labelHidden
+                />
+                <Select
+                  label=""
+                  options={categoryOptions}
+                  value={rule.category}
+                  onChange={(value) => handleRuleCategoryChange(index, value)}
+                  labelHidden
+                  disabled={categoryOptions.length === 0}
+                />
                 <Button onClick={() => handleRemoveRule(index)}>
                   {t.shipping.packaging.removeRule}
                 </Button>
@@ -269,7 +312,7 @@ export function PackagingCard({
             ))}
 
             <div>
-              <Button onClick={handleAddRule} disabled={categories.length === 0}>
+              <Button onClick={handleAddRule} disabled={!hasNonEmptyCategory}>
                 {t.shipping.packaging.addRule}
               </Button>
             </div>

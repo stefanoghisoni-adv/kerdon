@@ -12,6 +12,7 @@ import {
   Page,
   Toast,
 } from '@shopify/polaris';
+import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { requireShopCapability } from '~/lib/authz/require-capability.server';
@@ -19,6 +20,7 @@ import { useT } from '~/lib/i18n/context';
 import { authenticate } from '~/shopify.server';
 import { syncShippingZones } from '~/lib/shipping/sync-zones.server';
 import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute.server';
+import { validateCategories, validateFallbackRules } from '~/lib/shipping/load-config.server';
 import { validateBrackets } from '~/components/Shipping/brackets';
 import { validatePackaging } from '~/components/Shipping/packaging';
 import { ShippingZonesTable } from '~/components/Shipping/ShippingZonesTable';
@@ -61,18 +63,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })),
     packaging: packagingConfig
       ? {
-          categories: packagingConfig.categories as unknown as PackagingCategory[],
-          fallbackRules: packagingConfig.fallbackRules as unknown as FallbackRule[],
+          categories: validateCategories(packagingConfig.categories),
+          fallbackRules: validateFallbackRules(packagingConfig.fallbackRules),
           defaultWeightPerItemKg: packagingConfig.defaultWeightPerItem
             ? Number(packagingConfig.defaultWeightPerItem)
             : null,
           returnCost: packagingConfig.returnCost ? Number(packagingConfig.returnCost) : null,
+          configKey: packagingConfig.updatedAt.toISOString(),
         }
       : {
           categories: [],
           fallbackRules: [],
           defaultWeightPerItemKg: null,
           returnCost: null,
+          configKey: 'empty',
         },
   });
 }
@@ -233,14 +237,14 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { shopId: shop.id },
       create: {
         shopId: shop.id,
-        categories: categories as any,
-        fallbackRules: rules as any,
+        categories: categories as unknown as Prisma.InputJsonValue,
+        fallbackRules: rules as unknown as Prisma.InputJsonValue,
         defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
         returnCost: returnCost !== null ? new Decimal(returnCost) : null,
       },
       update: {
-        categories: categories as any,
-        fallbackRules: rules as any,
+        categories: categories as unknown as Prisma.InputJsonValue,
+        fallbackRules: rules as unknown as Prisma.InputJsonValue,
         defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
         returnCost: returnCost !== null ? new Decimal(returnCost) : null,
       },
@@ -383,10 +387,12 @@ export default function ShippingPage() {
               <ShippingZonesTable zones={zones} onEdit={handleEdit} />
             </Card>
             <PackagingCard
+              key={packaging.configKey}
               initialCategories={packaging.categories}
               initialRules={packaging.fallbackRules}
               initialDefaultWeight={packaging.defaultWeightPerItemKg}
               initialReturnCost={packaging.returnCost}
+              configKey={packaging.configKey}
               onSave={handlePackagingSave}
               isSaving={isSavingPackaging}
             />

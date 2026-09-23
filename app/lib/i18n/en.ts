@@ -1130,6 +1130,7 @@ export const en: typeof it = {
         ruleWeightNegative: "Maximum weight must be greater than or equal to 0",
         multipleUnlimitedRules: "There can be at most one \"everything else\" rule",
         unlimitedRuleMustBeLast: "The \"everything else\" rule must be last",
+        categoryStillReferenced: "This category is used by a rule. Remove the rules that use it first.",
       },
     },
   },

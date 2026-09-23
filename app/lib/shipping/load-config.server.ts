@@ -85,7 +85,7 @@ export async function loadLogisticsConfigStrict(
 }
 
 /** Valida e filtra le categorie dal JSON, scartando quelle malformate. */
-function validateCategories(json: unknown): PackagingCategory[] {
+export function validateCategories(json: unknown): PackagingCategory[] {
   if (!Array.isArray(json)) {
     return [];
   }
@@ -101,7 +101,7 @@ function validateCategories(json: unknown): PackagingCategory[] {
 }
 
 /** Valida e filtra le fallback rules dal JSON, scartando quelle malformate. */
-function validateFallbackRules(json: unknown): FallbackRule[] {
+export function validateFallbackRules(json: unknown): FallbackRule[] {
   if (!Array.isArray(json)) {
     return [];
   }
