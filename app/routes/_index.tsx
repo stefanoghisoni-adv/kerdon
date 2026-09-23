@@ -205,7 +205,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // spiegata sopra: su Vercel il database e' remoto, e un round-trip in
       // piu' in fila sarebbe latenza sul TTFB, cioe' sull'LCP di questa pagina.
       pendingSyncRequests(shop.id),
-      // Ordini senza peso: avviso chiudibile, torna se il problema resta.
+      // Ordini senza peso: avviso chiudibile, e la chiusura e' definitiva (si
+      // salva sul server). Sparisce da solo se si configura un peso di default.
       shouldShowWeightAlert(shop.id, session.shop),
     ]);
 
@@ -503,7 +504,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         maxCustomers: p.maxCustomers,
         customersSyncEnabled: p.customersSyncEnabled,
       })),
-      // Ordini senza peso: avviso che torna se il problema resta.
+      // Ordini senza peso: una volta chiuso non torna, anche se il problema resta.
       weightAlert: {
         show: weightAlert.show,
         count: weightAlert.count,
@@ -1743,7 +1744,7 @@ export default function Dashboard() {
         {/* Ordini senza peso: il costo di spedizione resta a zero e il profitto
             risulta piu' alto del vero. Compare solo se ci sono ordini in quella
             condizione e non c'e' un peso di default configurato. Chiudibile, e
-            torna se il problema resta. */}
+            la chiusura e' definitiva: non torna anche se il problema resta. */}
         {planConfirmed && weightAlert.show && <WeightMissingBanner count={weightAlert.count} />}
 
         {/* L'avviso sul cambio di piano parla di una configurazione che gira

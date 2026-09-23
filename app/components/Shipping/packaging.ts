@@ -6,6 +6,35 @@ export interface PackagingInput {
   rules: FallbackRule[];
 }
 
+/** L'errore per dati che non hanno la forma di una configurazione packaging. */
+export const INVALID_PACKAGING = 'shipping.packaging.errors.invalidData';
+
+const numeroFinito = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * La forma di categorie e regole, prima delle regole di coerenza.
+ *
+ * Arrivano dal client come JSON: una stringa al posto del costo passerebbe il
+ * controllo `cost < 0` e finirebbe salvata cosi' nel JSON della
+ * configurazione, e il calcolo del costo la sommerebbe come testo.
+ */
+function formaValida(input: unknown): input is PackagingInput {
+  if (typeof input !== 'object' || input === null) return false;
+  const { categories, rules } = input as Record<string, unknown>;
+  if (!Array.isArray(categories) || !Array.isArray(rules)) return false;
+  const categorieOk = categories.every(
+    (c) => typeof c === 'object' && c !== null && typeof c.name === 'string' && numeroFinito(c.cost),
+  );
+  const regoleOk = rules.every(
+    (r) =>
+      typeof r === 'object' &&
+      r !== null &&
+      typeof r.category === 'string' &&
+      (r.weightMaxKg === null || numeroFinito(r.weightMaxKg)),
+  );
+  return categorieOk && regoleOk;
+}
+
 /**
  * Validates packaging configuration.
  *
@@ -16,11 +45,13 @@ export interface PackagingInput {
  * - Rule weights must be >= 0 (when not null)
  * - At most one "tutto il resto" rule (weightMaxKg = null)
  * - The "tutto il resto" rule, if present, must be last
+ * - Every cost and weight must be a finite number (weights may be null)
  *
  * @param input The packaging configuration to validate
  * @returns The i18n key of the error, or null if valid
  */
-export function validatePackaging(input: PackagingInput): string | null {
+export function validatePackaging(input: unknown): string | null {
+  if (!formaValida(input)) return INVALID_PACKAGING;
   const { categories, rules } = input;
 
   // Validate categories
@@ -76,4 +107,26 @@ export function validatePackaging(input: PackagingInput): string | null {
   }
 
   return null;
+}
+
+/**
+ * Categorie e regole dai campi del form, gia' validate.
+ *
+ * Come per le fasce: il JSON malformato torna come errore di validazione, non
+ * come eccezione.
+ */
+export function parsePackaging(
+  categoriesRaw: string | undefined,
+  rulesRaw: string | undefined,
+): { value: PackagingInput; error: null } | { value: null; error: string } {
+  if (!categoriesRaw || !rulesRaw) return { value: null, error: INVALID_PACKAGING };
+  let value: unknown;
+  try {
+    value = { categories: JSON.parse(categoriesRaw), rules: JSON.parse(rulesRaw) };
+  } catch {
+    return { value: null, error: INVALID_PACKAGING };
+  }
+  const error = validatePackaging(value);
+  if (error) return { value: null, error };
+  return { value: value as PackagingInput, error: null };
 }

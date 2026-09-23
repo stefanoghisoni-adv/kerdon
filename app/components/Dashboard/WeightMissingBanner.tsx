@@ -15,8 +15,9 @@ interface WeightMissingBannerProps {
  * c'e' un default configurato, il costo resta a zero — cioe' il profitto
  * calcolato risulta piu' alto del vero.
  *
- * L'avviso e' chiudibile e la chiusura si ricorda sul server: finche' quei
- * costi mancano, alla prossima apertura torna.
+ * L'avviso e' chiudibile e la chiusura si ricorda sul server, per sempre: non
+ * torna alla prossima apertura, anche se gli ordini senza peso restano. Sparisce
+ * da solo quando si configura un peso di default per articolo.
  *
  * Tono info (non warning): e' l'unica eccezione consentita alla regola del
  * progetto "un problema resta warning". L'utente ha esplicitamente chiesto un

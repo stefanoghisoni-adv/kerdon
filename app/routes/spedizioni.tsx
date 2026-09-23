@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useActionData, useFetcher, useLoaderData } from '@remix-run/react';
+import { useFetcher, useLoaderData } from '@remix-run/react';
 import { useState, useEffect } from 'react';
 import {
   Banner,
@@ -20,9 +20,10 @@ import { useT } from '~/lib/i18n/context';
 import { authenticate } from '~/shopify.server';
 import { syncShippingZones } from '~/lib/shipping/sync-zones.server';
 import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute.server';
-import { validateCategories, validateFallbackRules } from '~/lib/shipping/load-config.server';
-import { validateBrackets } from '~/components/Shipping/brackets';
-import { validatePackaging } from '~/components/Shipping/packaging';
+import { loadShippingPageData } from '~/lib/shipping/page-data.server';
+import { parseBrackets } from '~/components/Shipping/brackets';
+import { parsePackaging } from '~/components/Shipping/packaging';
+import { feedbackFromActionData, type ShippingIntent } from '~/components/Shipping/feedback';
 import { ShippingZonesTable } from '~/components/Shipping/ShippingZonesTable';
 import { EditZoneModal } from '~/components/Shipping/EditZoneModal';
 import { PackagingCard } from '~/components/Shipping/PackagingCard';
@@ -35,50 +36,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   await requireSetupComplete(session.shop);
 
-  // Carica le zone di spedizione con le tariffe
-  const zones = await prisma.shippingZone.findMany({
-    where: { shopId: shop.id },
-    include: { rates: true },
-    orderBy: { zoneName: 'asc' },
-  });
+  // Zone, tariffe e packaging. Con le tabelle owner non ancora migrate la
+  // pagina si apre vuota invece di rispondere 500 (vedi page-data.server).
+  return json(await loadShippingPageData(shop.id));
+}
 
-  // Carica la configurazione packaging
-  const packagingConfig = await prisma.packagingConfig.findUnique({
-    where: { shopId: shop.id },
-  });
+/**
+ * La risposta dell'azione, sempre con l'intento a cui risponde.
+ *
+ * La pagina usa un fetcher solo per tre azioni, e quando la risposta arriva
+ * `fetcher.formData` e' gia' stato azzerato da Remix: l'intento va rimandato
+ * qui, o il client non sa quale toast mostrare (vedi feedback.ts).
+ */
+function risposta(intent: ShippingIntent | null, esito: { success: true } | { success: false; error: string }) {
+  return json({ intent, ...esito } as { intent: ShippingIntent | null; success: boolean; error?: string });
+}
 
-  return json({
-    zones: zones.map((zone) => ({
-      id: zone.id,
-      zoneName: zone.zoneName,
-      countries: zone.countries,
-      restOfWorld: zone.restOfWorld,
-      rateType: zone.rateType as 'linear' | 'brackets',
-      rates: zone.rates.map((rate) => ({
-        id: rate.id,
-        weightFromKg: rate.weightFrom ? Number(rate.weightFrom) : null,
-        weightToKg: rate.weightTo ? Number(rate.weightTo) : null,
-        cost: Number(rate.cost),
-      })),
-    })),
-    packaging: packagingConfig
-      ? {
-          categories: validateCategories(packagingConfig.categories),
-          fallbackRules: validateFallbackRules(packagingConfig.fallbackRules),
-          defaultWeightPerItemKg: packagingConfig.defaultWeightPerItem
-            ? Number(packagingConfig.defaultWeightPerItem)
-            : null,
-          returnCost: packagingConfig.returnCost ? Number(packagingConfig.returnCost) : null,
-          configKey: packagingConfig.updatedAt.toISOString(),
-        }
-      : {
-          categories: [],
-          fallbackRules: [],
-          defaultWeightPerItemKg: null,
-          returnCost: null,
-          configKey: 'empty',
-        },
-  });
+/**
+ * Un importo facoltativo dal form: null se assente, NaN se non e' un numero
+ * finito e non negativo. `Number.isFinite` e non `isNaN`: "Infinity" passa
+ * `parseFloat` e farebbe fallire il Decimal con un 500.
+ */
+function importoFacoltativo(valore: string | undefined): number | null {
+  if (valore === undefined || valore === '') return null;
+  const n = parseFloat(valore);
+  return Number.isFinite(n) && n >= 0 ? n : Number.NaN;
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -94,24 +76,31 @@ export async function action({ request }: ActionFunctionArgs) {
     try {
       // Re-authenticate to get the admin object with graphql method
       const { admin } = await authenticate.admin(request);
-      const result = await syncShippingZones(admin, shop.id);
-      return json({ success: true, synced: result });
+      await syncShippingZones(admin, shop.id);
     } catch (error) {
       const isScopeError =
         error instanceof Error && error.message.includes('read_shipping');
-      return json({
+      return risposta('sync-zones', {
         success: false,
         error: isScopeError ? 'scope_error' : 'sync_error',
       });
     }
+
+    // L'importazione puo' cambiare i paesi di una zona o quale zona fa da
+    // resto del mondo: i costi gia' scritti sugli ordini vanno rifatti come
+    // dopo un salvataggio delle tariffe. Non solleva mai (vedi
+    // recompute-enqueue.server): le zone sono gia' salvate comunque.
+    await enqueueLogisticsRecompute(shop.id);
+
+    return risposta('sync-zones', { success: true });
   }
 
   if (intent === 'save-zone-rates') {
     const zoneId = formData.get('zoneId')?.toString();
-    const rateType = formData.get('rateType')?.toString() as 'linear' | 'brackets';
+    const rateType = formData.get('rateType')?.toString();
 
-    if (!zoneId || !rateType) {
-      return json({ success: false, error: 'invalid_request' });
+    if (!zoneId || (rateType !== 'linear' && rateType !== 'brackets')) {
+      return risposta('save-zone-rates', { success: false, error: 'invalid_request' });
     }
 
     // Verifica che la zona appartenga a questo shop
@@ -120,15 +109,14 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!zone) {
-      return json({ success: false, error: 'zone_not_found' });
+      return risposta('save-zone-rates', { success: false, error: 'zone_not_found' });
     }
 
     if (rateType === 'linear') {
-      const costPerKg = formData.get('costPerKg')?.toString();
-      const cost = parseFloat(costPerKg || '');
+      const cost = importoFacoltativo(formData.get('costPerKg')?.toString());
 
-      if (isNaN(cost) || cost < 0) {
-        return json({ success: false, error: 'invalid_cost' });
+      if (cost === null || Number.isNaN(cost)) {
+        return risposta('save-zone-rates', { success: false, error: 'shipping.errors.invalidLinearCost' });
       }
 
       // Sostituisci le tariffe in una transazione
@@ -148,19 +136,14 @@ export async function action({ request }: ActionFunctionArgs) {
         }),
       ]);
     } else {
-      // Brackets
-      const bracketsJson = formData.get('brackets')?.toString();
-      if (!bracketsJson) {
-        return json({ success: false, error: 'invalid_brackets' });
+      // Il JSON malformato o con tipi sbagliati torna come errore di
+      // validazione, non come eccezione: il merchant vede il motivo nella
+      // modale invece di una pagina di errore.
+      const parsed = parseBrackets(formData.get('brackets')?.toString());
+      if (parsed.error !== null) {
+        return risposta('save-zone-rates', { success: false, error: parsed.error });
       }
-
-      const brackets: RateBracket[] = JSON.parse(bracketsJson);
-
-      // Valida i brackets
-      const validationError = validateBrackets(brackets);
-      if (validationError) {
-        return json({ success: false, error: validationError });
-      }
+      const brackets: RateBracket[] = parsed.brackets;
 
       // Sostituisci le tariffe in una transazione
       await prisma.$transaction([
@@ -185,51 +168,29 @@ export async function action({ request }: ActionFunctionArgs) {
     // Accoda il ricalcolo dei costi logistici in background
     await enqueueLogisticsRecompute(shop.id);
 
-    return json({ success: true });
+    return risposta('save-zone-rates', { success: true });
   }
 
   if (intent === 'save-packaging') {
-    const categoriesJson = formData.get('categories')?.toString();
-    const rulesJson = formData.get('rules')?.toString();
-    const defaultWeightStr = formData.get('defaultWeightPerItemKg')?.toString();
-    const returnCostStr = formData.get('returnCost')?.toString();
-
-    if (!categoriesJson || !rulesJson) {
-      return json({ success: false, error: 'invalid_request' });
+    const parsed = parsePackaging(
+      formData.get('categories')?.toString(),
+      formData.get('rules')?.toString(),
+    );
+    if (parsed.error !== null) {
+      return risposta('save-packaging', { success: false, error: parsed.error });
     }
+    const categories: PackagingCategory[] = parsed.value.categories;
+    const rules: FallbackRule[] = parsed.value.rules;
 
-    let categories: PackagingCategory[];
-    let rules: FallbackRule[];
+    const defaultWeight = importoFacoltativo(formData.get('defaultWeightPerItemKg')?.toString());
+    const returnCost = importoFacoltativo(formData.get('returnCost')?.toString());
 
-    try {
-      categories = JSON.parse(categoriesJson);
-      rules = JSON.parse(rulesJson);
-    } catch {
-      return json({ success: false, error: 'invalid_json' });
+    // Verifica valori finiti e non negativi
+    if (defaultWeight !== null && Number.isNaN(defaultWeight)) {
+      return risposta('save-packaging', { success: false, error: 'invalid_default_weight' });
     }
-
-    // Valida il packaging
-    const validationError = validatePackaging({ categories, rules });
-    if (validationError) {
-      return json({ success: false, error: validationError });
-    }
-
-    // Parse dei valori opzionali
-    const defaultWeight =
-      defaultWeightStr && defaultWeightStr !== ''
-        ? parseFloat(defaultWeightStr)
-        : null;
-    const returnCost =
-      returnCostStr && returnCostStr !== ''
-        ? parseFloat(returnCostStr)
-        : null;
-
-    // Verifica valori non negativi
-    if (defaultWeight !== null && (isNaN(defaultWeight) || defaultWeight < 0)) {
-      return json({ success: false, error: 'invalid_default_weight' });
-    }
-    if (returnCost !== null && (isNaN(returnCost) || returnCost < 0)) {
-      return json({ success: false, error: 'invalid_return_cost' });
+    if (returnCost !== null && Number.isNaN(returnCost)) {
+      return risposta('save-packaging', { success: false, error: 'invalid_return_cost' });
     }
 
     // Upsert della configurazione
@@ -253,60 +214,62 @@ export async function action({ request }: ActionFunctionArgs) {
     // Accoda il ricalcolo dei costi logistici in background
     await enqueueLogisticsRecompute(shop.id);
 
-    return json({ success: true });
+    return risposta('save-packaging', { success: true });
   }
 
-  return json({ success: false, error: 'unknown_intent' });
+  return risposta(null, { success: false, error: 'unknown_intent' });
 }
 
 export default function ShippingPage() {
   const { zones, packaging } = useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const t = useT();
 
   const [editingZone, setEditingZone] = useState<typeof zones[0] | null>(null);
-  const [successToast, setSuccessToast] = useState<string | null>(null);
-  const [errorToast, setErrorToast] = useState<string | null>(null);
+  // L'errore del server sulla zona in modifica: la modale resta aperta e lo mostra.
+  const [zoneServerError, setZoneServerError] = useState<string | null>(null);
+  // Un toast solo: il successo di un'azione sostituisce l'errore di quella
+  // prima, invece di comparire accanto.
+  const [toast, setToast] = useState<{ content: string; error: boolean } | null>(null);
 
-  const isSyncing = fetcher.state !== 'idle' && (fetcher.formData as FormData | undefined)?.get('intent') === 'sync-zones';
-  const isSavingPackaging = fetcher.state !== 'idle' && (fetcher.formData as FormData | undefined)?.get('intent') === 'save-packaging';
+  // Durante l'invio `fetcher.formData` c'e' ancora: e' la risposta che non ce
+  // l'ha piu' (vedi feedback.ts).
+  const intentInCorso =
+    fetcher.state !== 'idle' ? (fetcher.formData as FormData | undefined)?.get('intent') : undefined;
+  const isSyncing = intentInCorso === 'sync-zones';
+  const isSavingPackaging = intentInCorso === 'save-packaging';
+  const isSavingZone = intentInCorso === 'save-zone-rates';
 
-  // Mostra toast solo dopo risposta del server
+  // Cosa mostrare, deciso dalla risposta (con il suo intento) e non dal form.
+  const feedback = fetcher.state === 'idle' ? feedbackFromActionData(fetcher.data, t) : null;
+
+  // Una volta per risposta: `fetcher.data` e' un oggetto nuovo a ogni risposta.
   useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data) {
-      const formData = fetcher.formData as FormData | undefined;
-      const intent = formData?.get('intent')?.toString();
-
-      if (fetcher.data.success) {
-        if (intent === 'sync-zones') {
-          setSuccessToast(t.shipping.syncSuccess);
-        } else if (intent === 'save-zone-rates') {
-          setSuccessToast(t.shipping.modal.saveSuccess);
-        } else if (intent === 'save-packaging') {
-          setSuccessToast(t.shipping.packaging.saveSuccess);
-        }
-      } else if ('error' in fetcher.data && fetcher.data.error !== 'scope_error') {
-        if (intent === 'sync-zones') {
-          setErrorToast(t.shipping.syncError);
-        } else if (intent === 'save-zone-rates') {
-          setErrorToast(t.shipping.modal.saveError);
-        } else if (intent === 'save-packaging') {
-          setErrorToast(t.shipping.packaging.saveError);
-        }
-      }
+    if (fetcher.state !== 'idle' || !fetcher.data) return;
+    const esito = feedbackFromActionData(fetcher.data, t);
+    if (esito.toast) setToast(esito.toast);
+    if (esito.zoneSaved) {
+      setEditingZone(null);
+      setZoneServerError(null);
+    } else if (esito.zoneError) {
+      setZoneServerError(esito.zoneError);
     }
-  }, [fetcher.state, fetcher.data, t]);
+    // `t` resta fuori di proposito: cambiare lingua non e' una risposta nuova,
+    // e non deve rimostrare il toast dell'ultima azione.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetcher.state, fetcher.data]);
 
   const handleSync = () => {
     fetcher.submit({ intent: 'sync-zones' }, { method: 'post' });
   };
 
   const handleEdit = (zone: typeof zones[0]) => {
+    setZoneServerError(null);
     setEditingZone(zone);
   };
 
   const handleModalClose = () => {
+    setZoneServerError(null);
     setEditingZone(null);
   };
 
@@ -324,8 +287,10 @@ export default function ShippingPage() {
       formData.append('brackets', JSON.stringify(data.brackets));
     }
 
+    // La modale NON si chiude qui: si chiude quando il server conferma, e resta
+    // aperta con il motivo se rifiuta (vedi l'effetto sopra).
+    setZoneServerError(null);
     fetcher.submit(formData, { method: 'post' });
-    setEditingZone(null);
   };
 
   const handlePackagingSave = (data: {
@@ -348,8 +313,9 @@ export default function ShippingPage() {
     fetcher.submit(formData, { method: 'post' });
   };
 
-  // Mostra errore di scope se presente
-  const scopeError = actionData && !actionData.success && 'error' in actionData && actionData.error === 'scope_error';
+  // Il banner del permesso mancante arriva dalla risposta del fetcher, come
+  // l'importazione che lo provoca; resta finche' non arriva un'altra risposta.
+  const scopeError = feedback?.scopeError ?? false;
 
   return (
     <Page
@@ -405,21 +371,16 @@ export default function ShippingPage() {
             zone={editingZone}
             onClose={handleModalClose}
             onSave={handleModalSave}
+            isSaving={isSavingZone}
+            serverError={zoneServerError}
           />
         )}
 
-        {successToast && (
+        {toast && (
           <Toast
-            content={successToast}
-            onDismiss={() => setSuccessToast(null)}
-          />
-        )}
-
-        {errorToast && (
-          <Toast
-            content={errorToast}
-            error
-            onDismiss={() => setErrorToast(null)}
+            content={toast.content}
+            error={toast.error}
+            onDismiss={() => setToast(null)}
           />
         )}
       </BlockStack>

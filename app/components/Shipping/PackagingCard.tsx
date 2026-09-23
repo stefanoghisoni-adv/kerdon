@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import {
+  Box,
   Card,
   BlockStack,
   TextField,
@@ -43,6 +44,7 @@ function getValidationErrorMessage(
     'shipping.packaging.errors.ruleWeightNegative': t.shipping.packaging.errors.ruleWeightNegative,
     'shipping.packaging.errors.multipleUnlimitedRules': t.shipping.packaging.errors.multipleUnlimitedRules,
     'shipping.packaging.errors.unlimitedRuleMustBeLast': t.shipping.packaging.errors.unlimitedRuleMustBeLast,
+    'shipping.packaging.errors.invalidData': t.shipping.packaging.errors.invalidData,
   };
 
   return errorMap[errorCode] ?? t.shipping.packaging.saveError;
@@ -267,11 +269,13 @@ export function PackagingCard({
             </BlockStack>
           ))}
 
-          <div>
+          {/* Il Box tiene il pulsante alla sua larghezza: dentro un BlockStack
+              un figlio diretto si allungherebbe su tutta la card. */}
+          <Box>
             <Button onClick={handleAddCategory}>
               {t.shipping.packaging.addCategory}
             </Button>
-          </div>
+          </Box>
         </BlockStack>
 
         {/* Rules */}
@@ -311,11 +315,11 @@ export function PackagingCard({
               </InlineStack>
             ))}
 
-            <div>
+            <Box>
               <Button onClick={handleAddRule} disabled={!hasNonEmptyCategory}>
                 {t.shipping.packaging.addRule}
               </Button>
-            </div>
+            </Box>
           </BlockStack>
         )}
 
@@ -353,11 +357,11 @@ export function PackagingCard({
         )}
 
         {/* Save button */}
-        <div>
+        <Box>
           <Button variant="primary" onClick={handleSave} loading={isSaving} disabled={!!validationError}>
             {t.shipping.packaging.save}
           </Button>
-        </div>
+        </Box>
       </BlockStack>
     </Card>
   );

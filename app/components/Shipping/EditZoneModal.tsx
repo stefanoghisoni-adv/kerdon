@@ -27,6 +27,7 @@ function getValidationErrorMessage(
     'shipping.errors.costMustBeNonNegative': t.shipping.errors.costMustBeNonNegative,
     'shipping.errors.weightFromGreaterThanWeightTo': t.shipping.errors.weightFromGreaterThanWeightTo,
     'shipping.errors.invalidLinearCost': t.shipping.errors.invalidLinearCost,
+    'shipping.errors.invalidBrackets': t.shipping.errors.invalidBrackets,
   };
 
   return errorMap[errorCode] ?? t.shipping.modal.saveError;
@@ -54,9 +55,17 @@ interface EditZoneModalProps {
     costPerKg?: string;
     brackets?: RateBracket[];
   }) => void;
+  /** Il salvataggio e' partito e il server non ha ancora risposto. */
+  isSaving?: boolean;
+  /**
+   * Il motivo per cui il server ha rifiutato il salvataggio, gia' tradotto.
+   * La modale resta aperta con i valori scritti dal merchant e lo mostra:
+   * chiuderla farebbe sembrare riuscito un salvataggio rifiutato.
+   */
+  serverError?: string | null;
 }
 
-export function EditZoneModal({ zone, onClose, onSave }: EditZoneModalProps) {
+export function EditZoneModal({ zone, onClose, onSave, isSaving = false, serverError = null }: EditZoneModalProps) {
   const t = useT();
 
   const [rateType, setRateType] = useState<'linear' | 'brackets'>(zone.rateType);
@@ -121,6 +130,7 @@ export function EditZoneModal({ zone, onClose, onSave }: EditZoneModalProps) {
         content: t.shipping.modal.save,
         onAction: handleSave,
         disabled: !!validationError,
+        loading: isSaving,
       }}
       secondaryActions={[
         {
@@ -172,6 +182,14 @@ export function EditZoneModal({ zone, onClose, onSave }: EditZoneModalProps) {
           {validationError && validationError !== 'shipping.errors.invalidLinearCost' && (
             <Text as="p" tone="critical">
               {getValidationErrorMessage(validationError, t)}
+            </Text>
+          )}
+
+          {/* Il rifiuto del server, solo se il controllo locale non ha gia'
+              detto qualcosa: due messaggi sullo stesso problema confondono. */}
+          {serverError && !validationError && (
+            <Text as="p" tone="critical">
+              {serverError}
             </Text>
           )}
         </BlockStack>

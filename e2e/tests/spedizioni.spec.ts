@@ -2,14 +2,25 @@
 //
 // Le azioni della pagina Spedizioni: salvataggio tariffe e packaging.
 //
-// COSA COPRE. Le azioni `save-zone-rates` e `save-packaging` della rotta
-// /spedizioni: validazione dei brackets, ownership delle zone, validazione del
-// packaging. Non copre l'importazione delle zone (richiederebbe Shopify GraphQL)
-// né la voce di menu (vive in App Bridge, fuori dalla portata dell'harness).
+// COSA COPRE. Le azioni `save-zone-rates`, `save-packaging` e `sync-zones`
+// della rotta /spedizioni: validazione dei brackets, ownership delle zone,
+// validazione del packaging, JSON malformato, importazione zone (con l'admin
+// GraphQL finto) e il ricalcolo accodato dopo l'importazione. Non copre la voce
+// di menu (vive in App Bridge, fuori dalla portata dell'harness).
+//
+// IL CONTRATTO CON LA PAGINA. La pagina non si puo' montare qui (il server di
+// prova chiama loader e action, non renderizza le rotte embedded), quindi la
+// catena "risposta del server -> toast o banner" si prova in due pezzi che si
+// toccano: ogni risposta qui porta il suo `intent`, e la si passa a
+// `feedbackFromActionData` — la stessa funzione che usa la pagina — per
+// verificare che produca il toast o il banner giusto. E' il pezzo che mancava
+// quando i toast non comparivano mai.
 
 import { expect, type APIRequestContext, type BrowserContext } from '@playwright/test';
 import { test as prova } from './support/prova';
-import { azzera, db, entraComeNegozio, NEGOZIO, ALTRO_NEGOZIO, seminaNegozio } from './support/server';
+import { azzera, db, entraComeNegozio, finti, NEGOZIO, ALTRO_NEGOZIO, seminaNegozio } from './support/server';
+import { it as italiano } from '~/lib/i18n/it';
+import { feedbackFromActionData, type ShippingActionData } from '~/components/Shipping/feedback';
 
 interface ZonaSeminata {
   id: string;
@@ -103,6 +114,45 @@ async function salvaPackaging(
   });
 
   return { stato: risposta.status(), corpo: (await risposta.json()) as Record<string, unknown> };
+}
+
+/** Una richiesta grezza all'azione, per i casi che gli helper sopra non sanno scrivere. */
+async function inviaForm(
+  context: BrowserContext,
+  campi: Record<string, string>,
+): Promise<{ stato: number; corpo: Record<string, unknown> }> {
+  const risposta = await context.request.post('/spedizioni', {
+    data: new URLSearchParams(campi).toString(),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
+  return { stato: risposta.status(), corpo: (await risposta.json()) as Record<string, unknown> };
+}
+
+/** Cosa vedrebbe il merchant per questa risposta, deciso dalla funzione della pagina. */
+const cosaVede = (corpo: Record<string, unknown>) =>
+  feedbackFromActionData(corpo as unknown as ShippingActionData, italiano);
+
+/** Le zone come le restituisce l'admin GraphQL di Shopify. */
+function risposteZone(zone: Array<{ name: string; countries: Array<{ countryCode: string; restOfWorld: boolean }> }>) {
+  return {
+    data: {
+      deliveryProfiles: {
+        nodes: [
+          {
+            profileLocationGroups: [
+              {
+                locationGroupZones: {
+                  nodes: zone.map((z) => ({
+                    zone: { name: z.name, countries: z.countries.map((c) => ({ code: c })) },
+                  })),
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
 }
 
 prova.describe('le azioni della pagina Spedizioni', () => {
@@ -401,6 +451,193 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       expect(stato).toBe(200);
       expect(corpo.success).toBe(false);
       expect(corpo.error).toBe('shipping.packaging.errors.unlimitedRuleMustBeLast');
+    });
+  });
+  prova.describe('cosa vede il merchant dopo ogni azione', () => {
+    prova('tariffe salvate: la risposta porta l intento e la pagina mostra il toast di successo', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3.0 }],
+      });
+
+      const { corpo } = await salvaTariffe(context, { zoneId: zona.id, rateType: 'linear', costPerKg: '4.5' });
+
+      expect(corpo).toMatchObject({ intent: 'save-zone-rates', success: true });
+      const f = cosaVede(corpo);
+      expect(f.toast).toEqual({ content: italiano.shipping.modal.saveSuccess, error: false });
+      expect(f.zoneSaved).toBe(true);
+    });
+
+    prova('tariffe rifiutate: toast di errore e modale aperta con il motivo', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Francia',
+        countries: ['FR'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 2.5 }],
+      });
+
+      const { corpo } = await salvaTariffe(context, {
+        zoneId: zona.id,
+        rateType: 'brackets',
+        brackets: [
+          { weightFromKg: 0, weightToKg: 5, cost: 10 },
+          { weightFromKg: 7, weightToKg: null, cost: 15 },
+        ],
+      });
+
+      expect(corpo).toMatchObject({ intent: 'save-zone-rates', success: false });
+      const f = cosaVede(corpo);
+      expect(f.toast).toEqual({ content: italiano.shipping.modal.saveError, error: true });
+      expect(f.zoneSaved).toBe(false);
+      expect(f.zoneError).toBe(italiano.shipping.errors.bracketsHaveGaps);
+    });
+
+    prova('packaging salvato e rifiutato: il toast giusto per ciascuno', async ({ request, context }) => {
+      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+
+      const ok = await salvaPackaging(context, {
+        categories: [{ name: 'Busta', cost: 1.5 }],
+        rules: [{ weightMaxKg: null, category: 'Busta' }],
+      });
+      expect(ok.corpo).toMatchObject({ intent: 'save-packaging', success: true });
+      expect(cosaVede(ok.corpo).toast).toEqual({ content: italiano.shipping.packaging.saveSuccess, error: false });
+
+      const ko = await salvaPackaging(context, {
+        categories: [{ name: 'Busta', cost: 1.5 }],
+        rules: [{ weightMaxKg: null, category: 'Scatola' }],
+      });
+      expect(ko.corpo).toMatchObject({ intent: 'save-packaging', success: false });
+      expect(cosaVede(ko.corpo).toast).toEqual({
+        content: italiano.shipping.packaging.errors.ruleInvalidCategory,
+        error: true,
+      });
+    });
+
+    prova('permesso sulle spedizioni mancante: banner, non toast', async ({ request, context }) => {
+      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      await finti(request, {
+        graphql: [
+          {
+            match: 'DeliveryZones',
+            body: { errors: [{ message: 'Access denied for deliveryProfiles field.', extensions: { code: 'ACCESS_DENIED' } }] },
+          },
+        ],
+      });
+
+      const { stato, corpo } = await inviaForm(context, { intent: 'sync-zones' });
+
+      expect(stato).toBe(200);
+      expect(corpo).toEqual({ intent: 'sync-zones', success: false, error: 'scope_error' });
+      const f = cosaVede(corpo);
+      expect(f.scopeError).toBe(true);
+      expect(f.toast).toBeNull();
+    });
+
+    prova('importazione riuscita: toast di successo e ricalcolo dei costi accodato', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      await finti(request, {
+        graphql: [
+          {
+            match: 'DeliveryZones',
+            body: risposteZone([
+              { name: 'Italia', countries: [{ countryCode: 'IT', restOfWorld: false }] },
+              { name: 'Mondo', countries: [{ countryCode: 'ZZ', restOfWorld: true }] },
+            ]),
+          },
+        ],
+      });
+
+      const { stato, corpo } = await inviaForm(context, { intent: 'sync-zones' });
+
+      expect(stato).toBe(200);
+      expect(corpo).toMatchObject({ intent: 'sync-zones', success: true });
+      expect(cosaVede(corpo).toast).toEqual({ content: italiano.shipping.syncSuccess, error: false });
+
+      // Le zone nuove cambiano i paesi e il resto del mondo: i costi gia'
+      // scritti sugli ordini vanno rifatti.
+      const accodati = await db<Array<{ type: string }>>(request, 'syncRequest', 'findMany', {
+        where: { shopId: shop.id, type: 'logistics-recompute' },
+        select: { type: true },
+      });
+      expect(accodati.length).toBeGreaterThan(0);
+    });
+  });
+
+  prova.describe('dati malformati', () => {
+    prova('fasce con JSON rotto: errore di validazione, non un 500', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3.0 }],
+      });
+
+      const { stato, corpo } = await inviaForm(context, {
+        intent: 'save-zone-rates',
+        zoneId: zona.id,
+        rateType: 'brackets',
+        brackets: '[{ rotto',
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo).toMatchObject({ intent: 'save-zone-rates', success: false, error: 'shipping.errors.invalidBrackets' });
+    });
+
+    prova('fasce con un costo stringa: rifiutate', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3.0 }],
+      });
+
+      const { stato, corpo } = await inviaForm(context, {
+        intent: 'save-zone-rates',
+        zoneId: zona.id,
+        rateType: 'brackets',
+        brackets: JSON.stringify([{ weightFromKg: 0, weightToKg: null, cost: '5' }]),
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo.error).toBe('shipping.errors.invalidBrackets');
+    });
+
+    prova('costo lineare non finito: rifiutato invece di un 500', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3.0 }],
+      });
+
+      const { stato, corpo } = await salvaTariffe(context, { zoneId: zona.id, rateType: 'linear', costPerKg: 'Infinity' });
+
+      expect(stato).toBe(200);
+      expect(corpo.error).toBe('shipping.errors.invalidLinearCost');
+    });
+
+    prova('packaging con JSON rotto: errore di validazione, non un 500', async ({ request, context }) => {
+      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+
+      const { stato, corpo } = await inviaForm(context, {
+        intent: 'save-packaging',
+        categories: '[{',
+        rules: '[]',
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo).toMatchObject({
+        intent: 'save-packaging',
+        success: false,
+        error: 'shipping.packaging.errors.invalidData',
+      });
     });
   });
 });

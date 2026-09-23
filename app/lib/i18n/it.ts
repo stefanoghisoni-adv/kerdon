@@ -1331,7 +1331,7 @@ export const it = {
     syncSuccess: "Zone importate con successo",
     syncError: "Non è stato possibile importare le zone. Riprova fra poco.",
     scopeError:
-      "Per importare le zone serve il permesso di leggere le spedizioni. Richiedi il permesso dal pannello partner Shopify.",
+      "Per importare le tue zone di spedizione, riapri l'app e accetta i permessi aggiornati.",
     empty: {
       title: "Nessuna zona di spedizione configurata",
       description:
@@ -1395,6 +1395,7 @@ export const it = {
       weightFromGreaterThanWeightTo:
         "Il peso iniziale non può essere maggiore del peso finale",
       invalidLinearCost: "Inserisci un costo valido",
+      invalidBrackets: "Le fasce non sono valide: controlla pesi e costi",
     },
     packaging: {
       title: "Packaging e rientri",
@@ -1436,6 +1437,7 @@ export const it = {
         multipleUnlimitedRules: "Può esserci al massimo una regola \"tutto il resto\"",
         unlimitedRuleMustBeLast: "La regola \"tutto il resto\" deve essere l'ultima",
         categoryStillReferenced: "Questa categoria è usata da una regola. Rimuovi prima le regole che la usano.",
+        invalidData: "La configurazione non è valida: controlla nomi, pesi e costi",
       },
     },
   },

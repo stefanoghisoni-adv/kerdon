@@ -1035,7 +1035,7 @@ export const en: typeof it = {
     syncSuccess: "Zones imported successfully",
     syncError: "Could not import zones. Try again in a moment.",
     scopeError:
-      "Importing zones requires permission to read shipping. Request permission from the Shopify partner panel.",
+      "To import your shipping zones, reopen the app and accept the updated permissions.",
     empty: {
       title: "No shipping zones configured",
       description:
@@ -1098,6 +1098,7 @@ export const en: typeof it = {
       weightFromGreaterThanWeightTo:
         "Starting weight cannot be greater than ending weight",
       invalidLinearCost: "Enter a valid cost",
+      invalidBrackets: "The brackets aren't valid: check the weights and costs",
     },
     packaging: {
       title: "Packaging and returns",
@@ -1139,6 +1140,7 @@ export const en: typeof it = {
         multipleUnlimitedRules: "There can be at most one \"everything else\" rule",
         unlimitedRuleMustBeLast: "The \"everything else\" rule must be last",
         categoryStillReferenced: "This category is used by a rule. Remove the rules that use it first.",
+        invalidData: "The configuration isn't valid: check the names, weights and costs",
       },
     },
   },
