@@ -102,11 +102,27 @@ export function IngestKeySection({ keys }: IngestKeySectionProps) {
           tone: neHaGia ? 'success' : undefined,
           content: neHaGia ? t.database.writeKeyActive(vive.length) : t.database.writeKeyNone,
         }}
+        // Le azioni stanno sulla riga del titolo, accanto al badge, come nelle
+        // altre righe delle card: sotto il titolo restano solo gli esiti.
         action={!neHaGia ? (
           <Button onClick={() => chiama('issue')} loading={inCorso} disabled={inCorso}>
             {t.database.writeKeyCreate}
           </Button>
-        ) : undefined}
+        ) : (
+          <>
+            <Button
+              tone="critical"
+              variant="plain"
+              onClick={() => setConfermaRevoca(true)}
+              disabled={inCorso}
+            >
+              {t.database.writeKeyRevoke}
+            </Button>
+            <Button onClick={() => chiama('issue')} loading={inCorso} disabled={inCorso}>
+              {t.database.writeKeyRotate}
+            </Button>
+          </>
+        )}
       />
 
       {/* Nessun avviso che conti i giorni a una scadenza: non ce n'e' piu' una.
@@ -142,22 +158,6 @@ export function IngestKeySection({ keys }: IngestKeySectionProps) {
             {t.database.writeKeyFailed}
           </Text>
         </Banner>
-      )}
-
-      {neHaGia && (
-        <InlineStack gap="200" blockAlign="center">
-          <Button onClick={() => chiama('issue')} loading={inCorso} disabled={inCorso}>
-            {t.database.writeKeyRotate}
-          </Button>
-          <Button
-            tone="critical"
-            variant="plain"
-            onClick={() => setConfermaRevoca(true)}
-            disabled={inCorso}
-          >
-            {t.database.writeKeyRevoke}
-          </Button>
-        </InlineStack>
       )}
 
       {/* Solo quando un invio c'e' stato davvero. Prima diceva "nessun invio
