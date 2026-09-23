@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   EmptyState,
+  InlineGrid,
   Page,
   Toast,
 } from '@shopify/polaris';
@@ -19,9 +20,11 @@ import { authenticate } from '~/shopify.server';
 import { syncShippingZones } from '~/lib/shipping/sync-zones.server';
 import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute.server';
 import { validateBrackets } from '~/components/Shipping/brackets';
+import { validatePackaging } from '~/components/Shipping/packaging';
 import { ShippingZonesTable } from '~/components/Shipping/ShippingZonesTable';
 import { EditZoneModal } from '~/components/Shipping/EditZoneModal';
-import type { RateBracket } from '~/lib/shipping/types';
+import { PackagingCard } from '~/components/Shipping/PackagingCard';
+import type { RateBracket, PackagingCategory, FallbackRule } from '~/lib/shipping/types';
 import { Decimal } from '@prisma/client/runtime/library';
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -35,6 +38,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     where: { shopId: shop.id },
     include: { rates: true },
     orderBy: { zoneName: 'asc' },
+  });
+
+  // Carica la configurazione packaging
+  const packagingConfig = await prisma.packagingConfig.findUnique({
+    where: { shopId: shop.id },
   });
 
   return json({
@@ -51,6 +59,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
         cost: Number(rate.cost),
       })),
     })),
+    packaging: packagingConfig
+      ? {
+          categories: packagingConfig.categories as unknown as PackagingCategory[],
+          fallbackRules: packagingConfig.fallbackRules as unknown as FallbackRule[],
+          defaultWeightPerItemKg: packagingConfig.defaultWeightPerItem
+            ? Number(packagingConfig.defaultWeightPerItem)
+            : null,
+          returnCost: packagingConfig.returnCost ? Number(packagingConfig.returnCost) : null,
+        }
+      : {
+          categories: [],
+          fallbackRules: [],
+          defaultWeightPerItemKg: null,
+          returnCost: null,
+        },
   });
 }
 
@@ -161,11 +184,79 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'save-packaging') {
+    const categoriesJson = formData.get('categories')?.toString();
+    const rulesJson = formData.get('rules')?.toString();
+    const defaultWeightStr = formData.get('defaultWeightPerItemKg')?.toString();
+    const returnCostStr = formData.get('returnCost')?.toString();
+
+    if (!categoriesJson || !rulesJson) {
+      return json({ success: false, error: 'invalid_request' });
+    }
+
+    let categories: PackagingCategory[];
+    let rules: FallbackRule[];
+
+    try {
+      categories = JSON.parse(categoriesJson);
+      rules = JSON.parse(rulesJson);
+    } catch {
+      return json({ success: false, error: 'invalid_json' });
+    }
+
+    // Valida il packaging
+    const validationError = validatePackaging({ categories, rules });
+    if (validationError) {
+      return json({ success: false, error: validationError });
+    }
+
+    // Parse dei valori opzionali
+    const defaultWeight =
+      defaultWeightStr && defaultWeightStr !== ''
+        ? parseFloat(defaultWeightStr)
+        : null;
+    const returnCost =
+      returnCostStr && returnCostStr !== ''
+        ? parseFloat(returnCostStr)
+        : null;
+
+    // Verifica valori non negativi
+    if (defaultWeight !== null && (isNaN(defaultWeight) || defaultWeight < 0)) {
+      return json({ success: false, error: 'invalid_default_weight' });
+    }
+    if (returnCost !== null && (isNaN(returnCost) || returnCost < 0)) {
+      return json({ success: false, error: 'invalid_return_cost' });
+    }
+
+    // Upsert della configurazione
+    await prisma.packagingConfig.upsert({
+      where: { shopId: shop.id },
+      create: {
+        shopId: shop.id,
+        categories: categories as any,
+        fallbackRules: rules as any,
+        defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
+        returnCost: returnCost !== null ? new Decimal(returnCost) : null,
+      },
+      update: {
+        categories: categories as any,
+        fallbackRules: rules as any,
+        defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
+        returnCost: returnCost !== null ? new Decimal(returnCost) : null,
+      },
+    });
+
+    // Accoda il ricalcolo dei costi logistici in background
+    await enqueueLogisticsRecompute(shop.id);
+
+    return json({ success: true });
+  }
+
   return json({ success: false, error: 'unknown_intent' });
 }
 
 export default function ShippingPage() {
-  const { zones } = useLoaderData<typeof loader>();
+  const { zones, packaging } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const t = useT();
@@ -175,6 +266,7 @@ export default function ShippingPage() {
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
   const isSyncing = fetcher.state !== 'idle' && (fetcher.formData as FormData | undefined)?.get('intent') === 'sync-zones';
+  const isSavingPackaging = fetcher.state !== 'idle' && (fetcher.formData as FormData | undefined)?.get('intent') === 'save-packaging';
 
   // Mostra toast solo dopo risposta del server
   useEffect(() => {
@@ -187,12 +279,16 @@ export default function ShippingPage() {
           setSuccessToast(t.shipping.syncSuccess);
         } else if (intent === 'save-zone-rates') {
           setSuccessToast(t.shipping.modal.saveSuccess);
+        } else if (intent === 'save-packaging') {
+          setSuccessToast(t.shipping.packaging.saveSuccess);
         }
       } else if ('error' in fetcher.data && fetcher.data.error !== 'scope_error') {
         if (intent === 'sync-zones') {
           setErrorToast(t.shipping.syncError);
         } else if (intent === 'save-zone-rates') {
           setErrorToast(t.shipping.modal.saveError);
+        } else if (intent === 'save-packaging') {
+          setErrorToast(t.shipping.packaging.saveError);
         }
       }
     }
@@ -226,6 +322,26 @@ export default function ShippingPage() {
 
     fetcher.submit(formData, { method: 'post' });
     setEditingZone(null);
+  };
+
+  const handlePackagingSave = (data: {
+    categories: PackagingCategory[];
+    rules: FallbackRule[];
+    defaultWeightPerItemKg: string | null;
+    returnCost: string | null;
+  }) => {
+    const formData = new FormData();
+    formData.append('intent', 'save-packaging');
+    formData.append('categories', JSON.stringify(data.categories));
+    formData.append('rules', JSON.stringify(data.rules));
+    if (data.defaultWeightPerItemKg) {
+      formData.append('defaultWeightPerItemKg', data.defaultWeightPerItemKg);
+    }
+    if (data.returnCost) {
+      formData.append('returnCost', data.returnCost);
+    }
+
+    fetcher.submit(formData, { method: 'post' });
   };
 
   // Mostra errore di scope se presente
@@ -262,11 +378,19 @@ export default function ShippingPage() {
             </EmptyState>
           </Card>
         ) : (
-          <>
+          <InlineGrid columns={{ xs: 1, md: '2fr 1fr' }} gap="400">
             <Card padding="0">
               <ShippingZonesTable zones={zones} onEdit={handleEdit} />
             </Card>
-          </>
+            <PackagingCard
+              initialCategories={packaging.categories}
+              initialRules={packaging.fallbackRules}
+              initialDefaultWeight={packaging.defaultWeightPerItemKg}
+              initialReturnCost={packaging.returnCost}
+              onSave={handlePackagingSave}
+              isSaving={isSavingPackaging}
+            />
+          </InlineGrid>
         )}
 
         {editingZone && (
