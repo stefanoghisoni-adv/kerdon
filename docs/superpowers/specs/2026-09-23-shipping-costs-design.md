@@ -1,7 +1,22 @@
 # Shipping Costs Management - Design Specification
 
 **Data**: 2026-09-23  
-**Versione**: 1.0  
+**Versione**: 1.1 (revisione vincolante in testa — prevale sul resto del documento)
+
+## Revisione 1.1 — correzioni dopo la verifica sul codice (2026-09-23)
+
+Queste regole **sostituiscono** le parti del documento che le contraddicono.
+
+1. **Costo logistico salvato sull'ordine, non calcolato al volo.** Il profitto si calcola in SQL sul database del merchant (`app/lib/customers/net-contribution.ts`, frammenti usati da `customers-query.ts`); le tariffe stanno sul DB owner, e le due basi non si possono unire in una query. Quindi: colonna `logistics_cost NUMERIC(10,2)` su `orders` (DB merchant), calcolata in TypeScript da una funzione pura al momento della scrittura dell'ordine, e **ricalcolata in background** su tutti gli ordini quando il merchant salva zone/tariffe/packaging. Niente cache LRU.
+2. **Una volta per ordine.** Le query del profitto uniscono `orders` a `order_lines`: il costo logistico va sottratto una sola volta per ordine, mai una volta per riga. Il profitto per prodotto (`top-products.ts`) resta senza costo logistico: e' un costo dell'ordine, non del prodotto.
+3. **Solo ordini spediti.** Spedizione e packaging si applicano solo se l'ordine risulta spedito (codice di tracciamento presente, oppure stato Shopify FULFILLED/PARTIALLY_FULFILLED). Il costo di rientro si applica se l'ordine ha un reso.
+4. **API Shopify.** Zone: `deliveryProfiles → profileLocationGroups → locationGroupZones → zone { name countries { code { countryCode restOfWorld } } }` (scope `read_shipping`). Resi: connessione `returns` dell'ordine (scope `read_returns`), non `refunds`: un rimborso non e' un pacco rientrato. Peso: `Order.totalWeight` (grammi). Paese: `shippingAddress.countryCodeV2`. Tracking: `fulfillments { trackingInfo { number } }`. Gli scope nuovi richiedono `shopify app deploy`.
+5. **Peso mancante.** Se `totalWeight` e' 0/assente si usa `peso di default per articolo × numero di articoli`; se manca anche quello, il costo spedizione e' 0 e l'ordine conta come "senza peso" per l'avviso informativo in dashboard.
+6. **Zona "Resto del mondo".** Un paese non elencato in nessuna zona cade nella zona con `restOfWorld`, se esiste.
+7. **Colonne ordini (schema merchant v12):** `fulfillment_status TEXT`, `shipping_country_code TEXT`, `total_weight_grams INTEGER`, `item_count INTEGER`, `returned_at TIMESTAMP`, `packaging_category TEXT`, `logistics_cost NUMERIC(10,2)`.
+8. **Tabelle owner:** migrazione Prisma in `prisma/migrations/<timestamp>_shipping_costs/` con RLS abilitata su ogni tabella nuova (come `product_feeds`); `shipping_zones` ha anche `rest_of_world BOOLEAN`.
+9. **Navigazione:** voce "Spedizioni" nella `NavMenu` di `app/root.tsx`, dopo Clienti, solo a configurazione completata. **Testi** in `app/lib/i18n/it.ts` + `en.ts`, mai stringhe fisse nei componenti.
+
 **Stato**: Approved
 
 ## Contesto e Motivazione
