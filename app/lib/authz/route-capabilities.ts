@@ -118,6 +118,7 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
   'api.product-scope': { guard: 'capability', capability: 'use_app' },
   'api.sync-job.$id.details': { guard: 'capability', capability: 'use_app' },
   customers: { guard: 'capability', capability: 'use_app' },
+  spedizioni: { guard: 'capability', capability: 'use_app' },
   'products.issues': { guard: 'capability', capability: 'use_app' },
   logs: { guard: 'capability', capability: 'use_app' },
   'catalogs._index': { guard: 'capability', capability: 'use_app' },

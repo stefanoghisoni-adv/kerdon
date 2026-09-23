@@ -358,7 +358,7 @@ export const en: typeof it = {
   dashboard: {
     profit: {
       title: "Profit this month",
-      hint: "Revenue minus the cost of goods sold, on this month’s orders.",
+      hint: "What’s left after product, shipping and packaging costs, on this month’s orders.",
       orders: (n: number) => `${n} ${n === 1 ? "order" : "orders"}`,
       reliability: (percent: number) => `Based on ${percent}% of order lines`,
       complete: "Based on every order line",
@@ -374,7 +374,7 @@ export const en: typeof it = {
       title: "Average margin per order",
       detail: (profit: string, value: string) =>
         `${profit} of ${value} per order`,
-      hint: "What’s left of an average order after the cost of goods.",
+      hint: "What’s left of an average order after product, shipping and packaging costs.",
       noOrders: "No orders to work from yet.",
     },
     profitability: {
@@ -865,7 +865,7 @@ export const en: typeof it = {
       help: "Information integrated using customer metafields",
     },
     title: "Customers",
-    intro: "What each customer is worth, after the cost of what they bought.",
+    intro: "What each customer is worth, after product, shipping and packaging costs.",
     range: "Period",
     apply: "Apply",
     columns: {
@@ -1016,6 +1016,83 @@ export const en: typeof it = {
       previousYearWeekday: "Previous year (matching weekday)",
     },
   },
+
+  // Shipping: zone rates and logistics costs
+  shipping: {
+    title: "Shipping",
+    intro:
+      "Configure how much it costs you to ship to each zone: logistics costs are subtracted from calculated profit.",
+    sync: "Import zones from Shopify",
+    syncing: "Importing…",
+    syncSuccess: "Zones imported successfully",
+    syncError: "Could not import zones. Try again in a moment.",
+    scopeError:
+      "Importing zones requires permission to read shipping. Request permission from the Shopify partner panel.",
+    empty: {
+      title: "No shipping zones configured",
+      description:
+        "Import your shipping zones from Shopify to start configuring costs.",
+      action: "Import zones from Shopify",
+    },
+    table: {
+      zone: "Zone",
+      countries: "Countries",
+      rateType: "Rate type",
+      indicativeCost: "Indicative cost",
+      actions: "Actions",
+      edit: "Edit",
+    },
+    countriesList: (first: string[], others: number) =>
+      others > 0
+        ? `${first.join(', ')} and ${others} more`
+        : first.join(', '),
+    restOfWorld: "Rest of world",
+    rateTypes: {
+      linear: "Linear",
+      brackets: "Weight brackets",
+    },
+    costDisplay: {
+      linear: (costPerKg: string) => `${costPerKg}/kg`,
+      brackets: (min: string, max: string) => `${min} – ${max}`,
+      empty: "—",
+    },
+    modal: {
+      title: (zoneName: string) => `Rates for ${zoneName}`,
+      rateTypeLabel: "Rate type",
+      rateTypeHelp:
+        "Choose whether cost grows linearly with weight or you use weight brackets with fixed costs.",
+      linearLabel: "Linear (€/kg)",
+      bracketsLabel: "Weight brackets",
+      linearCostLabel: "Cost per kg",
+      linearCostPlaceholder: "0.00",
+      linearCostHelp: "How much it costs you to ship 1 kg to this zone",
+      bracketsHelp:
+        "Define weight brackets with fixed costs. The first bracket must start at 0 kg, brackets must be contiguous, and only the last can be unlimited.",
+      addBracket: "Add bracket",
+      removeBracket: "Remove",
+      bracketWeightFrom: "From (kg)",
+      bracketWeightTo: "To (kg)",
+      bracketCost: "Cost (€)",
+      bracketUnlimited: "Unlimited",
+      save: "Save",
+      cancel: "Cancel",
+      saving: "Saving…",
+      saveSuccess: "Rates saved successfully",
+      saveError: "Could not save rates. Try again in a moment.",
+    },
+    errors: {
+      atLeastOneBracket: "At least one weight bracket is required",
+      firstBracketMustStartAtZero: "The first bracket must start at 0 kg",
+      bracketsHaveGaps: "Brackets have gaps: they must be contiguous",
+      bracketsOverlap: "Brackets overlap",
+      onlyLastBracketCanBeUnlimited: "Only the last bracket can be unlimited",
+      costMustBeNonNegative: "Cost must be greater than or equal to 0",
+      weightFromGreaterThanWeightTo:
+        "Starting weight cannot be greater than ending weight",
+      invalidLinearCost: "Enter a valid cost",
+    },
+  },
+
   catalogs: {
     title: "Catalogues",
     intro:

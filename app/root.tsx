@@ -247,6 +247,7 @@ export default function App() {
     home: setupComplete ? strings.common.dashboard : strings.nav.configuration,
     productIssues: strings.common.productIssues,
     customers: strings.customers.title,
+    shipping: strings.shipping.title,
     catalogs: strings.catalogs.title,
     logs: strings.common.logs,
     plan: strings.common.plan,
@@ -289,7 +290,10 @@ export default function App() {
                 {/* Fra i prodotti e i log: e' l'altra faccia dello stesso dato
                     — cosa e' stato venduto, e a chi. */}
                 <Link to="/customers">{menu.customers}</Link>
-                {/* Dopo i clienti: il catalogo pubblicato verso le piattaforme
+                {/* Dopo i clienti: le spedizioni sono costi che vanno sottratti
+                    dal profitto. */}
+                <Link to="/spedizioni">{menu.shipping}</Link>
+                {/* Dopo le spedizioni: il catalogo pubblicato verso le piattaforme
                     e' l'ultimo anello — prima si sistemano i dati, poi si
                     mandano fuori. */}
                 <Link to="/catalogs">{menu.catalogs}</Link>

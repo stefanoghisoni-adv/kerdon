@@ -410,7 +410,7 @@ export const it = {
     /** Il numero per cui il merchant apre l'app. */
     profit: {
       title: "Profitto del mese",
-      hint: "Ricavi meno il costo dei prodotti venduti, sugli ordini di questo mese.",
+      hint: "Quanto resta dopo i costi di prodotto, spedizione e packaging, sugli ordini di questo mese.",
       orders: (n: number) => `${n} ${n === 1 ? "ordine" : "ordini"}`,
       reliability: (percent: number) =>
         `Calcolato sul ${percent}% delle righe d’ordine`,
@@ -429,7 +429,7 @@ export const it = {
       title: "Margine medio per ordine",
       detail: (profit: string, value: string) =>
         `${profit} su ${value} per ordine`,
-      hint: "Quanto resta di un ordine medio dopo il costo dei prodotti.",
+      hint: "Quanto resta di un ordine medio dopo i costi di prodotto, spedizione e packaging.",
       noOrders: "Ancora nessun ordine da cui calcolarlo.",
     },
     /** Quanto di cio' che si incassa resta. */
@@ -1088,7 +1088,7 @@ export const it = {
     },
     title: "Clienti",
     intro:
-      "Quanto rende ogni cliente, al netto del costo dei prodotti che ha comprato.",
+      "Quanto rende ogni cliente, al netto dei costi di prodotto, spedizione e packaging.",
     range: "Periodo",
     apply: "Applica",
     columns: {
@@ -1312,6 +1312,84 @@ export const it = {
       previousYearWeekday: "Anno precedente (giorno della settimana)",
     },
   },
+
+  // Spedizioni: tariffe per zona e costi logistici
+  shipping: {
+    title: "Spedizioni",
+    intro:
+      "Configura quanto ti costa spedire in ogni zona: i costi logistici vengono sottratti dal profitto calcolato.",
+    sync: "Importa zone da Shopify",
+    syncing: "Importazione in corso…",
+    syncSuccess: "Zone importate con successo",
+    syncError: "Non è stato possibile importare le zone. Riprova fra poco.",
+    scopeError:
+      "Per importare le zone serve il permesso di leggere le spedizioni. Richiedi il permesso dal pannello partner Shopify.",
+    empty: {
+      title: "Nessuna zona di spedizione configurata",
+      description:
+        "Importa le tue zone di spedizione da Shopify per iniziare a configurare i costi.",
+      action: "Importa zone da Shopify",
+    },
+    table: {
+      zone: "Zona",
+      countries: "Paesi",
+      rateType: "Tipo tariffa",
+      indicativeCost: "Costo indicativo",
+      actions: "Azioni",
+      edit: "Modifica",
+    },
+    countriesList: (first: string[], others: number) =>
+      others > 0
+        ? `${first.join(', ')} e altri ${others}`
+        : first.join(', '),
+    restOfWorld: "Resto del mondo",
+    rateTypes: {
+      linear: "Lineare",
+      brackets: "Fasce peso",
+    },
+    costDisplay: {
+      linear: (costPerKg: string) => `${costPerKg}/kg`,
+      brackets: (min: string, max: string) => `${min} – ${max}`,
+      empty: "—",
+    },
+    modal: {
+      title: (zoneName: string) => `Tariffe per ${zoneName}`,
+      rateTypeLabel: "Tipo di tariffa",
+      rateTypeHelp:
+        "Scegli se il costo cresce linearmente col peso o se usi fasce di peso con costi fissi.",
+      linearLabel: "Lineare (€/kg)",
+      bracketsLabel: "Fasce peso",
+      linearCostLabel: "Costo per kg",
+      linearCostPlaceholder: "0,00",
+      linearCostHelp: "Quanto ti costa spedire 1 kg in questa zona",
+      bracketsHelp:
+        "Definisci fasce di peso con costi fissi. La prima fascia deve partire da 0 kg, le fasce devono essere contigue e solo l'ultima può essere illimitata.",
+      addBracket: "Aggiungi fascia",
+      removeBracket: "Rimuovi",
+      bracketWeightFrom: "Da (kg)",
+      bracketWeightTo: "A (kg)",
+      bracketCost: "Costo (€)",
+      bracketUnlimited: "Illimitato",
+      save: "Salva",
+      cancel: "Annulla",
+      saving: "Salvataggio in corso…",
+      saveSuccess: "Tariffe salvate con successo",
+      saveError: "Non è stato possibile salvare le tariffe. Riprova fra poco.",
+    },
+    errors: {
+      atLeastOneBracket: "Serve almeno una fascia di peso",
+      firstBracketMustStartAtZero: "La prima fascia deve partire da 0 kg",
+      bracketsHaveGaps: "Le fasce hanno buchi: devono essere contigue",
+      bracketsOverlap: "Le fasce si sovrappongono",
+      onlyLastBracketCanBeUnlimited:
+        "Solo l'ultima fascia può essere illimitata",
+      costMustBeNonNegative: "Il costo deve essere maggiore o uguale a 0",
+      weightFromGreaterThanWeightTo:
+        "Il peso iniziale non può essere maggiore del peso finale",
+      invalidLinearCost: "Inserisci un costo valido",
+    },
+  },
+
   catalogs: {
     title: "Cataloghi",
     intro:
