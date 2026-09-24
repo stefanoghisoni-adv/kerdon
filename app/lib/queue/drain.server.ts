@@ -43,6 +43,7 @@ import {
   processPeriodicSyncCheck,
 } from '~/lib/workers/processors.server';
 import { processComplianceRequest } from '~/lib/gdpr/process-compliance.server';
+import { processLogisticsRecompute } from '~/lib/shipping/recompute.server';
 import { randomUUID } from 'node:crypto';
 
 /** Quanto si aspetta prima di riprovare un negozio che era occupato. */
@@ -95,6 +96,17 @@ export const defaultHandlers: Record<SyncRequestType, Handler> = {
     }
     await processComplianceRequest(requestId);
   },
+  'logistics-recompute': (row, ctx) => {
+    // Una continuazione porta nel payload il punto da cui riprendere; un
+    // ricalcolo da salvataggio non porta niente e parte da zero.
+    const cursor = (row.payload as { cursor?: unknown } | null)?.cursor;
+    return processLogisticsRecompute(row.shopId!, {
+      lease: ctx.lease,
+      signal: ctx.signal,
+      jobId: row.id,
+      cursor: typeof cursor === 'string' ? cursor : null,
+    });
+  },
 };
 
 /**
@@ -108,6 +120,11 @@ const RICHIEDE_LUCCHETTO: ReadonlySet<string> = new Set([
   'manual-sync',
   'initial-bulk-sync',
   'periodic-sync-check',
+  // Il ricalcolo si mette in fila come le sincronizzazioni. Due ricalcoli dello
+  // stesso negozio in parallelo — uno partito con le tariffe vecchie, uno con
+  // le nuove — potrebbero finire nell'ordine sbagliato, e l'ultimo a scrivere
+  // lascerebbe sugli ordini i costi di ieri.
+  'logistics-recompute',
 ]);
 
 export interface DrainOptions {

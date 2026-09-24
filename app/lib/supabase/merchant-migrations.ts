@@ -172,6 +172,73 @@ BEGIN
 END $$;
 `,
   },
+  {
+    version: 11,
+    description: 'Sblocca le righe d ordine a cui era stata congelata un assenza di costo',
+    // Dopo la DDL: le due colonne che questo passo tocca sono della 10, e su un
+    // progetto che salta dalla 9 alla 11 prima della DDL non esistono ancora.
+    runAfterDDL: true,
+    // LA RIPARAZIONE, e perche' sta qui invece che nel salvataggio del costo.
+    //
+    // Cosa era successo. Inserendo per la prima volta il costo di un prodotto
+    // gia' venduto e scegliendo "solo da adesso in avanti", l'app congelava sul
+    // passato il costo di prima — che non c'era. La riga restava senza valore ma
+    // con la data del congelamento sopra: per il calcolo del profitto vuol dire
+    // "conto chiuso", e da li' in poi nessun costo inserito poteva piu' farla
+    // rientrare. Il merchant compilava il costo che l'app gli chiedeva e trovava
+    // di nuovo profitto zero, senza niente da premere per uscirne.
+    //
+    // Il codice adesso non lo fa piu' (vedi `lib/products/cost-scope`), ma le
+    // righe gia' marcate restano invisibili per sempre: il bug ha lasciato dati,
+    // e i dati vanno sistemati dove sono.
+    //
+    // Perche' qui e non nel salvataggio del costo. Perche' quelle righe nascono
+    // da un salvataggio gia' avvenuto: la variante ha ormai il suo costo, non
+    // compare piu' nell'elenco dei problemi e il merchant non ha nessun motivo
+    // per salvarla una seconda volta. Una riparazione agganciata al salvataggio
+    // aspetterebbe un gesto che non arrivera'. Qui invece parte da sola alla
+    // prima apertura della dashboard, per ogni negozio collegato, senza che
+    // nessuno debba sapere di essere stato colpito.
+    //
+    // Perche' la condizione e' sicura. `unit_cost_at_sale IS NULL AND
+    // unit_cost_frozen_at IS NOT NULL` descrive esattamente un'assenza
+    // congelata, e non esiste un caso legittimo in cui debba restare: congelare
+    // vuol dire fissare un valore, e se il valore non c'e' non e' stato fissato
+    // niente. Le righe con un costo fissato davvero non vengono toccate — quelle
+    // conservano un passato vero, ed e' l'unica cosa che il congelamento serve a
+    // proteggere.
+    //
+    // Una tantum per davvero: dopo il fix quella combinazione non si ricrea, e
+    // rieseguire l'UPDATE su un progetto gia' sistemato non trova piu' righe.
+    sql: `
+DO $$
+BEGIN
+  -- La tabella puo' non esistere: gli ordini si sincronizzano solo per chi ha
+  -- concesso il permesso, e per gli altri qui non c'e' niente da riparare.
+  IF to_regclass('public.order_lines') IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- E le due colonne possono non esserci: un progetto con la tabella ordini
+  -- gia' creata ma il permesso ritirato non le riceve dalla DDL di questo giro,
+  -- e un UPDATE su una colonna che non c'e' farebbe fallire tutto
+  -- l'aggiornamento — comprese le parti che non c'entrano niente.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'order_lines'
+      AND column_name = 'unit_cost_frozen_at'
+  ) THEN
+    RETURN;
+  END IF;
+
+  UPDATE public.order_lines
+  SET unit_cost_frozen_at = NULL
+  WHERE unit_cost_at_sale IS NULL
+    AND unit_cost_frozen_at IS NOT NULL;
+END $$;
+`,
+  },
 ];
 
 /**
@@ -249,8 +316,24 @@ END $$;
  * nessuna parte. Vuote vogliono dire "per questa riga il costo non e' stato
  * fissato", che e' vero, e il comportamento resta quello di prima finche' il
  * merchant non decide diversamente.
+ *
+ * La 11 non porta niente di nuovo: ripara. La 10 aveva lasciato passare un
+ * caso che non doveva esistere — una riga con la data del congelamento e
+ * nessun costo dentro, cioe' un'assenza dichiarata definitiva. Nasceva dal
+ * primo inserimento di un costo su un prodotto gia' venduto, che e'
+ * precisamente cio' che la tab Prodotti chiede di fare, e toglieva quelle
+ * vendite dal profitto del cliente per sempre. Il passo rimette a NULL la data
+ * dove un valore fissato non c'e': solo li', perche' e' l'unica combinazione
+ * che non puo' voler dire niente di sensato.
+ *
+ * La 12 porta sugli ordini i dati di spedizione — stato di evasione, paese,
+ * peso, articoli, data del reso, imballo — e il costo logistico gia' calcolato.
+ * Solo aggiunte, quindi nessun passo esplicito: le porta la DDL. Nemmeno un
+ * riempimento dello storico: restano NULL finche' l'ordine non viene riscritto
+ * dalla sincronizzazione o dal ricalcolo. Chi li legge deve trattare NULL come
+ * zero: e' il profitto di prima, non un ordine senza profitto.
  */
-export const LATEST_SCHEMA_VERSION = 10;
+export const LATEST_SCHEMA_VERSION = 12;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

@@ -21,12 +21,7 @@ import {
   isDateMetafieldType,
   type BirthdateFieldState,
 } from '~/lib/customers/birthdate-metafield';
-import {
-  birthdateView,
-  readDismissedFor,
-  rememberDismissedFor,
-  type BirthdateView,
-} from './birthdate-notice';
+import { birthdateView, type BirthdateView } from './birthdate-notice';
 
 /**
  * Cosa mostrare della data di nascita, e come cambiarlo.
@@ -49,36 +44,42 @@ export interface BirthdateNotice {
 export function useBirthdateNotice(
   configured: string,
   state: BirthdateFieldState,
+  /**
+   * Per quale campo l'avviso risulta chiuso, secondo il server. Arriva con il
+   * loader, quindi il primo render lo sa gia': non c'e' nessun momento in cui
+   * si mostra una cosa e un istante dopo un'altra.
+   */
+  dismissedFor: string | null,
 ): BirthdateNotice {
   // Il merchant ha chiesto di scegliere, o di rivedere la scelta gia' fatta.
-  // Vive nel browser e non sul server: e' un ripensamento momentaneo, non una
-  // configurazione.
+  // Questo si' che vive nel browser, ed e' giusto: e' un ripensamento di
+  // adesso, non una configurazione, e non deve sopravvivere alla pagina.
   const [reopened, setReopened] = useState(false);
 
-  // Per quale campo l'avviso e' gia' stato chiuso.
-  //
-  // Sta nel browser e non sul server perche' non e' una configurazione: e' cosa
-  // questa persona ha gia' letto. Sopravvive alla ricarica — altrimenti "non
-  // mostrare piu'" durerebbe fino al primo aggiornamento di pagina — ma non
-  // viaggia con il negozio, e va bene cosi': l'ha letto chi l'ha chiuso.
-  const [dismissedFor, setDismissedFor] = useState<string | null | undefined>(undefined);
+  // La chiusura si salva sul server. Finche' il salvataggio e' in volo si
+  // considera gia' chiuso: aspettare il giro di rete vorrebbe dire lasciare
+  // l'avviso acceso sotto il dito di chi l'ha appena chiuso.
+  const chiusura = useFetcher<{ dismissed?: boolean }>();
+  const [chiusoOra, setChiusoOra] = useState<string | null>(null);
 
-  // Solo nel browser: `localStorage` non esiste durante il render sul server, e
-  // leggerlo li' romperebbe l'idratazione. Fino a quel momento vale
-  // `undefined`, che non e' "nessuno" ma "non lo so ancora": tiene la scelta
-  // sospesa invece di prenderla sbagliata e correggerla un istante dopo, sotto
-  // gli occhi di chi guarda.
+  // Il server non ha potuto registrare la chiusura — la tabella non c'e'
+  // ancora, il database owner non risponde. L'avviso torna, ed e' il
+  // comportamento onesto: far credere che un "non mostrarmelo piu'" sia stato
+  // preso quando non lo e' stato lascerebbe il merchant a chiedersi perche'
+  // ricompare.
   useEffect(() => {
-    setDismissedFor(readDismissedFor());
-  }, []);
+    if (chiusura.state === 'idle' && chiusura.data?.dismissed === false) {
+      setChiusoOra(null);
+    }
+  }, [chiusura.state, chiusura.data]);
 
   return {
-    view: birthdateView({ state, configured, reopened, dismissedFor }),
+    view: birthdateView({ state, configured, reopened, dismissedFor: chiusoOra ?? dismissedFor }),
     open: () => setReopened(true),
     close: () => setReopened(false),
     dismiss: () => {
-      setDismissedFor(configured);
-      rememberDismissedFor(configured);
+      setChiusoOra(configured);
+      chiusura.submit({ intent: 'dismiss-birthdate-notice' }, { method: 'post' });
     },
   };
 }
@@ -218,7 +219,7 @@ export function BirthdateMetafieldCard({
   // Al suo posto parla l'avviso, e quando anche quello e' stato chiuso resta la
   // riga di stato sopra la tabella: da li' si torna qui in un clic, cosi' la
   // scelta non diventa irreversibile a fronte di un tocco distratto.
-  if (notice.view === 'status' || notice.view === 'pending') return null;
+  if (notice.view === 'status') return null;
 
   if (notice.view === 'notice') {
     // Chiudibile sempre, e chiuso una volta non torna piu' — a meno che il

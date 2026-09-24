@@ -9,6 +9,8 @@ import { enrichVariantCosts } from '../stats/inventory-cost.server';
 import { filterEligibleProductRows } from '../eligibility/product-eligibility';
 import { sortByCreatedAtAsc } from '../sync/product-order';
 import { orderToRows } from '../customers/order-rows';
+import { loadLogisticsConfigForWrite } from '../shipping/load-config.server';
+import type { LogisticsConfig } from '../shipping/types';
 import { deleteStaleLines } from '../customers/order-write.server';
 import { ensureOrdersTables } from '../supabase/ensure-orders-tables.server';
 import {
@@ -926,6 +928,8 @@ async function syncOrders(
   ledger: RepairLedger = createRepairLedger(),
   /** Il permesso di scrivere, riverificato prima di ogni pagina. */
   lease?: LeaseGuard,
+  /** Le tariffe del negozio, caricate una volta per tutta la corsa. */
+  logisticsConfig: LogisticsConfig | null = null,
 ): Promise<OrderSyncResult> {
   let total = 0;
   let nextPageInfo: string | null = null;
@@ -940,7 +944,10 @@ async function syncOrders(
     if (!orders || orders.length === 0) break;
 
     const converted = orders
-      .map((order) => ({ rows: orderToRows(order), complete: order.lines_complete === true }))
+      .map((order) => ({
+        rows: orderToRows(order, new Date(), logisticsConfig),
+        complete: order.lines_complete === true,
+      }))
       .filter(
         (c): c is { rows: NonNullable<ReturnType<typeof orderToRows>>; complete: boolean } =>
           c.rows !== null,
@@ -1103,7 +1110,20 @@ async function syncOrdersIfEnabled(opts: {
   // che vende da anni — ed e' esattamente il caso in cui il lifetime serve.
   const updatedAtMin = tables.empty ? undefined : opts.updatedAtMin;
 
-  return syncOrders(opts.shopifyClient, opts.supabase, updatedAtMin, opts.ledger, opts.lease);
+  // Le tariffe una volta sola per la corsa, non per pagina ne' per ordine: una
+  // corsa di recupero su anni di storico sono migliaia di pagine, e le tariffe
+  // non cambiano mentre la si fa. Se non si leggono, il costo resta zero e gli
+  // ordini si scrivono lo stesso: il ricalcolo in background lo sistema dopo.
+  const logisticsConfig = await loadLogisticsConfigForWrite(opts.shopId);
+
+  return syncOrders(
+    opts.shopifyClient,
+    opts.supabase,
+    updatedAtMin,
+    opts.ledger,
+    opts.lease,
+    logisticsConfig,
+  );
 }
 
 /**

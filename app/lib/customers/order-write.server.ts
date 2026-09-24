@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { orderToRows, type ShopifyOrder } from './order-rows';
+import type { LogisticsConfig } from '~/lib/shipping/types';
 
 /**
  * L'ordine, le sue righe e la riconciliazione: una strada sola.
@@ -73,8 +74,14 @@ export async function applyOrderToMerchant(opts: {
   supabase: SupabaseClient;
   order: ShopifyOrder;
   syncedAt?: Date;
+  /**
+   * Le tariffe del negozio, caricate da chi chiama una volta per evento e non
+   * qui: questa funzione non sa quale negozio sia, e non deve aprire il
+   * database dell'app per ogni ordine. Assenti: costo logistico zero.
+   */
+  logisticsConfig?: LogisticsConfig | null;
 }): Promise<ApplyOrderResult | null> {
-  const rows = orderToRows(opts.order, opts.syncedAt ?? new Date());
+  const rows = orderToRows(opts.order, opts.syncedAt ?? new Date(), opts.logisticsConfig ?? null);
   if (!rows) return null;
 
   // Prima l'ordine, poi le righe: al contrario, se l'ordine fallisse,

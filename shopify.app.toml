@@ -31,7 +31,7 @@ embedded = true
 # definizione appartiene, quindi write_customers per i metafield del cliente.
 # Non e' il permesso di modificare le anagrafiche: l'app non scrive nessun
 # cliente, ne' il valore del campo, che resta del merchant e dei suoi clienti.
-scopes = "read_products,write_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders"
+scopes = "read_products,write_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders,read_shipping,read_returns"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 

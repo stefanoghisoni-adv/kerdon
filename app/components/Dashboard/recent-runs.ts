@@ -65,6 +65,76 @@ export function recentRunLabel(jobType: string, status: string, t: Dictionary): 
 }
 
 /**
+ * I tipi di corsa di cui parla l'avviso di sincronizzazione.
+ *
+ * Solo la corsa completa: e' quella che il pulsante "Sincronizzazione manuale"
+ * fa partire (il lavoro manuale riusa la stessa procedura del primo
+ * allineamento, e scrive `initial_bulk`). I controlli periodici sono lavoro
+ * automatico, vivono per conto loro e questa funzione non li tocca.
+ */
+const BULK_JOB_TYPES = new Set(['initial_bulk']);
+
+/** L'id della riga che rappresenta il lavoro chiesto ma non ancora partito. */
+export const PENDING_RUN_ID = 'pending-sync';
+
+/**
+ * La card e l'avviso, tenuti d'accordo per costruzione.
+ *
+ * IL DIFETTO CHE QUESTA FUNZIONE CHIUDE. Fra il clic sul pulsante e l'effettiva
+ * partenza del lavoro non esiste ancora nessuna riga in `sync_job`: in cima
+ * alla card restava quindi la corsa PRECEDENTE, gia' chiusa, con il badge
+ * "Completato", mentre l'avviso sopra diceva che si stava lavorando. Il
+ * merchant leggeva due cose opposte nella stessa schermata e non aveva modo di
+ * sapere quale credere.
+ *
+ * LA SOLUZIONE, E PERCHE' QUESTA. Si poteva nascondere la corsa precedente, ma
+ * cancellare un'informazione vera per non contraddirne un'altra e' il rimedio
+ * peggiore del male: quella corsa e' avvenuta, ed e' l'unica cosa che il
+ * merchant ha da guardare mentre aspetta. Si antepone invece una riga che dice
+ * quel che sta succedendo davvero — c'e' una sincronizzazione chiesta e non
+ * ancora conclusa — datata al momento in cui e' stata chiesta.
+ *
+ * E la simmetria conta quanto il resto: a lavoro NON in volo, una riga rimasta
+ * su 'running' non e' "in corso", e' un'invocazione stroncata che non ha fatto
+ * in tempo a riscriversi. Tenerla farebbe dire alla card l'esatto contrario
+ * dell'avviso, che e' il disaccordo da cui tutto questo e' partito; quindi si
+ * toglie. Nel registro completo resta, perche' li' una corsa appesa e'
+ * un'informazione utile — qui, dove la domanda e' una sola ("sta girando
+ * adesso?"), sarebbe una risposta sbagliata.
+ *
+ * Il risultato e' che la card mostra una corsa completa in corso SE E SOLO SE
+ * l'avviso e' acceso: nascono dallo stesso valore e non possono divergere.
+ */
+export function withPendingRun(
+  runs: RecentRunInput[],
+  pending: { since: string } | null,
+): RecentRunInput[] {
+  const inCorso = runs.some(
+    (run) => BULK_JOB_TYPES.has(run.jobType) && run.status === 'running',
+  );
+
+  if (!pending) {
+    return inCorso
+      ? runs.filter((run) => !(BULK_JOB_TYPES.has(run.jobType) && run.status === 'running'))
+      : runs;
+  }
+
+  // La riga vera c'e' gia': e' migliore di quella sintetica — ha l'id del job e
+  // l'ora d'inizio esatta — e non va raddoppiata.
+  if (inCorso) return runs;
+
+  return [
+    {
+      id: PENDING_RUN_ID,
+      jobType: 'initial_bulk',
+      status: 'running',
+      startedAt: pending.since,
+    },
+    ...runs,
+  ];
+}
+
+/**
  * Le righe da mostrare, al massimo `limit`.
  *
  * L'ordine arriva gia' fatto da chi legge il database (dalla piu' recente): qui

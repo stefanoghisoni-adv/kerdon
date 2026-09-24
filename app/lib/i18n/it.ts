@@ -78,6 +78,10 @@ export const it = {
     error: "Non siamo riusciti a preparare la copia. Riprova fra poco.",
     confirm: "Scarica",
     cancel: "Annulla",
+    // Il link all'informativa sta qui e non in una pagina sua: chi apre questo
+    // riquadro sta gia' pensando ai propri dati, ed e' il momento in cui la
+    // domanda "ma voi cosa ne fate?" se la sta ponendo davvero.
+    policyLink: "Leggi l'informativa sulla privacy",
   },
   dataRequests: {
     title: "Copie dei dati da consegnare",
@@ -98,6 +102,25 @@ export const it = {
     readKeyHelp: "È la chiave API pubblica che ti servirà per leggere le informazioni da Google Tag Manager server-side",
     notConfigured: "Non configurato",
     ownerUrl: "URL Database proprietario",
+
+    /**
+     * L'interruttore della riattivazione automatica, e la spiegazione che gli
+     * sta accanto.
+     *
+     * La spiegazione non e' un di piu': il merchant deve sapere che l'app fa
+     * questa cosa PRIMA che la faccia, non trovarsela raccontata dopo. E dice
+     * solo cosa succede ai suoi dati e cosa puo' fare lui — niente di come
+     * funziona dentro.
+     */
+    autoResume: {
+      label: "Riaccendi il database da solo prima della scadenza",
+      help:
+        "Se il tuo database viene messo in pausa, lo riaccendiamo noi prima che sia troppo tardi: " +
+        "passata la data limite non è più possibile riaccenderlo e dei tuoi dati restano soltanto " +
+        "le copie da scaricare. Ti avvisiamo dopo averlo fatto. Se preferisci occupartene tu, " +
+        "togli la spunta: non lo tocchiamo.",
+      failed: "Non è stato possibile salvare questa scelta. Riprova fra qualche minuto.",
+    },
     trackingTitle: "Connessione e credenziali di tracking",
     open: "Vai al database",
     copy: "Copia",
@@ -131,14 +154,12 @@ export const it = {
       "Da questo momento la tua installazione smette di inviare dati, finché non pubblichi una chiave nuova. Fallo se pensi che la chiave sia finita nelle mani sbagliate.",
     writeKeyRevoked: "Revocata.",
     writeKeyLastUsed: (when: string) => `Ultimo invio ricevuto il ${when}`,
-    writeKeyNeverUsed: "Nessun invio ricevuto finora",
     /**
      * Il passaggio alla chiave nuova, come lo vede il merchant: una cosa da
      * fare entro una data, non un dettaglio di funzionamento.
      */
     writeKeyUpdateNeeded: (when: string) =>
       `La tua installazione invia ancora i dati con la chiave di lettura. Aggiornala entro il ${when}, altrimenti da quella data smetterà di funzionare.`,
-    writeKeyUpToDate: "Installazione aggiornata",
   },
 
   logs: {
@@ -389,7 +410,7 @@ export const it = {
     /** Il numero per cui il merchant apre l'app. */
     profit: {
       title: "Profitto del mese",
-      hint: "Ricavi meno il costo dei prodotti venduti, sugli ordini di questo mese.",
+      hint: "Quanto resta dopo i costi di prodotto, spedizione, packaging e resi, sugli ordini di questo mese.",
       orders: (n: number) => `${n} ${n === 1 ? "ordine" : "ordini"}`,
       reliability: (percent: number) =>
         `Calcolato sul ${percent}% delle righe d’ordine`,
@@ -400,13 +421,15 @@ export const it = {
         "Il profitto sarà disponibile dopo la prima sincronizzazione degli ordini.",
       reconnect:
         "Il permesso di accedere al tuo database non è più valido. Ricollegalo dalle Impostazioni: i dati restano dove sono.",
+      temporary:
+        "Il profitto non è disponibile in questo momento. Ricarica fra qualche istante: non c’è niente da sistemare.",
     },
     /** Quanto resta di un ordine medio. */
     margin: {
       title: "Margine medio per ordine",
       detail: (profit: string, value: string) =>
         `${profit} su ${value} per ordine`,
-      hint: "Quanto resta di un ordine medio dopo il costo dei prodotti.",
+      hint: "Quanto resta di un ordine medio dopo i costi di prodotto, spedizione, packaging e resi.",
       noOrders: "Ancora nessun ordine da cui calcolarlo.",
     },
     /** Quanto di cio' che si incassa resta. */
@@ -542,6 +565,14 @@ export const it = {
         "Il collegamento è stato rimosso e le tabelle create dall’app, con i dati sincronizzati, sono state eliminate dal progetto.",
       keptBody:
         "Il collegamento è stato rimosso. Le tabelle e i dati sincronizzati restano nel progetto: ricollegandolo, la sincronizzazione riparte da lì.",
+    },
+    weightMissingAlert: {
+      title: (count: number) =>
+        count === 1
+          ? "1 ordine spedito non ha un peso"
+          : `${count} ordini spediti non hanno un peso`,
+      body: "Senza il peso, il costo di spedizione resta a zero e il profitto risulta più alto del reale. Indica un peso medio per articolo e il calcolo diventa preciso.",
+      action: "Vai a Spedizioni",
     },
   },
 
@@ -745,6 +776,87 @@ export const it = {
     noHistory:
       "Shopify conserva soltanto il costo attuale di un prodotto, non quelli precedenti: per gli ordini già registrati non possiamo sapere quanto ti costava davvero quel prodotto il giorno della vendita, e non lo inventiamo.",
     cancel: "Annulla",
+  },
+
+  // Il database del merchant e' in pausa, o sta ripartendo.
+  //
+  // Il tono resta WARNING per tutta la vicenda, riattivazione compresa: finche'
+  // il database non risponde la sincronizzazione e' ferma e i numeri che il
+  // merchant guarda sono vecchi. E' un problema in corso, e non diventa
+  // un'informazione solo perche' lui ha gia' premuto il pulsante. Si esce dal
+  // warning quando il database e' tornato davvero attivo — e li' l'avviso
+  // sparisce, non si ammorbidisce.
+  //
+  // LA DATA. Il merchant ha un tempo limitato per riaccendere il database, e
+  // passato quello non torna piu': e' l'informazione che non puo' permettersi
+  // di non vedere. La data esatta pero' non la sappiamo — la pagina del suo
+  // database la scrive, a noi nessuno la dice — e inventarla sarebbe peggio che
+  // non darla. Quindi si dice che il tempo e' limitato, si dice dove la data e'
+  // scritta, e si dice che cosa succede dopo.
+  databasePaused: {
+    title: "Il tuo database è in pausa",
+    dataSafe:
+      "I tuoi dati sono tutti al sicuro: non è stato perso niente, né i dati né le copie di sicurezza.",
+    syncStopped:
+      "Finché resta in pausa la sincronizzazione è ferma: i numeri che vedi nell’app restano quelli dell’ultimo aggiornamento e non cambiano.",
+    deadline:
+      "Puoi riaccenderlo solo entro una certa data, che trovi scritta sulla pagina del tuo database: dopo quella data non è più possibile riaccenderlo, e i dati restano soltanto da scaricare. Non aspettare.",
+    action: "Riattiva database",
+    openDashboard: "Apri la pagina del tuo database",
+
+    /**
+     * Quel che l'app fara' se il merchant non fa niente.
+     *
+     * Detto QUI, cioe' mentre il database e' ancora in pausa e prima che
+     * l'app intervenga: e' l'unico momento in cui e' un avviso e non una
+     * giustificazione. Compare solo quando l'interruttore e' davvero acceso e
+     * l'app e' davvero in grado di farlo.
+     */
+    willAutoResume:
+      "Se non lo riaccendi tu, lo riaccendiamo noi prima che scada il tempo per farlo. " +
+      "Puoi disattivarlo dalle Impostazioni, nella sezione Database.",
+
+    /**
+     * L'abbiamo riacceso noi.
+     *
+     * Resta dentro l'avviso warning, e non e' una svista: finche' il database
+     * non risponde la sincronizzazione e' ferma e i numeri sono vecchi. Non e'
+     * una bella notizia, e' un problema in corso a cui abbiamo tolto la parte
+     * irreversibile.
+     */
+    autoResumed: {
+      title: "Abbiamo riacceso il tuo database",
+      body:
+        "Il tuo database era in pausa e si stava avvicinando al momento oltre il quale non " +
+        "sarebbe più stato possibile riaccenderlo: lo abbiamo riacceso noi per non fartelo " +
+        "perdere. I tuoi dati sono tutti al sicuro.",
+      stillStopped:
+        "Ci vogliono alcuni minuti: finché non è tornato attivo la sincronizzazione resta ferma " +
+        "e i numeri non si aggiornano. Puoi chiudere questa pagina: quando il database riparte, " +
+        "la sincronizzazione riprende da sola. Se preferisci che non lo riaccendiamo noi, puoi " +
+        "disattivarlo dalle Impostazioni, nella sezione Database.",
+    },
+
+    // Riattivazione chiesta: parte, ma non è fatta.
+    resuming: {
+      title: "Riattivazione del database in corso",
+      body:
+        "Abbiamo chiesto di riaccendere il tuo database: ci vogliono alcuni minuti. I tuoi dati sono al sicuro.",
+      stillStopped:
+        "Fino a quando non è tornato attivo la sincronizzazione resta ferma e i numeri non si aggiornano. Puoi chiudere questa pagina: quando il database riparte, la sincronizzazione riprende da sola.",
+    },
+
+    // Quando il pulsante non può funzionare, la strada è un’altra.
+    errors: {
+      noPermission:
+        "Non possiamo riaccendere il database al posto tuo. Aprilo dalla sua pagina e riaccendilo da lì: i dati sono tutti dove li hai lasciati.",
+      reconnect:
+        "Il collegamento al tuo account database non è più valido. Ricollegalo dalle Impostazioni, oppure riaccendi il database dalla sua pagina.",
+      rateLimited:
+        "Sono state fatte troppe richieste in poco tempo. Aspetta qualche minuto e riprova.",
+      failed:
+        "Non siamo riusciti a chiedere la riattivazione. Riprova fra qualche minuto, oppure riaccendi il database dalla sua pagina.",
+    },
   },
 
   // Aggiornamento delle tabelle del merchant, in attesa.
@@ -984,7 +1096,7 @@ export const it = {
     },
     title: "Clienti",
     intro:
-      "Quanto rende ogni cliente, al netto del costo dei prodotti che ha comprato.",
+      "Quanto rende ogni cliente, al netto dei costi di prodotto, spedizione, packaging e resi.",
     range: "Periodo",
     apply: "Applica",
     columns: {
@@ -1208,6 +1320,128 @@ export const it = {
       previousYearWeekday: "Anno precedente (giorno della settimana)",
     },
   },
+
+  // Spedizioni: tariffe per zona e costi logistici
+  shipping: {
+    title: "Spedizioni",
+    intro:
+      "Configura quanto ti costa spedire in ogni zona: i costi logistici vengono sottratti dal profitto calcolato.",
+    sync: "Importa zone da Shopify",
+    syncing: "Importazione in corso…",
+    syncSuccess: "Zone importate con successo",
+    syncError: "Non è stato possibile importare le zone. Riprova fra poco.",
+    scopeError:
+      "Per importare le tue zone di spedizione, riapri l'app e accetta i permessi aggiornati.",
+    empty: {
+      title: "Nessuna zona di spedizione configurata",
+      description:
+        "Importa le tue zone di spedizione da Shopify per iniziare a configurare i costi.",
+      action: "Importa zone da Shopify",
+    },
+    table: {
+      zone: "Zona",
+      countries: "Paesi",
+      rateType: "Tipo tariffa",
+      indicativeCost: "Costo indicativo",
+      actions: "Azioni",
+      edit: "Modifica",
+    },
+    countriesList: (first: string[], others: number) =>
+      others > 0
+        ? `${first.join(', ')} e altri ${others}`
+        : first.join(', '),
+    restOfWorld: "Resto del mondo",
+    rateTypes: {
+      linear: "Lineare",
+      brackets: "Fasce peso",
+    },
+    costDisplay: {
+      linear: (costPerKg: string) => `${costPerKg}/kg`,
+      brackets: (min: string, max: string) => `${min} – ${max}`,
+      empty: "—",
+    },
+    modal: {
+      title: (zoneName: string) => `Tariffe per ${zoneName}`,
+      rateTypeLabel: "Tipo di tariffa",
+      rateTypeHelp:
+        "Scegli se il costo cresce linearmente col peso o se usi fasce di peso con costi fissi.",
+      linearLabel: "Lineare (€/kg)",
+      bracketsLabel: "Fasce peso",
+      linearCostLabel: "Costo per kg",
+      linearCostPlaceholder: "0,00",
+      linearCostHelp: "Quanto ti costa spedire 1 kg in questa zona",
+      bracketsHelp:
+        "Definisci fasce di peso con costi fissi. La prima fascia deve partire da 0 kg, le fasce devono essere contigue e solo l'ultima può essere illimitata.",
+      addBracket: "Aggiungi fascia",
+      removeBracket: "Rimuovi",
+      bracketWeightFrom: "Da (kg)",
+      bracketWeightTo: "A (kg)",
+      bracketCost: "Costo (€)",
+      bracketUnlimited: "Illimitato",
+      save: "Salva",
+      cancel: "Annulla",
+      saving: "Salvataggio in corso…",
+      saveSuccess: "Tariffe salvate con successo",
+      saveError: "Non è stato possibile salvare le tariffe. Riprova fra poco.",
+    },
+    errors: {
+      atLeastOneBracket: "Serve almeno una fascia di peso",
+      firstBracketMustStartAtZero: "La prima fascia deve partire da 0 kg",
+      bracketsHaveGaps: "Le fasce hanno buchi: devono essere contigue",
+      bracketsOverlap: "Le fasce si sovrappongono",
+      onlyLastBracketCanBeUnlimited:
+        "Solo l'ultima fascia può essere illimitata",
+      costMustBeNonNegative: "Il costo deve essere maggiore o uguale a 0",
+      weightFromGreaterThanWeightTo:
+        "Il peso iniziale non può essere maggiore del peso finale",
+      invalidLinearCost: "Inserisci un costo valido",
+      invalidBrackets: "Le fasce non sono valide: controlla pesi e costi",
+    },
+    packaging: {
+      title: "Packaging e rientri",
+      categoriesLabel: "Categorie di imballo",
+      categoriesHelp:
+        "Definisci le categorie di imballo e il loro costo. Ad esempio: Busta, Scatola piccola, Scatola grande.",
+      categoryNameLabel: "Nome categoria",
+      categoryNamePlaceholder: "es. Busta",
+      categoryCostLabel: "Costo (€)",
+      categoryCostPlaceholder: "0,00",
+      addCategory: "Aggiungi categoria",
+      removeCategory: "Rimuovi",
+      rulesLabel: "Regole per peso",
+      rulesHelp:
+        "Definisci quale categoria usare in base al peso totale dell'ordine. Si applica la prima regola che combacia.",
+      ruleWeightLabel: "Peso massimo (kg)",
+      ruleWeightPlaceholder: "0,00",
+      ruleCategoryLabel: "Categoria",
+      ruleUnlimited: "Tutto il resto",
+      addRule: "Aggiungi regola",
+      removeRule: "Rimuovi",
+      defaultWeightLabel: "Peso di default per articolo (kg)",
+      defaultWeightPlaceholder: "0,000",
+      defaultWeightHelp:
+        "Si usa per gli ordini i cui prodotti non hanno un peso su Shopify.",
+      returnCostLabel: "Costo di rientro per ordine reso (€)",
+      returnCostPlaceholder: "0,00",
+      returnCostHelp: "Il costo fisso quando un ordine ha un reso.",
+      save: "Salva",
+      saving: "Salvataggio in corso…",
+      saveSuccess: "Configurazione salvata con successo",
+      saveError: "Non è stato possibile salvare la configurazione. Riprova fra poco.",
+      errors: {
+        categoryNameEmpty: "Il nome della categoria non può essere vuoto",
+        categoryNameDuplicate: "Il nome della categoria è già in uso",
+        categoryCostNegative: "Il costo della categoria deve essere maggiore o uguale a 0",
+        ruleInvalidCategory: "La regola punta a una categoria che non esiste",
+        ruleWeightNegative: "Il peso massimo deve essere maggiore o uguale a 0",
+        multipleUnlimitedRules: "Può esserci al massimo una regola \"tutto il resto\"",
+        unlimitedRuleMustBeLast: "La regola \"tutto il resto\" deve essere l'ultima",
+        categoryStillReferenced: "Questa categoria è usata da una regola. Rimuovi prima le regole che la usano.",
+        invalidData: "La configurazione non è valida: controlla nomi, pesi e costi",
+      },
+    },
+  },
+
   catalogs: {
     title: "Cataloghi",
     intro:

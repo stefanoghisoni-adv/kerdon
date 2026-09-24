@@ -27,6 +27,7 @@ import { prisma } from '~/db.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import { applyOrderToMerchant, OrderWriteError } from '~/lib/customers/order-write.server';
+import { loadLogisticsConfigForWrite } from '~/lib/shipping/load-config.server';
 import { denialOf, can, type DenialReason } from '~/lib/authz/capabilities';
 import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
 import { linkUserToCustomer } from '~/lib/tracking/users.server';
@@ -316,9 +317,14 @@ export async function handleOrderUpsert(
 
   const supabase = createSupabaseClient(shop.supabaseConfig);
 
+  // Le tariffe, una volta per evento: servono al costo logistico che si scrive
+  // sull'ordine. Se non si leggono il costo resta zero, e l'ordine si scrive
+  // lo stesso — e' lui la ragione per cui questo handler esiste.
+  const logisticsConfig = await loadLogisticsConfigForWrite(shop.id);
+
   let written;
   try {
-    written = await applyOrderToMerchant({ supabase, order });
+    written = await applyOrderToMerchant({ supabase, order, logisticsConfig });
   } catch (error) {
     if (error instanceof OrderWriteError) {
       await saveOrderWebhookOutcome(shopId, {

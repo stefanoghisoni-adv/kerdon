@@ -30,6 +30,8 @@ import { can } from '~/lib/authz/capabilities';
 import { shopCapabilitiesWithPlan } from '~/lib/authz/shop-capabilities.server';
 import { loadSyncTiming } from '~/lib/sync/sync-timing.server';
 import { projectDashboardUrl } from '~/lib/supabase-management.server';
+import { autoResumeIsOn } from '~/lib/supabase/auto-resume';
+import { readAutoResumeSetting } from '~/lib/supabase/auto-resume-setting.server';
 import { SyncCard } from '~/components/Dashboard/SyncCard';
 import { SupabaseAccountConnect } from '~/components/Dashboard/SupabaseAccountConnect';
 import { SupabaseProjectConnect } from '~/components/Dashboard/SupabaseProjectConnect';
@@ -143,6 +145,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // della connessione, che da qui in poi vive su questa pagina.
   const authorization = normalizeAuthorization(shop?.authorization);
 
+  // La riattivazione automatica del database, come il merchant l'ha scelta.
+  //
+  // `available: false` vuol dire che non c'e' ancora nessun posto dove scrivere
+  // quella scelta — succede finche' la migrazione non e' stata eseguita — e in
+  // quel caso la card non mostra l'interruttore: un comando che non puo'
+  // salvare niente e' peggio di nessun comando, ed e' anche la ragione per cui
+  // in quel periodo l'app non riaccende niente da sola.
+  const autoResumeSetting = shop ? await readAutoResumeSetting(shop.id) : null;
+  const autoResume = {
+    available: autoResumeSetting !== null,
+    enabled: autoResumeSetting !== null && autoResumeIsOn(autoResumeSetting),
+  };
+
   // Le copie dei dati pronte da consegnare.
   //
   // Quando una persona chiede al negozio una copia dei propri dati, Shopify ce
@@ -212,7 +227,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const config = shop?.supabaseConfig;
   if (!config) {
-    return json({ account, config: null, sync, authorization, dataRequests, install, ingest });
+    return json({
+      account,
+      config: null,
+      sync,
+      authorization,
+      autoResume,
+      dataRequests,
+      install,
+      ingest,
+    });
   }
 
   // Le letture di tracciamento non passano più dalla anon key del merchant ma
@@ -228,6 +252,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     account,
     sync,
     authorization,
+    autoResume,
     dataRequests,
     install,
     ingest,
@@ -253,7 +278,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // automatica e non ha impostazioni, la chiave di lettura viene emessa una volta
 // al collegamento del progetto e le chiavi del progetto non si toccano da qui.
 export default function SupabaseSettings() {
-  const { account, config, sync, authorization, dataRequests, install, ingest } =
+  const { account, config, sync, authorization, autoResume, dataRequests, install, ingest } =
     useLoaderData<typeof loader>();
   const t = useT();
   // L'avviso sul limite dei database: lo accende il menu dentro la card, e lo
@@ -412,6 +437,7 @@ export default function SupabaseSettings() {
                 connected={account.connected}
                 databaseUrl={config?.databaseUrl ?? null}
                 dashboardUrl={config?.dashboardUrl ?? null}
+                autoResume={autoResume}
                 header={
                   account.connected ? (
                     <BlockStack gap="300">

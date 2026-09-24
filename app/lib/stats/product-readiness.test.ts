@@ -75,6 +75,9 @@ describe('collectProblemVariants', () => {
         price: '10.00',
         inventoryItemId: 999,
         missingField: 'cost_per_item',
+        // Nessun costo: e' la ragione per cui questa riga e' nell'elenco, ed e'
+        // cio' che dice alla tab che non ha un passato da proteggere.
+        previousCost: null,
       },
     ]);
   });

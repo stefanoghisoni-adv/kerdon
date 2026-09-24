@@ -10,7 +10,7 @@ export interface ProfitCardProps {
   coveredLines: number;
   totalLines: number;
   currency: string;
-  unavailable: 'no_orders_access' | 'not_connected' | 'reconnect' | null;
+  unavailable: 'no_orders_access' | 'not_connected' | 'reconnect' | 'temporary' | null;
   loading?: boolean;
   onFix?: () => void;
   fixLoading?: boolean;
@@ -72,6 +72,12 @@ export function ProfitCard({
                   // Dire "dopo la prima sincronizzazione" qui sarebbe falso — quella
                   // sincronizzazione non avverra' finche' il merchant non ricollega.
                   t.dashboard.profit.reconnect
+                : unavailable === 'temporary'
+                  ? // E questo e' il terzo caso: non "non ancora" e non "non piu'",
+                    // ma "non adesso". Il numero c'e', lo si rivede ricaricando, e
+                    // l'unica cosa sbagliata da dire al merchant sarebbe dargli
+                    // qualcosa da sistemare.
+                    t.dashboard.profit.temporary
                 : unavailable
                   ? t.dashboard.profit.unavailable
                 : orders === 0

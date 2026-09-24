@@ -356,3 +356,32 @@ describe('applyOrderToMerchant — le valute non si mescolano', () => {
     expect(db.tables.orders.get(111).currency).toBe('EUR');
   });
 });
+
+describe('applyOrderToMerchant — costo logistico', () => {
+  it('la configurazione passata da chi chiama finisce nel costo dell ordine', async () => {
+    const db = fakeSupabase();
+
+    await applyOrderToMerchant({
+      supabase: db.client,
+      order: order({ fulfillment_status: 'FULFILLED', shipping_country_code: 'IT', total_weight_grams: 1000 }),
+      syncedAt: SYNCED,
+      logisticsConfig: {
+        zones: [
+          { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 3 }] },
+        ],
+        categories: [],
+        fallbackRules: [],
+        defaultWeightPerItemKg: null,
+        returnCost: null,
+      },
+    });
+
+    expect(db.tables.orders.get(111).logistics_cost).toBe(3);
+  });
+
+  it('senza configurazione scrive zero', async () => {
+    const db = fakeSupabase();
+    await applyOrderToMerchant({ supabase: db.client, order: order(), syncedAt: SYNCED });
+    expect(db.tables.orders.get(111).logistics_cost).toBe(0);
+  });
+});

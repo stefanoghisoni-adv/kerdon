@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { countsAsSale, orderToRows, type ShopifyOrder, type ShopifyOrderLine } from './order-rows';
+import type { LogisticsConfig } from '~/lib/shipping/types';
 
 const SYNCED = new Date('2026-08-24T10:00:00Z');
 
@@ -251,5 +252,79 @@ describe('countsAsSale', () => {
     // e a dire quanto ne e' rimasto sono `current_quantity` e `line_net_total`,
     // non un'esclusione in blocco che porterebbe via anche le righe partite.
     expect(countsAsSale({ cancelled_at: null })).toBe(true);
+  });
+});
+
+describe('orderToRows — dati di spedizione e costo logistico', () => {
+  // Una configurazione minima: una zona lineare, una scatola, un reso forfait.
+  const config: LogisticsConfig = {
+    zones: [
+      { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }] },
+    ],
+    categories: [{ name: 'Scatola', cost: 1.5 }],
+    fallbackRules: [{ weightMaxKg: null, category: 'Scatola' }],
+    defaultWeightPerItemKg: null,
+    returnCost: 4,
+  };
+
+  const spedito = (over: Partial<ShopifyOrder> = {}) =>
+    order({
+      fulfillment_status: 'FULFILLED',
+      shipping_country_code: 'IT',
+      total_weight_grams: 1500,
+      returned_at: null,
+      packaging_category: null,
+      ...over,
+    });
+
+  it('porta sull ordine i campi che servono al costo', () => {
+    const rows = orderToRows(spedito({ packaging_category: 'Scatola' }), SYNCED)!;
+    expect(rows.order).toMatchObject({
+      fulfillment_status: 'FULFILLED',
+      shipping_country_code: 'IT',
+      total_weight_grams: 1500,
+      returned_at: null,
+      packaging_category: 'Scatola',
+    });
+  });
+
+  it('gli articoli sono quelli rimasti al cliente, riga per riga', () => {
+    const rows = orderToRows(
+      spedito({ lines: [line({ id: 1, current_quantity: 2 }), line({ id: 2, quantity: 3, current_quantity: 1 })] }),
+      SYNCED,
+    )!;
+    expect(rows.order.item_count).toBe(3);
+  });
+
+  it('con la configurazione il costo si calcola e si scrive', () => {
+    // 1,5 kg x 2 €/kg + 1,5 € di scatola.
+    const rows = orderToRows(spedito(), SYNCED, config)!;
+    expect(rows.order.logistics_cost).toBe(4.5);
+  });
+
+  it('un reso aggiunge il rientro senza togliere l andata', () => {
+    const rows = orderToRows(spedito({ returned_at: '2026-08-10T00:00:00Z' }), SYNCED, config)!;
+    expect(rows.order.logistics_cost).toBe(8.5);
+  });
+
+  it('senza configurazione il costo e zero, non assente', () => {
+    expect(orderToRows(spedito(), SYNCED, null)!.order.logistics_cost).toBe(0);
+    expect(orderToRows(spedito(), SYNCED)!.order.logistics_cost).toBe(0);
+  });
+
+  it('un costo oltre il tetto della colonna diventa zero invece di far fallire la scrittura', () => {
+    // 1,5 kg a un miliardo al kg esce da NUMERIC(10,2): scritto cosi',
+    // Postgres rifiuterebbe l'intero upsert dell'ordine, non solo il costo.
+    const assurda: LogisticsConfig = {
+      ...config,
+      zones: [{ ...config.zones[0], rates: [{ weightFromKg: null, weightToKg: null, cost: 1e9 }] }],
+    };
+    expect(orderToRows(spedito(), SYNCED, assurda)!.order.logistics_cost).toBe(0);
+  });
+
+  it('un ordine letto prima di questi campi non si rompe', () => {
+    const rows = orderToRows(order(), SYNCED, config)!;
+    expect(rows.order.fulfillment_status).toBeNull();
+    expect(rows.order.logistics_cost).toBe(0);
   });
 });

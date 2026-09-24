@@ -169,18 +169,45 @@ describe('fin dove arriva la modifica di un costo', () => {
     expect(righeOrdine[0].isNull).toEqual(['unit_cost_frozen_at']);
   });
 
-  // E' il caso di questa tab, dove il costo si inserisce la prima volta: quelle
-  // vendite sono sempre state senza costo. L'assenza si registra come tale, e
-  // quelle righe restano fuori dal profitto invece di ereditare un valore
-  // deciso mesi dopo.
-  it('se un costo prima non c era, si fissa l assenza e non il costo nuovo', async () => {
+  // IL BUG, ed e' il caso normale di questa tab: qui il costo si inserisce la
+  // prima volta, quindi un costo precedente non c'e'. Congelarne l'assenza
+  // lasciava la riga senza valore ma con la data del congelamento sopra —
+  // "conto chiuso" per il calcolo del profitto — e nessun costo inserito dopo
+  // poteva piu' farla rientrare: il merchant compilava il costo che l'app gli
+  // chiedeva e ritrovava profitto zero, per sempre.
+  //
+  // Niente da proteggere, niente da scrivere: le righe restano libere di
+  // seguire il costo di listino, che un istante dopo e' quello appena inserito.
+  it('se un costo prima non c era, sulle righe d ordine non si scrive niente', async () => {
     const scritture = supabaseFinto(null);
+
+    await action({ request: richiesta({ ...AGGIORNAMENTO, costScope: 'future' }) } as any);
+
+    expect(scritture.filter((s) => s.table === 'order_lines')).toEqual([]);
+  });
+
+  it('e il costo nuovo arriva lo stesso sul prodotto, che e cio che quelle righe seguono', async () => {
+    const scritture = supabaseFinto(null);
+
+    await action({ request: richiesta({ ...AGGIORNAMENTO, costScope: 'future' }) } as any);
+
+    const prodotti = scritture.filter((s) => s.table === 'products');
+    expect(prodotti).toHaveLength(1);
+    expect(prodotti[0].values.cost_per_item).toBe(9);
+  });
+
+  // L'altra meta' del fix: dove un costo precedente c'e' DAVVERO, congelare
+  // resta la cosa giusta. E' il caso per cui la scelta esiste — ho comprato a
+  // 4, adesso compro a 9, le vendite di prima restano a 4 — e non deve essere
+  // sacrificato per sistemare quello di sopra.
+  it('con un costo precedente vero il congelamento resta, anche a zero', async () => {
+    const scritture = supabaseFinto(0);
 
     await action({ request: richiesta({ ...AGGIORNAMENTO, costScope: 'future' }) } as any);
 
     const righeOrdine = scritture.filter((s) => s.table === 'order_lines');
     expect(righeOrdine).toHaveLength(1);
-    expect(righeOrdine[0].values.unit_cost_at_sale).toBeNull();
+    expect(righeOrdine[0].values.unit_cost_at_sale).toBe(0);
     expect(righeOrdine[0].values.unit_cost_frozen_at).toEqual(expect.any(String));
   });
 

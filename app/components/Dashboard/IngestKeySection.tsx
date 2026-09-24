@@ -102,18 +102,33 @@ export function IngestKeySection({ keys }: IngestKeySectionProps) {
           tone: neHaGia ? 'success' : undefined,
           content: neHaGia ? t.database.writeKeyActive(vive.length) : t.database.writeKeyNone,
         }}
+        // Le azioni stanno sulla riga del titolo, accanto al badge, come nelle
+        // altre righe delle card: sotto il titolo restano solo gli esiti.
+        action={!neHaGia ? (
+          <Button onClick={() => chiama('issue')} loading={inCorso} disabled={inCorso}>
+            {t.database.writeKeyCreate}
+          </Button>
+        ) : (
+          <>
+            <Button
+              tone="critical"
+              variant="plain"
+              onClick={() => setConfermaRevoca(true)}
+              disabled={inCorso}
+            >
+              {t.database.writeKeyRevoke}
+            </Button>
+            <Button onClick={() => chiama('issue')} loading={inCorso} disabled={inCorso}>
+              {t.database.writeKeyRotate}
+            </Button>
+          </>
+        )}
       />
 
       {/* Nessun avviso che conti i giorni a una scadenza: non ce n'e' piu' una.
           Chi ha una chiave viva e' a posto, e chi ha incollato quella sbagliata
           nel container lo vede dalla riga qui sotto — nessun dato ricevuto —
           molto piu' in fretta che da un banner. */}
-      {neHaGia && (
-        <Text as="p" variant="bodySm" tone="subdued">
-          {t.database.writeKeyUpToDate}
-        </Text>
-      )}
-
       {appena && (
         <Banner tone="info">
           <BlockStack gap="200">
@@ -145,25 +160,14 @@ export function IngestKeySection({ keys }: IngestKeySectionProps) {
         </Banner>
       )}
 
-      <InlineStack gap="200" blockAlign="center">
-        <Button onClick={() => chiama('issue')} loading={inCorso} disabled={inCorso}>
-          {neHaGia ? t.database.writeKeyRotate : t.database.writeKeyCreate}
-        </Button>
-        {neHaGia && (
-          <Button
-            tone="critical"
-            variant="plain"
-            onClick={() => setConfermaRevoca(true)}
-            disabled={inCorso}
-          >
-            {t.database.writeKeyRevoke}
-          </Button>
-        )}
-      </InlineStack>
-
-      {neHaGia && (
+      {/* Solo quando un invio c'e' stato davvero. Prima diceva "nessun invio
+          ricevuto finora", che e' vero anche un istante dopo aver creato la
+          chiave: chi ha appena finito leggeva un'assenza al posto di un esito,
+          e non c'era niente da fare per cambiarla. Un'assenza non e' una
+          notizia — la riga compare quando ha qualcosa da dire. */}
+      {neHaGia && ultimoInvio(vive) && (
         <Text as="p" variant="bodySm" tone="subdued">
-          {ultimoInvio(vive) ? t.database.writeKeyLastUsed(giorno(ultimoInvio(vive)!)) : t.database.writeKeyNeverUsed}
+          {t.database.writeKeyLastUsed(giorno(ultimoInvio(vive)!))}
         </Text>
       )}
 

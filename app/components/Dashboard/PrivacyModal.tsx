@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Banner, BlockStack, Modal, Text } from '@shopify/polaris';
-import { useT } from '~/lib/i18n/context';
+import { Banner, BlockStack, Link, Modal, Text } from '@shopify/polaris';
+import { useLocale, useT } from '~/lib/i18n/context';
 import { downloadFile } from '~/lib/privacy/download-file';
 
 interface Props {
@@ -24,6 +24,7 @@ interface Props {
  */
 export function PrivacyModal({ open, onClose }: Props) {
   const t = useT();
+  const locale = useLocale();
   const [scaricando, setScaricando] = useState(false);
   const [errore, setErrore] = useState(false);
 
@@ -65,6 +66,15 @@ export function PrivacyModal({ open, onClose }: Props) {
           <Text as="p" tone="subdued">
             {t.privacy.notIncluded}
           </Text>
+          {/* `external` e quindi una scheda nuova: l'app vive in un iframe
+              dentro l'admin, e aprire un documento lungo li' dentro vorrebbe
+              dire farlo leggere in una finestra alta pochi centimetri e far
+              perdere la pagina da cui si veniva. `lang` nella URL perche' il
+              documento sta fuori dall'app: li' non c'e' nessuna sessione da cui
+              dedurre la lingua, e chi parte da qui la lingua l'ha gia' scelta. */}
+          <Link url={`/policies/policies/privacy-policy?lang=${locale}`} external target="_blank">
+            {t.privacy.policyLink}
+          </Link>
         </BlockStack>
       </Modal.Section>
     </Modal>

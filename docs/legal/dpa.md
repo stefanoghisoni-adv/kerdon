@@ -1,6 +1,6 @@
 # Data Processing Agreement (DPA) — Kerdon
 
-Last updated: 17 September 2026
+Last updated: 18 September 2026
 
 > This agreement is accepted together with the terms of service, when the app is
 > installed.
@@ -41,6 +41,11 @@ other field of the customer record is created or changed.
 
 Where the merchant enables the feature, Kerdon also processes **visitor
 recognition** for the store, described in section 3.
+
+Kerdon may also act on the merchant's database project to restart it when the
+provider has paused it. This is not a new processing of personal data — no data
+is read, written or deleted in order to do it — but it is an automatic action
+on the controller's infrastructure, and it is described in section 6.
 
 Purpose: to let the merchant use its own commercial data to measure the
 profitability of its orders and its customers.
@@ -134,6 +139,31 @@ Kerdon accesses it on the merchant's instruction.
 - A record of every access to personal data, retained for 12 months
 - Separate development and production environments, on distinct databases
 - Access to production systems limited to the processor alone
+- Restoration of the availability of the merchant's database: where the project
+  is found paused, Kerdon requests its restart before the restore window closes
+
+**The automatic restart of the merchant's database** deserves to be set out in
+full, because it is the only action Kerdon takes on the controller's
+infrastructure without a specific request from it. A free database project left
+idle is paused, and the pause is not left open forever: once the restore window
+closes the project can no longer be recovered and all that is left of the data
+is backups. Kerdon notices when a read of the database fails, tells the
+merchant inside the app and offers to restart it; if the merchant does not,
+then before that window closes Kerdon makes the request itself, using the
+credentials the merchant granted it when connecting its account with the
+provider. The request concerns the state of the project alone: no personal data
+is read, written or deleted as a result of it.
+
+It counts as a measure for restoring the availability of and access to the data
+in a timely manner under Article 32(1)(c) GDPR, and it is declared here so that
+it also counts as a documented instruction of the controller under Article
+28(3)(a): in accepting this agreement, the merchant instructs Kerdon to carry
+it out. The merchant may withdraw that instruction at any time, from the toggle
+under Settings → Database; the notice and the button remain, and they are the
+merchant's. Kerdon does not act on the database of a store that has uninstalled
+the app, of one Shopify has asked to be erased, or of one whose link to the
+provider account has lapsed: in those cases it has neither the mandate nor the
+credentials.
 
 ## 7. Data breaches
 

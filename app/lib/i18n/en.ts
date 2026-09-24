@@ -73,6 +73,7 @@ export const en: typeof it = {
     error: "We couldn't prepare your copy. Please try again shortly.",
     confirm: "Download",
     cancel: "Cancel",
+    policyLink: "Read the privacy policy",
   },
   dataRequests: {
     title: "Data copies to hand over",
@@ -93,6 +94,16 @@ export const en: typeof it = {
     readKeyHelp: "The public API key you will need to read the information from server-side Google Tag Manager",
     notConfigured: "Not configured",
     ownerUrl: "Your database URL",
+
+    autoResume: {
+      label: "Bring the database back on its own before the deadline",
+      help:
+        "If your database is paused, we bring it back before it is too late: once the deadline " +
+        "has passed it can no longer be brought back, and only downloadable copies of your data " +
+        "are left. We tell you once we have done it. If you would rather handle it yourself, " +
+        "clear this box: we won’t touch it.",
+      failed: "We couldn’t save this choice. Try again in a few minutes.",
+    },
     trackingTitle: "Tracking connection and credentials",
     open: "Open database",
     copy: "Copy",
@@ -116,10 +127,8 @@ export const en: typeof it = {
       "From now on your installation stops sending data until you publish a new key. Do this if you think the key has ended up in the wrong hands.",
     writeKeyRevoked: "Revoked.",
     writeKeyLastUsed: (when: string) => `Last data received on ${when}`,
-    writeKeyNeverUsed: "No data received yet",
     writeKeyUpdateNeeded: (when: string) =>
       `Your installation still sends data with the read key. Update it by ${when}, or it will stop working on that date.`,
-    writeKeyUpToDate: "Installation up to date",
   },
 
   logs: {
@@ -349,7 +358,7 @@ export const en: typeof it = {
   dashboard: {
     profit: {
       title: "Profit this month",
-      hint: "Revenue minus the cost of goods sold, on this month’s orders.",
+      hint: "What’s left after product, shipping, packaging and return costs, on this month’s orders.",
       orders: (n: number) => `${n} ${n === 1 ? "order" : "orders"}`,
       reliability: (percent: number) => `Based on ${percent}% of order lines`,
       complete: "Based on every order line",
@@ -358,12 +367,14 @@ export const en: typeof it = {
       unavailable: "Profit becomes available after the first order sync.",
       reconnect:
         "Permission to reach your database is no longer valid. Reconnect it from Settings: your data stays where it is.",
+      temporary:
+        "Profit isn’t available right now. Reload in a moment: there’s nothing to fix.",
     },
     margin: {
       title: "Average margin per order",
       detail: (profit: string, value: string) =>
         `${profit} of ${value} per order`,
-      hint: "What’s left of an average order after the cost of goods.",
+      hint: "What’s left of an average order after product, shipping, packaging and return costs.",
       noOrders: "No orders to work from yet.",
     },
     profitability: {
@@ -470,6 +481,14 @@ export const en: typeof it = {
         "The connection has been removed and the tables the app created, with the synced data, have been deleted from the project.",
       keptBody:
         "The connection has been removed. The tables and the synced data stay in the project: reconnect it and the sync picks up from there.",
+    },
+    weightMissingAlert: {
+      title: (count: number) =>
+        count === 1
+          ? "1 shipped order has no weight"
+          : `${count} shipped orders have no weight`,
+      body: "Without the weight, the shipping cost stays at zero and the profit is higher than actual. Set an average weight per item and the calculation becomes accurate.",
+      action: "Go to Shipping",
     },
   },
 
@@ -634,6 +653,53 @@ export const en: typeof it = {
     noHistory:
       "Shopify only keeps a product's current cost, not the previous ones: for orders already recorded we cannot know what that product actually cost you on the day of the sale, and we do not make it up.",
     cancel: "Cancel",
+  },
+
+  databasePaused: {
+    title: "Your database is paused",
+    dataSafe:
+      "All of your data is safe: nothing has been lost, neither the data nor the backups.",
+    syncStopped:
+      "While it stays paused syncing is stopped: the numbers you see in the app are the ones from the last update and will not change.",
+    deadline:
+      "You can only bring it back before a certain date, which is written on your database page: after that date it can no longer be brought back, and the data is only left to download. Don’t wait.",
+    action: "Resume database",
+    openDashboard: "Open your database page",
+
+    willAutoResume:
+      "If you don’t bring it back yourself, we will bring it back before the time to do so runs " +
+      "out. You can turn this off in Settings, in the Database section.",
+
+    autoResumed: {
+      title: "We brought your database back",
+      body:
+        "Your database was paused and was getting close to the point where it could no longer be " +
+        "brought back: we brought it back so you wouldn’t lose it. All of your data is safe.",
+      stillStopped:
+        "It takes a few minutes: until it is active again syncing stays stopped and the numbers " +
+        "will not update. You can close this page: once the database is back, syncing starts " +
+        "again on its own. If you would rather we didn’t bring it back for you, you can turn " +
+        "that off in Settings, in the Database section.",
+    },
+
+    resuming: {
+      title: "Bringing your database back",
+      body:
+        "We have asked for your database to be brought back: it takes a few minutes. Your data is safe.",
+      stillStopped:
+        "Until it is active again syncing stays stopped and the numbers will not update. You can close this page: once the database is back, syncing starts again on its own.",
+    },
+
+    errors: {
+      noPermission:
+        "We can’t bring the database back for you. Open its page and bring it back from there: your data is exactly where you left it.",
+      reconnect:
+        "The link to your database account is no longer valid. Reconnect it from Settings, or bring the database back from its page.",
+      rateLimited:
+        "Too many requests were made in a short time. Wait a few minutes and try again.",
+      failed:
+        "We couldn’t ask for the database to be brought back. Try again in a few minutes, or bring it back from its page.",
+    },
   },
 
   schemaUpdate: {
@@ -807,7 +873,7 @@ export const en: typeof it = {
       help: "Information integrated using customer metafields",
     },
     title: "Customers",
-    intro: "What each customer is worth, after the cost of what they bought.",
+    intro: "What each customer is worth, after product, shipping, packaging and return costs.",
     range: "Period",
     apply: "Apply",
     columns: {
@@ -958,6 +1024,127 @@ export const en: typeof it = {
       previousYearWeekday: "Previous year (matching weekday)",
     },
   },
+
+  // Shipping: zone rates and logistics costs
+  shipping: {
+    title: "Shipping",
+    intro:
+      "Configure how much it costs you to ship to each zone: logistics costs are subtracted from calculated profit.",
+    sync: "Import zones from Shopify",
+    syncing: "Importing…",
+    syncSuccess: "Zones imported successfully",
+    syncError: "Could not import zones. Try again in a moment.",
+    scopeError:
+      "To import your shipping zones, reopen the app and accept the updated permissions.",
+    empty: {
+      title: "No shipping zones configured",
+      description:
+        "Import your shipping zones from Shopify to start configuring costs.",
+      action: "Import zones from Shopify",
+    },
+    table: {
+      zone: "Zone",
+      countries: "Countries",
+      rateType: "Rate type",
+      indicativeCost: "Indicative cost",
+      actions: "Actions",
+      edit: "Edit",
+    },
+    countriesList: (first: string[], others: number) =>
+      others > 0
+        ? `${first.join(', ')} and ${others} more`
+        : first.join(', '),
+    restOfWorld: "Rest of world",
+    rateTypes: {
+      linear: "Linear",
+      brackets: "Weight brackets",
+    },
+    costDisplay: {
+      linear: (costPerKg: string) => `${costPerKg}/kg`,
+      brackets: (min: string, max: string) => `${min} – ${max}`,
+      empty: "—",
+    },
+    modal: {
+      title: (zoneName: string) => `Rates for ${zoneName}`,
+      rateTypeLabel: "Rate type",
+      rateTypeHelp:
+        "Choose whether cost grows linearly with weight or you use weight brackets with fixed costs.",
+      linearLabel: "Linear (€/kg)",
+      bracketsLabel: "Weight brackets",
+      linearCostLabel: "Cost per kg",
+      linearCostPlaceholder: "0.00",
+      linearCostHelp: "How much it costs you to ship 1 kg to this zone",
+      bracketsHelp:
+        "Define weight brackets with fixed costs. The first bracket must start at 0 kg, brackets must be contiguous, and only the last can be unlimited.",
+      addBracket: "Add bracket",
+      removeBracket: "Remove",
+      bracketWeightFrom: "From (kg)",
+      bracketWeightTo: "To (kg)",
+      bracketCost: "Cost (€)",
+      bracketUnlimited: "Unlimited",
+      save: "Save",
+      cancel: "Cancel",
+      saving: "Saving…",
+      saveSuccess: "Rates saved successfully",
+      saveError: "Could not save rates. Try again in a moment.",
+    },
+    errors: {
+      atLeastOneBracket: "At least one weight bracket is required",
+      firstBracketMustStartAtZero: "The first bracket must start at 0 kg",
+      bracketsHaveGaps: "Brackets have gaps: they must be contiguous",
+      bracketsOverlap: "Brackets overlap",
+      onlyLastBracketCanBeUnlimited: "Only the last bracket can be unlimited",
+      costMustBeNonNegative: "Cost must be greater than or equal to 0",
+      weightFromGreaterThanWeightTo:
+        "Starting weight cannot be greater than ending weight",
+      invalidLinearCost: "Enter a valid cost",
+      invalidBrackets: "The brackets aren't valid: check the weights and costs",
+    },
+    packaging: {
+      title: "Packaging and returns",
+      categoriesLabel: "Packaging categories",
+      categoriesHelp:
+        "Define packaging categories and their cost. For example: Envelope, Small box, Large box.",
+      categoryNameLabel: "Category name",
+      categoryNamePlaceholder: "e.g. Envelope",
+      categoryCostLabel: "Cost (€)",
+      categoryCostPlaceholder: "0.00",
+      addCategory: "Add category",
+      removeCategory: "Remove",
+      rulesLabel: "Weight rules",
+      rulesHelp:
+        "Define which category to use based on the order's total weight. The first matching rule applies.",
+      ruleWeightLabel: "Maximum weight (kg)",
+      ruleWeightPlaceholder: "0.00",
+      ruleCategoryLabel: "Category",
+      ruleUnlimited: "Everything else",
+      addRule: "Add rule",
+      removeRule: "Remove",
+      defaultWeightLabel: "Default weight per item (kg)",
+      defaultWeightPlaceholder: "0.000",
+      defaultWeightHelp:
+        "Used for orders whose products have no weight on Shopify.",
+      returnCostLabel: "Return cost per returned order (€)",
+      returnCostPlaceholder: "0.00",
+      returnCostHelp: "The fixed cost when an order has a return.",
+      save: "Save",
+      saving: "Saving…",
+      saveSuccess: "Configuration saved successfully",
+      saveError: "Could not save configuration. Try again in a moment.",
+      errors: {
+        categoryNameEmpty: "Category name cannot be empty",
+        categoryNameDuplicate: "Category name is already in use",
+        categoryCostNegative: "Category cost must be greater than or equal to 0",
+        ruleInvalidCategory: "Rule points to a category that does not exist",
+        ruleWeightNegative: "Maximum weight must be greater than or equal to 0",
+        multipleUnlimitedRules: "There can be at most one \"everything else\" rule",
+        unlimitedRuleMustBeLast: "The \"everything else\" rule must be last",
+        categoryStillReferenced: "This category is used by a rule. Remove the rules that use it first.",
+        invalidData: "The configuration isn't valid: check the names, weights and costs",
+      },
+    },
+  },
+
   catalogs: {
     title: "Catalogues",
     intro:

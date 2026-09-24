@@ -21,6 +21,7 @@ import { drainWebhookEvents, pruneWebhookEvents } from '~/lib/webhooks/inbox.ser
 import { drainRevocations, pruneRevocations } from '~/lib/consent/revocation-register.server';
 import { WEBHOOK_PROCESSORS } from '~/lib/webhooks/processors.server';
 import { reconcileShopStates } from '~/lib/webhooks/reconcile.server';
+import { runAutoResume } from '~/lib/supabase/auto-resume.server';
 import { unauthenticated } from '~/shopify.server';
 import { pruneAnonymousUsers } from '~/lib/tracking/users.server';
 import { createSupabaseClient } from '~/lib/supabase.server';
@@ -162,6 +163,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     /** Abbonamenti attivi su Shopify di cui da noi non risultava niente. */
     reconciledActivations: 0,
     expiredExportsPruned: 0,
+    /**
+     * I database in pausa che questo giro e' andato a guardare, e quelli che ha
+     * riacceso.
+     *
+     * `autoResumeChecked` conta le domande fatte a Supabase, non i negozi
+     * guardati: se cresce insieme al numero dei negozi vuol dire che il filtro
+     * non sta filtrando, ed e' l'unica riga che lo direbbe.
+     */
+    autoResumeChecked: 0,
+    autoResumeRestored: 0,
+    autoResumeRefused: 0,
+    /** La tabella delle scelte non c'e' ancora: la funzione e' spenta per tutti. */
+    autoResumeUnavailable: false,
     errors: [] as string[],
   };
 
@@ -276,6 +290,39 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('Cron reconcile error:', message);
       results.errors.push(`riconciliazione: ${message}`);
+    }
+  }
+
+  // I database in pausa che stanno per non essere piu' riaccendibili.
+  //
+  // DOPO la riconciliazione e non prima, ed e' la stessa ragione per cui i
+  // webhook stanno prima delle sincronizzazioni: la riconciliazione e' il
+  // momento in cui si scopre chi ha disinstallato senza che l'evento arrivasse.
+  // Andando prima, questo giro potrebbe riaccendere il database di un negozio
+  // che se n'e' gia' andato — che e' esattamente la cosa da non fare.
+  //
+  // QUI DENTRO E NON IN UN CRON SUO. Su Vercel i cron sono contati e quelli del
+  // piano in uso sono gia' impegnati; ma soprattutto un secondo cron
+  // rifarebbe da capo l'elenco dei negozi, l'autenticazione col segreto e la
+  // riconciliazione di chi e' ancora installato — cioe' tre cose che questa
+  // rotta ha gia' fatto, e che dovrebbero restare d'accordo fra loro per
+  // sempre. E c'e' un vantaggio in piu': la stessa rotta la chiama anche
+  // GitHub Actions ogni mezz'ora, quindi il controllo non aspetta le 3 del
+  // mattino. Che possa girare ogni mezz'ora senza pesare e' garantito dal
+  // filtro dentro `runAutoResume` — nessuna chiamata a Supabase per un negozio
+  // che da' prova di essere vivo — e dall'attesa di sei ore fra due tentativi.
+  if (!onlyShopId) {
+    try {
+      const riattivazioni = await runAutoResume();
+      results.autoResumeChecked = riattivazioni.interrogati;
+      results.autoResumeRestored = riattivazioni.riattivati;
+      results.autoResumeRefused = riattivazioni.rifiutati;
+      results.autoResumeUnavailable = riattivazioni.nonConfigurato;
+      results.errors.push(...riattivazioni.errori.map((e) => `riattivazione ${e}`));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Cron auto-resume error:', message);
+      results.errors.push(`riattivazione automatica: ${message}`);
     }
   }
 

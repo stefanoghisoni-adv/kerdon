@@ -180,6 +180,19 @@ const ORDERS_COLUMNS: Column[] = [
   { name: 'placed_at', type: 'TIMESTAMP' },
   { name: 'updated_at', type: 'TIMESTAMP' },
   { name: 'synced_at', type: 'TIMESTAMP DEFAULT NOW()' },
+  // Cio' che serve a dire quanto e' costato far arrivare l'ordine e, se e'
+  // tornato, farlo rientrare. Il paese e non l'indirizzo: per la tariffa basta
+  // la zona, e un dato personale in piu' non serve a nessun conto.
+  { name: 'fulfillment_status', type: 'TEXT' },
+  { name: 'shipping_country_code', type: 'TEXT' },
+  { name: 'total_weight_grams', type: 'INTEGER' },
+  { name: 'item_count', type: 'INTEGER' },
+  { name: 'returned_at', type: 'TIMESTAMP' },
+  { name: 'packaging_category', type: 'TEXT' },
+  // Il costo gia' calcolato, e non le tariffe: quelle vivono sul database
+  // dell'app, e il profitto si fa in SQL qui, dove non si possono unire.
+  // Si sottrae una volta per ordine, mai una per riga.
+  { name: 'logistics_cost', type: 'NUMERIC(10, 2)' },
 ];
 
 const ORDERS_INDEXES = [
@@ -254,10 +267,15 @@ const ORDER_LINES_COLUMNS: Column[] = [
   // in uso quando il merchant decide di cambiarlo.
   //
   // COME SI LEGGONO. `unit_cost_frozen_at` valorizzata vuol dire che per questa
-  // riga il conto e' chiuso: vale `unit_cost_at_sale`, e se e' NULL vuol dire
-  // che quando quella vendita e' stata registrata un costo non c'era. In quel
-  // caso la riga resta fuori dal profitto, invece di adottare un costo deciso
-  // dopo — che sarebbe inventarle un passato.
+  // riga il conto e' chiuso: vale `unit_cost_at_sale`, che in quel caso c'e'
+  // sempre. Le due colonne si riempiono insieme o non si riempiono affatto.
+  //
+  // LA COMBINAZIONE CHE NON ESISTE: data del congelamento senza valore. Vorrebbe
+  // dire "abbiamo fissato niente", e in pratica voleva dire togliere quella
+  // vendita dal profitto per sempre — nessun costo inserito dopo poteva piu'
+  // farla rientrare. L'app l'ha prodotta finche' congelava anche l'assenza di un
+  // costo precedente (vedi `lib/products/cost-scope`); le righe rimaste cosi'
+  // le sblocca il passo 11 di `merchant-migrations`.
   //
   // Le righe senza `unit_cost_frozen_at` seguono il costo corrente, che e' il
   // comportamento di sempre: e' giusto cosi' fino al primo cambio, perche' fino

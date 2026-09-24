@@ -28,6 +28,10 @@ import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-forma
 import { BASE_CURRENCY } from '~/lib/billing/money';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { loadCustomersReport } from '~/lib/customers/customers.server';
+import {
+  birthdateNoticeDismissedFor,
+  dismissBirthdateNotice,
+} from '~/lib/customers/birthdate-dismissal.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
 import { defaultRange } from '~/lib/dates/ranges';
 import { PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
@@ -202,6 +206,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
            */
           notADate: configuredDefinition != null && !isDateMetafieldType(configuredDefinition.type),
           adminUrl: customerMetafieldsUrl(session.shop),
+          /**
+           * Per quale campo l'avviso di conferma risulta gia' chiuso.
+           *
+           * Viene da qui e non dal browser: `localStorage` appartiene
+           * all'indirizzo da cui la pagina arriva, e dentro l'admin questa
+           * pagina sta in un iframe di un'altra origine — storage di terze
+           * parti, che Safari blocca e Chrome partiziona. Arrivando col loader
+           * il primo render sa gia', quindi non c'e' il lampo fra quel che si
+           * mostra e quel che l'idratazione corregge.
+           */
+          dismissedFor: await birthdateNoticeDismissedFor(shop.id, configuredKey),
         }
       : null,
     // Per aprire la scheda del cliente: da qui il merchant vede l'anagrafica
@@ -251,6 +266,21 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const form = await request.formData();
   const intent = String(form.get('intent') ?? '');
+
+  // "Non mostrarmelo piu'": si segna per QUALE campo, non come un si'/no.
+  // Cambiando il campo da cui si legge la data di nascita c'e' una conferma
+  // nuova da dare, e un si'/no avrebbe zittito anche quella.
+  //
+  // Si risponde se la chiusura e' stata davvero registrata: il riquadro riapre
+  // l'avviso quando non lo e' stata, invece di lasciar credere al merchant che
+  // il suo gesto sia stato preso.
+  if (intent === 'dismiss-birthdate-notice') {
+    const dismissed = await dismissBirthdateNotice(
+      shop.id,
+      formatMetafieldKey(birthdateMetafieldOf(shop)),
+    );
+    return json({ ok: dismissed, dismissed });
+  }
 
   // Il campo che il merchant ha scelto o incollato. Quello che non si divide in
   // namespace e chiave non si salva: una riga interpretata a naso lascerebbe la
@@ -315,7 +345,11 @@ export default function Customers() {
   // qui: lo stesso verdetto serve al riquadro e alla riga, e due copie della
   // stessa regola sono due cose da tenere allineate. Chiamato sempre, anche
   // senza il riquadro da mostrare: un hook non si salta.
-  const notice = useBirthdateNotice(birthdate?.configured ?? '', birthdate?.state ?? 'none');
+  const notice = useBirthdateNotice(
+    birthdate?.configured ?? '',
+    birthdate?.state ?? 'none',
+    birthdate?.dismissedFor ?? null,
+  );
 
   const needsWork = (row: { coveredLines: number; totalLines: number }) =>
     row.coveredLines < row.totalLines;

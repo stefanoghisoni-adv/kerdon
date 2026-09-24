@@ -17,9 +17,22 @@
 //
 // COSA SI PUO' FARE ONESTAMENTE. Fermare il valore in uso nel momento in cui si
 // decide di cambiarlo. Da quel momento le righe d'ordine gia' scritte hanno il
-// conto chiuso: tengono il costo con cui erano state calcolate, e se un costo
-// non ce l'avevano restano senza — fuori dal profitto, come sono sempre state,
-// invece di adottarne uno deciso dopo.
+// conto chiuso: tengono il costo con cui erano state calcolate, qualunque cosa
+// succeda al costo di listino.
+//
+// E QUANDO UN COSTO PRIMA NON C'ERA? Allora non si ferma niente. Fermare
+// l'assenza sembrava la scelta coerente — "quelle vendite sono sempre state
+// senza costo, restano senza" — ed era invece il modo di renderle invisibili
+// per sempre: la riga restava senza valore ma marcata come "conto chiuso", e da
+// li' in poi nessun costo inserito poteva piu' rientrarci. Il merchant
+// compilava il costo che l'app gli chiedeva di compilare, tornava sui clienti e
+// trovava di nuovo profitto zero, senza niente da premere per cambiarlo.
+//
+// Il congelamento esiste per proteggere un costo PRECEDENTE REALE (ho comprato
+// a 3, adesso compro a 5: le vendite vecchie restano a 3). Dove quel costo non
+// c'e', non c'e' niente da proteggere e non c'e' nemmeno una scelta da fare: le
+// due strade portano allo stesso posto, e quelle righe prendono il costo nuovo
+// come tutte le altre.
 //
 // LE DUE STRADE, come le vede il merchant:
 //
@@ -57,22 +70,52 @@ export interface CostScopeEffect {
   clearFrozen: boolean;
 }
 
-export function costScopeEffect(scope: CostScope): CostScopeEffect {
-  return scope === 'future'
-    ? { freezeExisting: true, clearFrozen: false }
-    : { freezeExisting: false, clearFrozen: true };
+/**
+ * Cosa comporta la scelta, viste anche le righe su cui cadrebbe.
+ *
+ * `previousCost` non e' un parametro di comodo ed e' obbligatorio apposta: senza
+ * di lui questa funzione rispondeva "congela" anche quando non c'era niente da
+ * congelare, e chi chiamava non aveva modo di accorgersene. Il risultato era una
+ * riga con `unit_cost_frozen_at` valorizzato e nessun costo dentro: una vendita
+ * dichiarata "gia' contata" che dal profitto era esclusa per sempre.
+ *
+ * Quindi `future` congela solo dove c'e' un costo utilizzabile da conservare.
+ * Dove non c'e', non fa niente — ed e' la cosa giusta da fare, non una
+ * rinuncia: quelle righe non hanno un passato da difendere e seguono il costo
+ * di listino, che fra un istante sara' quello appena inserito.
+ */
+export function costScopeEffect(scope: CostScope, previousCost: unknown): CostScopeEffect {
+  if (scope === 'all') return { freezeExisting: false, clearFrozen: true };
+  return { freezeExisting: costToFreeze(previousCost) !== null, clearFrozen: false };
+}
+
+/**
+ * C'e' davvero qualcosa da chiedere al merchant?
+ *
+ * La domanda "fin dove arriva questo costo" ha senso finche' una delle due
+ * risposte cambia i numeri che ha gia' letto. Se nessuna delle varianti che sta
+ * salvando aveva un costo, non c'e' nessun numero da proteggere: le due risposte
+ * fanno la stessa cosa, e un dialogo che chiede di scegliere fra due esiti
+ * identici e' solo un passaggio in piu' — per giunta insinuando che qualcosa
+ * possa andare storto a seconda di come si risponde.
+ */
+export function needsCostScopeChoice(previousCosts: unknown[]): boolean {
+  return previousCosts.some((costo) => costToFreeze(costo) !== null);
 }
 
 /**
  * Il valore da fissare sulle righe gia' scritte.
  *
  * E' il costo che quelle righe stavano usando fino a un istante fa, cioe' il
- * costo del prodotto PRIMA della modifica — mai quello nuovo. Se prima non
- * c'era, non c'e' niente da fissare e si fissa l'assenza: quelle vendite sono
- * sempre state senza costo, e restano senza.
+ * costo del prodotto PRIMA della modifica — mai quello nuovo.
+ *
+ * `null` non e' "fissa l'assenza": e' "non c'e' niente da fissare", ed e' il
+ * motivo per cui `costScopeEffect` lo interroga prima di decidere se congelare.
+ * Fissare un'assenza scriveva la data del congelamento su una riga senza
+ * valore, e quella riga spariva dal profitto per sempre.
  *
  * Il numero non si arrotonda e non si corregge: o e' un costo utilizzabile, o
- * e' un'assenza. Un valore fuori scala trattato come zero direbbe che quella
+ * non e' niente. Un valore fuori scala trattato come zero direbbe che quella
  * merce era gratis.
  */
 export function costToFreeze(previousCost: unknown): number | null {

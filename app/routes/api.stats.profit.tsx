@@ -1,6 +1,8 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { isSupabaseCredentialDead } from '~/lib/supabase-management.server';
+import { isRinnovoPermessoInCorso } from '~/lib/supabase-oauth.server';
+import { noteDatabaseUnreachableForShop } from '~/lib/supabase/database-pause.server';
 import { prisma } from '~/db.server';
 import { loadShopAverages, loadShopProfit } from '~/lib/customers/profit.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
@@ -82,11 +84,53 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // finche' non ricollega, quel numero non tornera' mai, e "sara' disponibile
     // dopo la prima sincronizzazione" sarebbe una frase falsa.
     const daRicollegare = isSupabaseCredentialDead(e);
+    // Il permesso si sta rinnovando su un'altra richiesta: non e' un guasto ed
+    // e' gia' finito quando il merchant ricarica. Se non lo distinguessimo qui
+    // finirebbe nel ramo generico, che gli direbbe "dopo la prima
+    // sincronizzazione" — una frase falsa per un negozio che sincronizza da
+    // mesi.
+    const rinnovoInCorso = isRinnovoPermessoInCorso(e);
     console.error(
       '[api.stats.profit]',
-      daRicollegare ? 'permesso Supabase non piu valido: serve ricollegare' : '',
+      daRicollegare
+        ? 'permesso Supabase non piu valido: serve ricollegare'
+        : rinnovoInCorso
+          ? 'permesso Supabase in rinnovo su un altra richiesta: passeggero'
+          : '',
       e instanceof Error ? e.message : 'errore sconosciuto',
     );
+
+    // IL PUNTO IN CUI LA PAUSA DEL DATABASE SI SCOPRE.
+    //
+    // Qui e non in un loader, e il motivo e' il vincolo: chiedere a Supabase
+    // come sta il progetto e' una chiamata di rete verso un terzo, e pagarla a
+    // ogni apertura di pagina vorrebbe dire rallentare ogni schermata per una
+    // risposta che quasi sempre e' "tutto a posto". Dentro questo `catch`
+    // invece la domanda se l'e' gia' posta il fallimento: questa e' la prima
+    // lettura del database del merchant che la dashboard fa a ogni apertura, e
+    // quando il database e' in pausa e' anche la prima che fallisce.
+    //
+    // Si aspetta, invece di lasciarla correre da sola: una promessa lasciata
+    // in volo su Vercel muore con l'invocazione, e morirebbe proprio nel caso
+    // in cui serve. Non puo' far fallire niente (dentro ha il suo `catch`) e
+    // non costa niente sul percorso buono, perche' sul percorso buono qui non
+    // ci si arriva. Il freno di un minuto e' dentro: la dashboard ricarica le
+    // sue card a raffica, e senza quello un database fermo produrrebbe una
+    // chiamata a Supabase per ogni giro.
+    //
+    // Un negozio con la credenziale morta non ci entra: quello e' un altro
+    // guasto, con un'altra frase, e interrogare Supabase con un permesso che
+    // non vale piu' non direbbe niente di nuovo.
+    //
+    // E non ci entra nemmeno il rinnovo in corso, per il motivo opposto: li'
+    // il database del merchant non e' stato nemmeno interrogato: ci siamo
+    // fermati prima, in fila per il permesso. Chiedere a Supabase come sta il
+    // progetto vorrebbe dire pagare una chiamata di rete per rispondere a una
+    // domanda che nessuno ha fatto — e la pagherebbe con lo stesso permesso
+    // che in quel momento non e' disponibile.
+    if (!daRicollegare && !rinnovoInCorso) {
+      await noteDatabaseUnreachableForShop(session.shop);
+    }
     // Un guasto qui non deve spegnere la dashboard: si dice che il numero non
     // c'e', e le card sotto continuano a fare il loro lavoro.
     return json({
@@ -96,7 +140,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       coveredLines: 0,
       totalLines: 0,
       currency: 'EUR',
-      unavailable: (daRicollegare ? 'reconnect' : 'not_connected') as 'reconnect' | 'not_connected',
+      unavailable: (daRicollegare
+        ? 'reconnect'
+        : rinnovoInCorso
+          ? 'temporary'
+          : 'not_connected') as 'reconnect' | 'temporary' | 'not_connected',
       averages: {
         aov: null,
         aop: null,

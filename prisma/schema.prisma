@@ -205,6 +205,8 @@ model Shop {
   consentRevocations       ConsentRevocation[]
   productScope             ProductScopeEntry[]
   trackingIngestKeys       TrackingIngestKey[]
+  autoResume               SupabaseAutoResume?
+  birthdateNotice          BirthdateNoticeDismissal?
 
   @@index([shopDomain])
   @@map("shops")
@@ -370,6 +372,98 @@ model SupabaseConfig {
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("supabase_configs")
+}
+
+/// La riattivazione automatica del database del merchant: se la vuole, e cosa
+/// abbiamo gia' provato.
+///
+/// PERCHE' UNA TABELLA E NON TRE COLONNE SU `supabase_configs`. Perche' questo
+/// codice va in produzione PRIMA che la migrazione venga eseguita a mano su Live
+/// e Test, e nella finestra fra le due cose le colonne non ci sono ancora.
+/// Prisma elenca per nome ogni colonna del modello: una colonna nuova su
+/// `supabase_configs` farebbe fallire ogni `include: { supabaseConfig: true }`
+/// del repository — cioe' le Impostazioni, il cron e la dashboard — con un
+/// errore su una colonna che non esiste. Una TABELLA nuova invece la interroga
+/// solo chi la conosce: finche' non c'e', quella sola lettura fallisce, viene
+/// intercettata, e la riattivazione automatica resta spenta mentre tutto il
+/// resto dell'app continua a funzionare. Vedi `auto-resume-setting.server.ts`.
+///
+/// E' anche un'entita' vera e non un campo sparso: "cosa il merchant ha scelto
+/// e cosa abbiamo gia' tentato" e' una cosa sola, ed e' quella che il freno
+/// contro le richieste ripetute deve poter leggere in modo durevole. Tenere il
+/// freno in cache voleva dire non averlo la sera in cui la cache non risponde.
+model SupabaseAutoResume {
+  id     String @id @default(uuid())
+  shopId String @unique @map("shop_id")
+
+  /// L'interruttore in Impostazioni. NULL = mai toccato, e vale acceso: e' il
+  /// comportamento che l'app dichiara accanto all'interruttore e nel banner,
+  /// prima che accada. Spento e' una scelta esplicita del merchant e si
+  /// rispetta — il database e' suo.
+  enabled Boolean? @default(true)
+
+  /// L'ultima volta che il giro automatico si e' occupato di questo negozio:
+  /// e' il freno, e sta qui e non in cache perche' un freno che sparisce non e'
+  /// un freno.
+  lastAttemptAt DateTime? @map("last_attempt_at")
+
+  /// Quante riattivazioni abbiamo gia' chiesto per la pausa in corso. Si azzera
+  /// quando il progetto risulta di nuovo attivo: una pausa successiva ha il suo
+  /// budget, non gli avanzi della precedente.
+  attempts Int @default(0)
+
+  /// Quando l'app ha riacceso il database al posto del merchant.
+  ///
+  /// E' il fatto da dirgli, e il punto di aggancio per l'avviso via email il
+  /// giorno in cui ci sara' un provider: senza una data scritta da qualche
+  /// parte, "glielo abbiamo gia' detto?" non ha risposta.
+  autoResumedAt DateTime? @map("auto_resumed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("supabase_auto_resume")
+}
+
+/// Per quale campo il merchant ha chiuso l'avviso della data di nascita.
+///
+/// E' una preferenza, non una configurazione del negozio, e fino a ieri viveva
+/// nel browser. Non ha retto: `localStorage` e' legato all'indirizzo da cui la
+/// pagina arriva, e il giorno in cui l'app e' passata da `api.coreward.app` a
+/// `api.kerdon.io` ogni avviso gia' chiuso e' tornato su. Non e' nemmeno un
+/// caso limite: dentro l'admin l'app sta in un iframe di un'altra origine, e
+/// quello e' storage di terze parti — Safari lo blocca, Chrome lo partiziona.
+/// Una preferenza espressa con un gesto esplicito ("non mostrarmelo piu'") non
+/// puo' vivere in un posto che qualcun altro puo' svuotare o rifiutare: sta
+/// qui, accanto alle altre cose che riguardano il negozio.
+///
+/// Una TABELLA e non una colonna su `shops` per la stessa ragione di
+/// `SupabaseAutoResume`: le migrazioni le lancia una persona a mano, e fra il
+/// rilascio del codice e quel momento la colonna non esiste. Una colonna nuova
+/// su `shops` farebbe fallire OGNI lettura del negozio — cioe' tutta l'app,
+/// autenticazione compresa — perche' Prisma le elenca per nome. Una tabella
+/// nuova la interroga solo chi la conosce.
+///
+/// La memoria e' PER CAMPO e non un si'/no: cambiando il campo da cui si legge
+/// la data di nascita c'e' una conferma nuova da dare, e un "non mostrare piu'"
+/// secco avrebbe zittito anche quella.
+model BirthdateNoticeDismissal {
+  id     String @id @default(uuid())
+  shopId String @unique @map("shop_id")
+
+  /// Il campo per cui l'avviso e' stato chiuso, per intero: `facts.birth_date`.
+  /// La stessa forma che il negozio ha salvato, perche' il confronto e'
+  /// un'uguaglianza esatta: `namespace.chiave`, sempre, mai la chiave nuda.
+  dismissedFor String @map("dismissed_for")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("birthdate_notice_dismissals")
 }
 
 /// Un piano: cosa concede, non quanto costa.
@@ -1541,4 +1635,49 @@ model ProductScopeEntry {
   @@unique([shopId, shopifyProductId])
   @@index([shopId, inScope])
   @@map("product_scope")
+}
+
+model ShippingZone {
+  id          String         @id @default(uuid())
+  shopId      String         @map("shop_id")
+  zoneName    String         @map("zone_name")
+  countries   String[]
+  restOfWorld Boolean        @default(false) @map("rest_of_world")
+  rateType    String         @default("linear") @map("rate_type")
+  syncedAt    DateTime       @default(now()) @map("synced_at")
+  rates       ShippingRate[]
+
+  @@unique([shopId, zoneName])
+  @@index([shopId])
+  @@map("shipping_zones")
+}
+
+model ShippingRate {
+  id         String       @id @default(uuid())
+  zoneId     String       @map("zone_id")
+  weightFrom Decimal?     @map("weight_from") @db.Decimal(10, 3)
+  weightTo   Decimal?     @map("weight_to") @db.Decimal(10, 3)
+  cost       Decimal      @db.Decimal(10, 2)
+  zone       ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@index([zoneId])
+  @@map("shipping_rates")
+}
+
+model PackagingConfig {
+  shopId               String   @id @map("shop_id")
+  categories           Json     @default("[]")
+  fallbackRules        Json     @default("[]") @map("fallback_rules")
+  defaultWeightPerItem Decimal? @map("default_weight_per_item") @db.Decimal(10, 3)
+  returnCost           Decimal? @map("return_cost") @db.Decimal(10, 2)
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("packaging_config")
+}
+
+model ShippingAlertDismissal {
+  shopId      String   @id @map("shop_id")
+  dismissedAt DateTime @default(now()) @map("dismissed_at")
+
+  @@map("shipping_alert_dismissals")
 }

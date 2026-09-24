@@ -43,6 +43,7 @@ import {
   costScopeEffect,
   costToFreeze,
   isCostScope,
+  needsCostScopeChoice,
   type CostScope,
 } from '~/lib/products/cost-scope';
 import {
@@ -185,15 +186,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
  * Applica alle righe d'ordine gia' scritte la scelta del merchant.
  *
  * COSA FA `future`. Chiude il conto: ogni riga di quella variante che non era
- * ancora stata fissata si tiene il costo con cui e' stata calcolata finora —
- * che qui, dove i costi si inseriscono la prima volta, di solito e' nessuno. E
- * "nessuno" e' un esito, non un buco da riempire: quelle vendite sono sempre
- * state senza costo, restano senza, e continuano a non entrare nel profitto
- * invece di ereditare un valore deciso mesi dopo.
+ * ancora stata fissata si tiene il costo con cui e' stata calcolata finora.
+ *
+ * MA SOLO SE QUEL COSTO C'ERA. Qui i costi si inseriscono la prima volta,
+ * quindi il costo di prima e' quasi sempre nessuno — e finche' "nessuno" veniva
+ * congelato lo stesso, la riga restava senza valore ma marcata come conto
+ * chiuso: esclusa dal profitto per sempre, e nessun costo inserito dopo poteva
+ * piu' riportarcela. E' il giro che il merchant faceva: profitto zero, "Risolvi
+ * problemi", costo compilato, ritorno sui clienti, di nuovo zero. La decisione
+ * sta qui e non nel browser: `costScopeEffect` riceve il costo precedente letto
+ * un istante fa dal database e, se non c'e', non congela niente — quelle righe
+ * seguono il costo di listino, che fra un attimo e' quello appena scritto.
  *
  * Non si scrive MAI il costo nuovo sulle righe vecchie. Sarebbe il modo piu'
  * comodo di far quadrare tutto e sarebbe una bugia: il costo di allora non lo
  * sa nessuno, Shopify compreso — `InventoryItem.unitCost` e' solo l'attuale.
+ * Le righe senza costo fissato non lo ereditano: lo seguono, ed e' diverso —
+ * dicono "per questa riga vale il costo di listino", che e' cio' che hanno
+ * sempre detto.
  *
  * COSA FA `all`. Riapre il conto: le righe tornano a seguire il costo corrente,
  * cioe' il comportamento che c'e' sempre stato. Serve, ed e' la scelta giusta
@@ -212,7 +222,7 @@ async function applyCostScope(
   previousCost: unknown,
   scope: CostScope,
 ): Promise<void> {
-  const effetto = costScopeEffect(scope);
+  const effetto = costScopeEffect(scope, previousCost);
 
   try {
     if (effetto.freezeExisting) {
@@ -412,6 +422,19 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
 
+    // E il profitto dei clienti, che e' il numero per cui il merchant e'
+    // venuto fin qui? Non si invalida perche' non e' in cache da nessuna
+    // parte: la tab Clienti interroga il database del merchant a ogni
+    // apertura (`loadCustomersReport`), e la stessa cosa fanno le card di
+    // profitto della dashboard (`/api/stats/profit`). Dei due valori tenuti
+    // in Redis, `stats:readiness` e' quello appena riscritto qui sopra e
+    // `stats:customers` conta solo i consensi al marketing, che un costo non
+    // tocca — buttarlo via costringerebbe a rileggere tutti i clienti da
+    // Shopify per riottenere gli stessi numeri.
+    //
+    // Se un giorno il profitto finisse in cache, e' qui che va invalidato:
+    // senza, il merchant vedrebbe il numero vecchio anche a dato corretto, ed
+    // e' esattamente il modo in cui questo bug si presentava.
     return json({ ok: true, stillProblematic, failures });
   } catch (err) {
     console.error('[products.issues recheck] fallito:', err);
@@ -664,11 +687,34 @@ export default function ProblemProducts() {
     // Le righe rifiutate si vedono subito, senza passare dal dialogo: chiedere
     // "fin dove?" per poi rispondere "il valore non e' valido" farebbe fare due
     // giri per un errore che si vedeva gia' al primo.
-    const { rejected } = collectPendingCosts(rows, values);
+    const { updates, rejected } = collectPendingCosts(rows, values);
     if (rejected.length > 0) {
       runRecheck('all');
       return;
     }
+
+    // Niente dialogo quando non c'e' niente da decidere.
+    //
+    // Le varianti di questo elenco il costo non ce l'hanno: e' l'unica ragione
+    // per cui sono qui. Non esiste nessun profitto gia' calcolato da proteggere,
+    // quindi le due risposte porterebbero allo stesso risultato — e chiedere
+    // comunque fa credere che ci sia un modo sbagliato di rispondere.
+    //
+    // Si passa `future` e non `all` perche' e' la piu' prudente delle due: se
+    // per qualche riga un costo precedente ci fosse davvero (lo sa il database,
+    // non il browser), `all` glielo cancellerebbe riscrivendo numeri passati che
+    // nessuno ha chiesto di toccare, mentre `future` lo conserva. E se un costo
+    // precedente non c'e' — il caso di sempre, qui — il server lo vede e non
+    // congela niente: quelle righe prendono il costo appena scritto.
+    const inModifica = new Set(updates.map((u) => u.variantId));
+    const costiPrecedenti = rows
+      .filter((r) => inModifica.has(r.variantId))
+      .map((r) => r.previousCost);
+    if (!needsCostScopeChoice(costiPrecedenti)) {
+      runRecheck('future');
+      return;
+    }
+
     setCostScopeOpen(true);
   };
 

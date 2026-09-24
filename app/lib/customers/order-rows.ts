@@ -19,7 +19,18 @@
  * al cliente) e `line_net_total` (il netto della riga come lo dichiara
  * Shopify). Gli altri due restano scritti, perche' sono i numeri che il merchant
  * riconosce guardando una riga d'ordine, ma non entrano in nessuna metrica.
+ *
+ * IL COSTO LOGISTICO E' L'UNICO COSTO CHE SI SCRIVE QUI, e per una ragione di
+ * posto: le tariffe stanno sul database dell'app, il profitto si calcola in SQL
+ * su quello del merchant, e le due basi non si uniscono in una query. Quindi il
+ * costo si calcola in TypeScript quando l'ordine si scrive e si salva
+ * sull'ordine. La configurazione la porta chi chiama, caricata una volta per
+ * corsa: questa funzione resta pura e non sa dove le tariffe vivano.
  */
+
+import { computeLogisticsCost } from '~/lib/shipping/logistics-cost';
+import { clampLogisticsCost } from '~/lib/shipping/cost-clamp';
+import type { LogisticsConfig } from '~/lib/shipping/types';
 
 export interface ShopifyOrderLine {
   id: number | null;
@@ -70,6 +81,21 @@ export interface ShopifyOrder {
    * sospeso, e non si tocca altro.
    */
   lines_complete?: boolean;
+  /**
+   * I dati di spedizione, gia' nella forma in cui si scrivono. Facoltativi
+   * perche' un ordine costruito altrove (test, strade vecchie) puo' non
+   * averli: assenti valgono NULL, e il costo resta zero.
+   *
+   * `fulfillment_status` e' 'FULFILLED' appena un fulfillment ha un tracking,
+   * qualunque cosa dica Shopify: un ordine reso torna RESTOCKED, ma il pacco
+   * all'andata e' partito e il corriere l'ha fatturato.
+   */
+  fulfillment_status?: string | null;
+  shipping_country_code?: string | null;
+  total_weight_grams?: number | null;
+  /** Il primo reso non annullato ne' rifiutato. */
+  returned_at?: string | null;
+  packaging_category?: string | null;
 }
 
 export interface OrderRow {
@@ -85,6 +111,14 @@ export interface OrderRow {
   placed_at: string | null;
   updated_at: string | null;
   synced_at: string;
+  fulfillment_status: string | null;
+  shipping_country_code: string | null;
+  total_weight_grams: number | null;
+  item_count: number;
+  returned_at: string | null;
+  packaging_category: string | null;
+  /** Spedizione + imballo + rientro, gia' sommati. Zero senza configurazione. */
+  logistics_cost: number;
 }
 
 export interface OrderLineRow {
@@ -120,10 +154,30 @@ function money(value: string | null | undefined): number | null {
 export function orderToRows(
   order: ShopifyOrder,
   syncedAt: Date = new Date(),
+  /** Le tariffe del negozio. Assenti o `null`: costo logistico zero. */
+  logisticsConfig: LogisticsConfig | null = null,
 ): { order: OrderRow; lines: OrderLineRow[] } | null {
   if (order.id == null) return null;
 
   const synced_at = syncedAt.toISOString();
+
+  // Gli articoli che il cliente ha ancora, non quelli ordinati: servono a
+  // stimare il peso quando Shopify non lo dichiara, e un'unita' rimborsata
+  // prima di partire non pesa niente. Tutte le righe, anche quelle senza id:
+  // non si scrivono, ma nel pacco c'erano.
+  const item_count = order.lines.reduce(
+    (sum, line) => sum + Math.max(0, line.current_quantity ?? line.quantity ?? 0),
+    0,
+  );
+
+  const logistics = {
+    fulfillment_status: order.fulfillment_status ?? null,
+    shipping_country_code: order.shipping_country_code ?? null,
+    total_weight_grams: order.total_weight_grams ?? null,
+    item_count,
+    returned_at: order.returned_at ?? null,
+    packaging_category: order.packaging_category ?? null,
+  };
 
   return {
     order: {
@@ -139,6 +193,11 @@ export function orderToRows(
       placed_at: order.placed_at,
       updated_at: order.updated_at,
       synced_at,
+      ...logistics,
+      // Passa dallo stesso filtro del ricalcolo: un costo fuori dal tetto di
+      // NUMERIC(10,2) farebbe fallire l'upsert dell'intero ordine, non solo
+      // questa colonna.
+      logistics_cost: clampLogisticsCost(computeLogisticsCost(logistics, logisticsConfig).total),
     },
     // Le righe senza id restano fuori per la stessa ragione dell'ordine: non
     // sarebbero riconoscibili, e a ogni corsa se ne aggiungerebbe una copia.

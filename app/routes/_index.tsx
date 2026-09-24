@@ -9,7 +9,7 @@ import {
   useSearchParams,
 } from '@remix-run/react';
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Page,
   Box,
@@ -52,6 +52,8 @@ import { capabilityDenialResponse } from '~/lib/authz/require-capability.server'
 import { invalidateReadContextForShop } from '~/lib/read-proxy/context.server';
 import { resolveSyncState } from '~/components/Dashboard/sync-state';
 import { latestBulkJob, lastSyncActivityAt } from '~/lib/sync/latest-jobs.server';
+import { pendingSyncRequests } from '~/lib/sync/pending-sync.server';
+import { pendingSyncSince } from '~/lib/sync/pending-sync';
 import { enqueueManualSync, triggerSyncDrain } from '~/lib/queue/trigger.server';
 import { authenticate } from '~/shopify.server';
 import {
@@ -63,9 +65,12 @@ import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-forma
 import { normalizePlanName, samePlanName } from '~/lib/billing/plan-name';
 import { authorizationBanners } from '~/components/Dashboard/authorization-banners';
 import { TrackingConflicts } from '~/components/Dashboard/TrackingConflicts';
+import { DatabasePausedBanner } from '~/components/Dashboard/DatabasePausedBanner';
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { ProductScopeBanner } from '~/components/Dashboard/ProductScopeBanner';
 import { suggestPlanForProducts } from '~/components/Dashboard/plan-suggestion';
+import { WeightMissingBanner } from '~/components/Dashboard/WeightMissingBanner';
+import { shouldShowWeightAlert, dismissWeightAlert } from '~/lib/shipping/weight-alert.server';
 import type { TrackingFinding } from '~/lib/tracking/detect';
 import { needsSchemaUpdate } from '~/lib/supabase/merchant-migrations';
 import { triggerMerchantSchemaUpdate } from '~/lib/supabase/apply-schema-update.server';
@@ -76,6 +81,7 @@ import {
 import { useNavLoading } from '~/components/Dashboard/nav-loading';
 import { SyncCard } from '~/components/Dashboard/SyncCard';
 import { RecentRunsCard } from '~/components/Dashboard/RecentRunsCard';
+import { withPendingRun } from '~/components/Dashboard/recent-runs';
 import { loadSyncRuns, syncTimingFrom } from '~/lib/sync/sync-timing.server';
 import { buildPlanCards, manualSyncAllowed } from '~/components/Billing/plan-catalog';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
@@ -141,7 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // il loader costa due round-trip in profondità invece di tre. Su Vercel il
     // DB è remoto, quindi ogni round-trip risparmiato è latenza in meno sul TTFB
     // — che è ciò che domina l'LCP di questa pagina.
-    const [plans, recentJobs, latestBulk, lastActivityAt, customersTableJob, oauthToken, syncRuns, partnerPrices, trackingSetup] = await Promise.all([
+    const [plans, recentJobs, latestBulk, lastActivityAt, customersTableJob, oauthToken, syncRuns, partnerPrices, trackingSetup, queuedSyncRequests, weightAlert] = await Promise.all([
       // Tutti i piani, non solo quello in uso: quando i clienti restano fuori
       // serve anche sapere quale piano li rimetterebbe dentro, e leggerli tutti
       // costa come leggerne uno (la tabella e' di poche righe).
@@ -190,6 +196,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ? prisma.partnerPlanPrice.findMany({ where: { partnerName: shop.partnerName } })
         : Promise.resolve([]),
       prisma.trackingSetup.findUnique({ where: { shopId: shop.id } }),
+      // Il lavoro di sincronizzazione ancora non concluso, letto dalla coda.
+      //
+      // E' la sola fonte durevole: `sync_job` non ha ancora nessuna riga fra il
+      // clic e la partenza del lavoro, e tutto il resto di cio' che la
+      // dashboard sapeva viveva nella memoria del browser e moriva alla prima
+      // navigazione. Sta qui dentro e non in una lettura a parte per la ragione
+      // spiegata sopra: su Vercel il database e' remoto, e un round-trip in
+      // piu' in fila sarebbe latenza sul TTFB, cioe' sull'LCP di questa pagina.
+      pendingSyncRequests(shop.id),
+      // Ordini senza peso: avviso chiudibile, e la chiusura e' definitiva (si
+      // salva sul server). Sparisce da solo se si configura un peso di default.
+      shouldShowWeightAlert(shop.id, session.shop),
     ]);
 
     // La valuta che il merchant si aspetta: la sua scelta, o quella che di
@@ -280,6 +298,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       shop.supabaseConfig?.connectionVerifiedAt,
     );
 
+    // Da quando c'e' una sincronizzazione chiesta e non ancora conclusa.
+    //
+    // E' LA FONTE DI VERITA' UNICA di questa pagina: da qui nascono l'avviso di
+    // caricamento, lo stato del pulsante e la riga "in corso" della card delle
+    // corse. Nasce sul server e da una riga di database, quindi sopravvive al
+    // cambio di scheda, all'uscita dall'app e alla chiusura del browser —
+    // esattamente quello che le tre spie di prima non facevano.
+    //
+    // Due letture unite: la coda, che sa del lavoro anche prima che cominci, e
+    // la corsa gia' partita, che la coda copre gia' ma che non costa niente
+    // controllare visto che le righe sono qui. `syncState === 'in_progress'`
+    // porta con se' il legame alla connessione CORRENTE, quindi una corsa
+    // rimasta appesa da prima di un ri-collegamento non entra.
+    const pendingSince = pendingSyncSince({
+      requests: queuedSyncRequests,
+      runningJobStartedAt: syncState === 'in_progress' ? latestBulk?.startedAt ?? null : null,
+      now: new Date(),
+    });
+
     // Piano dell'ultima sync: serve a capire se c'e' altro da sincronizzare e a
     // dire, nel banner, se il tetto prodotti e' salito o sceso.
     const planChanged = hasPlanChanged(shop.currentPlan, shop.lastSyncedPlan);
@@ -314,7 +351,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       syncState !== 'failed' &&
       shouldTriggerPlanCatchUp({
         planChanged: planChanged || customersPending,
-        syncInProgress: syncState === 'in_progress',
+        // "In corso" qui vuol dire anche "gia' in coda", e non e' un dettaglio:
+        // finche' l'avviso e' acceso questo loader gira ogni pochi secondi, e
+        // guardando la sola corsa gia' partita inneschera' il recupero a ogni
+        // giro per tutto il tratto in cui il lavoro e' accodato ma non ancora
+        // cominciato — proprio il tratto che questa modifica allunga. La lettura
+        // della coda che l'ha reso visibile e' anche quella che lo impedisce:
+        // se c'e' gia' del lavoro in volo, non c'e' niente da innescare.
+        syncInProgress: syncState === 'in_progress' || pendingSince !== null,
         lastBulkStartedAt: lastActivityAt,
       })
     ) {
@@ -335,6 +379,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       supabaseAccountConnected,
       customersEnabled,
       syncState,
+      /**
+       * Da quando la sincronizzazione chiesta sta lavorando, o null.
+       *
+       * Un'ISO e non un booleano perche' serve due volte: accende l'avviso e
+       * spegne il pulsante, e insieme data la riga "in corso" della card delle
+       * corse nel tratto in cui in `sync_job` non c'e' ancora niente. Un valore
+       * solo per le due spie e' l'unico modo perche' non possano contraddirsi.
+       */
+      syncPendingSince: pendingSince?.toISOString() ?? null,
       authorization,
       trackingAuthorization,
       /**
@@ -451,6 +504,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         maxCustomers: p.maxCustomers,
         customersSyncEnabled: p.customersSyncEnabled,
       })),
+      // Ordini senza peso: una volta chiuso non torna, anche se il problema resta.
+      weightAlert: {
+        show: weightAlert.show,
+        count: weightAlert.count,
+      },
     });
   } catch (err) {
     // Le Response (redirect di auth, 404) devono passare intatte.
@@ -497,7 +555,15 @@ export async function action({ request }: ActionFunctionArgs) {
     // sincronizzare. Se segnasse anche la conferma del piano, premerlo durante
     // la configurazione chiuderebbe un passo che il merchant non ha fatto.
     const form = await request.formData().catch(() => null);
-    const manualOnly = String(form?.get('intent') ?? '') === 'sync';
+    const intent = String(form?.get('intent') ?? '');
+
+    // Chiusura dell'avviso "ordini senza peso".
+    if (intent === 'dismiss-weight-alert') {
+      const dismissed = await dismissWeightAlert(shop.id);
+      return json({ ok: dismissed });
+    }
+
+    const manualOnly = intent === 'sync';
 
     // Il push manuale e' una funzione del piano: chi non ce l'ha non deve
     // poterlo far partire nemmeno riabilitando il pulsante nell'HTML.
@@ -593,21 +659,24 @@ interface ProductHistoryResponse {
   planLimit: number | null;
 }
 
-/** Ogni quanto si ricontrolla se la corsa manuale e' finita. */
-const MANUAL_SYNC_POLL_MS = 1_500;
-
 /**
- * Dopo quanto si smette di aspettare.
+ * Ogni quanto si ricontrolla se la corsa manuale e' finita.
  *
- * Non e' il tempo che una sincronizzazione impiega — e' il tempo oltre il quale
- * conviene ridare il pulsante al merchant invece di lasciarglielo spento. Se la
- * corsa e' ancora viva finira' comunque, e i suoi numeri li vedra' alla
- * prossima apertura.
+ * Quattro secondi e non uno e mezzo come prima. Il controllo ricarica il loader
+ * di questa pagina, che sono dieci interrogazioni al database, e adesso la
+ * finestra da coprire e' piu' lunga: comincia quando il lavoro viene chiesto e
+ * non quando comincia, perche' e' proprio quel tratto — richiesta accodata e
+ * non ancora partita — che l'avviso prima si perdeva. A un secondo e mezzo,
+ * una corsa di qualche minuto costava centinaia di ricariche per rispondere a
+ * una domanda che cambia una volta sola.
+ *
+ * Non e' una scadenza: qui non si smette mai di controllare da soli. Che il
+ * lavoro sia finito lo dice il server, e quando lo dice il giro si ferma.
  */
-const MANUAL_SYNC_TIMEOUT_MS = 3 * 60_000;
+const MANUAL_SYNC_POLL_MS = 4_000;
 
 export default function Dashboard() {
-  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, blocked, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms } =
+  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, blocked, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, syncPendingSince, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms, weightAlert } =
     useLoaderData<typeof loader>();
   const t = useT();
 
@@ -703,42 +772,52 @@ export default function Dashboard() {
 
   const manualSyncFetcher = useFetcher<{ queued?: boolean; error?: string }>();
 
-  // Quando e' partita la corsa chiesta a mano, non "se la richiesta e' in
-  // volo".
+  // Quando la richiesta e' stata fatta, per la sola riga della card.
   //
-  // La differenza conta: la richiesta risponde subito, perche' mette il lavoro
-  // in coda e torna. La sincronizzazione vera comincia dopo e dura qualche
-  // secondo. Legando il pulsante alla sola richiesta, si riaccendeva mentre la
-  // corsa stava ancora girando e i numeri sotto erano ancora quelli vecchi.
-  const [manualStartedAt, setManualStartedAt] = useState<number | null>(null);
-  // In corso significa tre cose diverse, e servono tutte e tre.
+  // NON E' LO STATO DELLA SINCRONIZZAZIONE, ed e' l'unico posto di questa
+  // pagina dove il browser tiene ancora qualcosa a proposito: copre l'istante
+  // fra il clic e la risposta del server, in cui la card ha bisogno di una data
+  // da scrivere accanto alla riga "in corso" e il server non ne ha ancora data
+  // una. Appena `syncPendingSince` arriva, vince quella. Se la corsa fosse
+  // dedotta da qui — com'era prima — basterebbe cambiare scheda per perderla.
+  const [requestedAt, setRequestedAt] = useState<string | null>(null);
+
+  // In corso o no: una domanda, una risposta, e arriva dal server.
   //
-  // Le prime due vivono in questa pagina: la richiesta in volo, e il tratto fra
-  // il "messo in coda" e il momento in cui il database lo conferma. Ma sono
-  // memoria del browser, e la corsa no: il job sta su Redis e lo esegue
-  // un'invocazione a parte, quindi continua anche cambiando scheda, uscendo da
-  // Kerdon o chiudendo tutto. Riaprendo, di quelle due non resta niente e
-  // l'avviso spariva su una sincronizzazione che stava ancora girando.
+  // PRIMA ERANO TRE SPIE, e nessuna guardava dove il lavoro vive davvero. Lo
+  // stato del fetcher copre l'istante della messa in coda; un `useState` con
+  // l'ora del clic muore alla prima navigazione; e l'ultima corsa completa in
+  // `sync_job` non esiste ancora fra il clic e la partenza del lavoro. Da li'
+  // nascevano i due difetti segnalati insieme: l'avviso che spariva cambiando
+  // scheda su una sincronizzazione ancora in corso, e la card che intanto
+  // mostrava in cima la corsa precedente col badge "Completato".
   //
-  // La terza e' il database: se risulta una corsa in stato "running", sta
-  // girando davvero — e quello lo sa anche un browser appena riaperto.
-  const manualSyncing =
-    manualSyncFetcher.state !== 'idle' ||
-    manualStartedAt !== null ||
-    syncState === 'in_progress';
+  // Adesso la risposta e' `syncPendingSince`, che il loader legge dalla coda su
+  // Postgres: sopravvive alla navigazione, all'uscita dall'app e alla chiusura
+  // del browser, perche' e' una riga di database e non un ricordo.
+  //
+  // Lo stato del fetcher resta, ma solo come ponte sul mezzo secondo della
+  // POST: Remix riporta il fetcher a 'idle' soltanto dopo aver ricaricato i
+  // loader, quindi quando si spegne il valore del server e' gia' aggiornato e
+  // fra i due non c'e' nessun buco in cui il pulsante tornerebbe premibile.
+  const manualSyncing = syncPendingSince !== null || manualSyncFetcher.state !== 'idle';
+
+  // La card legge lo STESSO valore dell'avviso: e' questo che impedisce alle due
+  // di dirsi cose diverse. Il perche' della riga anteposta sta accanto a
+  // `withPendingRun`.
+  const pendingRunSince = manualSyncing ? syncPendingSince ?? requestedAt : null;
+  const runsToShow = withPendingRun(
+    recentRuns,
+    pendingRunSince === null ? null : { since: pendingRunSince },
+  );
 
   const startManualSync = useCallback(() => {
+    setRequestedAt(new Date().toISOString());
     const data = new FormData();
     data.set('intent', 'sync');
     manualSyncFetcher.submit(data, { method: 'post' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (manualSyncFetcher.state === 'idle' && manualSyncFetcher.data?.queued) {
-      setManualStartedAt(Date.now());
-    }
-  }, [manualSyncFetcher.state, manualSyncFetcher.data]);
 
   // Il periodo vale per tutta la pagina: profitto e prodotti rispondono alla
   // stessa domanda su archi diversi solo se glielo si chiede, e due periodi
@@ -824,9 +903,12 @@ export default function Dashboard() {
   const soldWithoutCost = readiness?.soldWithoutCost ?? 0;
   const customerStatsLoading = !customerStats;
 
-  // Sync in background durabile (coda + drain). Il pulsante mostra il loader
-  // mentre la sync è in corso — anche se prosegue in background a pagina chiusa —
-  // e resta disabilitato dopo il completamento (le successive sono automatiche).
+  // La sincronizzazione vive sul server (coda su Postgres + drenaggio), e il
+  // pulsante mostra il cerchietto per tutto il tempo in cui ci sta lavorando —
+  // anche a pagina chiusa, perche' quel tempo lo misura una riga di database e
+  // non questa scheda. Appena il lavoro e' concluso, nello stesso giro in cui
+  // l'avviso sparisce, il pulsante torna premibile: una sincronizzazione in
+  // piu' si puo' sempre chiedere.
   const revalidator = useRevalidator();
 
   // Mentre la corsa manuale gira si ricontrolla ogni pochi secondi SE e' finita.
@@ -841,26 +923,38 @@ export default function Dashboard() {
   // diverso. L'unico momento in cui vale la pena rileggerli e' quando c'e'
   // qualcosa di definitivo da leggere.
   //
-  // Con una scadenza: se qualcosa si inceppa a monte il pulsante deve tornare
-  // premibile, non restare spento per sempre.
+  // La scadenza non e' piu' qui. Prima il browser contava tre minuti dal clic e
+  // poi si arrendeva, perche' era l'unico modo di non lasciare il pulsante
+  // spento per sempre quando qualcosa si inceppava a monte. Adesso la fine la
+  // dichiara il server, che la sa: una richiesta in coda ha tentativi, backoff
+  // e lettera morta, e da quelli si vede se qualcuno la sta ancora facendo —
+  // mentre un browser poteva solo indovinare. Il perche' di ogni limite sta in
+  // `pending-sync.ts`.
+  //
+  // Nessuna dipendenza dai dati del loader: il giro successivo si programma
+  // quando `revalidator` torna 'idle', cioe' quando la ricarica precedente e'
+  // finita. Cosi' non si accavallano due richieste e non si smette di
+  // controllare solo perche' una ricarica non ha cambiato niente.
   useEffect(() => {
-    if (manualStartedAt === null) return;
-
-    const done = recentRuns.some(
-      (run) => run.status !== 'running' && new Date(run.startedAt).getTime() >= manualStartedAt,
-    );
-    if (done || Date.now() - manualStartedAt > MANUAL_SYNC_TIMEOUT_MS) {
-      setManualStartedAt(null);
-      reloadForPeriod(range, comparison);
-      return;
-    }
-
+    if (!manualSyncing) return;
+    if (revalidator.state !== 'idle') return;
     const timer = setTimeout(() => {
       revalidator.revalidate();
     }, MANUAL_SYNC_POLL_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualStartedAt, recentRuns]);
+  }, [manualSyncing, revalidator.state]);
+
+  // Finita davvero: si rileggono una volta sola i numeri che dipendono dai dati
+  // appena scritti. Il passaggio da "in corso" a "finita" e' un fronte, non uno
+  // stato, quindi lo si guarda ricordando il valore di prima — con lo stato
+  // della pagina soltanto, il confronto non si potrebbe fare.
+  const eraInCorso = useRef(false);
+  useEffect(() => {
+    if (eraInCorso.current && !manualSyncing) reloadForPeriod(range, comparison);
+    eraInCorso.current = manualSyncing;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualSyncing]);
 
   // La lingua durante la configurazione. Il selettore vive nella barra del
   // titolo perche' Impostazioni li' non e' raggiungibile — e la lingua e' la
@@ -1597,6 +1691,18 @@ export default function Dashboard() {
             </Banner>
           ))}
 
+        {/* Database in pausa: viene PRIMA di tutti gli avvisi sui dati, perche'
+            li rende tutti muti. Un progetto gratuito che nessuno tocca per un
+            po' viene messo in pausa e smette di rispondere: da quel momento la
+            sincronizzazione e' ferma e ogni numero a schermo e' quello
+            dell'ultimo aggiornamento. Senza questo avviso il merchant vedeva
+            delle card vuote e nessuna spiegazione.
+
+            Solo a database collegato: senza un progetto non c'e' niente che
+            possa essere in pausa, e chiederlo sarebbe una domanda con una sola
+            risposta possibile. */}
+        {supabaseConnected && <DatabasePausedBanner />}
+
         {/* Il cambio di lingua non e' istantaneo: la pagina deve tornare dal
             server con i testi nuovi. Finche' non e' tornata lo si dice, gia'
             nella lingua scelta, e i passi restano fermi. */}
@@ -1635,6 +1741,11 @@ export default function Dashboard() {
             Compare solo se c'e' davvero qualcosa di fermo. */}
         {planConfirmed && <ProductScopeBanner timeZone={shop.ianaTimezone} />}
 
+        {/* Ordini senza peso: il costo di spedizione resta a zero e il profitto
+            risulta piu' alto del vero. Compare solo se ci sono ordini in quella
+            condizione e non c'e' un peso di default configurato. Chiudibile, e
+            la chiusura e' definitiva: non torna anche se il problema resta. */}
+        {planConfirmed && weightAlert.show && <WeightMissingBanner count={weightAlert.count} />}
 
         {/* L'avviso sul cambio di piano parla di una configurazione che gira
             gia': confronta il piano di adesso con quello dell'ultima
@@ -1847,7 +1958,7 @@ export default function Dashboard() {
             loading={!profitFetcher.data}
           />
 
-          <RecentRunsCard runs={recentRuns} timeZone={shop.ianaTimezone} />
+          <RecentRunsCard runs={runsToShow} timeZone={shop.ianaTimezone} />
         </InlineGrid>
 
 

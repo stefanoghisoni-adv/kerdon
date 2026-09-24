@@ -81,6 +81,11 @@ describe('numero di versione e cio che promette', () => {
     expect(LATEST_SCHEMA_VERSION).not.toBe(3);
   });
 
+  it('la 12 porta sugli ordini i dati di spedizione', () => {
+    // Solo colonne aggiunte: basta alzare il numero, la DDL additiva fa il resto.
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(12);
+  });
+
   it('l aggiornamento porta le colonne dell indirizzo del cliente', () => {
     // Sono aggiunte, quindi non hanno un passo esplicito: le porta la DDL
     // idempotente, che pero' viaggia solo se il numero di versione e' salito.
@@ -219,5 +224,64 @@ describe('la versione 8 completa l anagrafica del cliente', () => {
     expect(sql).toContain('ADD COLUMN IF NOT EXISTS city TEXT');
     expect(sql).not.toMatch(/DROP\s+COLUMN/i);
     expect(sql).not.toMatch(/ALTER COLUMN city/i);
+  });
+});
+
+/**
+ * La riparazione delle righe che il bug aveva gia' rovinato.
+ *
+ * Inserendo per la prima volta il costo di un prodotto gia' venduto, l'app
+ * congelava sul passato il costo di prima — che non c'era. Restava una riga
+ * senza valore ma con la data del congelamento sopra: per il calcolo del
+ * profitto vuol dire "conto chiuso", e nessun costo inserito dopo poteva piu'
+ * farla rientrare. Il codice non lo fa piu', ma le righe gia' marcate
+ * resterebbero invisibili per sempre: vanno sbloccate dove sono.
+ */
+describe('la versione 11 sblocca le assenze di costo congelate', () => {
+  it('rimette a NULL la data dove un valore fissato non c e', () => {
+    const sql = buildSchemaUpdateSQL(10, true, true)!;
+    expect(sql).toContain('SET unit_cost_frozen_at = NULL');
+    expect(sql).toContain('WHERE unit_cost_at_sale IS NULL');
+    expect(sql).toContain('AND unit_cost_frozen_at IS NOT NULL');
+  });
+
+  it('non tocca le righe con un costo fissato davvero', () => {
+    // Quelle conservano un passato vero — ho comprato a 3, adesso compro a 5 —
+    // ed e' l'unica cosa che il congelamento serve a proteggere. La condizione
+    // le esclude: senza `unit_cost_at_sale IS NULL` la riparazione diventerebbe
+    // la cancellazione di cio' che il merchant aveva scelto di conservare.
+    const passo = MERCHANT_MIGRATIONS.find((m) => m.version === 11)!;
+    expect(passo.sql).toMatch(
+      /SET unit_cost_frozen_at = NULL\s+WHERE unit_cost_at_sale IS NULL/,
+    );
+  });
+
+  it('gira DOPO la DDL, perche le due colonne sono della 10', () => {
+    // Un progetto che salta dalla 9 alla 11 le riceve dalla DDL di questo
+    // stesso giro: prima di lei non esistono, e l'UPDATE farebbe fallire
+    // l'intero aggiornamento.
+    const passo = MERCHANT_MIGRATIONS.find((m) => m.version === 11)!;
+    expect(passo.runAfterDDL).toBe(true);
+
+    const sql = buildSchemaUpdateSQL(9, true, true)!;
+    expect(sql.indexOf('ADD COLUMN IF NOT EXISTS unit_cost_frozen_at')).toBeLessThan(
+      sql.indexOf('SET unit_cost_frozen_at = NULL'),
+    );
+  });
+
+  it('non prova a riparare quel che quel negozio non ha', () => {
+    // Senza permesso sugli ordini `order_lines` non esiste, e le due colonne
+    // possono mancare anche a tabella presente (permesso ritirato dopo). Un
+    // UPDATE nudo farebbe fallire tutto l'aggiornamento, clienti compresi.
+    const passo = MERCHANT_MIGRATIONS.find((m) => m.version === 11)!;
+    expect(passo.sql).toContain("to_regclass('public.order_lines') IS NULL");
+    expect(passo.sql).toContain("column_name = 'unit_cost_frozen_at'");
+  });
+
+  it('chi era gia alla 10 lo riceve, e riceverlo due volte non fa niente', () => {
+    // La combinazione riparata non si ricrea piu', quindi una seconda
+    // esecuzione non trova righe: e' una tantum per davvero.
+    expect(pendingMigrations(10).map((m) => m.version)).toEqual([11]);
+    expect(pendingMigrations(11)).toEqual([]);
   });
 });

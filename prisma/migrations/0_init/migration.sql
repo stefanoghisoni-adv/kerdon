@@ -759,6 +759,50 @@ CREATE INDEX "product_scope_shop_id_in_scope_idx" ON "product_scope"("shop_id", 
 ALTER TABLE "product_scope" ADD CONSTRAINT "product_scope_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- CreateTable
+CREATE TABLE "supabase_auto_resume" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "enabled" BOOLEAN DEFAULT true,
+    "last_attempt_at" TIMESTAMP(3),
+    "attempts" INTEGER NOT NULL DEFAULT 0,
+    "auto_resumed_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "supabase_auto_resume_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "supabase_auto_resume_shop_id_key" ON "supabase_auto_resume"("shop_id");
+
+-- AddForeignKey
+ALTER TABLE "supabase_auto_resume" ADD CONSTRAINT "supabase_auto_resume_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "birthdate_notice_dismissals" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "dismissed_for" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "birthdate_notice_dismissals_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "birthdate_notice_dismissals_shop_id_key" ON "birthdate_notice_dismissals"("shop_id");
+
+-- AddForeignKey
+ALTER TABLE "birthdate_notice_dismissals" ADD CONSTRAINT "birthdate_notice_dismissals_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Se il merchant vuole che l'app riaccenda da sola il suo database prima che non
+-- sia piu' riaccendibile, e cosa abbiamo gia' provato. `enabled` e' nullable di
+-- proposito: "non ha scelto" e "ha scelto no" sono due cose diverse, e solo la
+-- seconda deve fermare l'app. CASCADE come per l'ambito dei prodotti: un negozio
+-- che se ne va non lascia dietro di se' il permesso di toccare
+-- un'infrastruttura che non e' piu' sua.
+
+-- CreateTable
 CREATE TABLE "tracking_ingest_keys" (
     "id" TEXT NOT NULL,
     "shop_id" TEXT NOT NULL,
@@ -799,6 +843,71 @@ ALTER TABLE "tracking_ingest_keys" ADD CONSTRAINT "tracking_ingest_keys_shop_id_
 -- Prima venivano cancellate dalla spazzata di fine corsa, che non sapeva
 -- distinguere "non riscritto perche' non esiste piu'" da "non riscritto perche'
 -- non l'ho nemmeno chiesto".
+
+-- CreateTable
+CREATE TABLE "shipping_zones" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "zone_name" TEXT NOT NULL,
+    "countries" TEXT[],
+    "rest_of_world" BOOLEAN NOT NULL DEFAULT false,
+    "rate_type" TEXT NOT NULL DEFAULT 'linear',
+    "synced_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "shipping_zones_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "shipping_zones_shop_id_zone_name_key" ON "shipping_zones"("shop_id", "zone_name");
+
+-- CreateIndex
+CREATE INDEX "shipping_zones_shop_id_idx" ON "shipping_zones"("shop_id");
+
+-- AddForeignKey
+ALTER TABLE "shipping_zones" ADD CONSTRAINT "shipping_zones_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "shipping_rates" (
+    "id" TEXT NOT NULL,
+    "zone_id" TEXT NOT NULL,
+    "weight_from" DECIMAL(10,3),
+    "weight_to" DECIMAL(10,3),
+    "cost" DECIMAL(10,2) NOT NULL,
+
+    CONSTRAINT "shipping_rates_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "shipping_rates_zone_id_idx" ON "shipping_rates"("zone_id");
+
+-- AddForeignKey
+ALTER TABLE "shipping_rates" ADD CONSTRAINT "shipping_rates_zone_id_fkey" FOREIGN KEY ("zone_id") REFERENCES "shipping_zones"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "packaging_config" (
+    "shop_id" TEXT NOT NULL,
+    "categories" JSONB NOT NULL DEFAULT '[]',
+    "fallback_rules" JSONB NOT NULL DEFAULT '[]',
+    "default_weight_per_item" DECIMAL(10,3),
+    "return_cost" DECIMAL(10,2),
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "packaging_config_pkey" PRIMARY KEY ("shop_id")
+);
+
+-- AddForeignKey
+ALTER TABLE "packaging_config" ADD CONSTRAINT "packaging_config_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "shipping_alert_dismissals" (
+    "shop_id" TEXT NOT NULL,
+    "dismissed_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "shipping_alert_dismissals_pkey" PRIMARY KEY ("shop_id")
+);
+
+-- AddForeignKey
+ALTER TABLE "shipping_alert_dismissals" ADD CONSTRAINT "shipping_alert_dismissals_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- I piani: cinque righe copiate dal database owner in uso.
 --
