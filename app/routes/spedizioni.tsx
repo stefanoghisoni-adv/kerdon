@@ -23,11 +23,13 @@ import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute.server';
 import { loadShippingPageData } from '~/lib/shipping/page-data.server';
 import { parseBrackets } from '~/components/Shipping/brackets';
 import { parsePackaging } from '~/components/Shipping/packaging';
+import { parseOptionBrackets } from '~/components/Shipping/option-cost';
 import { feedbackFromActionData, type ShippingIntent } from '~/components/Shipping/feedback';
 import { ShippingZonesTable } from '~/components/Shipping/ShippingZonesTable';
 import { EditZoneModal } from '~/components/Shipping/EditZoneModal';
+import { EditOptionModal } from '~/components/Shipping/EditOptionModal';
 import { PackagingCard } from '~/components/Shipping/PackagingCard';
-import type { RateBracket, PackagingCategory, FallbackRule } from '~/lib/shipping/types';
+import type { RateBracket, PackagingCategory, FallbackRule, OptionCostType, OptionBracket } from '~/lib/shipping/types';
 import { Decimal } from '@prisma/client/runtime/library';
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -217,6 +219,86 @@ export async function action({ request }: ActionFunctionArgs) {
     return risposta('save-packaging', { success: true });
   }
 
+  if (intent === 'save-option-cost') {
+    const optionId = formData.get('optionId')?.toString();
+    const costType = formData.get('costType')?.toString();
+
+    if (!optionId || !costType) {
+      return risposta('save-option-cost', { success: false, error: 'invalid_request' });
+    }
+
+    if (costType !== 'flat' && costType !== 'linear' && costType !== 'weight_brackets' && costType !== 'value_brackets') {
+      return risposta('save-option-cost', { success: false, error: 'invalid_request' });
+    }
+
+    // Verifica che l'opzione appartenga a una zona di questo shop (ownership)
+    const option = await prisma.shippingOption.findFirst({
+      where: { id: optionId },
+      include: { zone: true },
+    });
+
+    if (!option || option.zone.shopId !== shop.id) {
+      return risposta('save-option-cost', { success: false, error: 'option_not_found' });
+    }
+
+    if (costType === 'flat' || costType === 'linear') {
+      const costField = costType === 'flat' ? 'flatCost' : 'linearCost';
+      const cost = importoFacoltativo(formData.get(costField)?.toString());
+
+      if (cost === null || Number.isNaN(cost)) {
+        return risposta('save-option-cost', { success: false, error: 'shipping.errors.invalidLinearCost' });
+      }
+
+      // Sostituisci le tariffe in una transazione
+      await prisma.$transaction([
+        prisma.shippingOptionRate.deleteMany({ where: { optionId } }),
+        prisma.shippingOption.update({
+          where: { id: optionId },
+          data: { costType },
+        }),
+        prisma.shippingOptionRate.create({
+          data: {
+            optionId,
+            rangeFrom: null,
+            rangeTo: null,
+            cost: new Decimal(cost),
+          },
+        }),
+      ]);
+    } else {
+      // weight_brackets o value_brackets
+      const parsed = parseOptionBrackets(costType, formData.get('brackets')?.toString());
+      if (parsed.error !== null) {
+        return risposta('save-option-cost', { success: false, error: parsed.error });
+      }
+      const brackets: OptionBracket[] = parsed.brackets;
+
+      // Sostituisci le tariffe in una transazione
+      await prisma.$transaction([
+        prisma.shippingOptionRate.deleteMany({ where: { optionId } }),
+        prisma.shippingOption.update({
+          where: { id: optionId },
+          data: { costType },
+        }),
+        ...brackets.map((bracket) =>
+          prisma.shippingOptionRate.create({
+            data: {
+              optionId,
+              rangeFrom: bracket.from !== null ? new Decimal(bracket.from) : null,
+              rangeTo: bracket.to !== null ? new Decimal(bracket.to) : null,
+              cost: new Decimal(bracket.cost),
+            },
+          }),
+        ),
+      ]);
+    }
+
+    // Accoda il ricalcolo dei costi logistici in background
+    await enqueueLogisticsRecompute(shop.id);
+
+    return risposta('save-option-cost', { success: true });
+  }
+
   return risposta(null, { success: false, error: 'unknown_intent' });
 }
 
@@ -228,6 +310,11 @@ export default function ShippingPage() {
   const [editingZone, setEditingZone] = useState<typeof zones[0] | null>(null);
   // L'errore del server sulla zona in modifica: la modale resta aperta e lo mostra.
   const [zoneServerError, setZoneServerError] = useState<string | null>(null);
+
+  const [editingOption, setEditingOption] = useState<{ option: typeof zones[0]['options'][0]; zone: typeof zones[0] } | null>(null);
+  // L'errore del server sull'opzione in modifica: la modale resta aperta e lo mostra.
+  const [optionServerError, setOptionServerError] = useState<string | null>(null);
+
   // Il toast e' quello dell'admin (App Bridge), non il Toast di Polaris: quello
   // vuole un <Frame> attorno alla pagina, e senza butta giu' tutta la pagina
   // proprio nel momento in cui dovrebbe dire che e' andato tutto bene.
@@ -240,6 +327,7 @@ export default function ShippingPage() {
   const isSyncing = intentInCorso === 'sync-zones';
   const isSavingPackaging = intentInCorso === 'save-packaging';
   const isSavingZone = intentInCorso === 'save-zone-rates';
+  const isSavingOption = intentInCorso === 'save-option-cost';
 
   // Cosa mostrare, deciso dalla risposta (con il suo intento) e non dal form.
   const feedback = fetcher.state === 'idle' ? feedbackFromActionData(fetcher.data, t) : null;
@@ -254,6 +342,12 @@ export default function ShippingPage() {
       setZoneServerError(null);
     } else if (esito.zoneError) {
       setZoneServerError(esito.zoneError);
+    }
+    if (esito.optionSaved) {
+      setEditingOption(null);
+      setOptionServerError(null);
+    } else if (esito.optionError) {
+      setOptionServerError(esito.optionError);
     }
     // `t` resta fuori di proposito: cambiare lingua non e' una risposta nuova,
     // e non deve rimostrare il toast dell'ultima azione.
@@ -291,6 +385,43 @@ export default function ShippingPage() {
     // La modale NON si chiude qui: si chiude quando il server conferma, e resta
     // aperta con il motivo se rifiuta (vedi l'effetto sopra).
     setZoneServerError(null);
+    fetcher.submit(formData, { method: 'post' });
+  };
+
+  const handleEditOption = (option: typeof zones[0]['options'][0], zone: typeof zones[0]) => {
+    setOptionServerError(null);
+    setEditingOption({ option, zone });
+  };
+
+  const handleOptionModalClose = () => {
+    setOptionServerError(null);
+    setEditingOption(null);
+  };
+
+  const handleOptionModalSave = (data: {
+    costType: OptionCostType;
+    flatCost?: string;
+    linearCost?: string;
+    brackets?: OptionBracket[];
+  }) => {
+    if (!editingOption) return;
+
+    const formData = new FormData();
+    formData.append('intent', 'save-option-cost');
+    formData.append('optionId', editingOption.option.id);
+    formData.append('costType', data.costType);
+
+    if (data.costType === 'flat' && data.flatCost) {
+      formData.append('flatCost', data.flatCost);
+    } else if (data.costType === 'linear' && data.linearCost) {
+      formData.append('linearCost', data.linearCost);
+    } else if ((data.costType === 'weight_brackets' || data.costType === 'value_brackets') && data.brackets) {
+      formData.append('brackets', JSON.stringify(data.brackets));
+    }
+
+    // La modale NON si chiude qui: si chiude quando il server conferma, e resta
+    // aperta con il motivo se rifiuta (vedi l'effetto sopra).
+    setOptionServerError(null);
     fetcher.submit(formData, { method: 'post' });
   };
 
@@ -351,7 +482,7 @@ export default function ShippingPage() {
         ) : (
           <InlineGrid columns={{ xs: 1, md: '2fr 1fr' }} gap="400">
             <Card padding="0">
-              <ShippingZonesTable zones={zones} onEdit={handleEdit} />
+              <ShippingZonesTable zones={zones} onEdit={handleEdit} onEditOption={handleEditOption} />
             </Card>
             <PackagingCard
               key={packaging.configKey}
@@ -374,6 +505,18 @@ export default function ShippingPage() {
             onSave={handleModalSave}
             isSaving={isSavingZone}
             serverError={zoneServerError}
+          />
+        )}
+
+        {editingOption && (
+          <EditOptionModal
+            key={editingOption.option.id}
+            option={editingOption.option}
+            zone={editingOption.zone}
+            onClose={handleOptionModalClose}
+            onSave={handleOptionModalSave}
+            isSaving={isSavingOption}
+            serverError={optionServerError}
           />
         )}
 

@@ -32,6 +32,7 @@ describe('loadShippingPageData', () => {
         restOfWorld: false,
         rateType: 'linear',
         rates: [{ id: 'r1', weightFrom: null, weightTo: null, cost: new Prisma.Decimal('2.50') }],
+        options: [],
       },
     ]);
     findUnique.mockResolvedValue({
@@ -52,6 +53,7 @@ describe('loadShippingPageData', () => {
         restOfWorld: false,
         rateType: 'linear',
         rates: [{ id: 'r1', weightFromKg: null, weightToKg: null, cost: 2.5 }],
+        options: [],
       },
     ]);
     expect(dati.packaging).toEqual({

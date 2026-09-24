@@ -11,7 +11,14 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { validateCategories, validateFallbackRules } from './load-config.server';
-import type { FallbackRule, PackagingCategory } from './types';
+import type { FallbackRule, PackagingCategory, OptionCostType } from './types';
+
+export interface ShippingPageOption {
+  id: string;
+  name: string;
+  costType: OptionCostType;
+  rates: Array<{ id: string; from: number | null; to: number | null; cost: number }>;
+}
 
 export interface ShippingPageZone {
   id: string;
@@ -20,6 +27,7 @@ export interface ShippingPageZone {
   restOfWorld: boolean;
   rateType: 'linear' | 'brackets';
   rates: Array<{ id: string; weightFromKg: number | null; weightToKg: number | null; cost: number }>;
+  options: ShippingPageOption[];
 }
 
 export interface ShippingPagePackaging {
@@ -60,7 +68,13 @@ export async function loadShippingPageData(
     const [zones, packagingConfig] = await Promise.all([
       prisma.shippingZone.findMany({
         where: { shopId },
-        include: { rates: true },
+        include: {
+          rates: true,
+          options: {
+            include: { rates: true },
+            orderBy: { name: 'asc' },
+          },
+        },
         orderBy: { zoneName: 'asc' },
       }),
       prisma.packagingConfig.findUnique({ where: { shopId } }),
@@ -78,6 +92,17 @@ export async function loadShippingPageData(
           weightFromKg: rate.weightFrom != null ? Number(rate.weightFrom) : null,
           weightToKg: rate.weightTo != null ? Number(rate.weightTo) : null,
           cost: Number(rate.cost),
+        })),
+        options: zone.options.map((option) => ({
+          id: option.id,
+          name: option.name,
+          costType: option.costType as OptionCostType,
+          rates: option.rates.map((rate) => ({
+            id: rate.id,
+            from: rate.rangeFrom != null ? Number(rate.rangeFrom) : null,
+            to: rate.rangeTo != null ? Number(rate.rangeTo) : null,
+            cost: Number(rate.cost),
+          })),
         })),
       })),
       packaging: packagingConfig

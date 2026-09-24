@@ -1,6 +1,20 @@
-import { Button, DataTable } from '@shopify/polaris';
+import { Button, DataTable, Text } from '@shopify/polaris';
 import { useT, useLocale } from '~/lib/i18n/context';
 import { formatMoney } from '~/lib/billing/money';
+import { formatIndicativeOptionCost } from './option-cost';
+import type { OptionCostType } from '~/lib/shipping/types';
+
+interface Option {
+  id: string;
+  name: string;
+  costType: OptionCostType;
+  rates: Array<{
+    id: string;
+    from: number | null;
+    to: number | null;
+    cost: number;
+  }>;
+}
 
 interface Zone {
   id: string;
@@ -14,14 +28,16 @@ interface Zone {
     weightToKg: number | null;
     cost: number;
   }>;
+  options: Option[];
 }
 
 interface ShippingZonesTableProps {
   zones: Zone[];
   onEdit: (zone: Zone) => void;
+  onEditOption: (option: Option, zone: Zone) => void;
 }
 
-export function ShippingZonesTable({ zones, onEdit }: ShippingZonesTableProps) {
+export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZonesTableProps) {
   const t = useT();
   const locale = useLocale();
 
@@ -67,15 +83,55 @@ export function ShippingZonesTable({ zones, onEdit }: ShippingZonesTableProps) {
     );
   };
 
-  const rows = zones.map((zone) => [
-    zone.zoneName,
-    formatCountries(zone),
-    formatRateType(zone.rateType),
-    formatIndicativeCost(zone),
-    <Button onClick={() => onEdit(zone)} size="slim">
-      {t.shipping.table.edit}
-    </Button>,
-  ]);
+  const getCostTypeLabel = (costType: OptionCostType): string => {
+    const labels: Record<OptionCostType, string> = {
+      flat: t.shipping.optionModal.flatLabel,
+      linear: t.shipping.optionModal.linearLabel,
+      weight_brackets: t.shipping.optionModal.weightBracketsLabel,
+      value_brackets: t.shipping.optionModal.valueBracketsLabel,
+    };
+    return labels[costType];
+  };
+
+  // Build rows with options nested under each zone
+  const rows: any[][] = [];
+
+  zones.forEach((zone) => {
+    // Main zone row
+    rows.push([
+      <Text as="span" fontWeight="semibold">{zone.zoneName}</Text>,
+      formatCountries(zone),
+      formatRateType(zone.rateType),
+      formatIndicativeCost(zone),
+      <Button onClick={() => onEdit(zone)} size="slim">
+        {t.shipping.table.edit}
+      </Button>,
+    ]);
+
+    // Option rows (indented)
+    zone.options.forEach((option) => {
+      rows.push([
+        <Text as="span" tone="subdued">  • {option.name}</Text>,
+        '', // No countries for options
+        getCostTypeLabel(option.costType),
+        formatIndicativeOptionCost(option.costType, option.rates, 'EUR', locale),
+        <Button onClick={() => onEditOption(option, zone)} size="slim">
+          {t.shipping.table.edit}
+        </Button>,
+      ]);
+    });
+
+    // Generic zone fallback row
+    if (zone.options.length > 0) {
+      rows.push([
+        <Text as="span" tone="subdued">  • Tariffa generica della zona</Text>,
+        '',
+        formatRateType(zone.rateType),
+        formatIndicativeCost(zone),
+        '', // No edit for generic fallback
+      ]);
+    }
+  });
 
   return (
     <DataTable

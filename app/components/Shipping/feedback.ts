@@ -12,7 +12,7 @@
 
 import type { Dictionary } from '~/lib/i18n/context';
 
-export type ShippingIntent = 'sync-zones' | 'save-zone-rates' | 'save-packaging';
+export type ShippingIntent = 'sync-zones' | 'save-zone-rates' | 'save-packaging' | 'save-option-cost';
 
 /** La forma comune delle risposte dell'azione di /spedizioni. */
 export interface ShippingActionData {
@@ -30,9 +30,20 @@ export interface ShippingFeedback {
   zoneSaved: boolean;
   /** Le tariffe sono state rifiutate: il motivo, da mostrare nella modale aperta. */
   zoneError: string | null;
+  /** I costi opzione sono salvati: la modale si puo' chiudere. */
+  optionSaved: boolean;
+  /** I costi opzione sono stati rifiutati: il motivo, da mostrare nella modale aperta. */
+  optionError: string | null;
 }
 
-const NIENTE: ShippingFeedback = { toast: null, scopeError: false, zoneSaved: false, zoneError: null };
+const NIENTE: ShippingFeedback = {
+  toast: null,
+  scopeError: false,
+  zoneSaved: false,
+  zoneError: null,
+  optionSaved: false,
+  optionError: null,
+};
 
 /**
  * Il testo di una chiave di errore restituita dal server, se ne ha uno.
@@ -82,6 +93,18 @@ export function feedbackFromActionData(data: ShippingActionData | undefined, t: 
       return {
         ...NIENTE,
         toast: { content: testoDiErrore(data.error, t) ?? t.shipping.packaging.saveError, error: true },
+      };
+
+    case 'save-option-cost':
+      if (data.success) {
+        return { ...NIENTE, toast: { content: t.shipping.optionModal.saveSuccess, error: false }, optionSaved: true };
+      }
+      // La modale resta aperta con quello che il merchant aveva scritto, e il
+      // motivo accanto: chiuderla farebbe sembrare riuscito un rifiuto.
+      return {
+        ...NIENTE,
+        toast: { content: t.shipping.optionModal.saveError, error: true },
+        optionError: testoDiErrore(data.error, t) ?? t.shipping.optionModal.saveError,
       };
 
     default:
