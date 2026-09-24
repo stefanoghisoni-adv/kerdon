@@ -128,3 +128,103 @@ describe('computeLogisticsCost', () => {
     expect(c.shipping).toBe(2.47);
   });
 });
+
+describe('computeLogisticsCost con opzioni', () => {
+  const zonaConOpzioni = {
+    zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear' as const,
+    rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }],
+    options: [
+      { name: 'Standard', costType: 'flat' as const, brackets: [{ from: null, to: null, cost: 4.9 }] },
+      { name: 'Express', costType: 'weight_brackets' as const, brackets: [
+        { from: 0, to: 2, cost: 9 }, { from: 2, to: null, cost: 14 } ] },
+      { name: 'Gratis sopra 50', costType: 'value_brackets' as const, brackets: [
+        { from: 0, to: 50, cost: 6 }, { from: 50, to: null, cost: 6.5 } ] },
+      { name: 'Corriere', costType: 'linear' as const, brackets: [{ from: null, to: null, cost: 1.5 }] },
+    ],
+  };
+
+  const configConOpzioni: LogisticsConfig = {
+    ...config,
+    zones: [zonaConOpzioni],
+  };
+
+  it('Standard: costo flat 4.9 anche con peso null', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Standard', total_weight_grams: null },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(4.9);
+  });
+
+  it('express (spazi/maiuscole) 3 kg: fascia peso >=2 → 14', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: ' express ', total_weight_grams: 3000 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(14);
+  });
+
+  it('Gratis sopra 50 con total_price 80: fascia valore >=50 → 6.5', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Gratis sopra 50', total_price: 80 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(6.5);
+  });
+
+  it('Gratis sopra 50 con total_price null: nessuna fascia → 0', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Gratis sopra 50', total_price: null },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(0);
+  });
+
+  it('Corriere 2 kg: linear 1.5 EUR/kg → 3', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Corriere', total_weight_grams: 2000 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(3);
+  });
+
+  it('opzione sconosciuta: ripiego sulla tariffa di zona 3 kg × 2 = 6', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Sconosciuta', total_weight_grams: 3000 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(6);
+  });
+
+  it('shipping_method null: ripiego sulla zona', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: null, total_weight_grams: 3000 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(6);
+  });
+
+  it('opzione weight_brackets senza peso: 0 (non NaN)', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Express', total_weight_grams: null, item_count: null },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(0);
+  });
+
+  it('ordine non spedito con opzione: 0', () => {
+    const c = computeLogisticsCost(
+      { ...base, fulfillment_status: 'UNFULFILLED', shipping_method: 'Standard' },
+      configConOpzioni
+    );
+    expect(c).toEqual({ shipping: 0, packaging: 0, returns: 0, total: 0 });
+  });
+
+  it('paese null con opzione: 0 (regola 1.1: niente indirizzo, niente spedizione)', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_country_code: null, shipping_method: 'Standard' },
+      configConOpzioni
+    );
+    expect(c).toEqual({ shipping: 0, packaging: 0, returns: 0, total: 0 });
+  });
+});
