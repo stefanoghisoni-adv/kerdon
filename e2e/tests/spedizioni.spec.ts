@@ -27,6 +27,11 @@ interface ZonaSeminata {
   shopId: string;
 }
 
+interface OpzioneSeminata {
+  id: string;
+  zoneId: string;
+}
+
 /** Semina una zona di spedizione con le sue tariffe. */
 async function seminaZona(
   request: APIRequestContext,
@@ -54,6 +59,33 @@ async function seminaZona(
       },
     },
     select: { id: true, shopId: true },
+  });
+}
+
+/** Semina un'opzione di spedizione con le sue tariffe. */
+async function seminaOpzione(
+  request: APIRequestContext,
+  zoneId: string,
+  dati: {
+    name: string;
+    costType: 'flat' | 'linear' | 'weight_brackets' | 'value_brackets';
+    rates: Array<{ from: number | null; to: number | null; cost: number }>;
+  },
+): Promise<OpzioneSeminata> {
+  return db<OpzioneSeminata>(request, 'shippingOption', 'create', {
+    data: {
+      zoneId,
+      name: dati.name,
+      costType: dati.costType,
+      rates: {
+        create: dati.rates.map((r) => ({
+          rangeFrom: r.from,
+          rangeTo: r.to,
+          cost: r.cost,
+        })),
+      },
+    },
+    select: { id: true, zoneId: true },
   });
 }
 
@@ -106,6 +138,38 @@ async function salvaPackaging(
   }
   if (dati.returnCost !== undefined && dati.returnCost !== null) {
     form.set('returnCost', String(dati.returnCost));
+  }
+
+  const risposta = await context.request.post('/spedizioni', {
+    data: form.toString(),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
+
+  return { stato: risposta.status(), corpo: (await risposta.json()) as Record<string, unknown> };
+}
+
+/** Salva i costi di un'opzione di spedizione. */
+async function salvaCostiOpzione(
+  context: BrowserContext,
+  dati: {
+    optionId: string;
+    costType: 'flat' | 'linear' | 'weight_brackets' | 'value_brackets';
+    flatCost?: string;
+    linearCost?: string;
+    brackets?: Array<{ from: number | null; to: number | null; cost: number }>;
+  },
+): Promise<{ stato: number; corpo: Record<string, unknown> }> {
+  const form = new URLSearchParams();
+  form.set('intent', 'save-option-cost');
+  form.set('optionId', dati.optionId);
+  form.set('costType', dati.costType);
+
+  if (dati.costType === 'flat' && dati.flatCost) {
+    form.set('flatCost', dati.flatCost);
+  } else if (dati.costType === 'linear' && dati.linearCost) {
+    form.set('linearCost', dati.linearCost);
+  } else if ((dati.costType === 'weight_brackets' || dati.costType === 'value_brackets') && dati.brackets) {
+    form.set('brackets', JSON.stringify(dati.brackets));
   }
 
   const risposta = await context.request.post('/spedizioni', {
@@ -679,6 +743,333 @@ prova.describe('le azioni della pagina Spedizioni', () => {
         success: false,
         error: 'shipping.packaging.errors.invalidData',
       });
+    });
+  });
+
+  prova.describe('save-option-cost', () => {
+    prova('con costo fisso valido salva con successo', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3.0 }],
+      });
+      const opzione = await seminaOpzione(request, zona.id, {
+        name: 'Standard',
+        costType: 'flat',
+        rates: [{ from: null, to: null, cost: 5.0 }],
+      });
+
+      const { stato, corpo } = await salvaCostiOpzione(context, {
+        optionId: opzione.id,
+        costType: 'flat',
+        flatCost: '8.5',
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo.success).toBe(true);
+
+      // Verifica che il costo sia stato salvato
+      const tariffe = await db<Array<{ rangeFrom: string | null; rangeTo: string | null; cost: string }>>(
+        request,
+        'shippingOptionRate',
+        'findMany',
+        { where: { optionId: opzione.id } },
+      );
+
+      expect(tariffe).toHaveLength(1);
+      expect(tariffe[0].rangeFrom).toBeNull();
+      expect(tariffe[0].rangeTo).toBeNull();
+      expect(Number(tariffe[0].cost)).toBe(8.5);
+
+      // Verifica che il costType sia aggiornato
+      const opzioneAggiornata = await db<{ costType: string } | null>(
+        request,
+        'shippingOption',
+        'findUnique',
+        { where: { id: opzione.id }, select: { costType: true } },
+      );
+      expect(opzioneAggiornata?.costType).toBe('flat');
+    });
+
+    prova('con fasce di valore contigue salva con successo', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Francia',
+        countries: ['FR'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 2.5 }],
+      });
+      const opzione = await seminaOpzione(request, zona.id, {
+        name: 'Express',
+        costType: 'flat',
+        rates: [{ from: null, to: null, cost: 10.0 }],
+      });
+
+      const { stato, corpo } = await salvaCostiOpzione(context, {
+        optionId: opzione.id,
+        costType: 'value_brackets',
+        brackets: [
+          { from: 0, to: 50, cost: 5 },
+          { from: 50, to: 100, cost: 3 },
+          { from: 100, to: null, cost: 0 },
+        ],
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo.success).toBe(true);
+
+      // Verifica che le fasce siano state salvate
+      const tariffe = await db<Array<{ rangeFrom: string | null; rangeTo: string | null; cost: string }>>(
+        request,
+        'shippingOptionRate',
+        'findMany',
+        { where: { optionId: opzione.id }, orderBy: { rangeFrom: 'asc' } },
+      );
+
+      expect(tariffe).toHaveLength(3);
+      expect(Number(tariffe[0].rangeFrom)).toBe(0);
+      expect(Number(tariffe[0].rangeTo)).toBe(50);
+      expect(Number(tariffe[0].cost)).toBe(5);
+      expect(Number(tariffe[1].rangeFrom)).toBe(50);
+      expect(Number(tariffe[1].rangeTo)).toBe(100);
+      expect(Number(tariffe[1].cost)).toBe(3);
+      expect(Number(tariffe[2].rangeFrom)).toBe(100);
+      expect(tariffe[2].rangeTo).toBeNull();
+      expect(Number(tariffe[2].cost)).toBe(0);
+
+      // Verifica che il costType sia aggiornato
+      const opzioneAggiornata = await db<{ costType: string } | null>(
+        request,
+        'shippingOption',
+        'findUnique',
+        { where: { id: opzione.id }, select: { costType: true } },
+      );
+      expect(opzioneAggiornata?.costType).toBe('value_brackets');
+    });
+
+    prova('con fasce non contigue rifiuta con errore di validazione', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Germania',
+        countries: ['DE'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 2.0 }],
+      });
+      const opzione = await seminaOpzione(request, zona.id, {
+        name: 'Standard',
+        costType: 'flat',
+        rates: [{ from: null, to: null, cost: 7.0 }],
+      });
+
+      // Fasce con un buco: 0-30, poi 50-100 (manca 30-50)
+      const { stato, corpo } = await salvaCostiOpzione(context, {
+        optionId: opzione.id,
+        costType: 'value_brackets',
+        brackets: [
+          { from: 0, to: 30, cost: 10 },
+          { from: 50, to: 100, cost: 5 },
+        ],
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo.success).toBe(false);
+      expect(corpo.error).toBe('shipping.errors.bracketsHaveGaps');
+
+      // Verifica che il database non sia cambiato
+      const tariffe = await db<Array<{ rangeFrom: string | null; rangeTo: string | null; cost: string }>>(
+        request,
+        'shippingOptionRate',
+        'findMany',
+        { where: { optionId: opzione.id } },
+      );
+
+      expect(tariffe).toHaveLength(1);
+      expect(Number(tariffe[0].cost)).toBe(7.0);
+
+      const opzioneAggiornata = await db<{ costType: string } | null>(
+        request,
+        'shippingOption',
+        'findUnique',
+        { where: { id: opzione.id }, select: { costType: true } },
+      );
+      expect(opzioneAggiornata?.costType).toBe('flat');
+    });
+
+    prova('con optionId di un altro shop rifiuta', async ({ request, context }) => {
+      // Crea sia il negozio corrente (che ha la sessione) sia quello altrui
+      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const altroShop = await seminaNegozio(request, {
+        setupCompletedAt: new Date().toISOString(),
+      }, ALTRO_NEGOZIO);
+      const zonaAltrui = await seminaZona(request, altroShop.id, {
+        zoneName: 'Spagna',
+        countries: ['ES'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 4.0 }],
+      });
+      const opzioneAltrui = await seminaOpzione(request, zonaAltrui.id, {
+        name: 'Express',
+        costType: 'flat',
+        rates: [{ from: null, to: null, cost: 12.0 }],
+      });
+
+      // Il negozio corrente (NEGOZIO) prova a modificare un'opzione di ALTRO_NEGOZIO
+      const { stato, corpo } = await salvaCostiOpzione(context, {
+        optionId: opzioneAltrui.id,
+        costType: 'flat',
+        flatCost: '15.0',
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo.success).toBe(false);
+      expect(corpo.error).toBe('option_not_found');
+
+      // Verifica che i dati dell'altro shop non siano cambiati
+      const tariffe = await db<Array<{ cost: string }>>(
+        request,
+        'shippingOptionRate',
+        'findMany',
+        { where: { optionId: opzioneAltrui.id } },
+      );
+
+      expect(tariffe).toHaveLength(1);
+      expect(Number(tariffe[0].cost)).toBe(12.0);
+    });
+
+    prova('con JSON malformato rifiuta con errore di validazione, non un 500', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Belgio',
+        countries: ['BE'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 2.8 }],
+      });
+      const opzione = await seminaOpzione(request, zona.id, {
+        name: 'Standard',
+        costType: 'flat',
+        rates: [{ from: null, to: null, cost: 6.0 }],
+      });
+
+      const { stato, corpo } = await inviaForm(context, {
+        intent: 'save-option-cost',
+        optionId: opzione.id,
+        costType: 'weight_brackets',
+        brackets: '[{ rotto',
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo).toMatchObject({
+        intent: 'save-option-cost',
+        success: false,
+        error: 'shipping.errors.invalidBrackets',
+      });
+    });
+
+    prova('con costo fisso negativo rifiuta', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Portogallo',
+        countries: ['PT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3.5 }],
+      });
+      const opzione = await seminaOpzione(request, zona.id, {
+        name: 'Standard',
+        costType: 'flat',
+        rates: [{ from: null, to: null, cost: 5.0 }],
+      });
+
+      const { stato, corpo } = await salvaCostiOpzione(context, {
+        optionId: opzione.id,
+        costType: 'flat',
+        flatCost: '-2',
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo.success).toBe(false);
+      expect(corpo.error).toBe('shipping.errors.invalidFlatCost');
+    });
+
+    prova('con costo al kg NaN rifiuta', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Austria',
+        countries: ['AT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3.0 }],
+      });
+      const opzione = await seminaOpzione(request, zona.id, {
+        name: 'Standard',
+        costType: 'linear',
+        rates: [{ from: null, to: null, cost: 4.0 }],
+      });
+
+      const { stato, corpo } = await salvaCostiOpzione(context, {
+        optionId: opzione.id,
+        costType: 'linear',
+        linearCost: 'Infinity',
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo.success).toBe(false);
+      expect(corpo.error).toBe('shipping.errors.invalidLinearCost');
+    });
+
+    prova('salvataggio riuscito accoda il ricalcolo, fallito no', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Olanda',
+        countries: ['NL'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 2.5 }],
+      });
+      const opzione = await seminaOpzione(request, zona.id, {
+        name: 'Standard',
+        costType: 'flat',
+        rates: [{ from: null, to: null, cost: 6.5 }],
+      });
+
+      // Prima del salvataggio: nessun ricalcolo accodato
+      const primaDelSalvataggio = await db<Array<{ type: string }>>(request, 'syncRequest', 'findMany', {
+        where: { shopId: shop.id, type: 'logistics-recompute' },
+        select: { type: true },
+      });
+
+      // Salvataggio riuscito
+      const { stato: statoOk, corpo: corpoOk } = await salvaCostiOpzione(context, {
+        optionId: opzione.id,
+        costType: 'flat',
+        flatCost: '9.0',
+      });
+
+      expect(statoOk).toBe(200);
+      expect(corpoOk.success).toBe(true);
+
+      // Dopo il salvataggio riuscito: ricalcolo accodato
+      const dopoSalvataggio = await db<Array<{ type: string }>>(request, 'syncRequest', 'findMany', {
+        where: { shopId: shop.id, type: 'logistics-recompute' },
+        select: { type: true },
+      });
+      expect(dopoSalvataggio.length).toBeGreaterThan(primaDelSalvataggio.length);
+
+      // Salvataggio fallito
+      const { stato: statoKo, corpo: corpoKo } = await salvaCostiOpzione(context, {
+        optionId: opzione.id,
+        costType: 'flat',
+        flatCost: '-5',
+      });
+
+      expect(statoKo).toBe(200);
+      expect(corpoKo.success).toBe(false);
+
+      // Dopo il salvataggio fallito: nessun ricalcolo aggiunto
+      const dopoFallimento = await db<Array<{ type: string }>>(request, 'syncRequest', 'findMany', {
+        where: { shopId: shop.id, type: 'logistics-recompute' },
+        select: { type: true },
+      });
+      expect(dopoFallimento.length).toBe(dopoSalvataggio.length);
     });
   });
 });
