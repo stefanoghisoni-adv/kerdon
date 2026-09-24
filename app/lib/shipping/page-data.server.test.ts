@@ -57,7 +57,7 @@ describe('loadShippingPageData', () => {
       },
     ]);
     expect(dati.packaging).toEqual({
-      categories: [{ name: 'Busta', cost: 1 }],
+      categories: [{ name: 'Busta', cost: 1, origin: 'manual' }],
       fallbackRules: [{ weightMaxKg: null, category: 'Busta' }],
       defaultWeightPerItemKg: 0.5,
       returnCost: null,

@@ -2,8 +2,8 @@
 //
 // Cosa vede il merchant dopo ogni azione della pagina Spedizioni.
 //
-// PERCHE' L'INTENTO STA NELLA RISPOSTA. La pagina usa un solo fetcher per le
-// tre azioni (importazione zone, tariffe, packaging), e per sapere a quale
+// PERCHE' L'INTENTO STA NELLA RISPOSTA. La pagina usa un solo fetcher per
+// tutte le azioni (importazione zone, tariffe, opzioni, righe di imballo), e per sapere a quale
 // risponde il server serve l'intento. Leggerlo da `fetcher.formData` non
 // funziona: Remix lo azzera quando il fetcher torna a riposo, cioe' proprio nel
 // momento in cui arriva la risposta. Cosi' ogni azione lo rimanda indietro, e
@@ -12,7 +12,16 @@
 
 import type { Dictionary } from '~/lib/i18n/context';
 
-export type ShippingIntent = 'sync-zones' | 'save-zone-rates' | 'save-packaging' | 'save-option-cost';
+export type ShippingIntent =
+  | 'sync-zones'
+  | 'save-zone-rates'
+  | 'save-packaging'
+  | 'save-option-cost'
+  | 'save-category'
+  | 'delete-category'
+  | 'save-rule'
+  | 'delete-rule'
+  | 'save-packaging-defaults';
 
 /** La forma comune delle risposte dell'azione di /spedizioni. */
 export interface ShippingActionData {
@@ -34,6 +43,10 @@ export interface ShippingFeedback {
   optionSaved: boolean;
   /** I costi opzione sono stati rifiutati: il motivo, da mostrare nella modale aperta. */
   optionError: string | null;
+  /** Categoria o regola salvata o eliminata: la sua modale si puo' chiudere. */
+  packagingSaved: boolean;
+  /** Categoria o regola rifiutata: il motivo, da mostrare nella modale aperta. */
+  packagingError: string | null;
 }
 
 const NIENTE: ShippingFeedback = {
@@ -43,6 +56,8 @@ const NIENTE: ShippingFeedback = {
   zoneError: null,
   optionSaved: false,
   optionError: null,
+  packagingSaved: false,
+  packagingError: null,
 };
 
 /**
@@ -51,7 +66,7 @@ const NIENTE: ShippingFeedback = {
  * Solo sotto i due rami di errori della pagina: una chiave qualsiasi non deve
  * poter pescare un testo a caso dal dizionario.
  */
-function testoDiErrore(chiave: string | undefined, t: Dictionary): string | null {
+export function testoDiErrore(chiave: string | undefined, t: Dictionary): string | null {
   if (!chiave) return null;
   const rami: Array<[string, Record<string, unknown>]> = [
     ['shipping.errors.', t.shipping.errors],
@@ -105,6 +120,32 @@ export function feedbackFromActionData(data: ShippingActionData | undefined, t: 
         ...NIENTE,
         toast: { content: t.shipping.optionModal.saveError, error: true },
         optionError: testoDiErrore(data.error, t) ?? t.shipping.optionModal.saveError,
+      };
+
+    case 'save-category':
+    case 'delete-category':
+    case 'save-rule':
+    case 'delete-rule': {
+      if (data.success) {
+        const testi = {
+          'save-category': t.shipping.packaging.categories.saved,
+          'delete-category': t.shipping.packaging.categories.deleted,
+          'save-rule': t.shipping.packaging.rules.saved,
+          'delete-rule': t.shipping.packaging.rules.deleted,
+        };
+        return { ...NIENTE, toast: { content: testi[data.intent], error: false }, packagingSaved: true };
+      }
+      // Come per le tariffe: la modale resta aperta con il motivo accanto,
+      // compresa l'eliminazione bloccata da una regola.
+      const motivo = testoDiErrore(data.error, t) ?? t.shipping.packaging.saveError;
+      return { ...NIENTE, toast: { content: motivo, error: true }, packagingError: motivo };
+    }
+
+    case 'save-packaging-defaults':
+      if (data.success) return { ...NIENTE, toast: { content: t.shipping.packaging.saveSuccess, error: false } };
+      return {
+        ...NIENTE,
+        toast: { content: testoDiErrore(data.error, t) ?? t.shipping.packaging.saveError, error: true },
       };
 
     default:

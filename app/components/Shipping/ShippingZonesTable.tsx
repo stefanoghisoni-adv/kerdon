@@ -111,7 +111,10 @@ export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZone
     const headerId = `zona-${zone.id}`;
 
     const header = (
-      <IndexTable.Row rowType="subheader" id={headerId} key={headerId} position={position++}>
+      // La riga ha un id suo: quello dell'intestazione (`th`) e' il bersaglio
+      // di `headers` delle righe figlie, e due elementi con lo stesso id nel
+      // DOM renderebbero ambiguo a chi e' riferito.
+      <IndexTable.Row rowType="subheader" id={`${headerId}-riga`} key={headerId} position={position++}>
         <IndexTable.Cell as="th" id={headerId} colSpan={headings.length} scope="colgroup">
           <BlockStack gap="050">
             <Text as="span" fontWeight="semibold">

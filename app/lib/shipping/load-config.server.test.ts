@@ -95,7 +95,7 @@ describe('loadLogisticsConfig', () => {
 
     expect(result).toEqual({
       zones: [],
-      categories: [{ name: 'Scatola', cost: 2.5 }],
+      categories: [{ name: 'Scatola', cost: 2.5, origin: 'manual' }],
       fallbackRules: [{ weightMaxKg: 10, category: 'Scatola' }],
       defaultWeightPerItemKg: 0.5,
       returnCost: 5,
@@ -126,7 +126,31 @@ describe('loadLogisticsConfig', () => {
 
     const result = await loadLogisticsConfig('shop-1');
 
-    expect(result?.categories).toEqual([{ name: 'Scatola', cost: 2.5 }]);
+    expect(result?.categories).toEqual([{ name: 'Scatola', cost: 2.5, origin: 'manual' }]);
+  });
+
+  it("legge l'origine delle categorie: 'shopify' resta, assente o sconosciuta vale 'manual'", async () => {
+    findMany.mockResolvedValue([]);
+    findUnique.mockResolvedValue({
+      categories: [
+        { name: 'Da Shopify', cost: 0, origin: 'shopify' },
+        { name: 'Vecchia', cost: 1 },
+        { name: 'Strana', cost: 2, origin: 42 },
+        { name: 'Creata', cost: 3, origin: 'manual' },
+      ],
+      fallbackRules: [],
+      defaultWeightPerItem: null,
+      returnCost: null,
+    });
+
+    const result = await loadLogisticsConfig('shop-1');
+
+    expect(result?.categories).toEqual([
+      { name: 'Da Shopify', cost: 0, origin: 'shopify' },
+      { name: 'Vecchia', cost: 1, origin: 'manual' },
+      { name: 'Strana', cost: 2, origin: 'manual' },
+      { name: 'Creata', cost: 3, origin: 'manual' },
+    ]);
   });
 
   it('difende contro JSON malformato nelle fallback rules', async () => {

@@ -25,6 +25,8 @@ describe('feedbackFromActionData', () => {
       zoneError: null,
       optionSaved: false,
       optionError: null,
+      packagingSaved: false,
+      packagingError: null,
     });
   });
 
@@ -36,6 +38,8 @@ describe('feedbackFromActionData', () => {
       zoneError: null,
       optionSaved: false,
       optionError: null,
+      packagingSaved: false,
+      packagingError: null,
     });
   });
 
@@ -126,5 +130,49 @@ describe('feedbackFromActionData', () => {
   prova('costi opzione rifiutati per un motivo senza testo dedicato: il messaggio generico', () => {
     const data: ShippingActionData = { intent: 'save-option-cost', success: false, error: 'option_not_found' };
     expect(feedbackFromActionData(data, t).optionError).toBe(t.shipping.optionModal.saveError);
+  });
+
+  prova('categoria salvata o eliminata: il suo toast e la modale da chiudere', () => {
+    const salvata = feedbackFromActionData({ intent: 'save-category', success: true }, t);
+    expect(salvata.toast).toEqual({ content: t.shipping.packaging.categories.saved, error: false });
+    expect(salvata.packagingSaved).toBe(true);
+    expect(salvata.packagingError).toBeNull();
+
+    const eliminata = feedbackFromActionData({ intent: 'delete-category', success: true }, t);
+    expect(eliminata.toast).toEqual({ content: t.shipping.packaging.categories.deleted, error: false });
+    expect(eliminata.packagingSaved).toBe(true);
+  });
+
+  prova('regola salvata o eliminata: il suo toast e la modale da chiudere', () => {
+    expect(feedbackFromActionData({ intent: 'save-rule', success: true }, t)).toMatchObject({
+      toast: { content: t.shipping.packaging.rules.saved, error: false },
+      packagingSaved: true,
+    });
+    expect(feedbackFromActionData({ intent: 'delete-rule', success: true }, t)).toMatchObject({
+      toast: { content: t.shipping.packaging.rules.deleted, error: false },
+      packagingSaved: true,
+    });
+  });
+
+  prova('eliminazione bloccata: la modale resta aperta con il motivo', () => {
+    const f = feedbackFromActionData(
+      { intent: 'delete-category', success: false, error: 'shipping.packaging.errors.categoryStillReferenced' },
+      t,
+    );
+    expect(f.packagingSaved).toBe(false);
+    expect(f.packagingError).toBe(t.shipping.packaging.errors.categoryStillReferenced);
+    expect(f.toast).toEqual({ content: t.shipping.packaging.errors.categoryStillReferenced, error: true });
+  });
+
+  prova('modifica rifiutata senza testo dedicato: il messaggio generico nella modale', () => {
+    const f = feedbackFromActionData({ intent: 'save-rule', success: false, error: 'invalid_request' }, t);
+    expect(f.packagingError).toBe(t.shipping.packaging.saveError);
+    expect(f.toast).toEqual({ content: t.shipping.packaging.saveError, error: true });
+  });
+
+  prova('peso di default e resi salvati: toast di successo, nessuna modale', () => {
+    const f = feedbackFromActionData({ intent: 'save-packaging-defaults', success: true }, t);
+    expect(f.toast).toEqual({ content: t.shipping.packaging.saveSuccess, error: false });
+    expect(f.packagingSaved).toBe(false);
   });
 });

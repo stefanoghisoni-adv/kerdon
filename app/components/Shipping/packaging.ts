@@ -128,5 +128,18 @@ export function parsePackaging(
   }
   const error = validatePackaging(value);
   if (error) return { value: null, error };
-  return { value: value as PackagingInput, error: null };
+  const { categories, rules } = value as PackagingInput;
+  // Solo i campi che conosciamo: il JSON finisce cosi' com'e' nella
+  // configurazione, e un'origine inventata non deve arrivarci.
+  return {
+    value: {
+      categories: categories.map((c) =>
+        c.origin === 'shopify' || c.origin === 'manual'
+          ? { name: c.name, cost: c.cost, origin: c.origin }
+          : { name: c.name, cost: c.cost },
+      ),
+      rules: rules.map((r) => ({ weightMaxKg: r.weightMaxKg, category: r.category })),
+    },
+    error: null,
+  };
 }

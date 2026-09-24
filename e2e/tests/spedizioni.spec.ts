@@ -1072,4 +1072,202 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       expect(dopoFallimento.length).toBe(dopoSalvataggio.length);
     });
   });
+
+  prova.describe('categorie e regole di imballo, una riga alla volta', () => {
+    type Config = {
+      categories: Array<{ name: string; cost: number; origin?: string }>;
+      fallbackRules: Array<{ weightMaxKg: number | null; category: string }>;
+      defaultWeightPerItem: string | null;
+      returnCost: string | null;
+    };
+
+    /** Semina la configurazione packaging come la trova la pagina. */
+    async function seminaPackaging(request: APIRequestContext, shopId: string, dati: Partial<Config>) {
+      await db(request, 'packagingConfig', 'create', {
+        data: {
+          shopId,
+          categories: dati.categories ?? [],
+          fallbackRules: dati.fallbackRules ?? [],
+          defaultWeightPerItem: dati.defaultWeightPerItem ?? null,
+          returnCost: dati.returnCost ?? null,
+        },
+      });
+    }
+
+    const leggiPackaging = (request: APIRequestContext, shopId: string) =>
+      db<Config | null>(request, 'packagingConfig', 'findUnique', {
+        where: { shopId },
+        select: { categories: true, fallbackRules: true, defaultWeightPerItem: true, returnCost: true },
+      });
+
+    const ricalcoli = async (request: APIRequestContext, shopId: string) =>
+      (
+        await db<Array<{ id: string }>>(request, 'syncRequest', 'findMany', {
+          where: { shopId, type: 'logistics-recompute' },
+          select: { id: true },
+        })
+      ).length;
+
+    prova('aggiungi categoria: salvata come creata dal merchant, ricalcolo accodato, modale da chiudere', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+
+      const { stato, corpo } = await inviaForm(context, { intent: 'save-category', name: ' Busta ', cost: '1.5' });
+
+      expect(stato).toBe(200);
+      expect(corpo).toEqual({ intent: 'save-category', success: true });
+      const config = await leggiPackaging(request, shop.id);
+      expect(config!.categories).toEqual([{ name: 'Busta', cost: 1.5, origin: 'manual' }]);
+      expect(await ricalcoli(request, shop.id)).toBeGreaterThan(0);
+      const f = cosaVede(corpo);
+      expect(f.packagingSaved).toBe(true);
+      expect(f.toast).toEqual({ content: italiano.shipping.packaging.categories.saved, error: false });
+    });
+
+    prova('aggiungi categoria con un nome gia in uso (maiuscole diverse): rifiutata, niente scritto', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      await seminaPackaging(request, shop.id, { categories: [{ name: 'Busta', cost: 1 }] });
+
+      const { corpo } = await inviaForm(context, { intent: 'save-category', name: 'BUSTA', cost: '2' });
+
+      expect(corpo).toEqual({
+        intent: 'save-category',
+        success: false,
+        error: 'shipping.packaging.errors.categoryNameDuplicate',
+      });
+      expect((await leggiPackaging(request, shop.id))!.categories).toEqual([{ name: 'Busta', cost: 1 }]);
+      expect(await ricalcoli(request, shop.id)).toBe(0);
+      expect(cosaVede(corpo).packagingError).toBe(italiano.shipping.packaging.errors.categoryNameDuplicate);
+    });
+
+    prova('modifica categoria: nuovo nome e costo, le regole la seguono, peso e resi restano', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      await seminaPackaging(request, shop.id, {
+        categories: [
+          { name: 'Busta', cost: 1 },
+          { name: 'Scatola', cost: 3, origin: 'shopify' },
+        ],
+        fallbackRules: [{ weightMaxKg: null, category: 'Scatola' }],
+        defaultWeightPerItem: '0.4',
+        returnCost: '5',
+      });
+
+      const { corpo } = await inviaForm(context, {
+        intent: 'save-category',
+        originalName: 'Scatola',
+        name: 'Scatola media',
+        cost: '4.25',
+      });
+
+      expect(corpo).toEqual({ intent: 'save-category', success: true });
+      const config = await leggiPackaging(request, shop.id);
+      expect(config!.categories).toEqual([
+        { name: 'Busta', cost: 1, origin: 'manual' },
+        { name: 'Scatola media', cost: 4.25, origin: 'shopify' },
+      ]);
+      expect(config!.fallbackRules).toEqual([{ weightMaxKg: null, category: 'Scatola media' }]);
+      expect(Number(config!.defaultWeightPerItem)).toBe(0.4);
+      expect(Number(config!.returnCost)).toBe(5);
+    });
+
+    prova('elimina categoria non usata: sparisce e il ricalcolo si accoda', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      await seminaPackaging(request, shop.id, {
+        categories: [
+          { name: 'Busta', cost: 1 },
+          { name: 'Tubo', cost: 2 },
+        ],
+        fallbackRules: [{ weightMaxKg: null, category: 'Busta' }],
+      });
+
+      const { corpo } = await inviaForm(context, { intent: 'delete-category', name: 'Tubo' });
+
+      expect(corpo).toEqual({ intent: 'delete-category', success: true });
+      expect((await leggiPackaging(request, shop.id))!.categories).toEqual([
+        { name: 'Busta', cost: 1, origin: 'manual' },
+      ]);
+      expect(await ricalcoli(request, shop.id)).toBeGreaterThan(0);
+      expect(cosaVede(corpo).toast).toEqual({ content: italiano.shipping.packaging.categories.deleted, error: false });
+    });
+
+    prova('elimina categoria usata da una regola: bloccata con il motivo, niente cambia', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      await seminaPackaging(request, shop.id, {
+        categories: [{ name: 'Busta', cost: 1 }],
+        fallbackRules: [{ weightMaxKg: null, category: 'Busta' }],
+      });
+
+      const { corpo } = await inviaForm(context, { intent: 'delete-category', name: 'Busta' });
+
+      expect(corpo).toEqual({
+        intent: 'delete-category',
+        success: false,
+        error: 'shipping.packaging.errors.categoryStillReferenced',
+      });
+      expect((await leggiPackaging(request, shop.id))!.categories).toEqual([{ name: 'Busta', cost: 1 }]);
+      expect(await ricalcoli(request, shop.id)).toBe(0);
+      const f = cosaVede(corpo);
+      expect(f.packagingSaved).toBe(false);
+      expect(f.packagingError).toBe(italiano.shipping.packaging.errors.categoryStillReferenced);
+    });
+
+    prova('regole: aggiunte in ordine di peso, modificate ed eliminate per posizione', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      await seminaPackaging(request, shop.id, {
+        categories: [
+          { name: 'Busta', cost: 1 },
+          { name: 'Scatola', cost: 3 },
+        ],
+        fallbackRules: [{ weightMaxKg: null, category: 'Scatola' }],
+      });
+
+      const aggiunta = await inviaForm(context, { intent: 'save-rule', weightMaxKg: '1', category: 'Busta' });
+      expect(aggiunta.corpo).toEqual({ intent: 'save-rule', success: true });
+      expect((await leggiPackaging(request, shop.id))!.fallbackRules).toEqual([
+        { weightMaxKg: 1, category: 'Busta' },
+        { weightMaxKg: null, category: 'Scatola' },
+      ]);
+
+      const seconda = await inviaForm(context, { intent: 'save-rule', weightMaxKg: '', category: 'Busta' });
+      expect(seconda.corpo.error).toBe('shipping.packaging.errors.multipleUnlimitedRules');
+
+      const modificata = await inviaForm(context, { intent: 'save-rule', index: '0', weightMaxKg: '2.5', category: 'Busta' });
+      expect(modificata.corpo).toEqual({ intent: 'save-rule', success: true });
+
+      const eliminata = await inviaForm(context, { intent: 'delete-rule', index: '1' });
+      expect(eliminata.corpo).toEqual({ intent: 'delete-rule', success: true });
+      expect((await leggiPackaging(request, shop.id))!.fallbackRules).toEqual([{ weightMaxKg: 2.5, category: 'Busta' }]);
+
+      const fuori = await inviaForm(context, { intent: 'delete-rule', index: '9' });
+      expect(fuori.corpo.error).toBe('shipping.packaging.errors.ruleNotFound');
+    });
+
+    prova('peso di default e resi: salvati da soli, categorie e regole restano', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      await seminaPackaging(request, shop.id, {
+        categories: [{ name: 'Busta', cost: 1 }],
+        fallbackRules: [{ weightMaxKg: null, category: 'Busta' }],
+      });
+
+      const { corpo } = await inviaForm(context, {
+        intent: 'save-packaging-defaults',
+        defaultWeightPerItemKg: '0.3',
+        returnCost: '6',
+      });
+
+      expect(corpo).toEqual({ intent: 'save-packaging-defaults', success: true });
+      const config = await leggiPackaging(request, shop.id);
+      expect(Number(config!.defaultWeightPerItem)).toBe(0.3);
+      expect(Number(config!.returnCost)).toBe(6);
+      expect(config!.categories).toEqual([{ name: 'Busta', cost: 1 }]);
+      expect(config!.fallbackRules).toEqual([{ weightMaxKg: null, category: 'Busta' }]);
+      expect(await ricalcoli(request, shop.id)).toBeGreaterThan(0);
+
+      const ko = await inviaForm(context, { intent: 'save-packaging-defaults', returnCost: '-1' });
+      expect(ko.corpo.error).toBe('shipping.packaging.errors.invalidReturnCost');
+      expect(cosaVede(ko.corpo).toast).toEqual({
+        content: italiano.shipping.packaging.errors.invalidReturnCost,
+        error: true,
+      });
+    });
+  });
 });

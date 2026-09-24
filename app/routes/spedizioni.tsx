@@ -16,20 +16,38 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { requireShopCapability } from '~/lib/authz/require-capability.server';
-import { useT } from '~/lib/i18n/context';
+import { useLocale, useT } from '~/lib/i18n/context';
 import { authenticate } from '~/shopify.server';
 import { syncShippingZones } from '~/lib/shipping/sync-zones.server';
 import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute.server';
 import { loadShippingPageData } from '~/lib/shipping/page-data.server';
 import { parseBrackets } from '~/components/Shipping/brackets';
 import { parsePackaging } from '~/components/Shipping/packaging';
+import {
+  deleteCategory,
+  deleteRule,
+  saveCategory,
+  saveRule,
+  type PackagingEditResult,
+} from '~/components/Shipping/packaging-edit';
+import { readPackaging, writePackaging } from '~/lib/shipping/packaging-store.server';
 import { parseOptionBrackets } from '~/components/Shipping/option-cost';
 import { feedbackFromActionData, type ShippingIntent } from '~/components/Shipping/feedback';
 import { ShippingZonesTable } from '~/components/Shipping/ShippingZonesTable';
 import { EditZoneModal } from '~/components/Shipping/EditZoneModal';
 import { EditOptionModal } from '~/components/Shipping/EditOptionModal';
-import { PackagingCard } from '~/components/Shipping/PackagingCard';
+import { PackagingCategoriesCard } from '~/components/Shipping/PackagingCategoriesCard';
+import { PackagingRulesCard, describeRuleWeight } from '~/components/Shipping/PackagingRulesCard';
+import { PackagingDefaultsCard } from '~/components/Shipping/PackagingDefaultsCard';
+import { CategoryModal, ConfirmDeleteModal, RuleModal } from '~/components/Shipping/PackagingModals';
 import type { RateBracket, PackagingCategory, FallbackRule, OptionCostType, OptionBracket } from '~/lib/shipping/types';
+
+/** La modale aperta sulle tabelle di imballo, una alla volta. */
+type PackagingDialog =
+  | { kind: 'category'; category: PackagingCategory | null }
+  | { kind: 'delete-category'; category: PackagingCategory }
+  | { kind: 'rule'; index: number | null }
+  | { kind: 'delete-rule'; index: number };
 import { Decimal } from '@prisma/client/runtime/library';
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -63,6 +81,27 @@ function importoFacoltativo(valore: string | undefined): number | null {
   if (valore === undefined || valore === '') return null;
   const n = parseFloat(valore);
   return Number.isFinite(n) && n >= 0 ? n : Number.NaN;
+}
+
+/** Una posizione nell'elenco delle regole: solo cifre, o null. */
+function indiceRegola(valore: string | undefined): number | null {
+  return valore !== undefined && /^\d+$/.test(valore) ? Number(valore) : null;
+}
+
+/**
+ * Applica una modifica di una riga (categoria o regola) alla configurazione
+ * salvata, la riscrive se passa e solo allora accoda il ricalcolo.
+ */
+async function modificaPackaging(
+  shopId: string,
+  intent: ShippingIntent,
+  modifica: (attuale: Awaited<ReturnType<typeof readPackaging>>) => PackagingEditResult,
+) {
+  const esito = modifica(await readPackaging(shopId));
+  if (esito.error !== null) return risposta(intent, { success: false, error: esito.error });
+  await writePackaging(shopId, esito.value);
+  await enqueueLogisticsRecompute(shopId);
+  return risposta(intent, { success: true });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -219,6 +258,78 @@ export async function action({ request }: ActionFunctionArgs) {
     return risposta('save-packaging', { success: true });
   }
 
+  if (intent === 'save-category') {
+    const originalName = formData.get('originalName')?.toString() || null;
+    const name = formData.get('name')?.toString() ?? '';
+    // Il costo e' obbligatorio: vuoto vale come non valido, non come zero.
+    const cost = importoFacoltativo(formData.get('cost')?.toString()) ?? Number.NaN;
+    return modificaPackaging(shop.id, 'save-category', (attuale) =>
+      saveCategory(attuale, originalName, { name, cost }),
+    );
+  }
+
+  if (intent === 'delete-category') {
+    const name = formData.get('name')?.toString() ?? '';
+    return modificaPackaging(shop.id, 'delete-category', (attuale) => deleteCategory(attuale, name));
+  }
+
+  if (intent === 'save-rule') {
+    const indexRaw = formData.get('index')?.toString();
+    const index = indiceRegola(indexRaw);
+    if (indexRaw && index === null) {
+      return risposta('save-rule', { success: false, error: 'shipping.packaging.errors.ruleNotFound' });
+    }
+    const category = formData.get('category')?.toString() ?? '';
+    // Peso vuoto = "tutto il resto"; un peso non valido arriva come NaN e lo
+    // rifiuta la validazione.
+    const weightRaw = formData.get('weightMaxKg')?.toString();
+    const weightMaxKg = weightRaw === undefined || weightRaw === '' ? null : Number(weightRaw);
+    return modificaPackaging(shop.id, 'save-rule', (attuale) =>
+      saveRule(attuale, index, { weightMaxKg, category }),
+    );
+  }
+
+  if (intent === 'delete-rule') {
+    const index = indiceRegola(formData.get('index')?.toString());
+    if (index === null) {
+      return risposta('delete-rule', { success: false, error: 'shipping.packaging.errors.ruleNotFound' });
+    }
+    return modificaPackaging(shop.id, 'delete-rule', (attuale) => deleteRule(attuale, index));
+  }
+
+  if (intent === 'save-packaging-defaults') {
+    const defaultWeight = importoFacoltativo(formData.get('defaultWeightPerItemKg')?.toString());
+    const returnCost = importoFacoltativo(formData.get('returnCost')?.toString());
+
+    if (defaultWeight !== null && Number.isNaN(defaultWeight)) {
+      return risposta('save-packaging-defaults', {
+        success: false,
+        error: 'shipping.packaging.errors.invalidDefaultWeight',
+      });
+    }
+    if (returnCost !== null && Number.isNaN(returnCost)) {
+      return risposta('save-packaging-defaults', {
+        success: false,
+        error: 'shipping.packaging.errors.invalidReturnCost',
+      });
+    }
+
+    // Solo questi due campi: categorie e regole hanno il loro salvataggio.
+    const data = {
+      defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
+      returnCost: returnCost !== null ? new Decimal(returnCost) : null,
+    };
+    await prisma.packagingConfig.upsert({
+      where: { shopId: shop.id },
+      create: { shopId: shop.id, ...data },
+      update: data,
+    });
+
+    await enqueueLogisticsRecompute(shop.id);
+
+    return risposta('save-packaging-defaults', { success: true });
+  }
+
   if (intent === 'save-option-cost') {
     const optionId = formData.get('optionId')?.toString();
     const costType = formData.get('costType')?.toString();
@@ -309,6 +420,11 @@ export default function ShippingPage() {
   const { zones, packaging } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const t = useT();
+  const locale = useLocale();
+
+  const [packagingDialog, setPackagingDialog] = useState<PackagingDialog | null>(null);
+  // L'errore del server sulla riga in modifica: la modale resta aperta e lo mostra.
+  const [packagingServerError, setPackagingServerError] = useState<string | null>(null);
 
   const [editingZone, setEditingZone] = useState<typeof zones[0] | null>(null);
   // L'errore del server sulla zona in modifica: la modale resta aperta e lo mostra.
@@ -328,7 +444,12 @@ export default function ShippingPage() {
   const intentInCorso =
     fetcher.state !== 'idle' ? (fetcher.formData as FormData | undefined)?.get('intent') : undefined;
   const isSyncing = intentInCorso === 'sync-zones';
-  const isSavingPackaging = intentInCorso === 'save-packaging';
+  const isSavingDefaults = intentInCorso === 'save-packaging-defaults';
+  const isSavingPackagingRow =
+    intentInCorso === 'save-category' ||
+    intentInCorso === 'delete-category' ||
+    intentInCorso === 'save-rule' ||
+    intentInCorso === 'delete-rule';
   const isSavingZone = intentInCorso === 'save-zone-rates';
   const isSavingOption = intentInCorso === 'save-option-cost';
 
@@ -351,6 +472,12 @@ export default function ShippingPage() {
       setOptionServerError(null);
     } else if (esito.optionError) {
       setOptionServerError(esito.optionError);
+    }
+    if (esito.packagingSaved) {
+      setPackagingDialog(null);
+      setPackagingServerError(null);
+    } else if (esito.packagingError) {
+      setPackagingServerError(esito.packagingError);
     }
     // `t` resta fuori di proposito: cambiare lingua non e' una risposta nuova,
     // e non deve rimostrare il toast dell'ultima azione.
@@ -428,25 +555,27 @@ export default function ShippingPage() {
     fetcher.submit(formData, { method: 'post' });
   };
 
-  const handlePackagingSave = (data: {
-    categories: PackagingCategory[];
-    rules: FallbackRule[];
-    defaultWeightPerItemKg: string | null;
-    returnCost: string | null;
-  }) => {
-    const formData = new FormData();
-    formData.append('intent', 'save-packaging');
-    formData.append('categories', JSON.stringify(data.categories));
-    formData.append('rules', JSON.stringify(data.rules));
-    if (data.defaultWeightPerItemKg) {
-      formData.append('defaultWeightPerItemKg', data.defaultWeightPerItemKg);
-    }
-    if (data.returnCost) {
-      formData.append('returnCost', data.returnCost);
-    }
-
-    fetcher.submit(formData, { method: 'post' });
+  const openPackagingDialog = (dialog: PackagingDialog) => {
+    setPackagingServerError(null);
+    setPackagingDialog(dialog);
   };
+
+  const closePackagingDialog = () => {
+    setPackagingServerError(null);
+    setPackagingDialog(null);
+  };
+
+  /** Invia una modifica di riga; la modale si chiude solo quando il server conferma. */
+  const submitPackaging = (fields: Record<string, string>) => {
+    setPackagingServerError(null);
+    fetcher.submit(fields, { method: 'post' });
+  };
+
+  const handleDefaultsSave = (data: { defaultWeightPerItemKg: string; returnCost: string }) => {
+    fetcher.submit({ intent: 'save-packaging-defaults', ...data }, { method: 'post' });
+  };
+
+  const packagingCurrent = { categories: packaging.categories, rules: packaging.fallbackRules };
 
   // Il banner del permesso mancante arriva dalla risposta del fetcher, come
   // l'importazione che lo provoca; resta finche' non arriva un'altra risposta.
@@ -454,6 +583,10 @@ export default function ShippingPage() {
 
   return (
     <Page
+      // A tutta larghezza come la dashboard: zone e categorie sono tabelle a
+      // quattro colonne, e nella larghezza stretta dei cataloghi i nomi delle
+      // opzioni andavano a capo.
+      fullWidth
       title={t.shipping.title}
       primaryAction={
         zones.length > 0
@@ -483,21 +616,102 @@ export default function ShippingPage() {
             </EmptyState>
           </Card>
         ) : (
-          <InlineGrid columns={{ xs: 1, md: '2fr 1fr' }} gap="400">
-            <Card padding="0">
-              <ShippingZonesTable zones={zones} onEdit={handleEdit} onEditOption={handleEditOption} />
-            </Card>
-            <PackagingCard
-              key={packaging.configKey}
-              initialCategories={packaging.categories}
-              initialRules={packaging.fallbackRules}
-              initialDefaultWeight={packaging.defaultWeightPerItemKg}
-              initialReturnCost={packaging.returnCost}
-              configKey={packaging.configKey}
-              onSave={handlePackagingSave}
-              isSaving={isSavingPackaging}
+          <Card padding="0">
+            <ShippingZonesTable zones={zones} onEdit={handleEdit} onEditOption={handleEditOption} />
+          </Card>
+        )}
+
+        {/* Imballi e resi dopo le zone, come prima: senza zone la pagina
+            chiede per prima cosa di importarle. */}
+        {zones.length > 0 && (
+          <>
+            <PackagingCategoriesCard
+              categories={packaging.categories}
+              onAdd={() => openPackagingDialog({ kind: 'category', category: null })}
+              onEdit={(category) => openPackagingDialog({ kind: 'category', category })}
+              onDelete={(category) => openPackagingDialog({ kind: 'delete-category', category })}
             />
-          </InlineGrid>
+
+            <InlineGrid columns={{ xs: 1, md: '2fr 1fr' }} gap="400">
+              <PackagingRulesCard
+                rules={packaging.fallbackRules}
+                hasCategories={packaging.categories.length > 0}
+                onAdd={() => openPackagingDialog({ kind: 'rule', index: null })}
+                onEdit={(index) => openPackagingDialog({ kind: 'rule', index })}
+                onDelete={(index) => openPackagingDialog({ kind: 'delete-rule', index })}
+              />
+              <PackagingDefaultsCard
+                key={packaging.configKey}
+                initialDefaultWeight={packaging.defaultWeightPerItemKg}
+                initialReturnCost={packaging.returnCost}
+                onSave={handleDefaultsSave}
+                isSaving={isSavingDefaults}
+              />
+            </InlineGrid>
+          </>
+        )}
+
+        {packagingDialog?.kind === 'category' && (
+          <CategoryModal
+            key={packagingDialog.category?.name ?? 'nuova'}
+            current={packagingCurrent}
+            category={packagingDialog.category}
+            onClose={closePackagingDialog}
+            onSave={(data) =>
+              submitPackaging({
+                intent: 'save-category',
+                originalName: data.originalName ?? '',
+                name: data.name,
+                cost: data.cost,
+              })
+            }
+            isSaving={isSavingPackagingRow}
+            serverError={packagingServerError}
+          />
+        )}
+
+        {packagingDialog?.kind === 'delete-category' && (
+          <ConfirmDeleteModal
+            title={t.shipping.packaging.categories.deleteTitle(packagingDialog.category.name)}
+            body={t.shipping.packaging.categories.deleteBody}
+            onClose={closePackagingDialog}
+            onConfirm={() => submitPackaging({ intent: 'delete-category', name: packagingDialog.category.name })}
+            isDeleting={isSavingPackagingRow}
+            serverError={packagingServerError}
+          />
+        )}
+
+        {packagingDialog?.kind === 'rule' && (
+          <RuleModal
+            key={packagingDialog.index ?? 'nuova'}
+            current={packagingCurrent}
+            index={packagingDialog.index}
+            onClose={closePackagingDialog}
+            onSave={(data) =>
+              submitPackaging({
+                intent: 'save-rule',
+                index: data.index !== null ? String(data.index) : '',
+                weightMaxKg: data.weightMaxKg,
+                category: data.category,
+              })
+            }
+            isSaving={isSavingPackagingRow}
+            serverError={packagingServerError}
+          />
+        )}
+
+        {packagingDialog?.kind === 'delete-rule' && packaging.fallbackRules[packagingDialog.index] && (
+          <ConfirmDeleteModal
+            title={t.shipping.packaging.rules.deleteTitle}
+            body={t.shipping.packaging.rules.deleteBody(
+              describeRuleWeight(packaging.fallbackRules[packagingDialog.index], t, locale),
+              packaging.fallbackRules[packagingDialog.index].category,
+            )}
+            onClose={closePackagingDialog}
+            onConfirm={() => submitPackaging({ intent: 'delete-rule', index: String(packagingDialog.index) })}
+            isDeleting={isSavingPackagingRow}
+            serverError={packagingServerError}
+          />
         )}
 
         {editingZone && (

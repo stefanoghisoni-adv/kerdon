@@ -30,7 +30,14 @@ export interface ZoneConfig {
   options: ShippingOptionConfig[];
 }
 
-export interface PackagingCategory { name: string; cost: number }
+/**
+ * Da dove arriva una categoria di imballo: creata dal merchant o portata da
+ * Shopify. Serve solo a mostrarla; il costo si calcola uguale.
+ */
+export type CategoryOrigin = 'shopify' | 'manual';
+
+/** `origin` assente = 'manual' (le categorie salvate prima che esistesse). */
+export interface PackagingCategory { name: string; cost: number; origin?: CategoryOrigin }
 /** `weightMaxKg` null = regola "tutto il resto". Si applica la prima che combacia. */
 export interface FallbackRule { weightMaxKg: number | null; category: string }
 

@@ -162,6 +162,21 @@ describe('parsePackaging', () => {
       error: null,
     });
   });
+  it("tiene un'origine valida e scarta quelle sconosciute e i campi estranei", () => {
+    const r = parsePackaging(
+      JSON.stringify([
+        { name: 'A', cost: 1, origin: 'shopify' },
+        { name: 'B', cost: 1, origin: 'manual' },
+        { name: 'C', cost: 1, origin: 'altro', extra: true },
+      ]),
+      '[]',
+    );
+    expect(r.value?.categories).toEqual([
+      { name: 'A', cost: 1, origin: 'shopify' },
+      { name: 'B', cost: 1, origin: 'manual' },
+      { name: 'C', cost: 1 },
+    ]);
+  });
   it('JSON malformato: errore tipizzato, nessuna eccezione', () => {
     expect(parsePackaging('[{', '[]')).toEqual({ value: null, error: 'shipping.packaging.errors.invalidData' });
   });

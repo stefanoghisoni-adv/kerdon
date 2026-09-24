@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
+import { normalizeOrigin } from './category-origin';
 import type {
   LogisticsConfig,
   ZoneConfig,
@@ -92,20 +93,27 @@ export async function loadLogisticsConfigStrict(
   }
 }
 
-/** Valida e filtra le categorie dal JSON, scartando quelle malformate. */
+/**
+ * Valida e filtra le categorie dal JSON, scartando quelle malformate.
+ *
+ * L'origine si legge a parte e non scarta mai una categoria: le categorie
+ * salvate prima che esistesse non ce l'hanno, e valgono 'manual'.
+ */
 export function validateCategories(json: unknown): PackagingCategory[] {
   if (!Array.isArray(json)) {
     return [];
   }
 
-  return json.filter((item): item is PackagingCategory => {
-    return (
-      typeof item === 'object' &&
-      item !== null &&
-      typeof (item as any).name === 'string' &&
-      typeof (item as any).cost === 'number'
-    );
-  });
+  return json
+    .filter((item): item is PackagingCategory => {
+      return (
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as any).name === 'string' &&
+        typeof (item as any).cost === 'number'
+      );
+    })
+    .map((item) => ({ name: item.name, cost: item.cost, origin: normalizeOrigin(item.origin) }));
 }
 
 /** Valida e filtra le fallback rules dal JSON, scartando quelle malformate. */
