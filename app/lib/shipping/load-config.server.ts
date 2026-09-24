@@ -5,6 +5,8 @@ import type {
   ZoneConfig,
   PackagingCategory,
   FallbackRule,
+  ShippingOptionConfig,
+  OptionCostType,
 } from './types';
 
 export async function loadLogisticsConfig(shopId: string): Promise<LogisticsConfig | null> {
@@ -32,10 +34,15 @@ export async function loadLogisticsConfigStrict(
   shopId: string,
 ): Promise<LogisticsConfig | null> {
   try {
-    // Leggi zone con tariffe
+    // Leggi zone con tariffe e opzioni
     const zones = await prisma.shippingZone.findMany({
       where: { shopId },
-      include: { rates: true },
+      include: {
+        rates: true,
+        options: {
+          include: { rates: true },
+        },
+      },
     });
 
     // Leggi packaging config
@@ -59,6 +66,7 @@ export async function loadLogisticsConfigStrict(
         weightToKg: rate.weightTo ? Number(rate.weightTo) : null,
         cost: Number(rate.cost),
       })),
+      options: convertOptions(zone.options),
     }));
 
     // Converti packaging config con validazione difensiva
@@ -114,6 +122,46 @@ export function validateFallbackRules(json: unknown): FallbackRule[] {
       ((item as any).weightMaxKg === null || typeof (item as any).weightMaxKg === 'number')
     );
   });
+}
+
+/**
+ * Converte le opzioni da Prisma a ShippingOptionConfig, scartando quelle con
+ * costType sconosciuto.
+ */
+function convertOptions(
+  options: Array<{
+    name: string;
+    costType: string;
+    rates: Array<{
+      rangeFrom: Prisma.Decimal | null;
+      rangeTo: Prisma.Decimal | null;
+      cost: Prisma.Decimal;
+    }>;
+  }>,
+): ShippingOptionConfig[] {
+  const validTypes: OptionCostType[] = ['flat', 'linear', 'weight_brackets', 'value_brackets'];
+
+  return options
+    .filter((option) => {
+      if (!validTypes.includes(option.costType as OptionCostType)) {
+        console.warn(
+          '[loadLogisticsConfig] costType sconosciuto, opzione scartata:',
+          option.costType,
+          option.name,
+        );
+        return false;
+      }
+      return true;
+    })
+    .map((option) => ({
+      name: option.name,
+      costType: option.costType as OptionCostType,
+      brackets: option.rates.map((rate) => ({
+        from: rate.rangeFrom ? Number(rate.rangeFrom) : null,
+        to: rate.rangeTo ? Number(rate.rangeTo) : null,
+        cost: Number(rate.cost),
+      })),
+    }));
 }
 
 /**

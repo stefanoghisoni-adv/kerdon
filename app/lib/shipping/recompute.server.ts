@@ -80,6 +80,8 @@ function inputDi(riga: OrderRow): OrderLogisticsInput {
     item_count: numeroOppureNull(riga.item_count),
     returned_at: riga.returned_at ?? null,
     packaging_category: riga.packaging_category ?? null,
+    shipping_method: null,
+    total_price: null,
   };
 }
 

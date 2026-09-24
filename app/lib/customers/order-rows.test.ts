@@ -259,7 +259,7 @@ describe('orderToRows — dati di spedizione e costo logistico', () => {
   // Una configurazione minima: una zona lineare, una scatola, un reso forfait.
   const config: LogisticsConfig = {
     zones: [
-      { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }] },
+      { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }], options: [] },
     ],
     categories: [{ name: 'Scatola', cost: 1.5 }],
     fallbackRules: [{ weightMaxKg: null, category: 'Scatola' }],

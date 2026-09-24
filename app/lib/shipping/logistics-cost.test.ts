@@ -5,13 +5,13 @@ import type { LogisticsConfig, OrderLogisticsInput } from './types';
 
 const config: LogisticsConfig = {
   zones: [
-    { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }] },
+    { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }], options: [] },
     { zoneName: 'UE', countries: ['FR', 'DE'], restOfWorld: false, rateType: 'brackets', rates: [
       { weightFromKg: 0, weightToKg: 1, cost: 5 },
       { weightFromKg: 1, weightToKg: 5, cost: 8 },
       { weightFromKg: 5, weightToKg: null, cost: 15 },
-    ] },
-    { zoneName: 'Mondo', countries: [], restOfWorld: true, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 10 }] },
+    ], options: [] },
+    { zoneName: 'Mondo', countries: [], restOfWorld: true, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 10 }], options: [] },
   ],
   categories: [{ name: 'Busta', cost: 1.5 }, { name: 'Box', cost: 3 }],
   fallbackRules: [{ weightMaxKg: 1, category: 'Busta' }, { weightMaxKg: null, category: 'Box' }],
@@ -21,7 +21,7 @@ const config: LogisticsConfig = {
 
 const base: OrderLogisticsInput = {
   fulfillment_status: 'fulfilled', shipping_country_code: 'IT', total_weight_grams: 3000,
-  item_count: 2, returned_at: null, packaging_category: 'Box',
+  item_count: 2, returned_at: null, packaging_category: 'Box', shipping_method: null, total_price: null,
 };
 
 describe('isShipped', () => {

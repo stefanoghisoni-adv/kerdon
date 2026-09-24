@@ -177,6 +177,8 @@ export function orderToRows(
     item_count,
     returned_at: order.returned_at ?? null,
     packaging_category: order.packaging_category ?? null,
+    shipping_method: null,
+    total_price: money(order.total_price),
   };
 
   return {
@@ -187,7 +189,6 @@ export function orderToRows(
       customer_first_name: order.customer_first_name,
       customer_last_name: order.customer_last_name,
       currency: order.currency,
-      total_price: money(order.total_price),
       financial_status: order.financial_status,
       cancelled_at: order.cancelled_at,
       placed_at: order.placed_at,

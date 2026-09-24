@@ -35,6 +35,7 @@
 | 4 | Ordini: `shipping_method` v13, scrittura e ricalcolo | opus |
 | 5 | UI: zone → opzioni, modale costi per tipo | sonnet |
 | 6 | E2E azioni | sonnet |
+| 7 | Pagina a tutta larghezza, tabella categorie di imballo (importate o create) | opus |
 
 ---
 
@@ -179,6 +180,22 @@ Requisiti:
 Scenari reali sulle azioni (niente skip): `save-option-cost` flat valido; fasce di valore contigue valide; fasce non contigue rifiutate; opzione di un altro negozio rifiutata; JSON malformato → errore tipizzato. I 21 esistenti restano verdi.
 
 - [ ] Scrivi → `npm run test:e2e -- spedizioni.spec.ts` verde → suite completa → commit `test(spedizioni): scenari end-to-end dei costi per opzione`.
+
+---
+
+### Task 7: Pagina a tutta larghezza e tabella delle categorie di imballo
+
+**Files:** `app/routes/spedizioni.tsx`, `app/components/Shipping/*` (PackagingCard si divide), eventuale `app/lib/shipping/sync-packages.server.ts` (+ test), i18n IT/EN.
+
+Requisiti (richiesta dell'utente del 2026-09-24):
+1. La pagina Spedizioni usa tutta la larghezza, come la dashboard (stessa impostazione di `Page` usata da `app/routes/_index.tsx`), non la larghezza stretta dei cataloghi.
+2. Le categorie di imballo diventano una **tabella a se'** sotto le zone: righe in sola lettura (nome, costo, origine: "Da Shopify" / "Creata da te"), azioni Modifica ed Elimina che aprono una modale; pulsante "Aggiungi categoria". Una categoria salvata non deve piu' sembrare un campo appena aggiunto.
+3. Le regole per peso diventano anch'esse una tabella con Modifica/Elimina/Aggiungi; peso di default per articolo e costo dei resi restano campi in una card con il loro Salva.
+4. **Importate:** verifica sulla versione Admin API del progetto se i pacchi configurati dal merchant in Shopify (Impostazioni → Spedizione → Pacchi) sono leggibili via GraphQL. Se si', "Importa da Shopify" li porta come categorie (nome e dimensioni/peso a titolo informativo, costo 0 da compilare), senza sovrascrivere le categorie esistenti con lo stesso nome; serve un campo origine sulle categorie (nel JSON di `PackagingConfig.categories`, con valore di default "creata" per le esistenti, letto in modo difensivo da `load-config.server.ts`). Se non sono leggibili, niente import: solo categorie create, e lo dici nel report.
+5. Eliminare una categoria usata da una regola resta bloccato con messaggio (comportamento attuale). Ogni salvataggio accoda il ricalcolo. Toast solo con `shopify.toast` (App Bridge), mai il `Toast` di Polaris.
+6. Test unitari delle parti pure; E2E delle nuove azioni (aggiungi, modifica, elimina categoria; import se presente).
+
+- [ ] TDD sulle parti pure → implementazione → tsc → suite completa → e2e spedizioni → commit `feat(spedizioni): pagina a tutta larghezza e tabella delle categorie di imballo`.
 
 ## Dopo l'esecuzione (utente)
 

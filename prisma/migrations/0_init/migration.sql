@@ -884,6 +884,44 @@ CREATE INDEX "shipping_rates_zone_id_idx" ON "shipping_rates"("zone_id");
 ALTER TABLE "shipping_rates" ADD CONSTRAINT "shipping_rates_zone_id_fkey" FOREIGN KEY ("zone_id") REFERENCES "shipping_zones"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- CreateTable
+CREATE TABLE "shipping_options" (
+    "id" TEXT NOT NULL,
+    "zone_id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "cost_type" TEXT NOT NULL DEFAULT 'flat',
+    "shopify_kind" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "shipping_options_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "shipping_option_rates" (
+    "id" TEXT NOT NULL,
+    "option_id" TEXT NOT NULL,
+    "range_from" DECIMAL(12,3),
+    "range_to" DECIMAL(12,3),
+    "cost" DECIMAL(10,2) NOT NULL,
+
+    CONSTRAINT "shipping_option_rates_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "shipping_options_zone_id_idx" ON "shipping_options"("zone_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "shipping_options_zone_id_name_key" ON "shipping_options"("zone_id", "name");
+
+-- CreateIndex
+CREATE INDEX "shipping_option_rates_option_id_idx" ON "shipping_option_rates"("option_id");
+
+-- AddForeignKey
+ALTER TABLE "shipping_options" ADD CONSTRAINT "shipping_options_zone_id_fkey" FOREIGN KEY ("zone_id") REFERENCES "shipping_zones"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "shipping_option_rates" ADD CONSTRAINT "shipping_option_rates_option_id_fkey" FOREIGN KEY ("option_id") REFERENCES "shipping_options"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
 CREATE TABLE "packaging_config" (
     "shop_id" TEXT NOT NULL,
     "categories" JSONB NOT NULL DEFAULT '[]',

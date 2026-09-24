@@ -7,12 +7,27 @@ export interface RateBracket {
   cost: number;
 }
 
+export type OptionCostType = 'flat' | 'linear' | 'weight_brackets' | 'value_brackets';
+
+export interface OptionBracket {
+  from: number | null;
+  to: number | null;
+  cost: number;
+}
+
+export interface ShippingOptionConfig {
+  name: string;
+  costType: OptionCostType;
+  brackets: OptionBracket[];
+}
+
 export interface ZoneConfig {
   zoneName: string;
   countries: string[];
   restOfWorld: boolean;
   rateType: RateType;
   rates: RateBracket[];
+  options: ShippingOptionConfig[];
 }
 
 export interface PackagingCategory { name: string; cost: number }
@@ -35,4 +50,6 @@ export interface OrderLogisticsInput {
   item_count: number | null;
   returned_at: string | null;
   packaging_category: string | null;
+  shipping_method: string | null;
+  total_price: number | null;
 }

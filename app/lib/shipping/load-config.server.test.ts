@@ -51,6 +51,7 @@ describe('loadLogisticsConfig', () => {
             cost: new Prisma.Decimal(10.5),
           },
         ],
+        options: [],
       },
     ]);
     findUnique.mockResolvedValue(null);
@@ -71,6 +72,7 @@ describe('loadLogisticsConfig', () => {
               cost: 10.5,
             },
           ],
+          options: [],
         },
       ],
       categories: [],
@@ -153,6 +155,7 @@ describe('loadLogisticsConfig', () => {
         restOfWorld: false,
         rateType: 'linear',
         rates: [],
+        options: [],
       },
     ]);
     findUnique.mockResolvedValue(null);
@@ -176,6 +179,7 @@ describe('loadLogisticsConfig', () => {
             cost: new Prisma.Decimal(10),
           },
         ],
+        options: [],
       },
     ]);
     findUnique.mockResolvedValue(null);
@@ -187,6 +191,116 @@ describe('loadLogisticsConfig', () => {
       weightToKg: null,
       cost: 10,
     });
+  });
+
+  it('carica le opzioni di spedizione e converte i Decimal', async () => {
+    findMany.mockResolvedValue([
+      {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        restOfWorld: false,
+        rateType: 'linear',
+        rates: [],
+        options: [
+          {
+            name: 'Standard',
+            costType: 'flat',
+            rates: [
+              {
+                rangeFrom: null,
+                rangeTo: null,
+                cost: new Prisma.Decimal(5.5),
+              },
+            ],
+          },
+          {
+            name: 'Express',
+            costType: 'weight_brackets',
+            rates: [
+              {
+                rangeFrom: new Prisma.Decimal(0),
+                rangeTo: new Prisma.Decimal(2),
+                cost: new Prisma.Decimal(8),
+              },
+              {
+                rangeFrom: new Prisma.Decimal(2),
+                rangeTo: null,
+                cost: new Prisma.Decimal(12),
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    findUnique.mockResolvedValue(null);
+
+    const result = await loadLogisticsConfig('shop-1');
+
+    expect(result?.zones[0].options).toEqual([
+      {
+        name: 'Standard',
+        costType: 'flat',
+        brackets: [
+          {
+            from: null,
+            to: null,
+            cost: 5.5,
+          },
+        ],
+      },
+      {
+        name: 'Express',
+        costType: 'weight_brackets',
+        brackets: [
+          {
+            from: 0,
+            to: 2,
+            cost: 8,
+          },
+          {
+            from: 2,
+            to: null,
+            cost: 12,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('scarta opzioni con costType sconosciuto', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    findMany.mockResolvedValue([
+      {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        restOfWorld: false,
+        rateType: 'linear',
+        rates: [],
+        options: [
+          {
+            name: 'Standard',
+            costType: 'flat',
+            rates: [{ rangeFrom: null, rangeTo: null, cost: new Prisma.Decimal(5) }],
+          },
+          {
+            name: 'Invalid',
+            costType: 'invalid_type',
+            rates: [{ rangeFrom: null, rangeTo: null, cost: new Prisma.Decimal(10) }],
+          },
+        ],
+      },
+    ]);
+    findUnique.mockResolvedValue(null);
+
+    const result = await loadLogisticsConfig('shop-1');
+
+    expect(result?.zones[0].options).toHaveLength(1);
+    expect(result?.zones[0].options[0].name).toBe('Standard');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('costType sconosciuto'),
+      'invalid_type',
+      'Invalid',
+    );
   });
 });
 

@@ -74,6 +74,7 @@ const CONFIG: LogisticsConfig = {
       restOfWorld: false,
       rateType: 'linear',
       rates: [{ weightFromKg: null, weightToKg: null, cost: 5 }],
+      options: [],
     },
   ],
   categories: [{ name: 'scatola', cost: 1 }],
@@ -91,6 +92,8 @@ function ordine(over: Record<string, unknown>) {
     item_count: 1,
     returned_at: null,
     packaging_category: null,
+    shipping_method: null,
+    total_price: null,
     ...over,
   };
 }
