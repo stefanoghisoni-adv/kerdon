@@ -65,6 +65,33 @@ describe('loadShippingPageData', () => {
     });
   });
 
+  it('regole salvate fuori ordine: la pagina le mostra nell ordine in cui si applicano', async () => {
+    findMany.mockResolvedValue([]);
+    findUnique.mockResolvedValue({
+      categories: [
+        { name: 'A', cost: 1 },
+        { name: 'B', cost: 1 },
+        { name: 'C', cost: 1 },
+      ],
+      fallbackRules: [
+        { weightMaxKg: 5, category: 'A' },
+        { weightMaxKg: 1, category: 'B' },
+        { weightMaxKg: null, category: 'C' },
+      ],
+      defaultWeightPerItem: null,
+      returnCost: null,
+      updatedAt: new Date('2026-09-23T10:00:00Z'),
+    });
+
+    const dati = await loadShippingPageData('shop-1');
+
+    expect(dati.packaging.fallbackRules).toEqual([
+      { weightMaxKg: 1, category: 'B' },
+      { weightMaxKg: 5, category: 'A' },
+      { weightMaxKg: null, category: 'C' },
+    ]);
+  });
+
   it('senza packaging salvato: la configurazione vuota', async () => {
     findMany.mockResolvedValue([]);
     findUnique.mockResolvedValue(null);

@@ -15,7 +15,6 @@ import type { Dictionary } from '~/lib/i18n/context';
 export type ShippingIntent =
   | 'sync-zones'
   | 'save-zone-rates'
-  | 'save-packaging'
   | 'save-option-cost'
   | 'save-category'
   | 'delete-category'
@@ -101,13 +100,6 @@ export function feedbackFromActionData(data: ShippingActionData | undefined, t: 
         ...NIENTE,
         toast: { content: t.shipping.modal.saveError, error: true },
         zoneError: testoDiErrore(data.error, t) ?? t.shipping.modal.saveError,
-      };
-
-    case 'save-packaging':
-      if (data.success) return { ...NIENTE, toast: { content: t.shipping.packaging.saveSuccess, error: false } };
-      return {
-        ...NIENTE,
-        toast: { content: testoDiErrore(data.error, t) ?? t.shipping.packaging.saveError, error: true },
       };
 
     case 'save-option-cost':

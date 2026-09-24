@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { normalizeOrigin } from './category-origin';
+import { sortRules } from './rule-order';
 import type {
   LogisticsConfig,
   ZoneConfig,
@@ -116,20 +117,24 @@ export function validateCategories(json: unknown): PackagingCategory[] {
     .map((item) => ({ name: item.name, cost: item.cost, origin: normalizeOrigin(item.origin) }));
 }
 
-/** Valida e filtra le fallback rules dal JSON, scartando quelle malformate. */
+/**
+ * Valida e filtra le fallback rules dal JSON, scartando quelle malformate, e le
+ * mette in ordine di peso (vedi rule-order): pagina, modifiche e calcolo le
+ * vedono tutti nello stesso ordine.
+ */
 export function validateFallbackRules(json: unknown): FallbackRule[] {
   if (!Array.isArray(json)) {
     return [];
   }
 
-  return json.filter((item): item is FallbackRule => {
+  return sortRules(json.filter((item): item is FallbackRule => {
     return (
       typeof item === 'object' &&
       item !== null &&
       typeof (item as any).category === 'string' &&
       ((item as any).weightMaxKg === null || typeof (item as any).weightMaxKg === 'number')
     );
-  });
+  }));
 }
 
 /**

@@ -2,8 +2,9 @@
 //
 // Le azioni della pagina Spedizioni: salvataggio tariffe e packaging.
 //
-// COSA COPRE. Le azioni `save-zone-rates`, `save-packaging` e `sync-zones`
-// della rotta /spedizioni: validazione dei brackets, ownership delle zone,
+// COSA COPRE. Le azioni della rotta /spedizioni (tariffe, costi opzione,
+// categorie e regole di imballo una riga alla volta, peso di default e resi,
+// importazione zone): validazione dei brackets, ownership delle zone,
 // validazione del packaging, JSON malformato, importazione zone (con l'admin
 // GraphQL finto) e il ricalcolo accodato dopo l'importazione. Non copre la voce
 // di menu (vive in App Bridge, fuori dalla portata dell'harness).
@@ -108,36 +109,6 @@ async function salvaTariffe(
     form.set('costPerKg', dati.costPerKg);
   } else if (dati.rateType === 'brackets' && dati.brackets) {
     form.set('brackets', JSON.stringify(dati.brackets));
-  }
-
-  const risposta = await context.request.post('/spedizioni', {
-    data: form.toString(),
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  });
-
-  return { stato: risposta.status(), corpo: (await risposta.json()) as Record<string, unknown> };
-}
-
-/** Salva la configurazione packaging. */
-async function salvaPackaging(
-  context: BrowserContext,
-  dati: {
-    categories: Array<{ name: string; cost: number }>;
-    rules: Array<{ weightMaxKg: number | null; category: string }>;
-    defaultWeightPerItemKg?: number | null;
-    returnCost?: number | null;
-  },
-): Promise<{ stato: number; corpo: Record<string, unknown> }> {
-  const form = new URLSearchParams();
-  form.set('intent', 'save-packaging');
-  form.set('categories', JSON.stringify(dati.categories));
-  form.set('rules', JSON.stringify(dati.rules));
-
-  if (dati.defaultWeightPerItemKg !== undefined && dati.defaultWeightPerItemKg !== null) {
-    form.set('defaultWeightPerItemKg', String(dati.defaultWeightPerItemKg));
-  }
-  if (dati.returnCost !== undefined && dati.returnCost !== null) {
-    form.set('returnCost', String(dati.returnCost));
   }
 
   const risposta = await context.request.post('/spedizioni', {
@@ -406,141 +377,6 @@ prova.describe('le azioni della pagina Spedizioni', () => {
     });
   });
 
-  prova.describe('save-packaging', () => {
-    prova('con configurazione valida salva con successo', async ({ request, context }) => {
-      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
-
-      const { stato, corpo } = await salvaPackaging(context, {
-        categories: [
-          { name: 'Busta', cost: 1.5 },
-          { name: 'Scatola piccola', cost: 3.0 },
-          { name: 'Scatola grande', cost: 5.0 },
-        ],
-        rules: [
-          { weightMaxKg: 1, category: 'Busta' },
-          { weightMaxKg: 5, category: 'Scatola piccola' },
-          { weightMaxKg: null, category: 'Scatola grande' },
-        ],
-        defaultWeightPerItemKg: 0.5,
-        returnCost: 4.0,
-      });
-
-      expect(stato).toBe(200);
-      expect(corpo.success).toBe(true);
-
-      // Verifica che la configurazione sia stata salvata
-      const config = await db<{
-        categories: unknown;
-        fallbackRules: unknown;
-        defaultWeightPerItem: string;
-        returnCost: string;
-      } | null>(request, 'packagingConfig', 'findUnique', {
-        where: { shopId: shop.id },
-        select: {
-          categories: true,
-          fallbackRules: true,
-          defaultWeightPerItem: true,
-          returnCost: true,
-        },
-      });
-
-      expect(config).not.toBeNull();
-      expect(Number(config!.defaultWeightPerItem)).toBe(0.5);
-      expect(Number(config!.returnCost)).toBe(4.0);
-    });
-
-    prova('con regola che punta a categoria mancante rifiuta', async ({ request, context }) => {
-      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
-
-      const { stato, corpo } = await salvaPackaging(context, {
-        categories: [
-          { name: 'Busta', cost: 1.5 },
-          { name: 'Scatola', cost: 3.0 },
-        ],
-        rules: [
-          { weightMaxKg: 1, category: 'Busta' },
-          { weightMaxKg: null, category: 'CategoriaInesistente' }, // Categoria che non esiste
-        ],
-      });
-
-      expect(stato).toBe(200);
-      expect(corpo.success).toBe(false);
-      expect(corpo.error).toBe('shipping.packaging.errors.ruleInvalidCategory');
-    });
-
-    prova('con nome categoria duplicato rifiuta', async ({ request, context }) => {
-      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
-
-      const { stato, corpo } = await salvaPackaging(context, {
-        categories: [
-          { name: 'Scatola', cost: 1.5 },
-          { name: 'Scatola', cost: 3.0 }, // Nome duplicato
-        ],
-        rules: [
-          { weightMaxKg: null, category: 'Scatola' },
-        ],
-      });
-
-      expect(stato).toBe(200);
-      expect(corpo.success).toBe(false);
-      expect(corpo.error).toBe('shipping.packaging.errors.categoryNameDuplicate');
-    });
-
-    prova('con nome categoria vuoto rifiuta', async ({ request, context }) => {
-      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
-
-      const { stato, corpo } = await salvaPackaging(context, {
-        categories: [
-          { name: '', cost: 1.5 }, // Nome vuoto
-        ],
-        rules: [
-          { weightMaxKg: null, category: '' },
-        ],
-      });
-
-      expect(stato).toBe(200);
-      expect(corpo.success).toBe(false);
-      expect(corpo.error).toBe('shipping.packaging.errors.categoryNameEmpty');
-    });
-
-    prova('con più regole illimitate rifiuta', async ({ request, context }) => {
-      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
-
-      const { stato, corpo } = await salvaPackaging(context, {
-        categories: [
-          { name: 'Busta', cost: 1.5 },
-          { name: 'Scatola', cost: 3.0 },
-        ],
-        rules: [
-          { weightMaxKg: null, category: 'Busta' }, // Prima illimitata
-          { weightMaxKg: null, category: 'Scatola' }, // Seconda illimitata
-        ],
-      });
-
-      expect(stato).toBe(200);
-      expect(corpo.success).toBe(false);
-      expect(corpo.error).toBe('shipping.packaging.errors.multipleUnlimitedRules');
-    });
-
-    prova('con regola illimitata non ultima rifiuta', async ({ request, context }) => {
-      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
-
-      const { stato, corpo } = await salvaPackaging(context, {
-        categories: [
-          { name: 'Busta', cost: 1.5 },
-          { name: 'Scatola', cost: 3.0 },
-        ],
-        rules: [
-          { weightMaxKg: null, category: 'Busta' }, // Illimitata ma non ultima
-          { weightMaxKg: 5, category: 'Scatola' },
-        ],
-      });
-
-      expect(stato).toBe(200);
-      expect(corpo.success).toBe(false);
-      expect(corpo.error).toBe('shipping.packaging.errors.unlimitedRuleMustBeLast');
-    });
-  });
   prova.describe('cosa vede il merchant dopo ogni azione', () => {
     prova('tariffe salvate: la risposta porta l intento e la pagina mostra il toast di successo', async ({ request, context }) => {
       const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
@@ -582,27 +418,6 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       expect(f.toast).toEqual({ content: italiano.shipping.modal.saveError, error: true });
       expect(f.zoneSaved).toBe(false);
       expect(f.zoneError).toBe(italiano.shipping.errors.bracketsHaveGaps);
-    });
-
-    prova('packaging salvato e rifiutato: il toast giusto per ciascuno', async ({ request, context }) => {
-      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
-
-      const ok = await salvaPackaging(context, {
-        categories: [{ name: 'Busta', cost: 1.5 }],
-        rules: [{ weightMaxKg: null, category: 'Busta' }],
-      });
-      expect(ok.corpo).toMatchObject({ intent: 'save-packaging', success: true });
-      expect(cosaVede(ok.corpo).toast).toEqual({ content: italiano.shipping.packaging.saveSuccess, error: false });
-
-      const ko = await salvaPackaging(context, {
-        categories: [{ name: 'Busta', cost: 1.5 }],
-        rules: [{ weightMaxKg: null, category: 'Scatola' }],
-      });
-      expect(ko.corpo).toMatchObject({ intent: 'save-packaging', success: false });
-      expect(cosaVede(ko.corpo).toast).toEqual({
-        content: italiano.shipping.packaging.errors.ruleInvalidCategory,
-        error: true,
-      });
     });
 
     prova('permesso sulle spedizioni mancante: banner, non toast', async ({ request, context }) => {
@@ -726,23 +541,6 @@ prova.describe('le azioni della pagina Spedizioni', () => {
 
       expect(stato).toBe(200);
       expect(corpo.error).toBe('shipping.errors.invalidLinearCost');
-    });
-
-    prova('packaging con JSON rotto: errore di validazione, non un 500', async ({ request, context }) => {
-      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
-
-      const { stato, corpo } = await inviaForm(context, {
-        intent: 'save-packaging',
-        categories: '[{',
-        rules: '[]',
-      });
-
-      expect(stato).toBe(200);
-      expect(corpo).toMatchObject({
-        intent: 'save-packaging',
-        success: false,
-        error: 'shipping.packaging.errors.invalidData',
-      });
     });
   });
 
@@ -1208,6 +1006,22 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       const f = cosaVede(corpo);
       expect(f.packagingSaved).toBe(false);
       expect(f.packagingError).toBe(italiano.shipping.packaging.errors.categoryStillReferenced);
+    });
+
+    prova('categoria senza nome o regola verso una categoria che non esiste: rifiutate', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      await seminaPackaging(request, shop.id, { categories: [{ name: 'Busta', cost: 1 }] });
+
+      const senzaNome = await inviaForm(context, { intent: 'save-category', name: '   ', cost: '1' });
+      expect(senzaNome.corpo.error).toBe('shipping.packaging.errors.categoryNameEmpty');
+
+      const regola = await inviaForm(context, { intent: 'save-rule', weightMaxKg: '', category: 'Scatola' });
+      expect(regola.corpo.error).toBe('shipping.packaging.errors.ruleInvalidCategory');
+
+      const config = await leggiPackaging(request, shop.id);
+      expect(config!.categories).toEqual([{ name: 'Busta', cost: 1 }]);
+      expect(config!.fallbackRules).toEqual([]);
+      expect(await ricalcoli(request, shop.id)).toBe(0);
     });
 
     prova('regole: aggiunte in ordine di peso, modificate ed eliminate per posizione', async ({ request, context }) => {

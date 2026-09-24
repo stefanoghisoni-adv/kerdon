@@ -12,7 +12,6 @@ import {
   InlineGrid,
   Page,
 } from '@shopify/polaris';
-import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { requireShopCapability } from '~/lib/authz/require-capability.server';
@@ -22,7 +21,6 @@ import { syncShippingZones } from '~/lib/shipping/sync-zones.server';
 import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute.server';
 import { loadShippingPageData } from '~/lib/shipping/page-data.server';
 import { parseBrackets } from '~/components/Shipping/brackets';
-import { parsePackaging } from '~/components/Shipping/packaging';
 import {
   deleteCategory,
   deleteRule,
@@ -40,7 +38,7 @@ import { PackagingCategoriesCard } from '~/components/Shipping/PackagingCategori
 import { PackagingRulesCard, describeRuleWeight } from '~/components/Shipping/PackagingRulesCard';
 import { PackagingDefaultsCard } from '~/components/Shipping/PackagingDefaultsCard';
 import { CategoryModal, ConfirmDeleteModal, RuleModal } from '~/components/Shipping/PackagingModals';
-import type { RateBracket, PackagingCategory, FallbackRule, OptionCostType, OptionBracket } from '~/lib/shipping/types';
+import type { RateBracket, PackagingCategory, OptionCostType, OptionBracket } from '~/lib/shipping/types';
 
 /** La modale aperta sulle tabelle di imballo, una alla volta. */
 type PackagingDialog =
@@ -64,7 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 /**
  * La risposta dell'azione, sempre con l'intento a cui risponde.
  *
- * La pagina usa un fetcher solo per tre azioni, e quando la risposta arriva
+ * La pagina usa un fetcher solo per tutte le azioni, e quando la risposta arriva
  * `fetcher.formData` e' gia' stato azzerato da Remix: l'intento va rimandato
  * qui, o il client non sa quale toast mostrare (vedi feedback.ts).
  */
@@ -210,52 +208,6 @@ export async function action({ request }: ActionFunctionArgs) {
     await enqueueLogisticsRecompute(shop.id);
 
     return risposta('save-zone-rates', { success: true });
-  }
-
-  if (intent === 'save-packaging') {
-    const parsed = parsePackaging(
-      formData.get('categories')?.toString(),
-      formData.get('rules')?.toString(),
-    );
-    if (parsed.error !== null) {
-      return risposta('save-packaging', { success: false, error: parsed.error });
-    }
-    const categories: PackagingCategory[] = parsed.value.categories;
-    const rules: FallbackRule[] = parsed.value.rules;
-
-    const defaultWeight = importoFacoltativo(formData.get('defaultWeightPerItemKg')?.toString());
-    const returnCost = importoFacoltativo(formData.get('returnCost')?.toString());
-
-    // Verifica valori finiti e non negativi
-    if (defaultWeight !== null && Number.isNaN(defaultWeight)) {
-      return risposta('save-packaging', { success: false, error: 'invalid_default_weight' });
-    }
-    if (returnCost !== null && Number.isNaN(returnCost)) {
-      return risposta('save-packaging', { success: false, error: 'invalid_return_cost' });
-    }
-
-    // Upsert della configurazione
-    await prisma.packagingConfig.upsert({
-      where: { shopId: shop.id },
-      create: {
-        shopId: shop.id,
-        categories: categories as unknown as Prisma.InputJsonValue,
-        fallbackRules: rules as unknown as Prisma.InputJsonValue,
-        defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
-        returnCost: returnCost !== null ? new Decimal(returnCost) : null,
-      },
-      update: {
-        categories: categories as unknown as Prisma.InputJsonValue,
-        fallbackRules: rules as unknown as Prisma.InputJsonValue,
-        defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
-        returnCost: returnCost !== null ? new Decimal(returnCost) : null,
-      },
-    });
-
-    // Accoda il ricalcolo dei costi logistici in background
-    await enqueueLogisticsRecompute(shop.id);
-
-    return risposta('save-packaging', { success: true });
   }
 
   if (intent === 'save-category') {
@@ -583,9 +535,9 @@ export default function ShippingPage() {
 
   return (
     <Page
-      // A tutta larghezza come la dashboard: zone e categorie sono tabelle a
-      // quattro colonne, e nella larghezza stretta dei cataloghi i nomi delle
-      // opzioni andavano a capo.
+      // A tutta larghezza come la dashboard: zone e categorie sono tabelle, e
+      // nella larghezza stretta dei cataloghi i nomi delle opzioni andavano a
+      // capo.
       fullWidth
       title={t.shipping.title}
       primaryAction={

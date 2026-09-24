@@ -59,25 +59,6 @@ describe('feedbackFromActionData', () => {
     expect(f.toast?.error).toBe(true);
   });
 
-  prova('packaging salvato: toast di successo', () => {
-    expect(feedbackFromActionData({ intent: 'save-packaging', success: true }, t).toast).toEqual({
-      content: t.shipping.packaging.saveSuccess,
-      error: false,
-    });
-  });
-
-  prova('packaging rifiutato: toast di errore con il motivo quando c e', () => {
-    expect(
-      feedbackFromActionData(
-        { intent: 'save-packaging', success: false, error: 'shipping.packaging.errors.ruleInvalidCategory' },
-        t,
-      ).toast,
-    ).toEqual({ content: t.shipping.packaging.errors.ruleInvalidCategory, error: true });
-    expect(
-      feedbackFromActionData({ intent: 'save-packaging', success: false, error: 'invalid_request' }, t).toast,
-    ).toEqual({ content: t.shipping.packaging.saveError, error: true });
-  });
-
   prova('zone importate: toast di successo, nessun banner', () => {
     const f = feedbackFromActionData({ intent: 'sync-zones', success: true }, t);
     expect(f.toast).toEqual({ content: t.shipping.syncSuccess, error: false });

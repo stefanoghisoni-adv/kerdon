@@ -108,38 +108,3 @@ export function validatePackaging(input: unknown): string | null {
 
   return null;
 }
-
-/**
- * Categorie e regole dai campi del form, gia' validate.
- *
- * Come per le fasce: il JSON malformato torna come errore di validazione, non
- * come eccezione.
- */
-export function parsePackaging(
-  categoriesRaw: string | undefined,
-  rulesRaw: string | undefined,
-): { value: PackagingInput; error: null } | { value: null; error: string } {
-  if (!categoriesRaw || !rulesRaw) return { value: null, error: INVALID_PACKAGING };
-  let value: unknown;
-  try {
-    value = { categories: JSON.parse(categoriesRaw), rules: JSON.parse(rulesRaw) };
-  } catch {
-    return { value: null, error: INVALID_PACKAGING };
-  }
-  const error = validatePackaging(value);
-  if (error) return { value: null, error };
-  const { categories, rules } = value as PackagingInput;
-  // Solo i campi che conosciamo: il JSON finisce cosi' com'e' nella
-  // configurazione, e un'origine inventata non deve arrivarci.
-  return {
-    value: {
-      categories: categories.map((c) =>
-        c.origin === 'shopify' || c.origin === 'manual'
-          ? { name: c.name, cost: c.cost, origin: c.origin }
-          : { name: c.name, cost: c.cost },
-      ),
-      rules: rules.map((r) => ({ weightMaxKg: r.weightMaxKg, category: r.category })),
-    },
-    error: null,
-  };
-}

@@ -45,20 +45,22 @@ export function CategoryModal({ current, category, onClose, onSave, isSaving, se
   const c = t.shipping.packaging.categories;
   const [name, setName] = useState(category?.name ?? '');
   const [cost, setCost] = useState(category ? String(category.cost) : '');
+  // La chiave dell'errore, non il testo: decide sotto quale campo mostrarlo.
   const [localError, setLocalError] = useState<string | null>(null);
 
   const handleSave = () => {
     const parsed = cost.trim() === '' ? Number.NaN : Number(cost);
     const esito = saveCategory(current, category?.name ?? null, { name, cost: parsed });
     if (esito.error !== null) {
-      setLocalError(testoDiErrore(esito.error, t) ?? t.shipping.packaging.saveError);
+      setLocalError(esito.error);
       return;
     }
     setLocalError(null);
     onSave({ originalName: category?.name ?? null, name: name.trim(), cost });
   };
 
-  const costError = localError === t.shipping.packaging.errors.categoryCostNegative;
+  const localText = localError ? (testoDiErrore(localError, t) ?? t.shipping.packaging.saveError) : null;
+  const costError = localError === 'shipping.packaging.errors.categoryCostNegative';
 
   return (
     <Modal
@@ -80,7 +82,7 @@ export function CategoryModal({ current, category, onClose, onSave, isSaving, se
             placeholder={t.shipping.packaging.categoryNamePlaceholder}
             helpText={c.nameHelp}
             autoComplete="off"
-            error={localError && !costError ? localError : undefined}
+            error={localText && !costError ? localText : undefined}
           />
           <TextField
             label={t.shipping.packaging.categoryCostLabel}
@@ -95,7 +97,7 @@ export function CategoryModal({ current, category, onClose, onSave, isSaving, se
             autoComplete="off"
             min={0}
             step={0.01}
-            error={costError ? localError ?? undefined : undefined}
+            error={costError ? localText ?? undefined : undefined}
           />
           <ServerOrLocalError local={null} server={localError ? null : serverError} />
         </BlockStack>
@@ -128,14 +130,15 @@ export function RuleModal({ current, index, onClose, onSave, isSaving, serverErr
     const weightMaxKg = unlimited ? null : weight.trim() === '' ? Number.NaN : Number(weight);
     const esito = saveRule(current, index, { weightMaxKg, category });
     if (esito.error !== null) {
-      setLocalError(testoDiErrore(esito.error, t) ?? t.shipping.packaging.saveError);
+      setLocalError(esito.error);
       return;
     }
     setLocalError(null);
     onSave({ index, weightMaxKg: unlimited ? '' : weight, category });
   };
 
-  const weightError = localError === t.shipping.packaging.errors.ruleWeightNegative;
+  const localText = localError ? (testoDiErrore(localError, t) ?? t.shipping.packaging.saveError) : null;
+  const weightError = localError === 'shipping.packaging.errors.ruleWeightNegative';
 
   return (
     <Modal
@@ -169,7 +172,7 @@ export function RuleModal({ current, index, onClose, onSave, isSaving, serverErr
               autoComplete="off"
               min={0}
               step={0.001}
-              error={weightError ? localError ?? undefined : undefined}
+              error={weightError ? localText ?? undefined : undefined}
             />
           )}
           <Select
@@ -181,7 +184,7 @@ export function RuleModal({ current, index, onClose, onSave, isSaving, serverErr
               setLocalError(null);
             }}
           />
-          <ServerOrLocalError local={weightError ? null : localError} server={localError ? null : serverError} />
+          <ServerOrLocalError local={weightError ? null : localText} server={localError ? null : serverError} />
         </BlockStack>
       </Modal.Section>
     </Modal>

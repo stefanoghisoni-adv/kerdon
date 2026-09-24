@@ -1,4 +1,4 @@
-import { Badge, BlockStack, Box, Button, Card, IndexTable, InlineStack, Text } from '@shopify/polaris';
+import { BlockStack, Box, Button, Card, IndexTable, InlineStack, Text } from '@shopify/polaris';
 import type { IndexTableProps } from '@shopify/polaris';
 import { useLocale, useT } from '~/lib/i18n/context';
 import { formatMoney } from '~/lib/billing/money';
@@ -24,7 +24,6 @@ export function PackagingCategoriesCard({ categories, onAdd, onEdit, onDelete }:
   const headings: IndexTableProps['headings'] = [
     { title: c.name },
     { title: c.cost },
-    { title: c.origin },
     { title: c.actions },
   ];
 
@@ -67,13 +66,6 @@ export function PackagingCategoriesCard({ categories, onAdd, onEdit, onDelete }:
                   </Text>
                 </IndexTable.Cell>
                 <IndexTable.Cell>{formatMoney(category.cost, 'EUR', locale)}</IndexTable.Cell>
-                <IndexTable.Cell>
-                  {category.origin === 'shopify' ? (
-                    <Badge tone="info">{c.originShopify}</Badge>
-                  ) : (
-                    <Badge>{c.originManual}</Badge>
-                  )}
-                </IndexTable.Cell>
                 <IndexTable.Cell>
                   <InlineStack gap="200" wrap={false}>
                     <Button size="slim" onClick={() => onEdit(category)} accessibilityLabel={c.editLabel(category.name)}>

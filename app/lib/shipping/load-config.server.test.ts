@@ -171,6 +171,28 @@ describe('loadLogisticsConfig', () => {
     expect(result?.fallbackRules).toEqual([{ weightMaxKg: 10, category: 'Scatola' }]);
   });
 
+  it('regole salvate fuori ordine: il calcolo le applica per peso crescente, come le mostra la pagina', async () => {
+    findMany.mockResolvedValue([]);
+    findUnique.mockResolvedValue({
+      categories: [],
+      fallbackRules: [
+        { weightMaxKg: 5, category: 'A' },
+        { weightMaxKg: 1, category: 'B' },
+        { weightMaxKg: null, category: 'C' },
+      ],
+      defaultWeightPerItem: null,
+      returnCost: null,
+    });
+
+    const result = await loadLogisticsConfig('shop-1');
+
+    expect(result?.fallbackRules).toEqual([
+      { weightMaxKg: 1, category: 'B' },
+      { weightMaxKg: 5, category: 'A' },
+      { weightMaxKg: null, category: 'C' },
+    ]);
+  });
+
   it('gestisce zone senza tariffe', async () => {
     findMany.mockResolvedValue([
       {
