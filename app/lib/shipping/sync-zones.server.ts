@@ -71,7 +71,7 @@ interface GroupZonesData {
 // quindi a pagine: prima i profili con i loro gruppi di sedi, poi le zone di
 // ogni gruppo 5 alla volta, ognuna con fino a 30 metodi (~800 punti stimati).
 const PROFILES_QUERY = `
-  query DeliveryProfileGroups($after: String) {
+  query DeliveryZonesProfiles($after: String) {
     deliveryProfiles(first: 25, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -83,7 +83,7 @@ const PROFILES_QUERY = `
 `;
 
 const GROUP_ZONES_QUERY = `
-  query DeliveryGroupZones($profileId: ID!, $locationGroupId: ID!, $after: String) {
+  query DeliveryZonesByGroup($profileId: ID!, $locationGroupId: ID!, $after: String) {
     deliveryProfile(id: $profileId) {
       profileLocationGroups(locationGroupId: $locationGroupId) {
         locationGroupZones(first: 5, after: $after) {
@@ -121,21 +121,45 @@ const GROUP_ZONES_QUERY = `
 /** Guardia contro cursori che non avanzano: nessun negozio reale ci arriva. */
 const MAX_PAGES = 200;
 
+const SCOPE_ERROR = 'Manca lo scope read_shipping';
+
+const isAccessDenied = (errors: GraphqlError[]) =>
+  errors.some(
+    (e) => e.extensions?.code === 'ACCESS_DENIED' || (e.message ?? '').includes('Access denied')
+  );
+
+/**
+ * Il client admin di `@shopify/shopify-app-remix` non restituisce gli errori
+ * GraphQL nel corpo: SOLLEVA un GraphqlQueryError con gli errori in
+ * `body.errors.graphQLErrors`. Il permesso mancante va riconosciuto anche li',
+ * altrimenti la pagina mostra un errore generico invece del banner che chiede
+ * di accettare i permessi.
+ */
+function graphqlErrorsOf(error: unknown): GraphqlError[] {
+  const graphQLErrors = (error as { body?: { errors?: { graphQLErrors?: unknown } } } | null)?.body
+    ?.errors?.graphQLErrors;
+  return Array.isArray(graphQLErrors) ? (graphQLErrors as GraphqlError[]) : [];
+}
+
 async function runQuery<T>(
   graphql: AdminGraphql,
   query: string,
   variables: Record<string, unknown>
 ): Promise<T> {
-  const response = await graphql(query, { variables });
-  const json = (await response.json()) as GraphqlResponse<T>;
+  let json: GraphqlResponse<T>;
+  try {
+    const response = await graphql(query, { variables });
+    json = (await response.json()) as GraphqlResponse<T>;
+  } catch (error) {
+    if (isAccessDenied(graphqlErrorsOf(error))) throw new Error(SCOPE_ERROR);
+    throw error;
+  }
 
-  // Controlla errori GraphQL (es. scope mancante)
+  // Controlla errori GraphQL restituiti nel corpo (es. scope mancante), su
+  // entrambe le query dell'import.
   if (json.errors && json.errors.length > 0) {
-    const accessDenied = json.errors.some(
-      (e) => e.extensions?.code === 'ACCESS_DENIED' || e.message.includes('Access denied')
-    );
-    if (accessDenied) {
-      throw new Error('Manca lo scope read_shipping');
+    if (isAccessDenied(json.errors)) {
+      throw new Error(SCOPE_ERROR);
     }
     throw new Error(`GraphQL error: ${json.errors[0].message}`);
   }

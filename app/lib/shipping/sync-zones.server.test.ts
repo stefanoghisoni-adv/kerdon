@@ -247,6 +247,68 @@ describe('syncShippingZones — zone', () => {
     );
   });
 
+  it('riconosce lo scope mancante anche sulla seconda query (zone del gruppo)', async () => {
+    const graphql = vi.fn(async (query: string) => {
+      const body = query.includes('deliveryProfiles(')
+        ? {
+            data: {
+              deliveryProfiles: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  {
+                    id: 'gid://shopify/DeliveryProfile/1',
+                    profileLocationGroups: [{ locationGroup: { id: 'gid://shopify/DeliveryLocationGroup/1' } }],
+                  },
+                ],
+              },
+            },
+          }
+        : {
+            errors: [
+              {
+                message: 'Access denied for methodDefinitions field.',
+                extensions: { code: 'ACCESS_DENIED' },
+              },
+            ],
+          };
+      return { json: async () => body } as Response;
+    });
+
+    await expect(syncShippingZones({ graphql }, 'shop-1')).rejects.toThrow(
+      'Manca lo scope read_shipping'
+    );
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('riconosce lo scope mancante quando il client admin SOLLEVA (GraphqlQueryError)', async () => {
+    // Forma di GraphqlQueryError di @shopify/shopify-api: il messaggio e' il
+    // primo errore, i dettagli stanno in body.errors.graphQLErrors.
+    const thrown = Object.assign(new Error('Access denied for deliveryProfiles field.'), {
+      body: {
+        errors: {
+          graphQLErrors: [
+            { message: 'Access denied for deliveryProfiles field.', extensions: { code: 'ACCESS_DENIED' } },
+          ],
+        },
+      },
+    });
+    const graphql = vi.fn(async () => {
+      throw thrown;
+    });
+
+    await expect(syncShippingZones({ graphql }, 'shop-1')).rejects.toThrow(
+      'Manca lo scope read_shipping'
+    );
+  });
+
+  it('un errore sollevato dal client che non riguarda i permessi resta com e', async () => {
+    const graphql = vi.fn(async () => {
+      throw new Error('rete giu');
+    });
+
+    await expect(syncShippingZones({ graphql }, 'shop-1')).rejects.toThrow('rete giu');
+  });
+
   it('propaga gli altri errori GraphQL senza scrivere nulla', async () => {
     const admin = fixedAdmin({ errors: [{ message: 'Query cost exceeded' }] });
 

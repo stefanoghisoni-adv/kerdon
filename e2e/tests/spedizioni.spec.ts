@@ -133,26 +133,50 @@ const cosaVede = (corpo: Record<string, unknown>) =>
   feedbackFromActionData(corpo as unknown as ShippingActionData, italiano);
 
 /** Le zone come le restituisce l'admin GraphQL di Shopify. */
+/**
+ * L'import legge a due query (vedi sync-zones.server): prima i profili con i
+ * gruppi di sedi (`DeliveryZonesProfiles`), poi le zone di ogni gruppo
+ * (`DeliveryZonesByGroup`). Un profilo con un gruppo basta a queste prove.
+ */
 function risposteZone(zone: Array<{ name: string; countries: Array<{ countryCode: string; restOfWorld: boolean }> }>) {
-  return {
-    data: {
-      deliveryProfiles: {
-        nodes: [
-          {
+  return [
+    {
+      match: 'DeliveryZonesProfiles',
+      body: {
+        data: {
+          deliveryProfiles: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                id: 'gid://shopify/DeliveryProfile/1',
+                profileLocationGroups: [{ locationGroup: { id: 'gid://shopify/DeliveryLocationGroup/1' } }],
+              },
+            ],
+          },
+        },
+      },
+    },
+    {
+      match: 'DeliveryZonesByGroup',
+      body: {
+        data: {
+          deliveryProfile: {
             profileLocationGroups: [
               {
                 locationGroupZones: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
                   nodes: zone.map((z) => ({
                     zone: { name: z.name, countries: z.countries.map((c) => ({ code: c })) },
+                    methodDefinitions: { pageInfo: { hasNextPage: false }, nodes: [] },
                   })),
                 },
               },
             ],
           },
-        ],
+        },
       },
     },
-  };
+  ];
 }
 
 prova.describe('le azioni della pagina Spedizioni', () => {
@@ -537,18 +561,35 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       expect(f.toast).toBeNull();
     });
 
+    prova('permesso mancante sulla seconda query (zone del gruppo): banner, non toast', async ({ request, context }) => {
+      await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const [profili] = risposteZone([]);
+      await finti(request, {
+        graphql: [
+          profili,
+          {
+            match: 'DeliveryZonesByGroup',
+            body: { errors: [{ message: 'Access denied for methodDefinitions field.', extensions: { code: 'ACCESS_DENIED' } }] },
+          },
+        ],
+      });
+
+      const { stato, corpo } = await inviaForm(context, { intent: 'sync-zones' });
+
+      expect(stato).toBe(200);
+      expect(corpo).toEqual({ intent: 'sync-zones', success: false, error: 'scope_error' });
+      const f = cosaVede(corpo);
+      expect(f.scopeError).toBe(true);
+      expect(f.toast).toBeNull();
+    });
+
     prova('importazione riuscita: toast di successo e ricalcolo dei costi accodato', async ({ request, context }) => {
       const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
       await finti(request, {
-        graphql: [
-          {
-            match: 'DeliveryZones',
-            body: risposteZone([
-              { name: 'Italia', countries: [{ countryCode: 'IT', restOfWorld: false }] },
-              { name: 'Mondo', countries: [{ countryCode: 'ZZ', restOfWorld: true }] },
-            ]),
-          },
-        ],
+        graphql: risposteZone([
+          { name: 'Italia', countries: [{ countryCode: 'IT', restOfWorld: false }] },
+          { name: 'Mondo', countries: [{ countryCode: 'ZZ', restOfWorld: true }] },
+        ]),
       });
 
       const { stato, corpo } = await inviaForm(context, { intent: 'sync-zones' });
