@@ -1,37 +1,24 @@
 // app/components/Shipping/option-cost.ts
 //
-// Formatting and validation for shipping option costs (TASK 5)
+// Le parti pure della modale dei costi per opzione. Le regole delle fasce non
+// vivono qui: sono quelle delle fasce di zona (brackets.ts), cosi' una modifica
+// alle regole vale per entrambe e le due modali non possono divergere.
 
-import type { OptionCostType, OptionBracket } from '~/lib/shipping/types';
+import type { OptionCostType, OptionBracket, RateBracket } from '~/lib/shipping/types';
 import type { Locale } from '~/lib/i18n/locales';
+import type { Dictionary } from '~/lib/i18n/context';
 import { formatMoneyExact } from '~/lib/billing/money';
+import { INVALID_BRACKETS, validateBrackets, parseBrackets } from './brackets';
 
-/** L'errore per dati che non hanno la forma di una lista di fasce. */
-export const INVALID_BRACKETS = 'shipping.errors.invalidBrackets';
-
-/** Un numero vero: `typeof` scarta le stringhe, `isFinite` NaN e Infinity. */
-const numeroFinito = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+export { INVALID_BRACKETS };
 
 /**
- * La forma di una fascia opzione, prima delle regole di contiguita'.
- */
-function formaValida(b: unknown): b is OptionBracket {
-  if (typeof b !== 'object' || b === null) return false;
-  const { from, to, cost } = b as Record<string, unknown>;
-  return (
-    numeroFinito(cost) &&
-    (from === null || numeroFinito(from)) &&
-    (to === null || numeroFinito(to))
-  );
-}
-
-/**
- * Formats the indicative cost of a shipping option based on its cost type and rates.
+ * Il costo indicativo di un'opzione, per la tabella delle zone.
  *
- * - flat: shows the single cost
- * - linear: shows cost/kg
- * - weight_brackets/value_brackets: shows min-max range
- * - empty rates: returns "—"
+ * Serve al merchant per riconoscere a colpo d'occhio cosa ha scritto, non per
+ * calcolare: per le fasce basta l'intervallo dal costo piu' basso al piu'
+ * alto. Senza tariffe un trattino, cosi' l'opzione ancora da compilare salta
+ * all'occhio invece di sembrare gratuita.
  */
 export function formatIndicativeOptionCost(
   costType: OptionCostType,
@@ -49,7 +36,7 @@ export function formatIndicativeOptionCost(
     return `${formatMoneyExact(rates[0].cost, currency, locale)}/kg`;
   }
 
-  // Brackets: show min-max range
+  // Fasce: dal costo minimo al massimo, oppure uno solo se coincidono.
   const costs = rates.map((r) => r.cost);
   const min = Math.min(...costs);
   const max = Math.max(...costs);
@@ -62,96 +49,34 @@ export function formatIndicativeOptionCost(
 }
 
 /**
- * Validates option brackets for weight_brackets or value_brackets cost types.
+ * Le fasce di un'opzione nella forma delle fasce di zona.
  *
- * Rules:
- * - For flat/linear: no validation needed (they don't use brackets)
- * - For brackets types:
- *   - At least one bracket required
- *   - First bracket must start at 0
- *   - Brackets must be contiguous (no gaps, no overlaps)
- *   - Only the last bracket can have to = null (unlimited)
- *   - All costs must be >= 0
- *   - from must be <= to (when to is not null)
- *   - Every value must be a finite number (or null where allowed)
+ * Solo un cambio di nome dei campi: i valori passano cosi' come sono, anche
+ * se sbagliati, perche' e' validateBrackets a decidere se la forma regge. Un
+ * elemento che non e' un oggetto resta com'e' e viene scartato li'.
+ */
+function comeFasceDiZona(input: unknown): unknown {
+  if (!Array.isArray(input)) return input;
+  return input.map((b: unknown) => {
+    if (typeof b !== 'object' || b === null) return b;
+    const { from, to, cost } = b as Record<string, unknown>;
+    return { weightFromKg: from, weightToKg: to, cost };
+  });
+}
+
+/**
+ * Controlla le fasce di un'opzione con le stesse regole delle fasce di zona.
  *
- * @param costType The cost type of the option
- * @param input The option brackets to validate
- * @returns The i18n key of the error, or null if valid
+ * Per il costo fisso e al kg non ci sono fasce da controllare. Per le fasce di
+ * peso e di valore le regole sono identiche (da 0, contigue, solo l'ultima
+ * illimitata, costi non negativi): cambia solo l'unita', che i messaggi di
+ * errore non nominano.
+ *
+ * @returns la chiave i18n dell'errore, oppure null se le fasce vanno bene
  */
 export function validateOptionBrackets(costType: OptionCostType, input: unknown): string | null {
-  // For flat/linear, no bracket validation
-  if (costType === 'flat' || costType === 'linear') {
-    return null;
-  }
-
-  if (!Array.isArray(input) || !input.every(formaValida)) {
-    return INVALID_BRACKETS;
-  }
-  const brackets: OptionBracket[] = input;
-
-  if (brackets.length === 0) {
-    return 'shipping.errors.atLeastOneBracket';
-  }
-
-  // First pass: check each bracket's internal validity
-  for (const bracket of brackets) {
-    // Cost must be non-negative
-    if (bracket.cost < 0) {
-      return 'shipping.errors.costMustBeNonNegative';
-    }
-
-    // from must be <= to (when to is not null)
-    if (bracket.to !== null && (bracket.from ?? 0) > bracket.to) {
-      return 'shipping.errors.weightFromGreaterThanWeightTo';
-    }
-  }
-
-  // Sort by from to check for gaps/overlaps
-  const sorted = [...brackets].sort((a, b) => {
-    const aFrom = a.from ?? 0;
-    const bFrom = b.from ?? 0;
-    return aFrom - bFrom;
-  });
-
-  // First bracket must start at 0
-  if ((sorted[0].from ?? 0) !== 0) {
-    return 'shipping.errors.firstBracketMustStartAtZero';
-  }
-
-  for (let i = 0; i < sorted.length; i++) {
-    const bracket = sorted[i];
-    const isLast = i === sorted.length - 1;
-
-    // Only the last bracket can be unlimited
-    if (!isLast && bracket.to === null) {
-      return 'shipping.errors.onlyLastBracketCanBeUnlimited';
-    }
-
-    // Check contiguity with next bracket
-    if (!isLast) {
-      const nextBracket = sorted[i + 1];
-      const currentTo = bracket.to;
-      const nextFrom = nextBracket.from ?? 0;
-
-      if (currentTo === null) {
-        // Already caught by "only last can be unlimited" check
-        continue;
-      }
-
-      if (currentTo < nextFrom) {
-        // Gap between brackets
-        return 'shipping.errors.bracketsHaveGaps';
-      }
-
-      if (currentTo > nextFrom) {
-        // Overlap between brackets
-        return 'shipping.errors.bracketsOverlap';
-      }
-    }
-  }
-
-  return null;
+  if (costType === 'flat' || costType === 'linear') return null;
+  return validateBrackets(comeFasceDiZona(input));
 }
 
 /**
@@ -159,20 +84,107 @@ export function validateOptionBrackets(costType: OptionCostType, input: unknown)
  *
  * Il JSON malformato e' un errore di validazione come gli altri, non
  * un'eccezione: l'azione risponde con la chiave e il merchant vede un
- * messaggio, invece di una pagina di errore.
+ * messaggio, invece di una pagina di errore. La lettura e i controlli sono
+ * quelli di parseBrackets, dopo aver rinominato i campi.
  */
 export function parseOptionBrackets(
   costType: OptionCostType,
   raw: string | undefined,
 ): { brackets: OptionBracket[]; error: null } | { brackets: null; error: string } {
-  if (!raw) return { brackets: null, error: INVALID_BRACKETS };
-  let dati: unknown;
-  try {
-    dati = JSON.parse(raw);
-  } catch {
-    return { brackets: null, error: INVALID_BRACKETS };
+  // Il fisso e il costo al kg non hanno fasce: niente da leggere dal campo.
+  if (costType === 'flat' || costType === 'linear') return { brackets: [], error: null };
+  const letto = parseBrackets(raw, comeFasceDiZona);
+  if (letto.error !== null) return { brackets: null, error: letto.error };
+  return { brackets: fromRateBrackets(letto.brackets), error: null };
+}
+
+/** Le etichette dell'editor delle fasce, che cambiano con l'unita' delle soglie. */
+export interface BracketEditorLabels {
+  from: string;
+  to: string;
+  cost: string;
+  unlimited: string;
+  /** Le regole delle fasce, dette nell'unita' giusta. */
+  help: string;
+  /** Il passo dei campi soglia: decimi di kg, centesimi per gli importi. */
+  rangeStep: number;
+}
+
+/**
+ * Le etichette per le fasce di un'opzione.
+ *
+ * Le fasce di valore misurano l'importo dell'ordine: mostrare "kg" farebbe
+ * scrivere al merchant soglie di peso dove servono soglie in euro.
+ */
+export function bracketEditorLabels(
+  costType: 'weight_brackets' | 'value_brackets',
+  t: Dictionary,
+): BracketEditorLabels {
+  const m = t.shipping.optionModal;
+  const comuni = { cost: m.bracketCost, unlimited: m.bracketUnlimited };
+  if (costType === 'value_brackets') {
+    return { ...comuni, from: m.bracketValueFrom, to: m.bracketValueTo, help: m.valueBracketsHelp, rangeStep: 0.01 };
   }
-  const error = validateOptionBrackets(costType, dati);
-  if (error) return { brackets: null, error };
-  return { brackets: dati as OptionBracket[], error: null };
+  return { ...comuni, from: m.bracketWeightFrom, to: m.bracketWeightTo, help: m.weightBracketsHelp, rangeStep: 0.1 };
+}
+
+/**
+ * Controlla il costo fisso o al kg scritto nel campo, con la stessa regola
+ * del server (un numero finito, zero compreso): se il campo passa qui, il
+ * server non lo rifiuta.
+ *
+ * Ogni tipo ha il suo errore, perche' il messaggio compare sotto il suo campo.
+ */
+export function validateCostField(costType: 'flat' | 'linear', raw: string): string | null {
+  const n = parseFloat(raw);
+  if (Number.isFinite(n) && n >= 0) return null;
+  return costType === 'flat' ? 'shipping.errors.invalidFlatCost' : 'shipping.errors.invalidLinearCost';
+}
+
+/**
+ * L'errore da mostrare mentre il merchant scrive.
+ *
+ * Si ricalcola a ogni tasto, cosi' l'errore sparisce appena il valore torna
+ * valido e Salva si riabilita. Il campo vuoto non e' ancora un errore: il
+ * merchant lo sta riscrivendo. Al salvataggio invece vale validateCostField.
+ */
+export function costFieldErrorWhileTyping(costType: 'flat' | 'linear', raw: string): string | null {
+  if (raw.trim() === '') return null;
+  return validateCostField(costType, raw);
+}
+
+/**
+ * La fascia che l'editor mostra quando non ce n'e' nessuna: tutto l'intervallo,
+ * da 0 senza limite, costo 0. Passa la validazione, cosi' Salva funziona.
+ */
+export const DEFAULT_OPTION_BRACKET: OptionBracket = { from: 0, to: null, cost: 0 };
+
+/**
+ * Le fasce con cui parte la modale.
+ *
+ * Mai una lista vuota: l'editor mostrerebbe comunque una fascia, e salvare
+ * risponderebbe "serve almeno una fascia" con una fascia in vista. Partire
+ * dalla stessa fascia che l'editor mostra tiene allineato cio' che si vede e
+ * cio' che si salva, anche quando il merchant passa a fasce da fisso o al kg.
+ * Le tariffe si copiano prima di ordinarle: sono quelle del loader.
+ */
+export function initialOptionBrackets(option: {
+  costType: OptionCostType;
+  rates: ReadonlyArray<{ from: number | null; to: number | null; cost: number }>;
+}): OptionBracket[] {
+  const aFasce = option.costType === 'weight_brackets' || option.costType === 'value_brackets';
+  if (!aFasce || option.rates.length === 0) return [{ ...DEFAULT_OPTION_BRACKET }];
+  return [...option.rates]
+    .sort((a, b) => (a.from ?? 0) - (b.from ?? 0))
+    .map(({ from, to, cost }) => ({ from, to, cost }));
+}
+
+/** Per l'editor delle fasce, che lavora nella forma delle fasce di zona. */
+export function toRateBrackets(brackets: OptionBracket[]): RateBracket[] {
+  return brackets.map((b) => ({ weightFromKg: b.from, weightToKg: b.to, cost: b.cost }));
+}
+
+/** Dall'editor delle fasce alla forma delle fasce di opzione. */
+export function fromRateBrackets(brackets: RateBracket[]): OptionBracket[] {
+  return brackets.map((b) => ({ from: b.weightFromKg, to: b.weightToKg, cost: b.cost }));
 }

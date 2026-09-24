@@ -1043,12 +1043,16 @@ export const en: typeof it = {
       action: "Import zones from Shopify",
     },
     table: {
-      zone: "Zone",
-      countries: "Countries",
-      rateType: "Rate type",
+      option: "Shipping option",
+      rateType: "Cost type",
       indicativeCost: "Indicative cost",
       actions: "Actions",
       edit: "Edit",
+      genericRate: "Zone's generic rate",
+      genericRateHelp: "Applies to orders with an option you don't see below",
+      editGenericRateLabel: (zoneName: string) => `Edit the generic rate for ${zoneName}`,
+      editOptionLabel: (zoneName: string, optionName: string) =>
+        `Edit the costs of ${optionName} in ${zoneName}`,
     },
     countriesList: (first: string[], others: number) =>
       others > 0
@@ -1089,22 +1093,25 @@ export const en: typeof it = {
       saveError: "Could not save rates. Try again in a moment.",
     },
     errors: {
-      atLeastOneBracket: "At least one weight bracket is required",
-      firstBracketMustStartAtZero: "The first bracket must start at 0 kg",
+      atLeastOneBracket: "At least one bracket is required",
+      firstBracketMustStartAtZero: "The first bracket must start at 0",
       bracketsHaveGaps: "Brackets have gaps: they must be contiguous",
       bracketsOverlap: "Brackets overlap",
       onlyLastBracketCanBeUnlimited: "Only the last bracket can be unlimited",
       costMustBeNonNegative: "Cost must be greater than or equal to 0",
       weightFromGreaterThanWeightTo:
-        "Starting weight cannot be greater than ending weight",
-      invalidLinearCost: "Enter a valid cost",
-      invalidBrackets: "The brackets aren't valid: check the weights and costs",
+        "A bracket can't start after it ends",
+      invalidLinearCost: "Enter a valid cost per kg, 0 or more",
+      invalidFlatCost: "Enter a valid flat cost, 0 or more",
+      invalidBrackets: "The brackets aren't valid: check the thresholds and costs",
     },
     optionModal: {
       title: (zoneName: string, optionName: string) => `Costs for "${optionName}" in ${zoneName}`,
       costTypeLabel: "Cost type",
       costTypeHelp:
-        "The brackets come from Shopify. Enter what it actually costs you to ship with this option: Shopify knows the price the customer pays, not your cost.",
+        "Shopify knows the price the customer pays, not what you spend: enter what this option really costs you, and the profit on the orders that use it will be the real one.",
+      bracketsFromShopifyHelp:
+        "The brackets come from Shopify with the same thresholds: you only need to enter the cost of each.",
       flatLabel: "Flat per shipment",
       linearLabel: "Per kg",
       weightBracketsLabel: "Weight brackets",
@@ -1116,9 +1123,9 @@ export const en: typeof it = {
       linearCostPlaceholder: "0.00",
       linearCostHelp: "What it costs you to ship 1 kg with this option",
       weightBracketsHelp:
-        "Costs per weight bracket. The brackets come from Shopify, enter the actual cost for each.",
+        "Thresholds in kg on the order weight. The first bracket starts at 0 kg, brackets are contiguous, and only the last can be unlimited.",
       valueBracketsHelp:
-        "Costs per order value bracket. The brackets come from Shopify, enter the actual cost for each.",
+        "Thresholds in € on the order total. The first bracket starts at €0, brackets are contiguous, and only the last can be unlimited.",
       bracketWeightFrom: "From (kg)",
       bracketWeightTo: "To (kg)",
       bracketValueFrom: "From (€)",
@@ -1127,7 +1134,6 @@ export const en: typeof it = {
       bracketUnlimited: "Unlimited",
       save: "Save",
       cancel: "Cancel",
-      saving: "Saving…",
       saveSuccess: "Costs saved successfully",
       saveError: "Could not save costs. Try again in a moment.",
     },

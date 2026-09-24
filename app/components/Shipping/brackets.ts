@@ -118,11 +118,17 @@ export function validateBrackets(input: unknown): string | null {
  */
 export function parseBrackets(
   raw: string | undefined,
+  /**
+   * Porta il JSON letto nella forma delle fasce di zona prima di validarlo.
+   * Serve alle fasce delle opzioni, che hanno gli stessi vincoli con campi
+   * dal nome diverso: cosi' le regole restano scritte in un posto solo.
+   */
+  adatta: (dati: unknown) => unknown = (dati) => dati,
 ): { brackets: RateBracket[]; error: null } | { brackets: null; error: string } {
   if (!raw) return { brackets: null, error: INVALID_BRACKETS };
   let dati: unknown;
   try {
-    dati = JSON.parse(raw);
+    dati = adatta(JSON.parse(raw));
   } catch {
     return { brackets: null, error: INVALID_BRACKETS };
   }

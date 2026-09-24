@@ -1339,12 +1339,16 @@ export const it = {
       action: "Importa zone da Shopify",
     },
     table: {
-      zone: "Zona",
-      countries: "Paesi",
-      rateType: "Tipo tariffa",
+      option: "Opzione di spedizione",
+      rateType: "Tipo di costo",
       indicativeCost: "Costo indicativo",
       actions: "Azioni",
       edit: "Modifica",
+      genericRate: "Tariffa generica della zona",
+      genericRateHelp: "Vale per gli ordini con un'opzione che non trovi qui sotto",
+      editGenericRateLabel: (zoneName: string) => `Modifica la tariffa generica di ${zoneName}`,
+      editOptionLabel: (zoneName: string, optionName: string) =>
+        `Modifica i costi di ${optionName} in ${zoneName}`,
     },
     countriesList: (first: string[], others: number) =>
       others > 0
@@ -1385,23 +1389,26 @@ export const it = {
       saveError: "Non è stato possibile salvare le tariffe. Riprova fra poco.",
     },
     errors: {
-      atLeastOneBracket: "Serve almeno una fascia di peso",
-      firstBracketMustStartAtZero: "La prima fascia deve partire da 0 kg",
+      atLeastOneBracket: "Serve almeno una fascia",
+      firstBracketMustStartAtZero: "La prima fascia deve partire da 0",
       bracketsHaveGaps: "Le fasce hanno buchi: devono essere contigue",
       bracketsOverlap: "Le fasce si sovrappongono",
       onlyLastBracketCanBeUnlimited:
         "Solo l'ultima fascia può essere illimitata",
       costMustBeNonNegative: "Il costo deve essere maggiore o uguale a 0",
       weightFromGreaterThanWeightTo:
-        "Il peso iniziale non può essere maggiore del peso finale",
-      invalidLinearCost: "Inserisci un costo valido",
-      invalidBrackets: "Le fasce non sono valide: controlla pesi e costi",
+        "L'inizio di una fascia non può superare la sua fine",
+      invalidLinearCost: "Inserisci un costo per kg valido, pari o superiore a 0",
+      invalidFlatCost: "Inserisci un costo fisso valido, pari o superiore a 0",
+      invalidBrackets: "Le fasce non sono valide: controlla soglie e costi",
     },
     optionModal: {
       title: (zoneName: string, optionName: string) => `Costi per "${optionName}" in ${zoneName}`,
       costTypeLabel: "Tipo di costo",
       costTypeHelp:
-        "Le fasce arrivano da Shopify. Inserisci quanto ti costa davvero spedire con questa opzione: Shopify conosce il prezzo al cliente, non il tuo costo.",
+        "Shopify conosce il prezzo che paga il cliente, non quanto spendi tu: inserisci il costo reale di questa opzione e il profitto degli ordini che la usano sarà quello vero.",
+      bracketsFromShopifyHelp:
+        "Le fasce arrivano da Shopify con le stesse soglie: ti basta scrivere il costo di ciascuna.",
       flatLabel: "Fisso per spedizione",
       linearLabel: "Al kg",
       weightBracketsLabel: "Fasce di peso",
@@ -1413,9 +1420,9 @@ export const it = {
       linearCostPlaceholder: "0,00",
       linearCostHelp: "Quanto ti costa spedire 1 kg con questa opzione",
       weightBracketsHelp:
-        "Costi per fascia di peso. Le fasce vengono da Shopify, inserisci il costo reale per ciascuna.",
+        "Soglie in kg sul peso dell'ordine. La prima fascia parte da 0 kg, le fasce sono contigue e solo l'ultima può essere illimitata.",
       valueBracketsHelp:
-        "Costi per fascia di valore dell'ordine. Le fasce vengono da Shopify, inserisci il costo reale per ciascuna.",
+        "Soglie in € sul totale dell'ordine. La prima fascia parte da 0 €, le fasce sono contigue e solo l'ultima può essere illimitata.",
       bracketWeightFrom: "Da (kg)",
       bracketWeightTo: "A (kg)",
       bracketValueFrom: "Da (€)",
@@ -1424,7 +1431,6 @@ export const it = {
       bracketUnlimited: "Illimitato",
       save: "Salva",
       cancel: "Annulla",
-      saving: "Salvataggio in corso…",
       saveSuccess: "Costi salvati con successo",
       saveError: "Non è stato possibile salvare i costi. Riprova fra poco.",
     },

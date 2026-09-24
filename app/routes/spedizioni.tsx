@@ -246,7 +246,10 @@ export async function action({ request }: ActionFunctionArgs) {
       const cost = importoFacoltativo(formData.get(costField)?.toString());
 
       if (cost === null || Number.isNaN(cost)) {
-        return risposta('save-option-cost', { success: false, error: 'shipping.errors.invalidLinearCost' });
+        // Ogni tipo ha il suo messaggio: il merchant legge l'errore sotto il
+        // campo che ha compilato, fisso o al kg.
+        const error = costType === 'flat' ? 'shipping.errors.invalidFlatCost' : 'shipping.errors.invalidLinearCost';
+        return risposta('save-option-cost', { success: false, error });
       }
 
       // Sostituisci le tariffe in una transazione

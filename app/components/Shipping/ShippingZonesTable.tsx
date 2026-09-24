@@ -1,4 +1,6 @@
-import { Button, DataTable, Text } from '@shopify/polaris';
+import { Fragment } from 'react';
+import { BlockStack, Button, IndexTable, Text } from '@shopify/polaris';
+import type { IndexTableProps } from '@shopify/polaris';
 import { useT, useLocale } from '~/lib/i18n/context';
 import { formatMoney } from '~/lib/billing/money';
 import { formatIndicativeOptionCost } from './option-cost';
@@ -37,6 +39,15 @@ interface ShippingZonesTableProps {
   onEditOption: (option: Option, zone: Zone) => void;
 }
 
+/**
+ * Le zone con le loro opzioni, in una sola tabella.
+ *
+ * Ogni zona apre il suo gruppo con una riga d'intestazione (nome e paesi) e
+ * sotto elenca le opzioni e la tariffa generica, che vale quando l'ordine usa
+ * un'opzione non importata. Le righe del gruppo puntano all'intestazione con
+ * `headers`: chi usa uno screen reader sente a quale zona appartiene ogni
+ * opzione, non solo chi vede il rientro.
+ */
 export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZonesTableProps) {
   const t = useT();
   const locale = useLocale();
@@ -52,10 +63,6 @@ export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZone
     return t.shipping.countriesList(first, others);
   };
 
-  const formatRateType = (rateType: 'linear' | 'brackets'): string => {
-    return t.shipping.rateTypes[rateType];
-  };
-
   const formatIndicativeCost = (zone: Zone): string => {
     if (zone.rates.length === 0) {
       return t.shipping.costDisplay.empty;
@@ -68,7 +75,7 @@ export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZone
       );
     }
 
-    // Brackets: mostra il range dal costo minimo al massimo
+    // Fasce: dal costo minimo al massimo, oppure uno solo se coincidono.
     const costs = zone.rates.map(r => r.cost);
     const min = Math.min(...costs);
     const max = Math.max(...costs);
@@ -83,67 +90,105 @@ export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZone
     );
   };
 
-  const getCostTypeLabel = (costType: OptionCostType): string => {
-    const labels: Record<OptionCostType, string> = {
-      flat: t.shipping.optionModal.flatLabel,
-      linear: t.shipping.optionModal.linearLabel,
-      weight_brackets: t.shipping.optionModal.weightBracketsLabel,
-      value_brackets: t.shipping.optionModal.valueBracketsLabel,
-    };
-    return labels[costType];
+  const costTypeLabels: Record<OptionCostType, string> = {
+    flat: t.shipping.optionModal.flatLabel,
+    linear: t.shipping.optionModal.linearLabel,
+    weight_brackets: t.shipping.optionModal.weightBracketsLabel,
+    value_brackets: t.shipping.optionModal.valueBracketsLabel,
   };
 
-  // Build rows with options nested under each zone
-  const rows: any[][] = [];
+  const headings: IndexTableProps['headings'] = [
+    { title: t.shipping.table.option },
+    { title: t.shipping.table.rateType },
+    { title: t.shipping.table.indicativeCost },
+    { title: t.shipping.table.actions },
+  ];
 
-  zones.forEach((zone) => {
-    // Main zone row
-    rows.push([
-      <Text as="span" fontWeight="semibold">{zone.zoneName}</Text>,
-      formatCountries(zone),
-      formatRateType(zone.rateType),
-      formatIndicativeCost(zone),
-      <Button onClick={() => onEdit(zone)} size="slim">
-        {t.shipping.table.edit}
-      </Button>,
-    ]);
+  // IndexTable vuole la posizione di ogni riga nell'elenco completo, gruppi
+  // compresi: il contatore avanza su intestazioni, opzioni e tariffe generiche.
+  let position = 0;
+  const rows = zones.map((zone) => {
+    const headerId = `zona-${zone.id}`;
 
-    // Option rows (indented)
-    zone.options.forEach((option) => {
-      rows.push([
-        <Text as="span" tone="subdued">  • {option.name}</Text>,
-        '', // No countries for options
-        getCostTypeLabel(option.costType),
-        formatIndicativeOptionCost(option.costType, option.rates, 'EUR', locale),
-        <Button onClick={() => onEditOption(option, zone)} size="slim">
-          {t.shipping.table.edit}
-        </Button>,
-      ]);
-    });
+    const header = (
+      <IndexTable.Row rowType="subheader" id={headerId} key={headerId} position={position++}>
+        <IndexTable.Cell as="th" id={headerId} colSpan={headings.length} scope="colgroup">
+          <BlockStack gap="050">
+            <Text as="span" fontWeight="semibold">
+              {zone.zoneName}
+            </Text>
+            <Text as="span" tone="subdued">
+              {formatCountries(zone)}
+            </Text>
+          </BlockStack>
+        </IndexTable.Cell>
+      </IndexTable.Row>
+    );
 
-    // Generic zone fallback row
-    if (zone.options.length > 0) {
-      rows.push([
-        <Text as="span" tone="subdued">  • Tariffa generica della zona</Text>,
-        '',
-        formatRateType(zone.rateType),
-        formatIndicativeCost(zone),
-        '', // No edit for generic fallback
-      ]);
-    }
+    const optionRows = zone.options.map((option) => (
+      <IndexTable.Row rowType="child" id={option.id} key={option.id} position={position++}>
+        <IndexTable.Cell headers={headerId}>
+          <Text as="span">{option.name}</Text>
+        </IndexTable.Cell>
+        <IndexTable.Cell headers={headerId}>{costTypeLabels[option.costType]}</IndexTable.Cell>
+        <IndexTable.Cell headers={headerId}>
+          {formatIndicativeOptionCost(option.costType, option.rates, 'EUR', locale)}
+        </IndexTable.Cell>
+        <IndexTable.Cell headers={headerId}>
+          <Button
+            size="slim"
+            onClick={() => onEditOption(option, zone)}
+            accessibilityLabel={t.shipping.table.editOptionLabel(zone.zoneName, option.name)}
+          >
+            {t.shipping.table.edit}
+          </Button>
+        </IndexTable.Cell>
+      </IndexTable.Row>
+    ));
+
+    const genericId = `zona-${zone.id}-generica`;
+    const genericRow = (
+      <IndexTable.Row rowType="child" tone="subdued" id={genericId} key={genericId} position={position++}>
+        <IndexTable.Cell headers={headerId}>
+          <BlockStack gap="050">
+            <Text as="span">{t.shipping.table.genericRate}</Text>
+            {zone.options.length > 0 && (
+              <Text as="span" tone="subdued" variant="bodySm">
+                {t.shipping.table.genericRateHelp}
+              </Text>
+            )}
+          </BlockStack>
+        </IndexTable.Cell>
+        <IndexTable.Cell headers={headerId}>{t.shipping.rateTypes[zone.rateType]}</IndexTable.Cell>
+        <IndexTable.Cell headers={headerId}>{formatIndicativeCost(zone)}</IndexTable.Cell>
+        <IndexTable.Cell headers={headerId}>
+          <Button
+            size="slim"
+            onClick={() => onEdit(zone)}
+            accessibilityLabel={t.shipping.table.editGenericRateLabel(zone.zoneName)}
+          >
+            {t.shipping.table.edit}
+          </Button>
+        </IndexTable.Cell>
+      </IndexTable.Row>
+    );
+
+    return (
+      <Fragment key={zone.id}>
+        {header}
+        {optionRows}
+        {genericRow}
+      </Fragment>
+    );
   });
 
   return (
-    <DataTable
-      columnContentTypes={['text', 'text', 'text', 'text', 'text']}
-      headings={[
-        t.shipping.table.zone,
-        t.shipping.table.countries,
-        t.shipping.table.rateType,
-        t.shipping.table.indicativeCost,
-        t.shipping.table.actions,
-      ]}
-      rows={rows}
-    />
+    <IndexTable
+      itemCount={position}
+      selectable={false}
+      headings={headings}
+    >
+      {rows}
+    </IndexTable>
   );
 }

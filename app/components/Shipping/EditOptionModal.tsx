@@ -1,17 +1,20 @@
 import { useState, useCallback } from 'react';
-import {
-  Modal,
-  BlockStack,
-  ChoiceList,
-  TextField,
-  Text,
-} from '@shopify/polaris';
+import { Modal, BlockStack, ChoiceList, TextField, Text } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
 import { BracketsEditor } from './BracketsEditor';
-import { validateOptionBrackets } from './option-cost';
+import {
+  validateOptionBrackets,
+  validateCostField,
+  costFieldErrorWhileTyping,
+  initialOptionBrackets,
+  bracketEditorLabels,
+  toRateBrackets,
+  fromRateBrackets,
+} from './option-cost';
 import type { OptionCostType, OptionBracket } from '~/lib/shipping/types';
 
-// Mappa tipizzata degli errori di validazione alle chiavi i18n
+// Gli errori che hanno un testo dedicato. Una chiave sconosciuta ricade sul
+// messaggio generico: meglio un testo vago che una chiave i18n a video.
 function getValidationErrorMessage(
   errorCode: string | null,
   t: ReturnType<typeof useT>
@@ -27,6 +30,7 @@ function getValidationErrorMessage(
     'shipping.errors.costMustBeNonNegative': t.shipping.errors.costMustBeNonNegative,
     'shipping.errors.weightFromGreaterThanWeightTo': t.shipping.errors.weightFromGreaterThanWeightTo,
     'shipping.errors.invalidLinearCost': t.shipping.errors.invalidLinearCost,
+    'shipping.errors.invalidFlatCost': t.shipping.errors.invalidFlatCost,
     'shipping.errors.invalidBrackets': t.shipping.errors.invalidBrackets,
   };
 
@@ -69,6 +73,9 @@ interface EditOptionModalProps {
   serverError?: string | null;
 }
 
+const isBracketType = (c: OptionCostType): c is 'weight_brackets' | 'value_brackets' =>
+  c === 'weight_brackets' || c === 'value_brackets';
+
 export function EditOptionModal({
   option,
   zone,
@@ -81,32 +88,19 @@ export function EditOptionModal({
 
   const [costType, setCostType] = useState<OptionCostType>(option.costType);
 
-  // Flat cost
-  const initialFlatCost =
-    option.costType === 'flat' && option.rates.length > 0
-      ? option.rates[0].cost.toString()
-      : '';
-  const [flatCost, setFlatCost] = useState(initialFlatCost);
+  // Il costo fisso e quello al kg partono dal valore salvato solo se l'opzione
+  // e' gia' di quel tipo: il costo fisso letto come costo al kg (o viceversa)
+  // sarebbe un numero giusto nel posto sbagliato.
+  const [flatCost, setFlatCost] = useState(
+    option.costType === 'flat' && option.rates.length > 0 ? option.rates[0].cost.toString() : ''
+  );
+  const [linearCost, setLinearCost] = useState(
+    option.costType === 'linear' && option.rates.length > 0 ? option.rates[0].cost.toString() : ''
+  );
 
-  // Linear cost
-  const initialLinearCost =
-    option.costType === 'linear' && option.rates.length > 0
-      ? option.rates[0].cost.toString()
-      : '';
-  const [linearCost, setLinearCost] = useState(initialLinearCost);
-
-  // Brackets (for both weight and value)
-  const initialBrackets: OptionBracket[] =
-    (option.costType === 'weight_brackets' || option.costType === 'value_brackets') && option.rates.length > 0
-      ? option.rates
-          .sort((a, b) => (a.from ?? 0) - (b.from ?? 0))
-          .map((r) => ({
-            from: r.from,
-            to: r.to,
-            cost: r.cost,
-          }))
-      : [];
-  const [brackets, setBrackets] = useState<OptionBracket[]>(initialBrackets);
+  // Le fasce partono sempre da cio' che l'editor mostra (mai da una lista
+  // vuota), cosi' passare a fasce e salvare subito salva la fascia visibile.
+  const [brackets, setBrackets] = useState<OptionBracket[]>(() => initialOptionBrackets(option));
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const handleCostTypeChange = useCallback((selected: string[]) => {
@@ -117,34 +111,47 @@ export function EditOptionModal({
 
   const handleBracketsChange = useCallback((newBrackets: OptionBracket[]) => {
     setBrackets(newBrackets);
-    const error = validateOptionBrackets(costType, newBrackets);
-    setValidationError(error);
+    setValidationError(validateOptionBrackets(costType, newBrackets));
   }, [costType]);
 
+  // L'errore si ricalcola a ogni tasto: appena il valore torna valido sparisce
+  // e Salva si riabilita, senza dover cambiare tipo di costo per sbloccarlo.
+  const handleFlatCostChange = useCallback((value: string) => {
+    setFlatCost(value);
+    setValidationError(costFieldErrorWhileTyping('flat', value));
+  }, []);
+
+  const handleLinearCostChange = useCallback((value: string) => {
+    setLinearCost(value);
+    setValidationError(costFieldErrorWhileTyping('linear', value));
+  }, []);
+
   const handleSave = () => {
-    if (costType === 'flat') {
-      const cost = parseFloat(flatCost);
-      if (isNaN(cost) || cost < 0) {
-        setValidationError('shipping.errors.invalidLinearCost');
-        return;
-      }
-      onSave({ costType: 'flat', flatCost });
-    } else if (costType === 'linear') {
-      const cost = parseFloat(linearCost);
-      if (isNaN(cost) || cost < 0) {
-        setValidationError('shipping.errors.invalidLinearCost');
-        return;
-      }
-      onSave({ costType: 'linear', linearCost });
-    } else {
-      const error = validateOptionBrackets(costType, brackets);
+    if (costType === 'flat' || costType === 'linear') {
+      const valore = costType === 'flat' ? flatCost : linearCost;
+      const error = validateCostField(costType, valore);
       if (error) {
         setValidationError(error);
         return;
       }
-      onSave({ costType, brackets });
+      onSave(costType === 'flat' ? { costType, flatCost } : { costType, linearCost });
+      return;
     }
+    const error = validateOptionBrackets(costType, brackets);
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+    onSave({ costType, brackets });
   };
+
+  // Gli errori dei campi di costo compaiono sotto il campo; quelli delle
+  // fasce, che riguardano l'insieme, sotto l'editor.
+  const costFieldError =
+    validationError === 'shipping.errors.invalidFlatCost' ||
+    validationError === 'shipping.errors.invalidLinearCost'
+      ? getValidationErrorMessage(validationError, t) ?? undefined
+      : undefined;
 
   return (
     <Modal
@@ -166,26 +173,24 @@ export function EditOptionModal({
     >
       <Modal.Section>
         <BlockStack gap="400">
+          {/* Il perche' della modale vale per ogni tipo di costo; la parte
+              sulle fasce importate solo quando l'opzione ha fasce. */}
+          <BlockStack gap="100">
+            <Text as="p">{t.shipping.optionModal.costTypeHelp}</Text>
+            {isBracketType(costType) && (
+              <Text as="p" tone="subdued">
+                {t.shipping.optionModal.bracketsFromShopifyHelp}
+              </Text>
+            )}
+          </BlockStack>
+
           <ChoiceList
             title={t.shipping.optionModal.costTypeLabel}
             choices={[
-              {
-                label: t.shipping.optionModal.flatLabel,
-                value: 'flat',
-                helpText: costType === 'flat' ? t.shipping.optionModal.costTypeHelp : undefined,
-              },
-              {
-                label: t.shipping.optionModal.linearLabel,
-                value: 'linear',
-              },
-              {
-                label: t.shipping.optionModal.weightBracketsLabel,
-                value: 'weight_brackets',
-              },
-              {
-                label: t.shipping.optionModal.valueBracketsLabel,
-                value: 'value_brackets',
-              },
+              { label: t.shipping.optionModal.flatLabel, value: 'flat' },
+              { label: t.shipping.optionModal.linearLabel, value: 'linear' },
+              { label: t.shipping.optionModal.weightBracketsLabel, value: 'weight_brackets' },
+              { label: t.shipping.optionModal.valueBracketsLabel, value: 'value_brackets' },
             ]}
             selected={[costType]}
             onChange={handleCostTypeChange}
@@ -196,17 +201,13 @@ export function EditOptionModal({
               label={t.shipping.optionModal.flatCostLabel}
               type="number"
               value={flatCost}
-              onChange={setFlatCost}
+              onChange={handleFlatCostChange}
               placeholder={t.shipping.optionModal.flatCostPlaceholder}
               helpText={t.shipping.optionModal.flatCostHelp}
               autoComplete="off"
               min={0}
               step={0.01}
-              error={
-                validationError === 'shipping.errors.invalidLinearCost'
-                  ? t.shipping.errors.invalidLinearCost
-                  : undefined
-              }
+              error={costFieldError}
             />
           )}
 
@@ -215,71 +216,28 @@ export function EditOptionModal({
               label={t.shipping.optionModal.linearCostLabel}
               type="number"
               value={linearCost}
-              onChange={setLinearCost}
+              onChange={handleLinearCostChange}
               placeholder={t.shipping.optionModal.linearCostPlaceholder}
               helpText={t.shipping.optionModal.linearCostHelp}
               autoComplete="off"
               min={0}
               step={0.01}
-              error={
-                validationError === 'shipping.errors.invalidLinearCost'
-                  ? t.shipping.errors.invalidLinearCost
-                  : undefined
-              }
+              error={costFieldError}
             />
           )}
 
-          {costType === 'weight_brackets' && (
-            <BlockStack gap="200">
-              <Text as="p" tone="subdued">
-                {t.shipping.optionModal.weightBracketsHelp}
-              </Text>
-              <BracketsEditor
-                initialBrackets={brackets.map((b) => ({
-                  weightFromKg: b.from,
-                  weightToKg: b.to,
-                  cost: b.cost,
-                }))}
-                onChange={(newBrackets) =>
-                  handleBracketsChange(
-                    newBrackets.map((b) => ({
-                      from: b.weightFromKg,
-                      to: b.weightToKg,
-                      cost: b.cost,
-                    }))
-                  )
-                }
-              />
-            </BlockStack>
+          {/* La key rimonta l'editor quando si passa da peso a valore: le
+              etichette e l'aiuto cambiano unita' insieme alle soglie. */}
+          {isBracketType(costType) && (
+            <BracketsEditor
+              key={costType}
+              labels={bracketEditorLabels(costType, t)}
+              initialBrackets={toRateBrackets(brackets)}
+              onChange={(newBrackets) => handleBracketsChange(fromRateBrackets(newBrackets))}
+            />
           )}
 
-          {costType === 'value_brackets' && (
-            <BlockStack gap="200">
-              <Text as="p" tone="subdued">
-                {t.shipping.optionModal.valueBracketsHelp}
-              </Text>
-              <BracketsEditor
-                initialBrackets={brackets.map((b) => ({
-                  weightFromKg: b.from,
-                  weightToKg: b.to,
-                  cost: b.cost,
-                }))}
-                onChange={(newBrackets) =>
-                  handleBracketsChange(
-                    newBrackets.map((b) => ({
-                      from: b.weightFromKg,
-                      to: b.weightToKg,
-                      cost: b.cost,
-                    }))
-                  )
-                }
-                // Per le fasce di valore, le etichette restano kg ma il significato e' EUR
-                // Il BracketsEditor non ha bisogno di sapere l'unita': accetta numeri
-              />
-            </BlockStack>
-          )}
-
-          {validationError && validationError !== 'shipping.errors.invalidLinearCost' && (
+          {validationError && !costFieldError && (
             <Text as="p" tone="critical">
               {getValidationErrorMessage(validationError, t)}
             </Text>
