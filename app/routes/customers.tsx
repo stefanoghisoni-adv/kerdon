@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useFetcher, useLoaderData } from '@remix-run/react';
+import { useFetcher, useLoaderData, useNavigation } from '@remix-run/react';
 import { useEffect, useState } from 'react';
 import {
   Badge,
@@ -16,6 +16,7 @@ import {
   InlineStack,
   Link,
   Page,
+  Spinner,
   Text,
   TextField,
   Tooltip,
@@ -331,6 +332,14 @@ export default function Customers() {
     useLoaderData<typeof loader>();
   const t = useT();
   const locale = useLocale();
+  // Quale riga ha appena chiesto "Risolvi problemi": la pagina dei prodotti
+  // impiega un momento a caricare, e senza un segno sulla riga il clic sembra
+  // non aver fatto niente — e si clicca di nuovo.
+  const navigation = useNavigation();
+  const clienteInApertura =
+    navigation.state === 'loading' && navigation.location.pathname === '/products/issues'
+      ? new URLSearchParams(navigation.location.search).get('customer')
+      : null;
 
   // Il filtro sta in uno stato e non nell'indirizzo: non ricarica niente —
   // le righe sono gia' tutte qui — e passare dal server per nascondere delle
@@ -620,11 +629,14 @@ export default function Customers() {
                         ordini. Chi preme "Risolvi problemi" da questa riga
                         vuole sistemare il profitto di questo cliente, non fare
                         le pulizie di primavera nel catalogo. */}
-                    {row.coveredLines < row.totalLines && (
-                      <Link url={`/products/issues?customer=${row.customerId}`} removeUnderline>
-                        {t.customers.fixIssues}
-                      </Link>
-                    )}
+                    {row.coveredLines < row.totalLines &&
+                      (clienteInApertura === String(row.customerId) ? (
+                        <Spinner size="small" accessibilityLabel={t.customers.fixIssues} />
+                      ) : (
+                        <Link url={`/products/issues?customer=${row.customerId}`} removeUnderline>
+                          {t.customers.fixIssues}
+                        </Link>
+                      ))}
                   </IndexTable.Cell>
                 </IndexTable.Row>
               ))}
