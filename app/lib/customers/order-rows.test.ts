@@ -341,10 +341,10 @@ describe('orderToRows — opzione di spedizione scelta dal cliente', () => {
         rateType: 'linear',
         rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }],
         options: [
-          { name: 'Express', costType: 'flat', brackets: [{ from: null, to: null, cost: 9 }] },
+          { name: 'Express', costType: 'flat', confirmed: true, brackets: [{ from: null, to: null, cost: 9 }] },
           {
             name: 'Standard',
-            costType: 'value_brackets',
+            costType: 'value_brackets', confirmed: true,
             brackets: [
               { from: null, to: 50, cost: 6 },
               { from: 50, to: null, cost: 3 },

@@ -1,15 +1,17 @@
 import { Fragment } from 'react';
-import { BlockStack, Button, IndexTable, Text } from '@shopify/polaris';
+import { Badge, BlockStack, Button, IndexTable, Text } from '@shopify/polaris';
 import type { IndexTableProps } from '@shopify/polaris';
 import { useT, useLocale } from '~/lib/i18n/context';
 import { formatMoney } from '~/lib/billing/money';
-import { formatIndicativeOptionCost } from './option-cost';
+import { isCarrierCalculated, optionCostCell } from './option-cost';
 import type { OptionCostType } from '~/lib/shipping/types';
 
 interface Option {
   id: string;
   name: string;
   costType: OptionCostType;
+  shopifyKind: string | null;
+  confirmed: boolean;
   rates: Array<{
     id: string;
     from: number | null;
@@ -44,7 +46,8 @@ interface ShippingZonesTableProps {
  *
  * Ogni zona apre il suo gruppo con una riga d'intestazione (nome e paesi) e
  * sotto elenca le opzioni e la tariffa generica, che vale quando l'ordine usa
- * un'opzione non importata. Le righe del gruppo puntano all'intestazione con
+ * un'opzione non importata, non ancora compilata o con un nome diverso (le
+ * tariffe calcolate al checkout riportano il nome del servizio). Le righe del gruppo puntano all'intestazione con
  * `headers`: chi usa uno screen reader sente a quale zona appartiene ogni
  * opzione, non solo chi vede il rientro.
  */
@@ -128,26 +131,38 @@ export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZone
       </IndexTable.Row>
     );
 
-    const optionRows = zone.options.map((option) => (
-      <IndexTable.Row rowType="child" id={option.id} key={option.id} position={position++}>
-        <IndexTable.Cell headers={headerId}>
-          <Text as="span">{option.name}</Text>
-        </IndexTable.Cell>
-        <IndexTable.Cell headers={headerId}>{costTypeLabels[option.costType]}</IndexTable.Cell>
-        <IndexTable.Cell headers={headerId}>
-          {formatIndicativeOptionCost(option.costType, option.rates, 'EUR', locale)}
-        </IndexTable.Cell>
-        <IndexTable.Cell headers={headerId}>
-          <Button
-            size="slim"
-            onClick={() => onEditOption(option, zone)}
-            accessibilityLabel={t.shipping.table.editOptionLabel(zone.zoneName, option.name)}
-          >
-            {t.shipping.table.edit}
-          </Button>
-        </IndexTable.Cell>
-      </IndexTable.Row>
-    ));
+    const optionRows = zone.options.map((option) => {
+      const cell = optionCostCell(option, 'EUR', locale);
+      return (
+        <IndexTable.Row rowType="child" id={option.id} key={option.id} position={position++}>
+          <IndexTable.Cell headers={headerId}>
+            <BlockStack gap="050">
+              <Text as="span">{option.name}</Text>
+              {/* Tariffa calcolata al checkout: sull'ordine compare il nome del
+                  servizio, che puo' non coincidere con quello importato. */}
+              {isCarrierCalculated(option.shopifyKind) && (
+                <Text as="span" tone="subdued" variant="bodySm">
+                  {t.shipping.table.carrierNameHelp}
+                </Text>
+              )}
+            </BlockStack>
+          </IndexTable.Cell>
+          <IndexTable.Cell headers={headerId}>{costTypeLabels[option.costType]}</IndexTable.Cell>
+          <IndexTable.Cell headers={headerId}>
+            {cell.toFill ? <Badge>{t.shipping.table.toFill}</Badge> : cell.text}
+          </IndexTable.Cell>
+          <IndexTable.Cell headers={headerId}>
+            <Button
+              size="slim"
+              onClick={() => onEditOption(option, zone)}
+              accessibilityLabel={t.shipping.table.editOptionLabel(zone.zoneName, option.name)}
+            >
+              {t.shipping.table.edit}
+            </Button>
+          </IndexTable.Cell>
+        </IndexTable.Row>
+      );
+    });
 
     const genericId = `zona-${zone.id}-generica`;
     const genericRow = (

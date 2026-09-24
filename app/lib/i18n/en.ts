@@ -1049,7 +1049,11 @@ export const en: typeof it = {
       actions: "Actions",
       edit: "Edit",
       genericRate: "Zone's generic rate",
-      genericRateHelp: "Applies to orders with an option you don't see below",
+      genericRateHelp:
+        "Applies to orders whose shipping option you haven't filled in yet, or that we can't match to one of the options below",
+      toFill: "To fill in",
+      carrierNameHelp:
+        "Rate calculated at checkout: this cost applies only when the order shows exactly this name, otherwise the zone rate applies",
       editGenericRateLabel: (zoneName: string) => `Edit the generic rate for ${zoneName}`,
       editOptionLabel: (zoneName: string, optionName: string) =>
         `Edit the costs of ${optionName} in ${zoneName}`,

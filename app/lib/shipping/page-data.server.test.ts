@@ -116,3 +116,37 @@ describe('loadShippingPageData', () => {
     await expect(loadShippingPageData('shop-1')).rejects.toThrow('connessione caduta');
   });
 });
+
+describe('loadShippingPageData con le tabelle delle opzioni non ancora create', () => {
+  it.each(['P2021', 'P2022'])('%s sulle opzioni: zone e imballo restano, le opzioni sono vuote', async (code) => {
+    findMany.mockImplementation(async (args: { include?: { options?: unknown } }) => {
+      if (args?.include?.options) throw erroreDiPrisma(code);
+      return [
+        {
+          id: 'z1',
+          zoneName: 'Italia',
+          countries: ['IT'],
+          restOfWorld: false,
+          rateType: 'linear',
+          rates: [{ id: 'r1', weightFrom: null, weightTo: null, cost: new Prisma.Decimal(5) }],
+        },
+      ];
+    });
+    findUnique.mockResolvedValue({
+      categories: [],
+      fallbackRules: [],
+      defaultWeightPerItem: new Prisma.Decimal(0.5),
+      returnCost: new Prisma.Decimal(4),
+      updatedAt: new Date('2026-09-24T10:00:00Z'),
+    });
+
+    const data = await loadShippingPageData('shop-1');
+
+    expect(data.zones).toHaveLength(1);
+    expect(data.zones[0].rates[0].cost).toBe(5);
+    expect(data.zones[0].options).toEqual([]);
+    // I default salvati si vedono: salvarli di nuovo non li azzera.
+    expect(data.packaging.defaultWeightPerItemKg).toBe(0.5);
+    expect(data.packaging.returnCost).toBe(4);
+  });
+});

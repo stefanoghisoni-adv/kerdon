@@ -1345,7 +1345,11 @@ export const it = {
       actions: "Azioni",
       edit: "Modifica",
       genericRate: "Tariffa generica della zona",
-      genericRateHelp: "Vale per gli ordini con un'opzione che non trovi qui sotto",
+      genericRateHelp:
+        "Vale per gli ordini con un'opzione che non hai ancora compilato o che non riusciamo ad abbinare a una di quelle qui sotto",
+      toFill: "Da compilare",
+      carrierNameHelp:
+        "Tariffa calcolata al checkout: questo costo vale solo se l'ordine riporta esattamente questo nome, altrimenti vale la tariffa della zona",
       editGenericRateLabel: (zoneName: string) => `Modifica la tariffa generica di ${zoneName}`,
       editOptionLabel: (zoneName: string, optionName: string) =>
         `Modifica i costi di ${optionName} in ${zoneName}`,

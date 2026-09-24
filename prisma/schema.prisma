@@ -1671,6 +1671,8 @@ model ShippingOption {
   name        String
   costType    String               @default("flat") @map("cost_type")
   shopifyKind String?              @map("shopify_kind")
+  /// false finche' il merchant non salva il costo: fino ad allora vale la tariffa della zona.
+  confirmed   Boolean              @default(false) @map("confirmed")
   createdAt   DateTime             @default(now()) @map("created_at")
   zone        ShippingZone         @relation(fields: [zoneId], references: [id], onDelete: Cascade)
   rates       ShippingOptionRate[]

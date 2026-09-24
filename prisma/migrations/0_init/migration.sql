@@ -890,6 +890,7 @@ CREATE TABLE "shipping_options" (
     "name" TEXT NOT NULL,
     "cost_type" TEXT NOT NULL DEFAULT 'flat',
     "shopify_kind" TEXT,
+    "confirmed" BOOLEAN NOT NULL DEFAULT false,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "shipping_options_pkey" PRIMARY KEY ("id")

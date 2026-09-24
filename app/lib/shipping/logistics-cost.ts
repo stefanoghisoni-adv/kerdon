@@ -47,12 +47,16 @@ export function findZone(zones: ZoneConfig[], country: string | null): ZoneConfi
 
 /**
  * Trova l'opzione di spedizione per nome, con confronto case-insensitive e spazi rimossi.
- * Ritorna null se il metodo e' null o se nessuna opzione combacia.
+ * Ritorna null se il metodo e' null o se nessuna opzione confermata combacia.
+ *
+ * Le opzioni non confermate non contano: l'import le crea con costo zero da
+ * compilare, e abbinarle farebbe risultare gratuita ogni spedizione con quel
+ * nome. Finche' il merchant non salva l'opzione vale la tariffa della zona.
  */
 export function findOption(zone: ZoneConfig, method: string | null): ShippingOptionConfig | null {
   if (!method) return null;
   const normalized = method.trim().toLowerCase();
-  return zone.options.find((opt) => opt.name.trim().toLowerCase() === normalized) ?? null;
+  return zone.options.find((opt) => opt.confirmed && opt.name.trim().toLowerCase() === normalized) ?? null;
 }
 
 function shippingFor(zone: ZoneConfig, weightKg: number): number {

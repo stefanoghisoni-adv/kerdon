@@ -14,6 +14,8 @@ import {
   costFieldErrorWhileTyping,
   initialOptionBrackets,
   DEFAULT_OPTION_BRACKET,
+  optionCostCell,
+  isCarrierCalculated,
 } from './option-cost';
 import { validateBrackets } from './brackets';
 import { it as italiano } from '~/lib/i18n/it';
@@ -306,5 +308,51 @@ describe('initialOptionBrackets', () => {
 
   it('la fascia di partenza supera la validazione, cosi Salva funziona subito', () => {
     expect(validateOptionBrackets('weight_brackets', [DEFAULT_OPTION_BRACKET])).toBeNull();
+  });
+});
+
+describe('optionCostCell: cosa mostra la tabella nella colonna del costo', () => {
+  const rates = [{ from: null, to: null, cost: 0 }];
+
+  it("opzione importata e mai salvata: 'da compilare', non 0,00 €", () => {
+    expect(optionCostCell({ costType: 'flat', confirmed: false, rates }, 'EUR', 'it')).toEqual({ toFill: true });
+  });
+
+  it('opzione salvata: il costo formattato, anche se zero', () => {
+    expect(optionCostCell({ costType: 'flat', confirmed: true, rates }, 'EUR', 'it')).toEqual({
+      toFill: false,
+      text: formatIndicativeOptionCost('flat', rates, 'EUR', 'it'),
+    });
+    expect(formatIndicativeOptionCost('flat', rates, 'EUR', 'it')).toMatch(/0,00/);
+  });
+
+  it('opzione salvata a fasce: intervallo come prima', () => {
+    const fasce = [
+      { from: 0, to: 2, cost: 5 },
+      { from: 2, to: null, cost: 8 },
+    ];
+    expect(optionCostCell({ costType: 'weight_brackets', confirmed: true, rates: fasce }, 'EUR', 'it')).toEqual({
+      toFill: false,
+      text: formatIndicativeOptionCost('weight_brackets', fasce, 'EUR', 'it'),
+    });
+  });
+
+  it('le etichette esistono in italiano e in inglese', () => {
+    expect(italiano.shipping.table.toFill).toBe('Da compilare');
+    expect(inglese.shipping.table.toFill).toBe('To fill in');
+    expect(italiano.shipping.table.carrierNameHelp.length).toBeGreaterThan(0);
+    expect(inglese.shipping.table.carrierNameHelp.length).toBeGreaterThan(0);
+  });
+});
+
+describe('isCarrierCalculated', () => {
+  it('tariffa calcolata dal corriere o da un app', () => {
+    expect(isCarrierCalculated('DeliveryParticipant')).toBe(true);
+  });
+
+  it('tariffe impostate nel negozio o tipo sconosciuto', () => {
+    expect(isCarrierCalculated('DeliveryRateDefinition')).toBe(false);
+    expect(isCarrierCalculated('DeliveryRateDefinition:TOTAL_WEIGHT')).toBe(false);
+    expect(isCarrierCalculated(null)).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { prisma } from '~/db.server';
+import { isMissingTableError } from './load-config.server';
 import type { OptionCostType } from './types';
 
 // Forma verificata sull'Admin API 2026-07 (validatore shopify-dev):
@@ -342,6 +343,12 @@ function proposeOption(
       rates[i].rangeTo = next.rangeFrom;
     }
   }
+  // L'ultima fascia resta aperta verso l'alto. In Shopify "fino a 5 kg" vuol
+  // dire che oltre quella soglia l'opzione non si offre, ma gli ordini con
+  // quel nome possono pesare di piu' (modifiche dopo l'acquisto, peso di
+  // default): con il tetto importato non troverebbero nessuna fascia e il
+  // costo di spedizione risulterebbe zero. Il merchant puo' sempre rimetterlo.
+  if (rates.length > 0) rates[rates.length - 1].rangeTo = null;
   return { name, costType, shopifyKind, rates };
 }
 
@@ -410,6 +417,11 @@ export async function syncShippingZones(
   let updated = 0;
   let optionsAdded = 0;
   const syncedAt = new Date();
+  // Le tabelle delle opzioni arrivano con una migrazione lanciata a mano dopo
+  // il rilascio. Finche' mancano, l'import delle zone deve riuscire lo stesso
+  // (le zone sono gia' salvate e il ricalcolo va accodato): si saltano solo le
+  // opzioni, che un import successivo portera' dentro.
+  let optionsUnavailable = false;
 
   // Upsert ogni zona
   for (const [zoneName, { countries, restOfWorld, methods }] of zoneMap.entries()) {
@@ -439,37 +451,61 @@ export async function syncShippingZones(
       updated++;
     }
 
-    if (methods.size === 0) continue;
+    if (methods.size === 0 || optionsUnavailable) continue;
 
-    // Opzioni gia' presenti: tipo e fasce li ha scritti il merchant, non si
-    // toccano. Quelle sparite da Shopify restano (servono agli ordini storici).
-    const existingOptions = await prisma.shippingOption.findMany({
-      where: { zoneId: savedZone.id },
-      select: { name: true },
-    });
-    const existingKeys = new Set(existingOptions.map((o) => optionKey(o.name)));
-
-    for (const [key, group] of methods.entries()) {
-      if (existingKeys.has(key)) continue;
-      const option = proposeOption(zoneName, group.name, group.methods);
-      try {
-        await prisma.shippingOption.create({
-          data: {
-            zoneId: savedZone.id,
-            name: option.name,
-            costType: option.costType,
-            shopifyKind: option.shopifyKind,
-            rates: { create: option.rates },
-          },
-        });
-        optionsAdded++;
-      } catch (error) {
-        // Un import concorrente l'ha creata tra la lettura e la scrittura:
-        // esiste gia', e quella resta com'e'. Ogni altro errore sale.
-        if ((error as { code?: string }).code !== 'P2002') throw error;
-      }
+    try {
+      optionsAdded += await importOptions(savedZone.id, zoneName, methods);
+    } catch (error) {
+      if (!isMissingTableError(error)) throw error;
+      optionsUnavailable = true;
+      console.warn('[sync-zones] Opzioni di spedizione non ancora disponibili: importate solo le zone');
     }
   }
 
   return { added, updated, optionsAdded };
+}
+
+/**
+ * Crea le opzioni nuove di una zona e ne restituisce il numero.
+ *
+ * Opzioni gia' presenti: tipo e fasce li ha scritti il merchant, non si
+ * toccano. Quelle sparite da Shopify restano (servono agli ordini storici).
+ */
+async function importOptions(
+  zoneId: string,
+  zoneName: string,
+  methods: Map<string, { name: string; methods: MethodDefinition[] }>
+): Promise<number> {
+  const existingOptions = await prisma.shippingOption.findMany({
+    where: { zoneId },
+    select: { name: true },
+  });
+  const existingKeys = new Set(existingOptions.map((o) => optionKey(o.name)));
+
+  let created = 0;
+  for (const [key, group] of methods.entries()) {
+    if (existingKeys.has(key)) continue;
+    const option = proposeOption(zoneName, group.name, group.methods);
+    try {
+      await prisma.shippingOption.create({
+        data: {
+          zoneId,
+          name: option.name,
+          costType: option.costType,
+          shopifyKind: option.shopifyKind,
+          // I costi proposti sono zeri segnaposto: finche' il merchant non li
+          // salva, gli ordini con questa opzione prendono la tariffa della
+          // zona invece di risultare spediti gratis.
+          confirmed: false,
+          rates: { create: option.rates },
+        },
+      });
+      created++;
+    } catch (error) {
+      // Un import concorrente l'ha creata tra la lettura e la scrittura:
+      // esiste gia', e quella resta com'e'. Ogni altro errore sale.
+      if ((error as { code?: string }).code !== 'P2002') throw error;
+    }
+  }
+  return created;
 }

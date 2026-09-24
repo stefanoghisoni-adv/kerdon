@@ -1,6 +1,6 @@
 // app/lib/shipping/logistics-cost.test.ts
 import { describe, it, expect } from 'vitest';
-import { computeLogisticsCost, findZone, isShipped, resolvePackagingCategory, resolveWeightKg } from './logistics-cost';
+import { computeLogisticsCost, findOption, findZone, isShipped, resolvePackagingCategory, resolveWeightKg } from './logistics-cost';
 import type { LogisticsConfig, OrderLogisticsInput } from './types';
 
 const config: LogisticsConfig = {
@@ -134,12 +134,12 @@ describe('computeLogisticsCost con opzioni', () => {
     zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear' as const,
     rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }],
     options: [
-      { name: 'Standard', costType: 'flat' as const, brackets: [{ from: null, to: null, cost: 4.9 }] },
-      { name: 'Express', costType: 'weight_brackets' as const, brackets: [
+      { name: 'Standard', costType: 'flat' as const, confirmed: true, brackets: [{ from: null, to: null, cost: 4.9 }] },
+      { name: 'Express', costType: 'weight_brackets' as const, confirmed: true, brackets: [
         { from: 0, to: 2, cost: 9 }, { from: 2, to: null, cost: 14 } ] },
-      { name: 'Gratis sopra 50', costType: 'value_brackets' as const, brackets: [
+      { name: 'Gratis sopra 50', costType: 'value_brackets' as const, confirmed: true, brackets: [
         { from: 0, to: 50, cost: 6 }, { from: 50, to: null, cost: 6.5 } ] },
-      { name: 'Corriere', costType: 'linear' as const, brackets: [{ from: null, to: null, cost: 1.5 }] },
+      { name: 'Corriere', costType: 'linear' as const, confirmed: true, brackets: [{ from: null, to: null, cost: 1.5 }] },
     ],
   };
 
@@ -226,5 +226,34 @@ describe('computeLogisticsCost con opzioni', () => {
       configConOpzioni
     );
     expect(c).toEqual({ shipping: 0, packaging: 0, returns: 0, total: 0 });
+  });
+});
+
+/**
+ * L'import porta le opzioni con costi a zero da compilare. Finche' il merchant
+ * non le salva, un ordine con quell'opzione prende la tariffa della zona:
+ * altrimenti lo zero segnaposto farebbe sembrare gratuita la spedizione.
+ */
+describe('computeLogisticsCost con opzioni non ancora confermate', () => {
+  const zona = (confirmed: boolean) => ({
+    zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear' as const,
+    rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }],
+    options: [{ name: 'Standard', costType: 'flat' as const, confirmed, brackets: [{ from: null, to: null, cost: 0 }] }],
+  });
+  const ordine = { ...base, shipping_method: 'Standard', total_weight_grams: 3000 };
+
+  it('opzione importata e mai salvata: vale la tariffa della zona (3 kg × 2 = 6)', () => {
+    const c = computeLogisticsCost(ordine, { ...config, zones: [zona(false)] });
+    expect(c.shipping).toBe(6);
+  });
+
+  it('dopo il salvataggio vale il costo dell opzione, anche se zero', () => {
+    const c = computeLogisticsCost(ordine, { ...config, zones: [zona(true)] });
+    expect(c.shipping).toBe(0);
+  });
+
+  it('findOption ignora le opzioni non confermate', () => {
+    expect(findOption(zona(false), 'Standard')).toBeNull();
+    expect(findOption(zona(true), 'Standard')?.name).toBe('Standard');
   });
 });

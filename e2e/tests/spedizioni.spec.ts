@@ -582,13 +582,15 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       expect(Number(tariffe[0].cost)).toBe(8.5);
 
       // Verifica che il costType sia aggiornato
-      const opzioneAggiornata = await db<{ costType: string } | null>(
+      const opzioneAggiornata = await db<{ costType: string; confirmed: boolean } | null>(
         request,
         'shippingOption',
         'findUnique',
-        { where: { id: opzione.id }, select: { costType: true } },
+        { where: { id: opzione.id }, select: { costType: true, confirmed: true } },
       );
       expect(opzioneAggiornata?.costType).toBe('flat');
+      // Salvare conferma l'opzione: da qui il suo costo vale sugli ordini.
+      expect(opzioneAggiornata?.confirmed).toBe(true);
     });
 
     prova('con fasce di valore contigue salva con successo', async ({ request, context }) => {
@@ -638,13 +640,14 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       expect(Number(tariffe[2].cost)).toBe(0);
 
       // Verifica che il costType sia aggiornato
-      const opzioneAggiornata = await db<{ costType: string } | null>(
+      const opzioneAggiornata = await db<{ costType: string; confirmed: boolean } | null>(
         request,
         'shippingOption',
         'findUnique',
-        { where: { id: opzione.id }, select: { costType: true } },
+        { where: { id: opzione.id }, select: { costType: true, confirmed: true } },
       );
       expect(opzioneAggiornata?.costType).toBe('value_brackets');
+      expect(opzioneAggiornata?.confirmed).toBe(true);
     });
 
     prova('con fasce non contigue rifiuta con errore di validazione', async ({ request, context }) => {
@@ -686,13 +689,15 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       expect(tariffe).toHaveLength(1);
       expect(Number(tariffe[0].cost)).toBe(7.0);
 
-      const opzioneAggiornata = await db<{ costType: string } | null>(
+      const opzioneAggiornata = await db<{ costType: string; confirmed: boolean } | null>(
         request,
         'shippingOption',
         'findUnique',
-        { where: { id: opzione.id }, select: { costType: true } },
+        { where: { id: opzione.id }, select: { costType: true, confirmed: true } },
       );
       expect(opzioneAggiornata?.costType).toBe('flat');
+      // Un salvataggio rifiutato non conferma l'opzione: resta la tariffa della zona.
+      expect(opzioneAggiornata?.confirmed).toBe(false);
     });
 
     prova('con optionId di un altro shop rifiuta', async ({ request, context }) => {

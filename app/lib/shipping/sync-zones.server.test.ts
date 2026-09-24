@@ -361,6 +361,9 @@ describe('syncShippingZones — opzioni', () => {
         name: 'Standard',
         costType: 'flat',
         shopifyKind: 'DeliveryRateDefinition',
+        // Da confermare: finche' il merchant non salva il costo vale la
+        // tariffa della zona, non lo zero proposto.
+        confirmed: false,
         rates: { create: [{ rangeFrom: null, rangeTo: null, cost: 0 }] },
       },
     });
@@ -437,8 +440,9 @@ describe('syncShippingZones — opzioni', () => {
 
     await syncShippingZones(admin, 'shop-1');
 
+    // L'ultima fascia resta aperta verso l'alto (vedi la prova sotto).
     expect(createdOption('Ground').rates.create).toEqual([
-      { rangeFrom: 0.227, rangeTo: 0.907, cost: 0 },
+      { rangeFrom: 0.227, rangeTo: null, cost: 0 },
     ]);
   });
 
@@ -636,7 +640,7 @@ describe('syncShippingZones — opzioni', () => {
           restOfWorld: false,
           rateType: 'linear' as const,
           rates: [],
-          options: [{ name: 'Standard', costType: 'value_brackets' as const, brackets }],
+          options: [{ name: 'Standard', costType: 'value_brackets' as const, confirmed: true, brackets }],
         },
       ],
       categories: [],
@@ -746,6 +750,112 @@ describe('syncShippingZones — opzioni', () => {
 
     expect(result.optionsAdded).toBe(1);
     expect(optionCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it("l'ultima fascia importata resta senza limite: un ordine piu pesante la trova", async () => {
+    const { admin } = fakeAdmin([
+      [
+        [
+          {
+            name: 'Italia',
+            countries: [c('IT')],
+            methods: [
+              { name: 'Corriere', rateProvider: flatRate('6.00'), methodConditions: [weight('LESS_THAN_OR_EQUAL_TO', 2)] },
+              {
+                name: 'Corriere',
+                rateProvider: flatRate('9.00'),
+                methodConditions: [weight('GREATER_THAN_OR_EQUAL_TO', 2), weight('LESS_THAN_OR_EQUAL_TO', 5)],
+              },
+            ],
+          },
+        ],
+      ],
+    ]);
+
+    await syncShippingZones(admin, 'shop-1');
+
+    const imported = createdOption('Corriere').rates.create as Array<{ rangeFrom: number | null; rangeTo: number | null }>;
+    expect(imported).toEqual([
+      { rangeFrom: 0, rangeTo: 2, cost: 0 },
+      { rangeFrom: 2, rangeTo: null, cost: 0 },
+    ]);
+
+    // Il merchant compila e conferma: un pacco da 7 kg prende l'ultima fascia, non zero.
+    const config = {
+      zones: [
+        {
+          zoneName: 'Italia',
+          countries: ['IT'],
+          restOfWorld: false,
+          rateType: 'linear' as const,
+          rates: [],
+          options: [
+            {
+              name: 'Corriere',
+              costType: 'weight_brackets' as const,
+              confirmed: true,
+              brackets: imported.map((r, k) => ({ from: r.rangeFrom, to: r.rangeTo, cost: k === 0 ? 5 : 8 })),
+            },
+          ],
+        },
+      ],
+      categories: [],
+      fallbackRules: [],
+      defaultWeightPerItemKg: null,
+      returnCost: null,
+    };
+    const cost = computeLogisticsCost(
+      {
+        fulfillment_status: 'FULFILLED',
+        shipping_country_code: 'IT',
+        total_weight_grams: 7000,
+        item_count: 1,
+        returned_at: null,
+        packaging_category: null,
+        shipping_method: 'Corriere',
+        total_price: 100,
+      },
+      config,
+    );
+    expect(cost.shipping).toBe(8);
+  });
+
+  it.each(['P2021', 'P2022'])(
+    'tabelle delle opzioni non ancora create (%s): le zone si importano e il sync riesce',
+    async (code) => {
+      const { Prisma } = await import('@prisma/client');
+      const { admin } = fakeAdmin([
+        [
+          [
+            { name: 'Italia', countries: [c('IT')], methods: [{ name: 'Standard', rateProvider: flatRate('4.90') }] },
+            { name: 'Europa', countries: [c('FR')], methods: [{ name: 'Express', rateProvider: flatRate('9.90') }] },
+          ],
+        ],
+      ]);
+      optionFindMany.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('missing', { code, clientVersion: 'test' }),
+      );
+
+      const result = await syncShippingZones(admin, 'shop-1');
+
+      expect(result).toEqual({ added: 2, updated: 0, optionsAdded: 0 });
+      expect(upsert).toHaveBeenCalledTimes(2);
+      // Dopo il primo errore le opzioni non si ritentano zona per zona.
+      expect(optionFindMany).toHaveBeenCalledTimes(1);
+      expect(optionCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('colonna delle opzioni non ancora creata alla scrittura (P2022): il sync riesce', async () => {
+    const { Prisma } = await import('@prisma/client');
+    const { admin } = fakeAdmin([
+      [[{ name: 'Italia', countries: [c('IT')], methods: [{ name: 'Standard', rateProvider: flatRate('4.90') }] }]],
+    ]);
+    optionCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('missing column', { code: 'P2022', clientVersion: 'test' }),
+    );
+
+    await expect(syncShippingZones(admin, 'shop-1')).resolves.toEqual({ added: 1, updated: 0, optionsAdded: 0 });
   });
 
   it("ogni altro errore nella creazione dell'opzione interrompe il sync", async () => {

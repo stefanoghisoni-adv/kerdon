@@ -318,9 +318,11 @@ export async function action({ request }: ActionFunctionArgs) {
       // Sostituisci le tariffe in una transazione
       await prisma.$transaction([
         prisma.shippingOptionRate.deleteMany({ where: { optionId } }),
+        // Salvare conferma l'opzione: da qui in poi il suo costo vale sugli
+        // ordini al posto della tariffa della zona.
         prisma.shippingOption.update({
           where: { id: optionId },
-          data: { costType },
+          data: { costType, confirmed: true },
         }),
         prisma.shippingOptionRate.create({
           data: {
@@ -342,9 +344,11 @@ export async function action({ request }: ActionFunctionArgs) {
       // Sostituisci le tariffe in una transazione
       await prisma.$transaction([
         prisma.shippingOptionRate.deleteMany({ where: { optionId } }),
+        // Salvare conferma l'opzione: da qui in poi il suo costo vale sugli
+        // ordini al posto della tariffa della zona.
         prisma.shippingOption.update({
           where: { id: optionId },
-          data: { costType },
+          data: { costType, confirmed: true },
         }),
         ...brackets.map((bracket) =>
           prisma.shippingOptionRate.create({

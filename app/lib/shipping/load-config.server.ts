@@ -30,22 +30,15 @@ export async function loadLogisticsConfig(shopId: string): Promise<LogisticsConf
  * con le tariffe illeggibili per un guasto di rete non si deve scrivere niente
  * — altrimenti un singhiozzo del database azzererebbe costi corretti. Quindi:
  * null quando la configurazione manca (anche con le tabelle owner non ancora
- * create, P2021), eccezione per qualunque altro errore.
+ * create, P2021), eccezione per qualunque altro errore. Le sole tabelle delle
+ * opzioni mancanti non contano come "configurazione assente": zone e imballo
+ * si leggono comunque (vedi readZonesWithOptions).
  */
 export async function loadLogisticsConfigStrict(
   shopId: string,
 ): Promise<LogisticsConfig | null> {
   try {
-    // Leggi zone con tariffe e opzioni
-    const zones = await prisma.shippingZone.findMany({
-      where: { shopId },
-      include: {
-        rates: true,
-        options: {
-          include: { rates: true },
-        },
-      },
-    });
+    const zones = await readZonesWithOptions(shopId);
 
     // Leggi packaging config
     const packagingConfig = await prisma.packagingConfig.findUnique({
@@ -91,6 +84,50 @@ export async function loadLogisticsConfigStrict(
     }
 
     throw error;
+  }
+}
+
+/**
+ * La tabella o la colonna non c'e' ancora (P2021 / P2022): la finestra fra il
+ * rilascio del codice e la migrazione del DB owner, che si lancia a mano.
+ */
+export function isMissingTableError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    (error.code === 'P2021' || error.code === 'P2022')
+  );
+}
+
+/**
+ * Le zone con tariffe e opzioni; senza opzioni se le loro tabelle mancano.
+ *
+ * Le opzioni arrivano con una migrazione a parte, lanciata a mano dopo il
+ * rilascio. Nel frattempo zone, tariffe e imballo sono dati veri del merchant:
+ * se l'assenza delle opzioni facesse fallire tutta la lettura, la
+ * configurazione risulterebbe "assente" e il ricalcolo scriverebbe zero su
+ * tutti gli ordini. Si rilegge quindi senza opzioni, e ogni ordine prende la
+ * tariffa della zona, come prima delle opzioni. Se manca anche la tabella
+ * delle zone, la seconda lettura fallisce con lo stesso codice e il chiamante
+ * lo tratta come "nessuna configurazione".
+ */
+async function readZonesWithOptions(shopId: string) {
+  try {
+    return await prisma.shippingZone.findMany({
+      where: { shopId },
+      include: {
+        rates: true,
+        options: {
+          include: { rates: true },
+        },
+      },
+    });
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error;
+    const zones = await prisma.shippingZone.findMany({
+      where: { shopId },
+      include: { rates: true },
+    });
+    return zones.map((zone) => ({ ...zone, options: [] }));
   }
 }
 
@@ -145,6 +182,7 @@ function convertOptions(
   options: Array<{
     name: string;
     costType: string;
+    confirmed: boolean;
     rates: Array<{
       rangeFrom: Prisma.Decimal | null;
       rangeTo: Prisma.Decimal | null;
@@ -169,6 +207,7 @@ function convertOptions(
     .map((option) => ({
       name: option.name,
       costType: option.costType as OptionCostType,
+      confirmed: option.confirmed === true,
       brackets: option.rates.map((rate) => ({
         from: rate.rangeFrom ? Number(rate.rangeFrom) : null,
         to: rate.rangeTo ? Number(rate.rangeTo) : null,

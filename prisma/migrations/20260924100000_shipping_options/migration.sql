@@ -11,6 +11,10 @@
 -- dal paese, poi opzione per nome. Niente opzione che combacia → si usa la tariffa
 -- generica della zona (ripiego).
 --
+-- CONFERMA. `confirmed` resta false sulle opzioni importate finche' il merchant
+-- non ne salva il costo: fino ad allora l'ordine prende la tariffa della zona,
+-- perche' lo zero proposto dall'import farebbe sembrare gratis la spedizione.
+--
 -- Additive: due tabelle nuove, nessuna colonna su quelle esistenti.
 
 CREATE TABLE IF NOT EXISTS "shipping_options" (
@@ -19,6 +23,7 @@ CREATE TABLE IF NOT EXISTS "shipping_options" (
   "name"         TEXT         NOT NULL,
   "cost_type"    TEXT         NOT NULL DEFAULT 'flat',
   "shopify_kind" TEXT,
+  "confirmed"    BOOLEAN      NOT NULL DEFAULT false,
   "created_at"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "shipping_options_pkey" PRIMARY KEY ("id")
 );

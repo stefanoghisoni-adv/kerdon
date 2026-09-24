@@ -31,6 +31,9 @@ vi.mock('~/db.server', () => ({
   prisma: {
     shop: { findUnique: vi.fn() },
     syncRequest: { createMany: vi.fn(), findUnique: vi.fn() },
+    // Solo per la prova con il caricatore vero delle tariffe (vedi sotto).
+    shippingZone: { findMany: vi.fn() },
+    packagingConfig: { findUnique: vi.fn() },
   },
 }));
 
@@ -182,6 +185,38 @@ describe('processLogisticsRecompute', () => {
 
     expect(scritture()).toHaveLength(1);
     expect(scritture()[0]).toContain('(1001::bigint, 0.00::numeric)');
+  });
+
+  it('tabelle delle opzioni non ancora create: scrive i costi della zona, non zero', async () => {
+    // Il caricatore vero sopra un Prisma che non conosce ancora le opzioni:
+    // e' la finestra fra il rilascio e la migrazione delle opzioni.
+    const vero = await vi.importActual<typeof import('./load-config.server')>('./load-config.server');
+    (loadLogisticsConfigStrict as any).mockImplementation(vero.loadLogisticsConfigStrict);
+    (prisma as any).shippingZone.findMany.mockImplementation(async (args: any) => {
+      if (args?.include?.options) {
+        const { Prisma } = await import('@prisma/client');
+        throw new Prisma.PrismaClientKnownRequestError('missing', { code: 'P2021', clientVersion: 'test' });
+      }
+      return [
+        {
+          zoneName: 'Italia',
+          countries: ['IT'],
+          restOfWorld: false,
+          rateType: 'linear',
+          rates: [{ weightFrom: null, weightTo: null, cost: 5 }],
+        },
+      ];
+    });
+    (prisma as any).packagingConfig.findUnique.mockResolvedValue(null);
+    (runQueryRows as any).mockResolvedValueOnce([
+      ordine({ shopify_order_id: '1001', total_weight_grams: 2000, shipping_method: 'Standard' }),
+    ]);
+
+    await processLogisticsRecompute('shop-1');
+
+    // 2 kg a 5 €/kg dalla tariffa della zona.
+    expect(scritture()).toHaveLength(1);
+    expect(scritture()[0]).toContain('(1001::bigint, 10.00::numeric)');
   });
 
   it('se le tariffe non si leggono non scrive niente e lascia ritentare la coda', async () => {
@@ -416,10 +451,10 @@ describe('ricalcolo: l opzione di spedizione scelta', () => {
       {
         ...CONFIG.zones[0],
         options: [
-          { name: 'Express', costType: 'flat', brackets: [{ from: null, to: null, cost: 9 }] },
+          { name: 'Express', costType: 'flat', confirmed: true, brackets: [{ from: null, to: null, cost: 9 }] },
           {
             name: 'Standard',
-            costType: 'value_brackets',
+            costType: 'value_brackets', confirmed: true,
             brackets: [
               { from: null, to: 50, cost: 6 },
               { from: 50, to: null, cost: 3 },

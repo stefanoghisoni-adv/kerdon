@@ -18,6 +18,11 @@ export interface OptionBracket {
 export interface ShippingOptionConfig {
   name: string;
   costType: OptionCostType;
+  /**
+   * false finche' il merchant non salva il costo: l'import propone zeri
+   * segnaposto, e fino ad allora gli ordini prendono la tariffa della zona.
+   */
+  confirmed: boolean;
   brackets: OptionBracket[];
 }
 

@@ -49,6 +49,35 @@ export function formatIndicativeOptionCost(
 }
 
 /**
+ * La cella del costo di un'opzione nella tabella.
+ *
+ * Un'opzione importata e mai salvata porta zeri segnaposto, e il calcolo non
+ * la usa (vale la tariffa della zona): mostrarla come "0,00 €" farebbe
+ * credere al merchant che quella spedizione risulti gratuita. Si segnala
+ * invece come da compilare. Dopo il salvataggio si mostra il costo, zero
+ * compreso, perche' a quel punto e' una scelta del merchant.
+ */
+export function optionCostCell(
+  option: { costType: OptionCostType; confirmed: boolean; rates: OptionBracket[] },
+  currency: string,
+  locale: Locale,
+): { toFill: true } | { toFill: false; text: string } {
+  if (!option.confirmed) return { toFill: true };
+  return { toFill: false, text: formatIndicativeOptionCost(option.costType, option.rates, currency, locale) };
+}
+
+/**
+ * La tariffa la calcola un corriere o un'app al checkout.
+ *
+ * In quel caso sull'ordine compare il nome del servizio scelto (es. "UPS
+ * Ground"), che puo' non coincidere con il nome dell'opzione importata: il
+ * merchant va avvisato che il costo vale solo a nome identico.
+ */
+export function isCarrierCalculated(shopifyKind: string | null): boolean {
+  return shopifyKind === 'DeliveryParticipant';
+}
+
+/**
  * Le fasce di un'opzione nella forma delle fasce di zona.
  *
  * Solo un cambio di nome dei campi: i valori passano cosi' come sono, anche

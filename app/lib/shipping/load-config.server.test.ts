@@ -251,6 +251,7 @@ describe('loadLogisticsConfig', () => {
           {
             name: 'Standard',
             costType: 'flat',
+            confirmed: true,
             rates: [
               {
                 rangeFrom: null,
@@ -286,6 +287,7 @@ describe('loadLogisticsConfig', () => {
       {
         name: 'Standard',
         costType: 'flat',
+        confirmed: true,
         brackets: [
           {
             from: null,
@@ -297,6 +299,8 @@ describe('loadLogisticsConfig', () => {
       {
         name: 'Express',
         costType: 'weight_brackets',
+        // Nessun valore da Prisma: non confermata, vale la tariffa della zona.
+        confirmed: false,
         brackets: [
           {
             from: 0,
@@ -382,5 +386,69 @@ describe('loadLogisticsConfigStrict', () => {
     findUnique.mockResolvedValue(null);
 
     await expect(loadLogisticsConfig('shop-1')).resolves.toBeNull();
+  });
+});
+
+/**
+ * La finestra fra il rilascio del codice e la migrazione delle opzioni: le
+ * zone, le tariffe e l'imballo esistono gia', solo le tabelle delle opzioni
+ * mancano. Il calcolo deve continuare con le tariffe di zona, non azzerarsi.
+ */
+describe('tabelle delle opzioni non ancora create', () => {
+  const zonaItalia = {
+    zoneName: 'Italia',
+    countries: ['IT'],
+    restOfWorld: false,
+    rateType: 'linear',
+    rates: [{ weightFrom: null, weightTo: null, cost: new Prisma.Decimal(5) }],
+  };
+
+  /** Prisma che fallisce solo quando la lettura include le opzioni. */
+  function opzioniMancanti(code: 'P2021' | 'P2022') {
+    findMany.mockImplementation(async (args: { include?: { options?: unknown } }) => {
+      if (args?.include?.options) {
+        throw new Prisma.PrismaClientKnownRequestError('missing', { code, clientVersion: 'test' });
+      }
+      return [zonaItalia];
+    });
+    findUnique.mockResolvedValue({
+      categories: [{ name: 'scatola', cost: 1 }],
+      fallbackRules: [],
+      defaultWeightPerItem: null,
+      returnCost: new Prisma.Decimal(3),
+    });
+  }
+
+  it.each(['P2021', 'P2022'] as const)(
+    '%s sulle opzioni: la variante severa rilegge senza opzioni e tiene zone e imballo',
+    async (code) => {
+      opzioniMancanti(code);
+
+      const config = await loadLogisticsConfigStrict('shop-1');
+
+      expect(config).not.toBeNull();
+      expect(config?.zones).toHaveLength(1);
+      expect(config?.zones[0].zoneName).toBe('Italia');
+      expect(config?.zones[0].rates).toEqual([{ weightFromKg: null, weightToKg: null, cost: 5 }]);
+      expect(config?.zones[0].options).toEqual([]);
+      expect(config?.categories).toEqual([{ name: 'scatola', cost: 1, origin: 'manual' }]);
+      expect(config?.returnCost).toBe(3);
+    },
+  );
+
+  it('anche la variante tollerante tiene zone e imballo', async () => {
+    opzioniMancanti('P2021');
+
+    const config = await loadLogisticsConfig('shop-1');
+
+    expect(config?.zones[0].rates[0].cost).toBe(5);
+    expect(config?.categories).toHaveLength(1);
+  });
+
+  it('se manca anche la tabella delle zone resta null, come prima', async () => {
+    findMany.mockRejectedValue(tabellaMancante());
+    findUnique.mockResolvedValue(null);
+
+    await expect(loadLogisticsConfigStrict('shop-1')).resolves.toBeNull();
   });
 });
