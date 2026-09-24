@@ -157,8 +157,12 @@ async function fetchLocationGroupZones(graphql: AdminGraphql): Promise<LocationG
         groups.push({ profileId: profile.id, locationGroupId: group.locationGroup.id });
       }
     }
-    if (!data.deliveryProfiles.pageInfo.hasNextPage) break;
-    after = data.deliveryProfiles.pageInfo.endCursor;
+    const { hasNextPage, endCursor } = data.deliveryProfiles.pageInfo;
+    if (!hasNextPage || !endCursor) break;
+    after = endCursor;
+    if (page === MAX_PAGES - 1) {
+      console.warn(`[sync-zones] Profili di spedizione oltre ${MAX_PAGES} pagine: lettura interrotta`);
+    }
   }
 
   const zones: LocationGroupZone[] = [];
@@ -173,8 +177,14 @@ async function fetchLocationGroupZones(graphql: AdminGraphql): Promise<LocationG
       const connection = data.deliveryProfile?.profileLocationGroups[0]?.locationGroupZones;
       if (!connection) break;
       zones.push(...connection.nodes);
-      if (!connection.pageInfo.hasNextPage) break;
-      zonesAfter = connection.pageInfo.endCursor;
+      const { hasNextPage, endCursor } = connection.pageInfo;
+      if (!hasNextPage || !endCursor) break;
+      zonesAfter = endCursor;
+      if (page === MAX_PAGES - 1) {
+        console.warn(
+          `[sync-zones] Zone del gruppo ${locationGroupId} oltre ${MAX_PAGES} pagine: lettura interrotta`
+        );
+      }
     }
   }
   return zones;
@@ -194,11 +204,19 @@ const KG_PER_UNIT: Record<string, number> = {
 /** Tre decimali come la colonna `range_from/range_to` (DECIMAL 12,3). */
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
-function criteriaValue(condition: MethodCondition): number | null {
+function criteriaValue(
+  condition: MethodCondition,
+  where: { zoneName: string; methodName: string }
+): number | null {
   const criteria = condition.conditionCriteria;
   if (criteria.__typename === 'Weight') {
     const factor = KG_PER_UNIT[criteria.unit];
-    if (factor === undefined) return null;
+    if (factor === undefined) {
+      console.warn(
+        `[sync-zones] Unita' di peso sconosciuta "${criteria.unit}" nel metodo "${where.methodName}" della zona "${where.zoneName}": soglia ignorata`
+      );
+      return null;
+    }
     return round3(criteria.value * factor);
   }
   if (criteria.__typename === 'MoneyV2') {
@@ -222,12 +240,12 @@ interface ProposedOption {
 }
 
 /** Le soglie di un metodo sul campo dato: >= e' `from`, <= e' `to`. */
-function bracketOf(method: MethodDefinition, field: string): ProposedRate {
+function bracketOf(method: MethodDefinition, field: string, zoneName: string): ProposedRate {
   let rangeFrom: number | null = null;
   let rangeTo: number | null = null;
   for (const condition of method.methodConditions) {
     if (condition.field !== field) continue;
-    const value = criteriaValue(condition);
+    const value = criteriaValue(condition, { zoneName, methodName: method.name });
     if (value === null) continue;
     if (condition.operator === 'GREATER_THAN_OR_EQUAL_TO') rangeFrom = value;
     else if (condition.operator === 'LESS_THAN_OR_EQUAL_TO') rangeTo = value;
@@ -241,7 +259,11 @@ function bracketOf(method: MethodDefinition, field: string): ProposedRate {
  * dal tipo Shopify; i costi partono a 0 perche' le cifre di Shopify sono cio'
  * che paga il cliente, non quanto spende il merchant.
  */
-function proposeOption(name: string, methods: MethodDefinition[]): ProposedOption {
+function proposeOption(
+  zoneName: string,
+  name: string,
+  methods: MethodDefinition[]
+): ProposedOption {
   const hasField = (field: string) =>
     methods.some((m) => m.methodConditions.some((cond) => cond.field === field));
 
@@ -272,7 +294,7 @@ function proposeOption(name: string, methods: MethodDefinition[]): ProposedOptio
   const rates: ProposedRate[] = [];
   for (const method of methods) {
     if (!method.methodConditions.some((cond) => cond.field === field)) continue;
-    const bracket = bracketOf(method, field);
+    const bracket = bracketOf(method, field, zoneName);
     const key = `${bracket.rangeFrom}|${bracket.rangeTo}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -284,6 +306,18 @@ function proposeOption(name: string, methods: MethodDefinition[]): ProposedOptio
       (a.rangeFrom ?? -Infinity) - (b.rangeFrom ?? -Infinity) ||
       (a.rangeTo ?? Infinity) - (b.rangeTo ?? Infinity)
   );
+  // Le condizioni Shopify sono inclusive (>= e <=), il calcolo del costo
+  // cerca in [from, to): "0–49,99 / da 50" lascerebbe scoperto 49,99..50.
+  // Ogni fascia arriva quindi fino all'inizio della successiva, e la prima
+  // parte da 0 (come vuole la validazione delle fasce).
+  if (rates.length > 0 && rates[0].rangeFrom === null) rates[0].rangeFrom = 0;
+  for (let i = 0; i < rates.length - 1; i++) {
+    const next = rates[i + 1];
+    const to = rates[i].rangeTo;
+    if (to !== null && next.rangeFrom !== null && to < next.rangeFrom) {
+      rates[i].rangeTo = next.rangeFrom;
+    }
+  }
   return { name, costType, shopifyKind, rates };
 }
 
@@ -393,21 +427,23 @@ export async function syncShippingZones(
 
     for (const [key, group] of methods.entries()) {
       if (existingKeys.has(key)) continue;
-      const option = proposeOption(group.name, group.methods);
-      // upsert con update vuoto: se un sync concorrente l'ha appena creata,
-      // resta com'e'.
-      await prisma.shippingOption.upsert({
-        where: { zoneId_name: { zoneId: savedZone.id, name: option.name } },
-        create: {
-          zoneId: savedZone.id,
-          name: option.name,
-          costType: option.costType,
-          shopifyKind: option.shopifyKind,
-          rates: { create: option.rates },
-        },
-        update: {},
-      });
-      optionsAdded++;
+      const option = proposeOption(zoneName, group.name, group.methods);
+      try {
+        await prisma.shippingOption.create({
+          data: {
+            zoneId: savedZone.id,
+            name: option.name,
+            costType: option.costType,
+            shopifyKind: option.shopifyKind,
+            rates: { create: option.rates },
+          },
+        });
+        optionsAdded++;
+      } catch (error) {
+        // Un import concorrente l'ha creata tra la lettura e la scrittura:
+        // esiste gia', e quella resta com'e'. Ogni altro errore sale.
+        if ((error as { code?: string }).code !== 'P2002') throw error;
+      }
     }
   }
 

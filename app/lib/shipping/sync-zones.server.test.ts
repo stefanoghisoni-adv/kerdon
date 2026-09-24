@@ -4,16 +4,17 @@ const findMany = vi.fn();
 const upsert = vi.fn();
 const updateMany = vi.fn();
 const optionFindMany = vi.fn();
-const optionUpsert = vi.fn();
+const optionCreate = vi.fn();
 
 vi.mock('~/db.server', () => ({
   prisma: {
     shippingZone: { findMany, upsert, updateMany },
-    shippingOption: { findMany: optionFindMany, upsert: optionUpsert },
+    shippingOption: { findMany: optionFindMany, create: optionCreate },
   },
 }));
 
 const { syncShippingZones } = await import('./sync-zones.server');
+const { computeLogisticsCost } = await import('./logistics-cost');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -24,7 +25,7 @@ beforeEach(() => {
     id: `zone:${where.shopId_zoneName.zoneName}`,
   }));
   optionFindMany.mockResolvedValue([]);
-  optionUpsert.mockResolvedValue({});
+  optionCreate.mockResolvedValue({});
 });
 
 // ---------------------------------------------------------------------------
@@ -62,18 +63,21 @@ const ZONE_PAGE = 5;
  * profilo i. Risponde alla lista dei profili e, per ogni gruppo, alle zone a
  * pagine di 5 come la query vera.
  */
-function fakeAdmin(profiles: FakeZone[][][]) {
+function fakeAdmin(profiles: FakeZone[][][], profilePageSize = Infinity) {
   const calls: Array<{ query: string; variables?: Record<string, unknown> }> = [];
   const graphql = vi.fn(
     async (query: string, options?: { variables?: Record<string, unknown> }) => {
       calls.push({ query, variables: options?.variables });
       let body: unknown;
       if (query.includes('deliveryProfiles(')) {
+        const start = options?.variables?.after ? Number(options.variables.after) : 0;
+        const end = start + profilePageSize;
+        const hasNextPage = end < profiles.length;
         body = {
           data: {
             deliveryProfiles: {
-              pageInfo: { hasNextPage: false, endCursor: null },
-              nodes: profiles.map((groups, i) => ({
+              pageInfo: { hasNextPage, endCursor: hasNextPage ? String(end) : null },
+              nodes: profiles.slice(start, end).map((groups, k) => ({ i: start + k, groups })).map(({ i, groups }) => ({
                 id: `gid://shopify/DeliveryProfile/${i}`,
                 profileLocationGroups: groups.map((_, j) => ({
                   locationGroup: { id: `gid://shopify/DeliveryLocationGroup/${i}-${j}` },
@@ -153,8 +157,8 @@ const price = (operator: 'GREATER_THAN_OR_EQUAL_TO' | 'LESS_THAN_OR_EQUAL_TO', a
 });
 
 function createdOption(name: string) {
-  const call = optionUpsert.mock.calls.find(([arg]) => arg.create.name === name);
-  return call?.[0];
+  const call = optionCreate.mock.calls.find(([arg]) => arg.data.name === name);
+  return call?.[0].data;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,16 +293,14 @@ describe('syncShippingZones — opzioni', () => {
     const result = await syncShippingZones(admin, 'shop-1');
 
     expect(result.optionsAdded).toBe(1);
-    expect(optionUpsert).toHaveBeenCalledWith({
-      where: { zoneId_name: { zoneId: 'zone:Italia', name: 'Standard' } },
-      create: {
+    expect(optionCreate).toHaveBeenCalledWith({
+      data: {
         zoneId: 'zone:Italia',
         name: 'Standard',
         costType: 'flat',
         shopifyKind: 'DeliveryRateDefinition',
         rates: { create: [{ rangeFrom: null, rangeTo: null, cost: 0 }] },
       },
-      update: {},
     });
   });
 
@@ -337,12 +339,13 @@ describe('syncShippingZones — opzioni', () => {
     const result = await syncShippingZones(admin, 'shop-1');
 
     expect(result.optionsAdded).toBe(1);
-    expect(optionUpsert).toHaveBeenCalledTimes(1);
+    expect(optionCreate).toHaveBeenCalledTimes(1);
     const arg = createdOption('Corriere espresso');
-    expect(arg.create.costType).toBe('weight_brackets');
-    expect(arg.create.shopifyKind).toBe('DeliveryRateDefinition:TOTAL_WEIGHT');
-    expect(arg.create.rates.create).toEqual([
-      { rangeFrom: null, rangeTo: 2, cost: 0 },
+    expect(arg.costType).toBe('weight_brackets');
+    expect(arg.shopifyKind).toBe('DeliveryRateDefinition:TOTAL_WEIGHT');
+    // Senza soglia minima la prima fascia parte da 0.
+    expect(arg.rates.create).toEqual([
+      { rangeFrom: 0, rangeTo: 2, cost: 0 },
       { rangeFrom: 2, rangeTo: 5, cost: 0 },
       { rangeFrom: 5, rangeTo: null, cost: 0 },
     ]);
@@ -372,7 +375,7 @@ describe('syncShippingZones — opzioni', () => {
 
     await syncShippingZones(admin, 'shop-1');
 
-    expect(createdOption('Ground').create.rates.create).toEqual([
+    expect(createdOption('Ground').rates.create).toEqual([
       { rangeFrom: 0.227, rangeTo: 0.907, cost: 0 },
     ]);
   });
@@ -407,10 +410,11 @@ describe('syncShippingZones — opzioni', () => {
     await syncShippingZones(admin, 'shop-1');
 
     const arg = createdOption('Standard');
-    expect(arg.create.costType).toBe('value_brackets');
-    expect(arg.create.shopifyKind).toBe('DeliveryRateDefinition:TOTAL_PRICE');
-    expect(arg.create.rates.create).toEqual([
-      { rangeFrom: 0, rangeTo: 49.99, cost: 0 },
+    expect(arg.costType).toBe('value_brackets');
+    expect(arg.shopifyKind).toBe('DeliveryRateDefinition:TOTAL_PRICE');
+    expect(arg.rates.create).toEqual([
+      // Contigue: 49,99 < 50 lasciava scoperti gli ordini da 49,99 a 50.
+      { rangeFrom: 0, rangeTo: 50, cost: 0 },
       { rangeFrom: 50, rangeTo: null, cost: 0 },
     ]);
   });
@@ -436,9 +440,9 @@ describe('syncShippingZones — opzioni', () => {
     await syncShippingZones(admin, 'shop-1');
 
     const arg = createdOption('UPS');
-    expect(arg.create.costType).toBe('linear');
-    expect(arg.create.shopifyKind).toBe('DeliveryParticipant');
-    expect(arg.create.rates.create).toEqual([{ rangeFrom: null, rangeTo: null, cost: 0 }]);
+    expect(arg.costType).toBe('linear');
+    expect(arg.shopifyKind).toBe('DeliveryParticipant');
+    expect(arg.rates.create).toEqual([{ rangeFrom: null, rangeTo: null, cost: 0 }]);
   });
 
   it('importa anche i metodi disattivati', async () => {
@@ -491,8 +495,8 @@ describe('syncShippingZones — opzioni', () => {
       where: { zoneId: 'zone:Italia' },
       select: { name: true },
     });
-    expect(optionUpsert).toHaveBeenCalledTimes(1);
-    expect(createdOption('Express').update).toEqual({});
+    expect(optionCreate).toHaveBeenCalledTimes(1);
+    expect(createdOption('Express')).toBeDefined();
     expect(createdOption('standard')).toBeUndefined();
   });
 
@@ -505,7 +509,7 @@ describe('syncShippingZones — opzioni', () => {
     const result = await syncShippingZones(admin, 'shop-1');
 
     expect(result.optionsAdded).toBe(1);
-    expect(optionUpsert).toHaveBeenCalledTimes(1);
+    expect(optionCreate).toHaveBeenCalledTimes(1);
   });
 
   it('avvisa quando una zona ha piu metodi di quelli letti', async () => {
@@ -525,5 +529,226 @@ describe('syncShippingZones — opzioni', () => {
     await syncShippingZones(admin, 'shop-1');
 
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Italia'));
+  });
+
+  it("un ordine sulla soglia inclusiva di Shopify trova la sua fascia (49,99 e 49,995)", async () => {
+    const { admin } = fakeAdmin([
+      [
+        [
+          {
+            name: 'Italia',
+            countries: [c('IT')],
+            methods: [
+              {
+                name: 'Standard',
+                rateProvider: flatRate('5.90'),
+                methodConditions: [
+                  price('GREATER_THAN_OR_EQUAL_TO', '0.0'),
+                  price('LESS_THAN_OR_EQUAL_TO', '49.99'),
+                ],
+              },
+              {
+                name: 'Standard',
+                rateProvider: flatRate('0.00'),
+                methodConditions: [price('GREATER_THAN_OR_EQUAL_TO', '50.0')],
+              },
+            ],
+          },
+        ],
+      ],
+    ]);
+
+    await syncShippingZones(admin, 'shop-1');
+
+    // Il merchant scrive i costi reali sulle fasce importate.
+    const imported = createdOption('Standard').rates.create as Array<{
+      rangeFrom: number | null;
+      rangeTo: number | null;
+    }>;
+    const brackets = imported.map((r, k) => ({ from: r.rangeFrom, to: r.rangeTo, cost: k === 0 ? 4 : 6 }));
+    const config = {
+      zones: [
+        {
+          zoneName: 'Italia',
+          countries: ['IT'],
+          restOfWorld: false,
+          rateType: 'linear' as const,
+          rates: [],
+          options: [{ name: 'Standard', costType: 'value_brackets' as const, brackets }],
+        },
+      ],
+      categories: [],
+      fallbackRules: [],
+      defaultWeightPerItemKg: null,
+      returnCost: null,
+    };
+    const order = (total_price: number) => ({
+      fulfillment_status: 'FULFILLED',
+      shipping_country_code: 'IT',
+      total_weight_grams: 1000,
+      item_count: 1,
+      returned_at: null,
+      packaging_category: null,
+      shipping_method: 'Standard',
+      total_price,
+    });
+
+    expect(computeLogisticsCost(order(49.99), config).shipping).toBe(4);
+    expect(computeLogisticsCost(order(49.995), config).shipping).toBe(4);
+    expect(computeLogisticsCost(order(50), config).shipping).toBe(6);
+  });
+
+  it('la prima fascia senza soglia minima parte da 0', async () => {
+    const { admin } = fakeAdmin([
+      [
+        [
+          {
+            name: 'Italia',
+            countries: [c('IT')],
+            methods: [
+              {
+                name: 'Standard',
+                rateProvider: flatRate('5.90'),
+                methodConditions: [price('LESS_THAN_OR_EQUAL_TO', '29.99')],
+              },
+              {
+                name: 'Standard',
+                rateProvider: flatRate('0.00'),
+                methodConditions: [price('GREATER_THAN_OR_EQUAL_TO', '30.0')],
+              },
+            ],
+          },
+        ],
+      ],
+    ]);
+
+    await syncShippingZones(admin, 'shop-1');
+
+    expect(createdOption('Standard').rates.create).toEqual([
+      { rangeFrom: 0, rangeTo: 30, cost: 0 },
+      { rangeFrom: 30, rangeTo: null, cost: 0 },
+    ]);
+  });
+
+  it('avvisa e ignora la soglia con unita di peso sconosciuta', async () => {
+    const { admin } = fakeAdmin([
+      [
+        [
+          {
+            name: 'Italia',
+            countries: [c('IT')],
+            methods: [
+              {
+                name: 'Pesante',
+                rateProvider: flatRate('9.00'),
+                methodConditions: [
+                  weight('GREATER_THAN_OR_EQUAL_TO', 1),
+                  weight('LESS_THAN_OR_EQUAL_TO', 3, 'STONES'),
+                ],
+              },
+            ],
+          },
+        ],
+      ],
+    ]);
+
+    await syncShippingZones(admin, 'shop-1');
+
+    expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(/STONES.*Pesante.*Italia/));
+    expect(createdOption('Pesante').rates.create).toEqual([{ rangeFrom: 1, rangeTo: null, cost: 0 }]);
+  });
+
+  it('opzione creata da un import concorrente (P2002): non conta e il sync prosegue', async () => {
+    const { admin } = fakeAdmin([
+      [
+        [
+          {
+            name: 'Italia',
+            countries: [c('IT')],
+            methods: [
+              { name: 'Standard', rateProvider: flatRate('4.90') },
+              { name: 'Express', rateProvider: flatRate('9.90') },
+            ],
+          },
+        ],
+      ],
+    ]);
+    optionCreate.mockImplementation(async ({ data }) => {
+      if (data.name === 'Standard') {
+        throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+      }
+      return {};
+    });
+
+    const result = await syncShippingZones(admin, 'shop-1');
+
+    expect(result.optionsAdded).toBe(1);
+    expect(optionCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it("ogni altro errore nella creazione dell'opzione interrompe il sync", async () => {
+    const { admin } = fakeAdmin([
+      [[{ name: 'Italia', countries: [c('IT')], methods: [{ name: 'Standard', rateProvider: flatRate('4.90') }] }]],
+    ]);
+    optionCreate.mockRejectedValue(new Error('connessione persa'));
+
+    await expect(syncShippingZones(admin, 'shop-1')).rejects.toThrow('connessione persa');
+  });
+});
+
+describe('syncShippingZones — paginazione dei profili', () => {
+  it('legge tutte le pagine di profili', async () => {
+    const { admin, calls } = fakeAdmin(
+      [
+        [[{ name: 'Italia', countries: [c('IT')] }]],
+        [[{ name: 'Francia', countries: [c('FR')] }]],
+        [[{ name: 'Germania', countries: [c('DE')] }]],
+      ],
+      2
+    );
+
+    const result = await syncShippingZones(admin, 'shop-1');
+
+    expect(result.added).toBe(3);
+    const profileCalls = calls.filter((call) => call.query.includes('deliveryProfiles('));
+    expect(profileCalls.map((call) => call.variables?.after ?? null)).toEqual([null, '2']);
+  });
+
+  it('si ferma se Shopify dice che ci sono altre pagine ma non da il cursore', async () => {
+    let profileCalls = 0;
+    const graphql = vi.fn(async (query: string) => {
+      const body = query.includes('deliveryProfiles(')
+        ? (profileCalls++,
+          {
+            data: {
+              deliveryProfiles: { pageInfo: { hasNextPage: true, endCursor: null }, nodes: [] },
+            },
+          })
+        : { data: { deliveryProfile: null } };
+      return { json: async () => body } as Response;
+    });
+
+    const result = await syncShippingZones({ graphql }, 'shop-1');
+
+    expect(result).toEqual({ added: 0, updated: 0, optionsAdded: 0 });
+    expect(profileCalls).toBe(1);
+  });
+
+  it('avvisa quando raggiunge il limite di pagine', async () => {
+    let n = 0;
+    const graphql = vi.fn(async () => {
+      n++;
+      const body = {
+        data: {
+          deliveryProfiles: { pageInfo: { hasNextPage: true, endCursor: `c${n}` }, nodes: [] },
+        },
+      };
+      return { json: async () => body } as Response;
+    });
+
+    await syncShippingZones({ graphql }, 'shop-1');
+
+    expect(n).toBe(200);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('200 pagine'));
   });
 });
