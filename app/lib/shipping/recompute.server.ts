@@ -63,6 +63,9 @@ interface OrderRow {
   item_count: number | string | null;
   returned_at: string | null;
   packaging_category: string | null;
+  shipping_method: string | null;
+  /** NUMERIC: la Management API puo' restituirlo come testo. */
+  total_price: number | string | null;
 }
 
 /** Un numero dal JSON della Management API, o null se non lo e'. */
@@ -80,8 +83,11 @@ function inputDi(riga: OrderRow): OrderLogisticsInput {
     item_count: numeroOppureNull(riga.item_count),
     returned_at: riga.returned_at ?? null,
     packaging_category: riga.packaging_category ?? null,
-    shipping_method: null,
-    total_price: null,
+    // Gli stessi due campi che la scrittura dell'ordine passa al costo: se
+    // mancassero qui, il ricalcolo riporterebbe tutti gli ordini alla tariffa
+    // generica e il costo cambierebbe a seconda di chi ha scritto per ultimo.
+    shipping_method: riga.shipping_method ?? null,
+    total_price: numeroOppureNull(riga.total_price),
   };
 }
 
@@ -115,7 +121,8 @@ export function recomputeSelectSQL(dopoId: string | null): string {
   const filtro = dopoId === null ? '' : `WHERE shopify_order_id > ${idSicuro(dopoId)}\n`;
   // L'id torna come testo: un bigint nel JSON perderebbe precisione oltre 2^53.
   return `SELECT shopify_order_id::text AS shopify_order_id, fulfillment_status,
-  shipping_country_code, total_weight_grams, item_count, returned_at, packaging_category
+  shipping_country_code, total_weight_grams, item_count, returned_at, packaging_category,
+  shipping_method, total_price
 FROM orders
 ${filtro}ORDER BY shopify_order_id
 LIMIT ${RECOMPUTE_PAGE_SIZE};`;
@@ -138,7 +145,14 @@ WHERE o.shopify_order_id = v.id
   AND o.logistics_cost IS DISTINCT FROM v.cost;`;
 }
 
-/** La tabella o la colonna non ci sono ancora: niente da ricalcolare. */
+/**
+ * La tabella o la colonna non ci sono ancora: niente da ricalcolare.
+ *
+ * Copre anche `shipping_method` quando lo schema 13 non e' arrivato (per
+ * esempio se l'aggiornamento appena tentato e' fallito): la SELECT la nomina,
+ * e un ricalcolo senza di lei riporterebbe tutti gli ordini alla tariffa
+ * generica. Meglio non scrivere niente e lasciare i costi di prima.
+ */
 function tabellaAssente(error: unknown): boolean {
   const messaggio = error instanceof Error ? error.message : String(error);
   return /relation .* does not exist|column .* does not exist|42P01|42703/i.test(messaggio);

@@ -260,6 +260,8 @@ interface GqlOrder {
   totalWeight?: string | number | null;
   returns?: { nodes: { status: string | null; createdAt: string | null }[] | null } | null;
   metafield?: { value: string | null } | null;
+  /** Una connessione (verificato sulla 2026-07): il titolo sta nei `nodes`. */
+  shippingLines?: { nodes: { title: string | null }[] | null } | null;
 }
 
 /**
@@ -281,6 +283,7 @@ function orderNodeFields(lineItemsFirst: number): string {
     totalWeight
     returns(first: 5) { nodes { status createdAt } }
     metafield(namespace: "custom", key: "packaging_category") { value }
+    shippingLines(first: 1) { nodes { title } }
     lineItems(first: ${lineItemsFirst}) {
       pageInfo { hasNextPage endCursor }
       nodes { ${LINE_ITEM_FIELDS} }
@@ -310,6 +313,7 @@ function mapOrderLogistics(o: GqlOrder): Pick<
   | 'total_weight_grams'
   | 'returned_at'
   | 'packaging_category'
+  | 'shipping_method'
 > {
   const tracciato = (o.fulfillments ?? []).some((f) =>
     (f.trackingInfo ?? []).some((t) => !!t.number),
@@ -327,6 +331,10 @@ function mapOrderLogistics(o: GqlOrder): Pick<
     total_weight_grams: Number.isFinite(peso) ? Math.round(peso) : null,
     returned_at: reso?.createdAt ?? null,
     packaging_category: o.metafield?.value || null,
+    // La prima riga e basta: un ordine con piu' spedizioni e' raro, e il costo
+    // si abbina a un'opzione sola. Un titolo vuoto non abbina niente, quindi
+    // vale come assente.
+    shipping_method: o.shippingLines?.nodes?.[0]?.title || null,
   };
 }
 

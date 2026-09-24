@@ -63,8 +63,10 @@ import {
   RECOMPUTE_PAGE_SIZE,
   enqueueLogisticsRecompute,
   processLogisticsRecompute,
+  recomputeSelectSQL,
   recomputeUpdateSQL,
 } from './recompute.server';
+import { orderToRows, type ShopifyOrder } from '~/lib/customers/order-rows';
 
 const CONFIG: LogisticsConfig = {
   zones: [
@@ -402,5 +404,139 @@ describe('enqueueLogisticsRecompute', () => {
 
     await expect(enqueueLogisticsRecompute('shop-1')).resolves.toBeUndefined();
     expect(console.error).toHaveBeenCalled();
+  });
+});
+
+describe('ricalcolo: l opzione di spedizione scelta', () => {
+  // La tariffa generica resta 5 €/kg; Express costa 9 € fissi, Standard va a
+  // fasce di valore dell'ordine.
+  const CON_OPZIONI: LogisticsConfig = {
+    ...CONFIG,
+    zones: [
+      {
+        ...CONFIG.zones[0],
+        options: [
+          { name: 'Express', costType: 'flat', brackets: [{ from: null, to: null, cost: 9 }] },
+          {
+            name: 'Standard',
+            costType: 'value_brackets',
+            brackets: [
+              { from: null, to: 50, cost: 6 },
+              { from: 50, to: null, cost: 3 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it('la SELECT legge anche opzione e totale dell ordine', () => {
+    const sql = recomputeSelectSQL(null);
+    expect(sql).toContain('shipping_method');
+    expect(sql).toContain('total_price');
+  });
+
+  it('il costo segue l opzione e il totale letti dal database', async () => {
+    (loadLogisticsConfigStrict as any).mockResolvedValue(CON_OPZIONI);
+    (runQueryRows as any).mockResolvedValueOnce([
+      ordine({ shopify_order_id: '2001', shipping_method: 'Express' }),
+      // NUMERIC arriva dalla Management API anche come testo.
+      ordine({ shopify_order_id: '2002', shipping_method: 'Standard', total_price: '80.00' }),
+      ordine({ shopify_order_id: '2003', shipping_method: 'Standard', total_price: 20 }),
+      // Opzione sconosciuta: ripiego sulla tariffa generica, 1 kg x 5 €.
+      ordine({ shopify_order_id: '2004', shipping_method: 'Ritiro' }),
+    ]);
+
+    await processLogisticsRecompute('shop-1');
+
+    const sql = scritture()[0];
+    expect(sql).toContain('(2001::bigint, 9.00::numeric)');
+    expect(sql).toContain('(2002::bigint, 3.00::numeric)');
+    expect(sql).toContain('(2003::bigint, 6.00::numeric)');
+    expect(sql).toContain('(2004::bigint, 5.00::numeric)');
+  });
+
+  it('colonna shipping_method non ancora creata (schema 13 non applicato): nessuna eccezione, nessuna scrittura', async () => {
+    (runQueryRows as any).mockRejectedValue(
+      new Error('Supabase query error: 400 — ERROR: 42703: column "shipping_method" does not exist'),
+    );
+
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBeUndefined();
+    expect(runQuery).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it('stesso ordine, stesso costo: scrittura e ricalcolo non divergono', async () => {
+    // Gli stessi ordini passano dalle due strade: `orderToRows` (webhook e
+    // corsa periodica) e il ricalcolo, che li rilegge dal database. Un costo
+    // diverso vorrebbe dire un profitto che cambia a seconda di chi ha scritto
+    // per ultimo.
+    const base: ShopifyOrder = {
+      id: 0,
+      order_number: '#1',
+      placed_at: '2026-09-01T00:00:00Z',
+      updated_at: '2026-09-01T00:00:00Z',
+      cancelled_at: null,
+      financial_status: 'PAID',
+      total_price: '0',
+      currency: 'EUR',
+      customer_id: null,
+      customer_first_name: null,
+      customer_last_name: null,
+      lines: [
+        {
+          id: 1,
+          title: 'x',
+          quantity: 2,
+          current_quantity: 2,
+          product_id: null,
+          variant_id: null,
+          unit_price: null,
+          total_discount: null,
+          line_net_total: null,
+          line_currency: null,
+        },
+      ],
+      fulfillment_status: 'FULFILLED',
+      shipping_country_code: 'IT',
+      total_weight_grams: 1500,
+      returned_at: null,
+      packaging_category: 'scatola',
+    };
+    const ordini: ShopifyOrder[] = [
+      { ...base, id: 3001, shipping_method: 'Express', total_price: '120.00' },
+      { ...base, id: 3002, shipping_method: '  standard ', total_price: '49.99' },
+      { ...base, id: 3003, shipping_method: 'Standard', total_price: '50.00', returned_at: '2026-09-05T00:00:00Z' },
+      { ...base, id: 3004, shipping_method: 'Ritiro', total_price: '10.00' },
+      { ...base, id: 3005, shipping_method: null, total_price: null, total_weight_grams: null },
+    ];
+
+    const scritti = ordini.map((o) => orderToRows(o, new Date(), CON_OPZIONI)!.order);
+
+    // Le righe tornano dal database come la Management API le restituisce:
+    // id e NUMERIC come testo.
+    (loadLogisticsConfigStrict as any).mockResolvedValue(CON_OPZIONI);
+    (runQueryRows as any).mockResolvedValueOnce(
+      scritti.map((r) => ({
+        shopify_order_id: String(r.shopify_order_id),
+        fulfillment_status: r.fulfillment_status,
+        shipping_country_code: r.shipping_country_code,
+        total_weight_grams: r.total_weight_grams,
+        item_count: r.item_count,
+        returned_at: r.returned_at,
+        packaging_category: r.packaging_category,
+        shipping_method: r.shipping_method,
+        total_price: r.total_price == null ? null : r.total_price.toFixed(2),
+      })),
+    );
+
+    await processLogisticsRecompute('shop-1');
+
+    const sql = scritture()[0];
+    for (const r of scritti) {
+      expect(sql).toContain(`(${r.shopify_order_id}::bigint, ${r.logistics_cost.toFixed(2)}::numeric)`);
+    }
+    // Non un confronto fra due zeri: i costi devono essere quelli attesi.
+    expect(scritti.map((r) => r.logistics_cost)).toEqual([10, 7, 7, 8.5, 1]);
   });
 });

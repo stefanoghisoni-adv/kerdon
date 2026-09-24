@@ -888,8 +888,26 @@ describe('ordini: i dati di spedizione', () => {
     totalWeight: '1250',
     returns: { nodes: [] },
     metafield: { value: 'Scatola' },
+    // Una connessione, non una lista: verificato sulla 2026-07.
+    shippingLines: { nodes: [{ title: 'Express' }] },
     lineItems: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
     ...over,
+  });
+
+  it('l opzione di spedizione e il titolo della prima shipping line', async () => {
+    (global.fetch as any).mockResolvedValueOnce(ok({ order: orderNode() }));
+    const order = await client().getOrderById(700);
+    expect(order?.shipping_method).toBe('Express');
+  });
+
+  it('senza shipping line l opzione resta vuota', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce(ok({ order: orderNode({ shippingLines: { nodes: [] } }) }))
+      .mockResolvedValueOnce(ok({ order: orderNode({ shippingLines: null }) }))
+      .mockResolvedValueOnce(ok({ order: orderNode({ shippingLines: { nodes: [{ title: '' }] } }) }));
+    expect((await client().getOrderById(700))?.shipping_method).toBeNull();
+    expect((await client().getOrderById(700))?.shipping_method).toBeNull();
+    expect((await client().getOrderById(700))?.shipping_method).toBeNull();
   });
 
   it('chiede i campi di spedizione nella stessa query dell ordine', async () => {
@@ -903,6 +921,7 @@ describe('ordini: i dati di spedizione', () => {
       'totalWeight',
       'returns(first: 5)',
       'key: "packaging_category"',
+      'shippingLines(first: 1) { nodes { title } }',
     ]) {
       expect(query).toContain(field);
     }

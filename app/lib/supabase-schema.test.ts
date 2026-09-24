@@ -182,6 +182,7 @@ describe('ordini: i dati di spedizione', () => {
       'returned_at TIMESTAMP',
       'packaging_category TEXT',
       'logistics_cost NUMERIC(10, 2)',
+      'shipping_method TEXT',
     ]) {
       expect(sql).toContain(`ADD COLUMN IF NOT EXISTS ${column}`);
     }
