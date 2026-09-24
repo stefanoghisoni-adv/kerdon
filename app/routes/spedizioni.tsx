@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useFetcher, useLoaderData } from '@remix-run/react';
+import { useAppBridge } from '@shopify/app-bridge-react';
 import { useState, useEffect } from 'react';
 import {
   Banner,
@@ -10,7 +11,6 @@ import {
   EmptyState,
   InlineGrid,
   Page,
-  Toast,
 } from '@shopify/polaris';
 import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
@@ -228,9 +228,10 @@ export default function ShippingPage() {
   const [editingZone, setEditingZone] = useState<typeof zones[0] | null>(null);
   // L'errore del server sulla zona in modifica: la modale resta aperta e lo mostra.
   const [zoneServerError, setZoneServerError] = useState<string | null>(null);
-  // Un toast solo: il successo di un'azione sostituisce l'errore di quella
-  // prima, invece di comparire accanto.
-  const [toast, setToast] = useState<{ content: string; error: boolean } | null>(null);
+  // Il toast e' quello dell'admin (App Bridge), non il Toast di Polaris: quello
+  // vuole un <Frame> attorno alla pagina, e senza butta giu' tutta la pagina
+  // proprio nel momento in cui dovrebbe dire che e' andato tutto bene.
+  const shopify = useAppBridge();
 
   // Durante l'invio `fetcher.formData` c'e' ancora: e' la risposta che non ce
   // l'ha piu' (vedi feedback.ts).
@@ -247,7 +248,7 @@ export default function ShippingPage() {
   useEffect(() => {
     if (fetcher.state !== 'idle' || !fetcher.data) return;
     const esito = feedbackFromActionData(fetcher.data, t);
-    if (esito.toast) setToast(esito.toast);
+    if (esito.toast) shopify.toast.show(esito.toast.content, { isError: esito.toast.error });
     if (esito.zoneSaved) {
       setEditingZone(null);
       setZoneServerError(null);
@@ -376,13 +377,6 @@ export default function ShippingPage() {
           />
         )}
 
-        {toast && (
-          <Toast
-            content={toast.content}
-            error={toast.error}
-            onDismiss={() => setToast(null)}
-          />
-        )}
       </BlockStack>
     </Page>
   );
