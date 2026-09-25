@@ -93,12 +93,10 @@ export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZone
     );
   };
 
-  const costTypeLabels: Record<OptionCostType, string> = {
-    flat: t.shipping.optionModal.flatLabel,
-    linear: t.shipping.optionModal.linearLabel,
-    weight_brackets: t.shipping.optionModal.weightBracketsLabel,
-    value_brackets: t.shipping.optionModal.valueBracketsLabel,
-  };
+  // Le etichette brevi, non quelle della modale: nella tabella le celle non
+  // vanno a capo, e "Fasce di valore dell'ordine" bastava da sola a far
+  // scorrere di lato la tabella a meta' pagina.
+  const costTypeLabels: Record<OptionCostType, string> = t.shipping.table.costTypes;
 
   const headings: IndexTableProps['headings'] = [
     { title: t.shipping.table.option },
@@ -167,15 +165,11 @@ export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZone
     const genericId = `zona-${zone.id}-generica`;
     const genericRow = (
       <IndexTable.Row rowType="child" tone="subdued" id={genericId} key={genericId} position={position++}>
+        {/* Solo l'etichetta, senza riga di spiegazione: le celle della
+            tabella non vanno a capo, e una frase lunga qui allargava la
+            colonna fino a far scorrere di lato la tabella a meta' pagina. */}
         <IndexTable.Cell headers={headerId}>
-          <BlockStack gap="050">
-            <Text as="span">{t.shipping.table.genericRate}</Text>
-            {zone.options.length > 0 && (
-              <Text as="span" tone="subdued" variant="bodySm">
-                {t.shipping.table.genericRateHelp}
-              </Text>
-            )}
-          </BlockStack>
+          <Text as="span">{t.shipping.table.genericRate}</Text>
         </IndexTable.Cell>
         <IndexTable.Cell headers={headerId}>{t.shipping.rateTypes[zone.rateType]}</IndexTable.Cell>
         <IndexTable.Cell headers={headerId}>{formatIndicativeCost(zone)}</IndexTable.Cell>

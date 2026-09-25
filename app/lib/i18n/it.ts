@@ -1350,10 +1350,19 @@ export const it = {
       indicativeCost: "Costo indicativo",
       actions: "Azioni",
       edit: "Modifica",
-      genericRate: "Tariffa generica della zona",
-      genericRateHelp:
-        "Vale per gli ordini con un'opzione che non hai ancora compilato o che non riusciamo ad abbinare a una di quelle qui sotto",
+      // Senza "della zona": la riga sta gia' sotto il nome della zona, e la
+      // colonna non va a capo, quindi ogni parola in piu' allarga la tabella.
+      genericRate: "Tariffa generica",
       toFill: "Da compilare",
+      // Le etichette brevi del tipo di costo, per la colonna della tabella: le
+      // celle non vanno a capo, e quelle lunghe della modale allargavano la
+      // tabella oltre la mezza pagina.
+      costTypes: {
+        flat: "Fisso",
+        linear: "Al kg",
+        weight_brackets: "Fasce di peso",
+        value_brackets: "Fasce di valore",
+      },
       carrierNameHelp:
         "Tariffa calcolata al checkout: questo costo vale solo se l'ordine riporta esattamente questo nome, altrimenti vale la tariffa della zona",
       editGenericRateLabel: (zoneName: string) => `Modifica la tariffa generica di ${zoneName}`,

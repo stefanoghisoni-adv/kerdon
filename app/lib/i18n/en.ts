@@ -1052,10 +1052,15 @@ export const en: typeof it = {
       indicativeCost: "Indicative cost",
       actions: "Actions",
       edit: "Edit",
-      genericRate: "Zone's generic rate",
-      genericRateHelp:
-        "Applies to orders whose shipping option you haven't filled in yet, or that we can't match to one of the options below",
+      genericRate: "Generic rate",
       toFill: "To fill in",
+      // Short cost type labels for the table column (see it.ts).
+      costTypes: {
+        flat: "Flat",
+        linear: "Per kg",
+        weight_brackets: "Weight brackets",
+        value_brackets: "Value brackets",
+      },
       carrierNameHelp:
         "Rate calculated at checkout: this cost applies only when the order shows exactly this name, otherwise the zone rate applies",
       editGenericRateLabel: (zoneName: string) => `Edit the generic rate for ${zoneName}`,
