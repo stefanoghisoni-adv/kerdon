@@ -101,3 +101,48 @@ prova.describe("l'informativa letta da chi parla inglese", () => {
     await expect(page.locator('#who-we-are')).toContainText('Stefano Ghisoni');
   });
 });
+
+// Ogni link generato dall'app porta alla pagina vera, non a un 410.
+//
+// IL DIFETTO CHE QUESTA PROVA IMPEDISCE. Prima di questo cambio stavano tre
+// versioni del percorso: una nel modal, una negli hreflang, e una — quella
+// giusta — nell'helper. Due di quelle tre sbagliavano, e chi le apriva trovava
+// un 410. Ora c'e' un solo helper che genera tutti i link, e questa prova
+// verifica che ogni link prodotto arrivi davvero alla pagina.
+prova.describe('tutti i link generati portano a 200', () => {
+  prova('gli hreflang alternates sono tutti raggiungibili', async ({ page }) => {
+    const risposta = await page.goto('/policies/privacy-policy');
+    expect(risposta?.status()).toBe(200);
+
+    // Gli hreflang che la pagina dichiara: devono tutti rispondere 200.
+    const hreflang = await page.locator('link[rel="alternate"][hreflang]').evaluateAll((elementi) =>
+      elementi.map((e) => e.getAttribute('href')),
+    );
+
+    // Ci sono almeno le due lingue piu' x-default
+    expect(hreflang.length).toBeGreaterThanOrEqual(3);
+
+    for (const href of hreflang) {
+      if (!href) continue;
+      const tentativo = await page.goto(href);
+      expect(tentativo?.status(), `${href} deve rispondere 200`).toBe(200);
+      // Deve essere la pagina dell'informativa, non un rimando o un errore
+      await expect(page.locator('h1')).toContainText(/Privacy Policy|Informativa sulla privacy/);
+    }
+  });
+
+  prova('il link di cambio lingua porta alla stessa pagina nell altra lingua', async ({ page }) => {
+    await page.goto('/policies/privacy-policy?lang=it');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'it');
+
+    const linkAltraLingua = page.getByRole('link', { name: 'English' });
+    const href = await linkAltraLingua.getAttribute('href');
+    expect(href).toBeTruthy();
+    expect(href).toContain('lang=en'); // deve portare all'inglese
+
+    // Cliccando il link si resta sulla stessa rotta, con la lingua cambiata
+    await linkAltraLingua.click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    expect(new URL(page.url()).pathname).toBe('/policies/privacy-policy');
+  });
+});

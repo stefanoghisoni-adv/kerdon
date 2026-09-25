@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Banner, BlockStack, Link, Modal, Text } from '@shopify/polaris';
 import { useLocale, useT } from '~/lib/i18n/context';
 import { downloadFile } from '~/lib/privacy/download-file';
+import { linkInformativa } from '~/lib/legal/privacy-policy';
 
 interface Props {
   open: boolean;
@@ -72,7 +73,7 @@ export function PrivacyModal({ open, onClose }: Props) {
               perdere la pagina da cui si veniva. `lang` nella URL perche' il
               documento sta fuori dall'app: li' non c'e' nessuna sessione da cui
               dedurre la lingua, e chi parte da qui la lingua l'ha gia' scelta. */}
-          <Link url={`/policies/policies/privacy-policy?lang=${locale}`} external target="_blank">
+          <Link url={linkInformativa(locale)} external target="_blank">
             {t.privacy.policyLink}
           </Link>
         </BlockStack>
