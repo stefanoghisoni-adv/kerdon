@@ -484,6 +484,19 @@ prova.describe('le azioni della pagina Spedizioni', () => {
         select: { type: true },
       });
       expect(accodati.length).toBeGreaterThan(0);
+
+      // Le opzioni importate raggiungono gli ordini storici solo se si sa
+      // quale hanno scelto: il recupero da Shopify parte con l'importazione.
+      // Uno solo anche reimportando subito dopo.
+      await finti(request, {
+        graphql: risposteZone([{ name: 'Italia', countries: [{ countryCode: 'IT', restOfWorld: false }] }]),
+      });
+      await inviaForm(context, { intent: 'sync-zones' });
+      const recuperi = await db<Array<{ type: string }>>(request, 'syncRequest', 'findMany', {
+        where: { shopId: shop.id, type: 'shipping-method-backfill' },
+        select: { type: true },
+      });
+      expect(recuperi).toHaveLength(1);
     });
   });
 

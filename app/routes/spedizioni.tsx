@@ -18,7 +18,8 @@ import { requireShopCapability } from '~/lib/authz/require-capability.server';
 import { useLocale, useT } from '~/lib/i18n/context';
 import { authenticate } from '~/shopify.server';
 import { syncShippingZones } from '~/lib/shipping/sync-zones.server';
-import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute.server';
+import { recomputeLogisticsAfterSave, type NumbersRefresh } from '~/lib/shipping/recompute-inline.server';
+import { enqueueShippingMethodBackfill } from '~/lib/shipping/shipping-method-backfill-enqueue.server';
 import { loadShippingPageData } from '~/lib/shipping/page-data.server';
 import { parseBrackets } from '~/components/Shipping/brackets';
 import {
@@ -66,8 +67,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
  * `fetcher.formData` e' gia' stato azzerato da Remix: l'intento va rimandato
  * qui, o il client non sa quale toast mostrare (vedi feedback.ts).
  */
-function risposta(intent: ShippingIntent | null, esito: { success: true } | { success: false; error: string }) {
-  return json({ intent, ...esito } as { intent: ShippingIntent | null; success: boolean; error?: string });
+function risposta(
+  intent: ShippingIntent | null,
+  esito: { success: true; numbers?: NumbersRefresh } | { success: false; error: string },
+) {
+  // `numbers` solo quando c'e' qualcosa da dire: una risposta senza ricalcolo
+  // resta identica a prima.
+  const { numbers, ...resto } = esito as { numbers?: NumbersRefresh };
+  const corpo = numbers ? { intent, ...resto, numbers } : { intent, ...resto };
+  return json(corpo as { intent: ShippingIntent | null; success: boolean; error?: string; numbers?: NumbersRefresh });
 }
 
 /**
@@ -88,7 +96,7 @@ function indiceRegola(valore: string | undefined): number | null {
 
 /**
  * Applica una modifica di una riga (categoria o regola) alla configurazione
- * salvata, la riscrive se passa e solo allora accoda il ricalcolo.
+ * salvata, la riscrive se passa e solo allora ricalcola i costi sugli ordini.
  */
 async function modificaPackaging(
   shopId: string,
@@ -98,8 +106,8 @@ async function modificaPackaging(
   const esito = modifica(await readPackaging(shopId));
   if (esito.error !== null) return risposta(intent, { success: false, error: esito.error });
   await writePackaging(shopId, esito.value);
-  await enqueueLogisticsRecompute(shopId);
-  return risposta(intent, { success: true });
+  const numbers = await recomputeLogisticsAfterSave(shopId);
+  return risposta(intent, { success: true, numbers });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -125,13 +133,20 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
+    // Le opzioni appena importate raggiungono solo gli ordini che sanno quale
+    // opzione ha scelto il cliente: quelli scritti prima dello schema 13 non
+    // lo sanno. Il recupero lo chiede a Shopify in sottofondo e alla fine
+    // ricalcola. Idempotente e deduplicato: reimportare non costa niente se
+    // lo storico e' gia' completo. Non solleva mai.
+    await enqueueShippingMethodBackfill(shop.id);
+
     // L'importazione puo' cambiare i paesi di una zona o quale zona fa da
     // resto del mondo: i costi gia' scritti sugli ordini vanno rifatti come
     // dopo un salvataggio delle tariffe. Non solleva mai (vedi
-    // recompute-enqueue.server): le zone sono gia' salvate comunque.
-    await enqueueLogisticsRecompute(shop.id);
+    // recompute-inline.server): le zone sono gia' salvate comunque.
+    const numbers = await recomputeLogisticsAfterSave(shop.id);
 
-    return risposta('sync-zones', { success: true });
+    return risposta('sync-zones', { success: true, numbers });
   }
 
   if (intent === 'save-zone-rates') {
@@ -204,10 +219,11 @@ export async function action({ request }: ActionFunctionArgs) {
       ]);
     }
 
-    // Accoda il ricalcolo dei costi logistici in background
-    await enqueueLogisticsRecompute(shop.id);
+    // I costi sugli ordini si ricalcolano adesso, cosi' Dashboard e Clienti
+    // mostrano gia' i numeri nuovi; oltre il budget il resto va in coda.
+    const numbers = await recomputeLogisticsAfterSave(shop.id);
 
-    return risposta('save-zone-rates', { success: true });
+    return risposta('save-zone-rates', { success: true, numbers });
   }
 
   if (intent === 'save-category') {
@@ -277,9 +293,9 @@ export async function action({ request }: ActionFunctionArgs) {
       update: data,
     });
 
-    await enqueueLogisticsRecompute(shop.id);
+    const numbers = await recomputeLogisticsAfterSave(shop.id);
 
-    return risposta('save-packaging-defaults', { success: true });
+    return risposta('save-packaging-defaults', { success: true, numbers });
   }
 
   if (intent === 'save-option-cost') {
@@ -363,10 +379,10 @@ export async function action({ request }: ActionFunctionArgs) {
       ]);
     }
 
-    // Accoda il ricalcolo dei costi logistici in background
-    await enqueueLogisticsRecompute(shop.id);
+    // Come per le tariffe di zona: ricalcolo adesso, coda oltre il budget.
+    const numbers = await recomputeLogisticsAfterSave(shop.id);
 
-    return risposta('save-option-cost', { success: true });
+    return risposta('save-option-cost', { success: true, numbers });
   }
 
   return risposta(null, { success: false, error: 'unknown_intent' });

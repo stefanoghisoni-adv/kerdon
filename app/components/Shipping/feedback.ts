@@ -27,6 +27,13 @@ export interface ShippingActionData {
   intent?: ShippingIntent | null;
   success: boolean;
   error?: string;
+  /**
+   * Com'e' andato il ricalcolo dei costi sugli ordini fatto nel salvataggio
+   * (recompute-inline.server): 'updated' se Dashboard e Clienti mostrano gia'
+   * i numeri nuovi, 'pending' se il resto e' in coda. Assente o null: nessuna
+   * promessa sui numeri, il toast resta quello di sempre.
+   */
+  numbers?: 'updated' | 'pending' | null;
 }
 
 export interface ShippingFeedback {
@@ -79,12 +86,27 @@ export function testoDiErrore(chiave: string | undefined, t: Dictionary): string
   return null;
 }
 
+/**
+ * Il testo di un salvataggio riuscito, con cosa e' successo ai numeri.
+ *
+ * Un toast solo e non due: App Bridge li mostra uno sopra l'altro e il secondo
+ * copre il primo. "Aggiornati" solo se il ricalcolo e' finito davvero: dire
+ * che i numeri sono nuovi quando non lo sono ancora e' peggio di non dire
+ * niente, perche' il merchant va a guardarli subito.
+ */
+function testoDiSuccesso(base: string, data: ShippingActionData, t: Dictionary): string {
+  if (data.numbers === 'updated') return t.shipping.numbers.updated(base);
+  if (data.numbers === 'pending') return t.shipping.numbers.pending(base);
+  return base;
+}
+
 export function feedbackFromActionData(data: ShippingActionData | undefined, t: Dictionary): ShippingFeedback {
   if (!data) return NIENTE;
+  const successo = (base: string) => ({ content: testoDiSuccesso(base, data, t), error: false });
 
   switch (data.intent) {
     case 'sync-zones':
-      if (data.success) return { ...NIENTE, toast: { content: t.shipping.syncSuccess, error: false } };
+      if (data.success) return { ...NIENTE, toast: successo(t.shipping.syncSuccess) };
       // Il permesso mancante non e' un singhiozzo da riprovare fra poco: serve
       // un gesto del merchant, e un toast sparirebbe prima di essere letto.
       if (data.error === 'scope_error') return { ...NIENTE, scopeError: true };
@@ -92,7 +114,7 @@ export function feedbackFromActionData(data: ShippingActionData | undefined, t: 
 
     case 'save-zone-rates':
       if (data.success) {
-        return { ...NIENTE, toast: { content: t.shipping.modal.saveSuccess, error: false }, zoneSaved: true };
+        return { ...NIENTE, toast: successo(t.shipping.modal.saveSuccess), zoneSaved: true };
       }
       // La modale resta aperta con quello che il merchant aveva scritto, e il
       // motivo accanto: chiuderla farebbe sembrare riuscito un rifiuto.
@@ -104,7 +126,7 @@ export function feedbackFromActionData(data: ShippingActionData | undefined, t: 
 
     case 'save-option-cost':
       if (data.success) {
-        return { ...NIENTE, toast: { content: t.shipping.optionModal.saveSuccess, error: false }, optionSaved: true };
+        return { ...NIENTE, toast: successo(t.shipping.optionModal.saveSuccess), optionSaved: true };
       }
       // La modale resta aperta con quello che il merchant aveva scritto, e il
       // motivo accanto: chiuderla farebbe sembrare riuscito un rifiuto.
@@ -125,7 +147,7 @@ export function feedbackFromActionData(data: ShippingActionData | undefined, t: 
           'save-rule': t.shipping.packaging.rules.saved,
           'delete-rule': t.shipping.packaging.rules.deleted,
         };
-        return { ...NIENTE, toast: { content: testi[data.intent], error: false }, packagingSaved: true };
+        return { ...NIENTE, toast: successo(testi[data.intent]), packagingSaved: true };
       }
       // Come per le tariffe: la modale resta aperta con il motivo accanto,
       // compresa l'eliminazione bloccata da una regola.
@@ -134,7 +156,7 @@ export function feedbackFromActionData(data: ShippingActionData | undefined, t: 
     }
 
     case 'save-packaging-defaults':
-      if (data.success) return { ...NIENTE, toast: { content: t.shipping.packaging.saveSuccess, error: false } };
+      if (data.success) return { ...NIENTE, toast: successo(t.shipping.packaging.saveSuccess) };
       return {
         ...NIENTE,
         toast: { content: testoDiErrore(data.error, t) ?? t.shipping.packaging.saveError, error: true },

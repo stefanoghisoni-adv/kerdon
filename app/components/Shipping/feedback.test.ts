@@ -157,3 +157,69 @@ describe('feedbackFromActionData', () => {
     expect(f.packagingSaved).toBe(false);
   });
 });
+
+// Il salvataggio ricalcola i costi sugli ordini (recompute-inline.server): il
+// toast deve dire se i numeri di Dashboard e Clienti sono gia' quelli nuovi o
+// se arrivano fra poco. Mai "aggiornati" se non lo sono.
+describe('i numeri dopo un salvataggio', () => {
+  const successi: Array<[ShippingActionData['intent'], string]> = [
+    ['sync-zones', t.shipping.syncSuccess],
+    ['save-zone-rates', t.shipping.modal.saveSuccess],
+    ['save-option-cost', t.shipping.optionModal.saveSuccess],
+    ['save-category', t.shipping.packaging.categories.saved],
+    ['delete-category', t.shipping.packaging.categories.deleted],
+    ['save-rule', t.shipping.packaging.rules.saved],
+    ['delete-rule', t.shipping.packaging.rules.deleted],
+    ['save-packaging-defaults', t.shipping.packaging.saveSuccess],
+  ];
+
+  for (const [intent, base] of successi) {
+    prova(`${intent}: ricalcolo finito, il toast dice che i numeri sono aggiornati`, () => {
+      const f = feedbackFromActionData({ intent, success: true, numbers: 'updated' }, t);
+      expect(f.toast).toEqual({ content: t.shipping.numbers.updated(base), error: false });
+    });
+
+    prova(`${intent}: ricalcolo passato alla coda, il toast dice "a breve"`, () => {
+      const f = feedbackFromActionData({ intent, success: true, numbers: 'pending' }, t);
+      expect(f.toast).toEqual({ content: t.shipping.numbers.pending(base), error: false });
+    });
+
+    prova(`${intent}: niente da ricalcolare, il toast di sempre`, () => {
+      expect(feedbackFromActionData({ intent, success: true, numbers: null }, t).toast).toEqual({
+        content: base,
+        error: false,
+      });
+      expect(feedbackFromActionData({ intent, success: true }, t).toast).toEqual({ content: base, error: false });
+    });
+  }
+
+  prova('i due testi sono diversi, e ognuno nomina Dashboard e Clienti', () => {
+    const aggiornati = t.shipping.numbers.updated('Salvato');
+    const aBreve = t.shipping.numbers.pending('Salvato');
+    expect(aggiornati).not.toBe(aBreve);
+    for (const testo of [aggiornati, aBreve]) {
+      expect(testo).toContain('Salvato');
+      expect(testo).toContain('Dashboard');
+      expect(testo).toContain('Clienti');
+    }
+  });
+
+  prova('in inglese le stesse chiavi, con il loro testo', () => {
+    const aggiornati = inglese.shipping.numbers.updated('Saved');
+    const aBreve = inglese.shipping.numbers.pending('Saved');
+    expect(aggiornati).toContain('Saved');
+    expect(aggiornati).toContain('Customers');
+    expect(aBreve).toContain('Customers');
+    expect(aggiornati).not.toBe(aBreve);
+    const f = feedbackFromActionData({ intent: 'save-option-cost', success: true, numbers: 'updated' }, inglese);
+    expect(f.toast?.content).toBe(inglese.shipping.numbers.updated(inglese.shipping.optionModal.saveSuccess));
+  });
+
+  prova('un errore non parla mai dei numeri', () => {
+    const f = feedbackFromActionData(
+      { intent: 'save-zone-rates', success: false, error: 'invalid_request', numbers: 'updated' },
+      t,
+    );
+    expect(f.toast).toEqual({ content: t.shipping.modal.saveError, error: true });
+  });
+});

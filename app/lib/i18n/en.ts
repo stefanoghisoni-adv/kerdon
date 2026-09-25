@@ -1034,6 +1034,10 @@ export const en: typeof it = {
     syncing: "Importing…",
     syncSuccess: "Zones imported successfully",
     syncError: "Could not import zones. Try again in a moment.",
+    numbers: {
+      updated: (saved: string) => `${saved}. Dashboard and Customers numbers are already up to date.`,
+      pending: (saved: string) => `${saved}. Dashboard and Customers numbers will update in a moment.`,
+    },
     scopeError:
       "To import your shipping zones, reopen the app and accept the updated permissions.",
     empty: {

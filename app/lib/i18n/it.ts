@@ -1330,6 +1330,12 @@ export const it = {
     syncing: "Importazione in corso…",
     syncSuccess: "Zone importate con successo",
     syncError: "Non è stato possibile importare le zone. Riprova fra poco.",
+    // Aggiunto al messaggio di ogni salvataggio riuscito: dice se i profitti
+    // di Dashboard e Clienti tengono gia' conto del costo appena salvato.
+    numbers: {
+      updated: (salvato: string) => `${salvato}. I numeri di Dashboard e Clienti sono già aggiornati.`,
+      pending: (salvato: string) => `${salvato}. I numeri di Dashboard e Clienti si aggiornano fra pochi istanti.`,
+    },
     scopeError:
       "Per importare le tue zone di spedizione, riapri l'app e accetta i permessi aggiornati.",
     empty: {
