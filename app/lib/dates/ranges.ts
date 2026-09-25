@@ -37,6 +37,30 @@ export interface DateRange {
  */
 export const DEFAULT_PRESET = 'last30';
 
+/**
+ * Il periodo con cui si apre la tab Clienti: da sempre.
+ *
+ * La tabella risponde a "chi sono i miei clienti e quanto rendono", e un
+ * cliente che ha comprato due mesi fa e' un cliente come gli altri. Con gli
+ * ultimi 30 giorni come partenza — e per di piu' senza un selettore a vista —
+ * chi aveva ordinato prima spariva dall'elenco senza un segno, e il merchant
+ * contava meno clienti di quanti ne ha.
+ *
+ * La dashboard resta su `DEFAULT_PRESET`: li' si guarda l'andamento, e
+ * l'andamento ha bisogno di un arco corto.
+ */
+export const CUSTOMERS_DEFAULT_PRESET = 'allTime';
+
+/**
+ * Dove comincia "da sempre": prima di qualunque ordine possibile.
+ *
+ * Shopify apre nel 2006, quindi un ordine precedente non puo' esistere. Una
+ * data fissa e non il primo ordine del negozio: la voce deve riconoscersi dalle
+ * sole date (`matchPreset`) senza chiedere niente al database, e un inizio che
+ * precede il primo ordine non cambia di una virgola cio' che si conta.
+ */
+export const ALL_TIME_START = '2006-01-01';
+
 export type PresetId =
   | 'today'
   | 'yesterday'
@@ -49,6 +73,7 @@ export type PresetId =
   | 'lastMonth'
   | 'lastQuarter'
   | 'lastYear'
+  | 'allTime'
   | 'custom';
 
 /**
@@ -204,6 +229,8 @@ export function presetRange(preset: PresetId, now: Date = new Date()): DateRange
       const year = today.getUTCFullYear() - 1;
       return { from: iso(new Date(Date.UTC(year, 0, 1))), to: iso(new Date(Date.UTC(year, 11, 31))) };
     }
+    case 'allTime':
+      return { from: ALL_TIME_START, to: iso(today) };
     case 'custom':
       return null;
   }
@@ -211,7 +238,8 @@ export function presetRange(preset: PresetId, now: Date = new Date()): DateRange
 
 /**
  * Il periodo di partenza per un negozio: gli ultimi 30 giorni nel SUO
- * calendario.
+ * calendario, oppure la voce che la pagina chiede (la tab Clienti apre su
+ * `CUSTOMERS_DEFAULT_PRESET`).
  *
  * Il fuso non e' un dettaglio: "ultimi 30 giorni" finisce oggi, e quale sia
  * oggi dipende da dove sta il negozio. Vedi `todayIn`.
@@ -219,10 +247,11 @@ export function presetRange(preset: PresetId, now: Date = new Date()): DateRange
 export function defaultRange(
   timeZone: string | null | undefined,
   now: Date = new Date(),
+  preset: SimplePresetId = DEFAULT_PRESET,
 ): DateRange {
   // `presetRange` restituisce null solo per 'custom': con un preset vero il
   // valore c'e' sempre.
-  return presetRange(DEFAULT_PRESET, fromIso(todayIn(timeZone, now)))!;
+  return presetRange(preset, fromIso(todayIn(timeZone, now)))!;
 }
 
 
@@ -246,6 +275,7 @@ export function matchPreset(range: DateRange, now: Date = new Date()): PresetId 
     'lastMonth',
     'lastQuarter',
     'lastYear',
+    'allTime',
   ];
 
   for (const preset of candidates) {
@@ -408,6 +438,14 @@ export interface PresetGroup {
   id: GroupId;
   leaves: PresetLeaf[];
 }
+
+/**
+ * "Da sempre", come voce del menu.
+ *
+ * Non sta in `HEAD_LEAVES`: la offre solo chi la chiede (la tab Clienti). In
+ * dashboard un periodo di vent'anni schiaccerebbe ogni andamento in una riga.
+ */
+export const ALL_TIME_LEAF: PresetLeaf = { kind: 'preset', preset: 'allTime' };
 
 /** Le due voci che stanno in cima e non hanno bisogno di un sottomenu. */
 export const HEAD_LEAVES: PresetLeaf[] = [

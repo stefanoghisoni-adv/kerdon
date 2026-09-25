@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useFetcher, useLoaderData, useNavigation } from '@remix-run/react';
+import { useFetcher, useLoaderData, useNavigation, useSearchParams } from '@remix-run/react';
 import { useEffect, useState } from 'react';
 import {
   Badge,
@@ -34,7 +34,13 @@ import {
   dismissBirthdateNotice,
 } from '~/lib/customers/birthdate-dismissal.server';
 import { isCalendarDate } from '~/lib/customers/customers-query';
-import { defaultRange } from '~/lib/dates/ranges';
+import {
+  ALL_TIME_START,
+  CUSTOMERS_DEFAULT_PRESET,
+  defaultRange,
+  type DateRange,
+} from '~/lib/dates/ranges';
+import { DateRangePicker } from '~/components/Dashboard/DateRangePicker';
 import { PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
 import { TablePagination } from '~/components/Dashboard/TablePagination';
 import { matchesCustomerSearch } from '~/lib/customers/customer-search';
@@ -83,7 +89,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requireSetupComplete(session.shop);
 
   // Le date arrivano dalla URL, quindi da fuori: quello che non e' una data si
-  // ignora e si torna al mese in corso, invece di far fallire la pagina.
+  // ignora e si torna al periodo di partenza, invece di far fallire la pagina.
   const params = new URL(request.url).searchParams;
   const wanted = { from: params.get('from') ?? '', to: params.get('to') ?? '' };
   const rangeFromUrl =
@@ -96,9 +102,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // nemmeno, e la query falliva con un 400 che arrivava fino a schermo come
   // "Unexpected Server Error" — con la pagina d'errore che, per giunta, torna
   // scura. Meglio entrare e trovare scritto perche' non c'e' niente.
-  // Il periodo di partenza si sceglie dopo aver letto il negozio, perche' senza
-  // il suo fuso "gli ultimi 30 giorni" finiscono nel giorno di qualcun altro.
-  const range = rangeFromUrl ?? defaultRange(shop.ianaTimezone);
+  // Il periodo di partenza e' "da sempre": la tabella deve mostrare tutti i
+  // clienti che hanno comprato, non solo quelli dell'ultimo mese. Con trenta
+  // giorni di partenza e nessun selettore a vista, chi aveva ordinato prima
+  // spariva senza un segno. Si sceglie dopo aver letto il negozio, perche'
+  // "oggi" — la fine del periodo — e' il giorno del SUO fuso.
+  const range = rangeFromUrl ?? defaultRange(shop.ianaTimezone, undefined, CUSTOMERS_DEFAULT_PRESET);
   const plan = await findPlanByName(shop.currentPlan);
   const customersIncluded = plan?.customersSyncEnabled ?? false;
 
@@ -165,14 +174,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
           '[customers] lettura non riuscita:',
           error instanceof Error ? error.message : 'errore sconosciuto',
         );
-        return { rows: [], currency: 'EUR', unavailable: 'failed' as const };
+        return { rows: [], currency: 'EUR', lifetimeCustomers: 0, unavailable: 'failed' as const };
       })
-    : { rows: [], currency: 'EUR', unavailable: 'plan_required' as const };
+    : { rows: [], currency: 'EUR', lifetimeCustomers: 0, unavailable: 'plan_required' as const };
 
   return json({
     ...report,
     upgradePlan,
     range,
+    // Per il selettore: "oggi" e' il giorno del negozio, non del browser.
+    timeZone: shop.ianaTimezone ?? null,
     // Il riquadro del campo "Data di nascita": c'e' solo con un piano che
     // sincronizza i clienti, perche' senza quel piano il campo non arriverebbe
     // da nessuna parte e il merchant lo compilerebbe per niente.
@@ -328,8 +339,17 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Customers() {
-  const { rows, currency, unavailable, upgradePlan, adminBase, birthdate } =
-    useLoaderData<typeof loader>();
+  const {
+    rows,
+    currency,
+    unavailable,
+    upgradePlan,
+    adminBase,
+    birthdate,
+    range,
+    timeZone,
+    lifetimeCustomers,
+  } = useLoaderData<typeof loader>();
   const t = useT();
   const locale = useLocale();
   // Quale riga ha appena chiesto "Risolvi problemi": la pagina dei prodotti
@@ -347,6 +367,25 @@ export default function Customers() {
   // ricerca, che lavora sulle stesse righe.
   const [onlyIssues, setOnlyIssues] = useState(false);
   const [query, setQuery] = useState('');
+
+  // Il periodo invece sta nell'indirizzo: cambiarlo vuol dire chiedere al
+  // database altri ordini, e il caricamento lo legge da li'. Si toccano solo
+  // `from` e `to`: gli altri parametri (quelli con cui l'admin apre l'app)
+  // restano dove sono. Ricerca e filtro restano quelli scelti.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const choosePeriod = (next: DateRange) => {
+    const params = new URLSearchParams(searchParams);
+    params.set('from', next.from);
+    params.set('to', next.to);
+    setSearchParams(params, { replace: true, preventScrollReset: true });
+  };
+  const periodLoading =
+    navigation.state === 'loading' && navigation.location.pathname === '/customers';
+  // "Da sempre" non lascia fuori nessuno. Qualunque altro periodo si': chi ha
+  // comprato prima non compare, e va detto — altrimenti sembra sparito.
+  const isAllTime = range.from <= ALL_TIME_START;
+  const periodHidesSome =
+    unavailable === null && !isAllTime && (rows.length === 0 || rows.length < lifetimeCustomers);
 
   // Della data di nascita si vede una cosa sola alla volta: il riquadro con cui
   // si sceglie il campo, l'avviso che conferma la scelta appena fatta, o la
@@ -374,9 +413,10 @@ export default function Customers() {
 
   // Cambiando ricerca o filtro si riparte da pagina 1: restare a pagina 4 su un
   // risultato che ne ha due mostrerebbe una tabella vuota senza spiegazione.
+  // Lo stesso per il periodo: sono altre righe, e si comincia dalla prima.
   useEffect(() => {
     setPage(1);
-  }, [query, onlyIssues]);
+  }, [query, onlyIssues, range.from, range.to]);
 
   // E se le righe si accorciano sotto i piedi — un filtro acceso mentre si e'
   // in fondo — si arretra invece di restare su una pagina che non c'e' piu'.
@@ -394,11 +434,9 @@ export default function Customers() {
       fullWidth
       title={t.customers.title}
       backAction={{ url: '/' }}
-      // Niente selettore di date qui: il periodo si sceglie in dashboard, ed
-      // e' li' che si guarda l'andamento. Questa tabella risponde a un'altra
-      // domanda — chi sono i clienti e quanto rendono — e due selettori in due
-      // pagine, ognuno col suo periodo, facevano leggere numeri diversi
-      // credendoli lo stesso numero.
+      // Il periodo si vede, sopra la tabella. Senza, la pagina ne usava uno
+      // che nessuno aveva scelto e che non si leggeva da nessuna parte, e i
+      // clienti che avevano ordinato prima sparivano in silenzio.
     >
       <BlockStack gap="400">
         {/* Il cambio di piano si legge da ogni tab, non solo da dove e' stato
@@ -454,7 +492,7 @@ export default function Customers() {
             gialla — quelle il cui profitto e' calcolato su prodotti senza
             costo. Sono le uniche su cui c'e' qualcosa da fare, e in un elenco
             lungo si perdono fra quelle a posto. */}
-        {unavailable === null && rows.length > 0 && (
+        {unavailable === null && (
           /* Filtri a sinistra e ricerca a destra, mezza riga ciascuno: la
              stessa forma dei prodotti non idonei, dove la ricerca finisce
              all'estrema destra senza doverla dimensionare a mano.
@@ -462,16 +500,29 @@ export default function Customers() {
              altrimenti i pulsanti si appoggerebbero in cima al campo. */
           <InlineGrid columns={2} gap="400" alignItems="center">
             <InlineStack gap="200" blockAlign="center" wrap>
-              <ButtonGroup variant="segmented">
-                <Button pressed={!onlyIssues} onClick={() => setOnlyIssues(false)}>
-                  {t.customers.filterAll}
-                </Button>
-                <Button pressed={onlyIssues} onClick={() => setOnlyIssues(true)}>
-                  {t.customers.filterIssues}
-                </Button>
-              </ButtonGroup>
+              {/* Il periodo per primo: dice quali clienti si stanno guardando,
+                  e va letto prima di qualsiasi riga. Resta anche con la tabella
+                  vuota, che e' proprio quando serve allargarlo. */}
+              <DateRangePicker
+                value={range}
+                timeZone={timeZone}
+                onChange={choosePeriod}
+                disabled={periodLoading}
+                allTime
+              />
 
-              {onlyIssues && hiddenByFilter > 0 && (
+              {rows.length > 0 && (
+                <ButtonGroup variant="segmented">
+                  <Button pressed={!onlyIssues} onClick={() => setOnlyIssues(false)}>
+                    {t.customers.filterAll}
+                  </Button>
+                  <Button pressed={onlyIssues} onClick={() => setOnlyIssues(true)}>
+                    {t.customers.filterIssues}
+                  </Button>
+                </ButtonGroup>
+              )}
+
+              {rows.length > 0 && onlyIssues && hiddenByFilter > 0 && (
                 <Text as="span" tone="subdued" variant="bodySm">
                   {t.customers.hiddenCount(hiddenByFilter)}
                 </Text>
@@ -482,18 +533,20 @@ export default function Customers() {
                 stessa impostazione della ricerca nei prodotti, cosi' le due tab
                 non si somigliano soltanto — si corrispondono. */}
             <InlineStack align="end">
-              <Box width="75%">
-                <TextField
-                  label={t.customers.search}
-                  labelHidden
-                  value={query}
-                  onChange={setQuery}
-                  autoComplete="off"
-                  placeholder={t.customers.searchPlaceholder}
-                  clearButton
-                  onClearButtonClick={() => setQuery('')}
-                />
-              </Box>
+              {rows.length > 0 && (
+                <Box width="75%">
+                  <TextField
+                    label={t.customers.search}
+                    labelHidden
+                    value={query}
+                    onChange={setQuery}
+                    autoComplete="off"
+                    placeholder={t.customers.searchPlaceholder}
+                    clearButton
+                    onClearButtonClick={() => setQuery('')}
+                  />
+                </Box>
+              )}
             </InlineStack>
           </InlineGrid>
         )}
@@ -517,9 +570,18 @@ export default function Customers() {
           >
           <Card padding="0">
             <Box padding="400">
-              <Text as="p" tone="subdued">
-                {t.customers.intro}
-              </Text>
+              <BlockStack gap="100">
+                <Text as="p" tone="subdued">
+                  {t.customers.intro}
+                </Text>
+                {/* Il periodo lascia fuori qualcuno: si dice, e si dice come
+                    ritrovarli. */}
+                {periodHidesSome && (
+                  <Text as="p" tone="subdued" variant="bodySm">
+                    {t.customers.periodHint}
+                  </Text>
+                )}
+              </BlockStack>
             </Box>
             {/* Le colonne non si riassestano a ogni lettera scritta nella
                 ricerca: le larghezze stanno in `dashboard.css`, dichiarate una
@@ -529,6 +591,7 @@ export default function Customers() {
               resourceName={t.customers.resource}
               itemCount={visibleRows.length}
               selectable={false}
+              loading={periodLoading}
               headings={[
                 { title: t.customers.columns.customer },
                 // Senza intestazione: e' una spia, non un dato. Un titolo sopra

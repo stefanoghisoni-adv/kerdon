@@ -16,6 +16,7 @@ import {
   ChevronRightIcon,
 } from '@shopify/polaris-icons';
 import {
+  ALL_TIME_LEAF,
   comparisonRange,
   dayPlaceholder,
   formatDayNumeric,
@@ -27,6 +28,7 @@ import {
   leafKey,
   leafRange,
   matchLeaf,
+  matchPreset,
   orderRange,
   parseDay,
   presetGroups,
@@ -53,6 +55,12 @@ export interface DateRangePickerProps {
    * dopo le sedici gia' domani. Assente = UTC, che e' cio' che c'era prima.
    */
   timeZone?: string | null;
+  /**
+   * Offre "Da sempre" in cima all'elenco. Lo chiede la tab Clienti, dove un
+   * cliente di sei mesi fa conta quanto uno di ieri; la dashboard no, perche'
+   * un andamento di vent'anni non si legge.
+   */
+  allTime?: boolean;
 }
 
 /**
@@ -109,6 +117,7 @@ export function DateRangePicker({
   onChange,
   disabled,
   timeZone,
+  allTime = false,
 }: DateRangePickerProps) {
   const t = useT();
   const locale = useLocale();
@@ -131,6 +140,13 @@ export function DateRangePicker({
   const [panel, setPanel] = useState<GroupId | null>(null);
 
   const groups = useMemo(() => presetGroups(todayUtc), [todayUtc]);
+  const headLeaves = allTime ? [ALL_TIME_LEAF, ...HEAD_LEAVES] : HEAD_LEAVES;
+  // "Da sempre" si legge per nome: le due date — la prima e' un giorno del
+  // 2006 — direbbero un periodo che nessuno ha scelto.
+  const buttonLabel =
+    allTime && matchPreset(value, todayUtc) === 'allTime'
+      ? t.dates.presets.allTime
+      : formatRange(value, locale);
   const selectedKey = useMemo(() => {
     const leaf = matchLeaf(draft, todayUtc);
     return leaf ? leafKey(leaf) : null;
@@ -238,7 +254,7 @@ export function DateRangePicker({
           disabled={disabled}
           onClick={() => (open ? cancel() : openPicker())}
         >
-          {formatRange(value, locale)}
+          {buttonLabel}
         </Button>
       }
     >
@@ -272,7 +288,7 @@ export function DateRangePicker({
               {/* Oggi e Ieri senza capofila sopra: sono le due che si scelgono
                   di gran lunga piu' spesso, e metterle dentro un gruppo da
                   aprire costerebbe un clic proprio dove non deve costarne. */}
-              <ActionList actionRole="menuitem" items={HEAD_LEAVES.map(leafItem)} />
+              <ActionList actionRole="menuitem" items={headLeaves.map(leafItem)} />
               <Divider />
               <ActionList
                 actionRole="menuitem"
