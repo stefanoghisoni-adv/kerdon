@@ -110,6 +110,19 @@ async function modificaPackaging(
   return risposta(intent, { success: true, numbers });
 }
 
+/*
+ * NIENTE `export const config = { maxDuration }` QUI, e non per dimenticanza.
+ * La configurazione per rotta la legge solo il preset Vercel di Remix
+ * (`vercelPreset()` da `@vercel/remix`), che questo progetto non usa:
+ * vite.config.ts monta il plugin di Remix nudo, e Vercel impacchetta l'app in
+ * una funzione sola. Un `config` esportato qui verrebbe ignorato in silenzio,
+ * cioe' dichiarerebbe un tetto che non esiste.
+ *
+ * Vale quindi il tetto di default del progetto, lo stesso su cui contano i job
+ * della coda (MAX_RUN_MS, 270 s). Il ricalcolo nel salvataggio sta molto sotto:
+ * INLINE_RECOMPUTE_BUDGET_MS (15 s) e, come interruzione dura,
+ * INLINE_RECOMPUTE_MAX_RUN_MS (45 s), in recompute-inline.server.ts.
+ */
 export async function action({ request }: ActionFunctionArgs) {
   const { session, shop } = await requireShopCapability(request, 'use_app', {
     onDenied: 'redirect',
@@ -133,18 +146,22 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Le opzioni appena importate raggiungono solo gli ordini che sanno quale
-    // opzione ha scelto il cliente: quelli scritti prima dello schema 13 non
-    // lo sanno. Il recupero lo chiede a Shopify in sottofondo e alla fine
-    // ricalcola. Idempotente e deduplicato: reimportare non costa niente se
-    // lo storico e' gia' completo. Non solleva mai.
-    await enqueueShippingMethodBackfill(shop.id);
-
     // L'importazione puo' cambiare i paesi di una zona o quale zona fa da
     // resto del mondo: i costi gia' scritti sugli ordini vanno rifatti come
     // dopo un salvataggio delle tariffe. Non solleva mai (vedi
     // recompute-inline.server): le zone sono gia' salvate comunque.
     const numbers = await recomputeLogisticsAfterSave(shop.id);
+
+    // Le opzioni appena importate raggiungono solo gli ordini che sanno quale
+    // opzione ha scelto il cliente: quelli scritti prima dello schema 13 non
+    // lo sanno. Il recupero lo chiede a Shopify in sottofondo e alla fine
+    // ricalcola. Idempotente e deduplicato: reimportare non costa niente se
+    // lo storico e' gia' completo. Non solleva mai.
+    //
+    // DOPO il ricalcolo, non prima: l'accodamento sveglia la coda con
+    // un'autochiamata che spesso prende il lucchetto del negozio per prima, e
+    // il ricalcolo qui sopra tornerebbe 'occupato' proprio al primo import.
+    await enqueueShippingMethodBackfill(shop.id);
 
     return risposta('sync-zones', { success: true, numbers });
   }

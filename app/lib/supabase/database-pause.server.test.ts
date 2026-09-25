@@ -14,6 +14,7 @@ const getValidAccessToken = vi.fn();
 const enqueueManualSync = vi.fn();
 const triggerSyncDrain = vi.fn();
 const enqueueLogisticsRecompute = vi.fn();
+const enqueueShippingMethodBackfill = vi.fn();
 
 vi.mock('~/db.server', () => ({
   prisma: {
@@ -35,6 +36,9 @@ vi.mock('~/lib/queue/trigger.server', () => ({
 }));
 vi.mock('~/lib/shipping/recompute-enqueue.server', () => ({
   enqueueLogisticsRecompute: (...a: unknown[]) => enqueueLogisticsRecompute(...a),
+}));
+vi.mock('~/lib/shipping/shipping-method-backfill-enqueue.server', () => ({
+  enqueueShippingMethodBackfill: (...a: unknown[]) => enqueueShippingMethodBackfill(...a),
 }));
 vi.mock('~/lib/supabase-management.server', async (importOriginal) => ({
   // `isSupabaseCredentialDead` e `SupabaseTokenError` restano quelli veri: qui
@@ -170,6 +174,23 @@ describe('il ritorno del database', () => {
     expect(enqueueLogisticsRecompute).toHaveBeenCalledWith('shop-1');
   });
 
+  it('al ritorno riaccoda anche il recupero dell opzione sugli ordini storici', async () => {
+    // Un recupero partito a database fermo esce in silenzio senza tappe ne'
+    // continuazioni: se nessuno lo riaccodasse, lo storico resterebbe senza
+    // opzione per sempre.
+    getState.mockResolvedValue({
+      status: 'INACTIVE',
+      availability: 'in-pausa',
+      checkedAt: new Date(Date.now() - 120_000).toISOString(),
+      resumeRequestedAt: null,
+    });
+    getProject.mockResolvedValue({ status: 'ACTIVE_HEALTHY' });
+
+    await readDatabasePause('shop-1');
+
+    expect(enqueueShippingMethodBackfill).toHaveBeenCalledWith('shop-1');
+  });
+
   it('un database che era gia attivo non accoda niente', async () => {
     getState.mockResolvedValue(null);
 
@@ -178,6 +199,7 @@ describe('il ritorno del database', () => {
     expect(getProject).not.toHaveBeenCalled();
     expect(enqueueManualSync).not.toHaveBeenCalled();
     expect(enqueueLogisticsRecompute).not.toHaveBeenCalled();
+    expect(enqueueShippingMethodBackfill).not.toHaveBeenCalled();
   });
 
   it('finche resta fermo si ricontrolla, ma non piu di una volta al minuto', async () => {

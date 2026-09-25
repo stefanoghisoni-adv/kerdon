@@ -95,10 +95,15 @@ describe('recomputeLogisticsAfterSave', () => {
     expect(enqueueLogisticsRecompute).toHaveBeenCalledWith('shop-1');
   });
 
-  prova('lucchetto non disponibile: si accoda', async () => {
+  prova('lucchetto non disponibile (owner DB irraggiungibile): nessuna promessa sui numeri', async () => {
     (runWithShopLease as any).mockResolvedValue('non-disponibile');
 
-    await expect(recomputeLogisticsAfterSave('shop-1')).resolves.toBe('pending');
+    // L'accodamento vive sullo stesso database che non risponde: dire "a
+    // breve" vorrebbe dire promettere un job che probabilmente non esiste.
+    await expect(recomputeLogisticsAfterSave('shop-1')).resolves.toBeNull();
+    expect(processLogisticsRecompute).not.toHaveBeenCalled();
+    // Il tentativo resta (non solleva mai): se il guasto era un singhiozzo,
+    // il job entra comunque.
     expect(enqueueLogisticsRecompute).toHaveBeenCalledWith('shop-1');
   });
 

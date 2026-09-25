@@ -30,6 +30,7 @@ import {
 } from '~/lib/cache/database-pause-cache.server';
 import { enqueueManualSync, triggerSyncDrain } from '~/lib/queue/trigger.server';
 import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute-enqueue.server';
+import { enqueueShippingMethodBackfill } from '~/lib/shipping/shipping-method-backfill-enqueue.server';
 import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { getProject, isSupabaseCredentialDead } from '~/lib/supabase-management.server';
 import {
@@ -118,6 +119,12 @@ export async function refreshDatabasePauseState(
     // resterebbe con i costi vecchi. Senza tariffe configurate il ricalcolo
     // scrive zero dove c'e' gia' zero, cioe' niente. Non solleva mai.
     await enqueueLogisticsRecompute(shopId);
+    // E il recupero dell'opzione sugli ordini storici: se era partito a
+    // database fermo e' uscito in silenzio, senza continuazione, e nessun
+    // altro lo riaccoderebbe. Deduplicato (uno solo in coda o in corso) e
+    // idempotente: se lo storico e' gia' completo costa una SELECT. Non
+    // solleva mai. Accoda da se' il ricalcolo quando ha scritto qualcosa.
+    await enqueueShippingMethodBackfill(shopId);
     triggerSyncDrain(shopId);
   }
 
