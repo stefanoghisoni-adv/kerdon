@@ -38,6 +38,17 @@ jobs:
       # questo: non e' registrabile, quindi se una prova provasse davvero a
       # chiamarlo fallirebbe subito invece di finire su un sito di qualcuno.
       SHOPIFY_APP_URL: https://ci.invalid
+      # Chiavi Shopify fittizie ma sintatticamente valide.
+      #
+      # `shopifyApp` valida la presenza di API key e secret al momento della
+      # chiamata: senza, i test che importano `app/shopify.server.ts` falliscono
+      # prima ancora di cominciare. In produzione le chiavi vere sono nei secrets
+      # di Vercel; in CI ne bastano di fittizie perché i test non fanno chiamate
+      # reali a Shopify — i finti rispondono al loro posto.
+      #
+      # 32 caratteri esadecimali: la forma che Shopify usa per le chiavi delle app.
+      SHOPIFY_API_KEY: 00000000000000000000000000000000
+      SHOPIFY_API_SECRET: 00000000000000000000000000000000
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -93,6 +104,11 @@ jobs:
     # L'indirizzo vero del database di prova se lo scrive il server da solo.
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_non_esiste?schema=public
+      # Chiavi Shopify fittizie: il server di prova importa `shopify.server.ts`,
+      # che richiede queste variabili anche se i finti rispondono al posto di Shopify.
+      SHOPIFY_API_KEY: 00000000000000000000000000000000
+      SHOPIFY_API_SECRET: 00000000000000000000000000000000
+      SHOPIFY_APP_URL: https://ci.invalid
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
