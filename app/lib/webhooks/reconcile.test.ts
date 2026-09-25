@@ -44,7 +44,7 @@ function negozio(over: Record<string, unknown> = {}) {
   return {
     id: 'shop-1',
     shopDomain: 'negozio.myshopify.com',
-    currentPlan: 'Pro',
+    currentPlan: 'Growth',
     activeChargeId: '123',
     ...over,
   };
@@ -53,8 +53,9 @@ function negozio(over: Record<string, unknown> = {}) {
 function abbonamento(over: Record<string, unknown> = {}) {
   return {
     gid: 'gid://shopify/AppSubscription/123',
-    name: 'Pro',
+    name: 'Growth',
     status: 'ACTIVE',
+    priceAmount: 29,
     ...over,
   };
 }
@@ -182,7 +183,7 @@ describe('lo stato dell abbonamento', () => {
 
   it('niente di attivo e nessun addebito da noi → niente da fare', async () => {
     getActiveSubscriptions.mockResolvedValue([]);
-    shopFindMany.mockResolvedValue([negozio({ activeChargeId: null, currentPlan: 'Free' })]);
+    shopFindMany.mockResolvedValue([negozio({ activeChargeId: null, currentPlan: 'Basic' })]);
 
     const esito = await reconcileShopStates(adminFor, ORA);
 
@@ -206,7 +207,7 @@ describe('lo stato dell abbonamento', () => {
   });
 
   it('abbonamento attivo che da noi non risultava → allineato', async () => {
-    shopFindMany.mockResolvedValue([negozio({ activeChargeId: null, currentPlan: 'Free' })]);
+    shopFindMany.mockResolvedValue([negozio({ activeChargeId: null, currentPlan: 'Basic' })]);
     const avviso = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const esito = await reconcileShopStates(adminFor, ORA);
@@ -214,11 +215,32 @@ describe('lo stato dell abbonamento', () => {
     expect(esito.aligned).toBe(1);
     expect(applyActiveSubscription).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'shop-1' }),
-      'Pro',
+      'Growth',
       123n,
       ORA,
+      29,
     );
     avviso.mockRestore();
+  });
+
+  it('abbonamento nato col nome di prima e gia attivo → non si tocca', async () => {
+    // Nato fra il 23 e il 26 settembre 2026 come "Core" da 29: la migrazione ha
+    // gia' portato il negozio su Growth. Confrontando i nomi lo si sarebbe
+    // "riallineato" sul Core da 149.
+    getActiveSubscriptions.mockResolvedValue([abbonamento({ name: 'Core', priceAmount: 29 })]);
+
+    const esito = await reconcileShopStates(adminFor, ORA);
+
+    expect(esito.aligned).toBe(0);
+    expect(applyActiveSubscription).not.toHaveBeenCalled();
+  });
+
+  it('abbonamento "Pro" di prima e gia attivo → non si tocca', async () => {
+    getActiveSubscriptions.mockResolvedValue([abbonamento({ name: 'Pro', priceAmount: 19 })]);
+
+    await reconcileShopStates(adminFor, ORA);
+
+    expect(applyActiveSubscription).not.toHaveBeenCalled();
   });
 
   it('gia allineato → non scrive niente: e il caso normale', async () => {

@@ -58,8 +58,8 @@ async function scenarioDiPartenza(
   request: import('@playwright/test').APIRequestContext,
   opzioni: { trialDays?: number; piano?: string } = {},
 ) {
-  const piano = opzioni.piano ?? 'Pro';
-  const shop = await seminaNegozio(request, { currentPlan: 'Free' });
+  const piano = opzioni.piano ?? 'Growth';
+  const shop = await seminaNegozio(request, { currentPlan: 'Basic' });
   await seminaTentativo(request, {
     shopId: shop.id,
     shopifyChargeId: Number(ADDEBITO),
@@ -93,7 +93,7 @@ const statoBuono = () =>
   firmaStato({
     nonce: NONCE,
     shopDomain: NEGOZIO,
-    planName: 'Pro',
+    planName: 'Growth',
     listPrice: 29,
     currency: 'EUR',
     interval: 'monthly',
@@ -145,7 +145,7 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     expect(destinazione).not.toMatch(/\/apps\/[^?]+\//);
 
     const negozio = await leggiNegozio(request);
-    expect(negozio.currentPlan).toBe('Pro');
+    expect(negozio.currentPlan).toBe('Growth');
     expect(negozio.activeChargeId).toBe(ADDEBITO);
     expect(negozio.billingCycle).toBe('monthly');
     // Approvare un piano a pagamento E' confermare il piano: il quarto passo
@@ -238,10 +238,10 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     const risposta = await request.get(urlCallback(null), { maxRedirects: 0 });
 
     // Una callback senza state puo' solo CONFERMARE un piano gia' applicato.
-    // Qui il negozio e' ancora su Free, quindi non c'e' niente da confermare.
+    // Qui il negozio e' ancora su Basic, quindi non c'e' niente da confermare.
     expect(risposta.headers()['location']).toContain('billing=ko');
     const negozio = await leggiNegozio(request);
-    expect(negozio.currentPlan).toBe('Free');
+    expect(negozio.currentPlan).toBe('Basic');
     expect(negozio.activeChargeId).toBeNull();
     expect((await leggiAddebito(request)).status).toBe('pending');
   });
@@ -255,7 +255,7 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     const risposta = await request.get(urlCallback(contraffatto), { maxRedirects: 0 });
 
     expect(risposta.headers()['location']).toContain('billing=ko');
-    expect((await leggiNegozio(request)).currentPlan).toBe('Free');
+    expect((await leggiNegozio(request)).currentPlan).toBe('Basic');
   });
 
   test('lo state di un altro negozio non attiva niente', async ({ request }) => {
@@ -264,7 +264,7 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     const altrui = firmaStato({
       nonce: NONCE,
       shopDomain: ALTRO_NEGOZIO,
-      planName: 'Pro',
+      planName: 'Growth',
       listPrice: 29,
       currency: 'EUR',
       interval: 'monthly',
@@ -272,7 +272,7 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     const risposta = await request.get(urlCallback(altrui), { maxRedirects: 0 });
 
     expect(risposta.headers()['location']).toContain('billing=ko');
-    expect((await leggiNegozio(request)).currentPlan).toBe('Free');
+    expect((await leggiNegozio(request)).currentPlan).toBe('Basic');
     expect((await leggiAddebito(request)).status).toBe('pending');
   });
 
@@ -281,10 +281,13 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
   }) => {
     await scenarioDiPartenza(request);
 
+    // "Scale" e non "Core": uno state "Core" a 29 e' quello firmato fra il 23 e
+    // il 26 settembre 2026 per il piano che oggi si chiama Growth, e l'app lo
+    // riconosce come tale. "Scale" a 29 non e' di nessuno scaglione di allora.
     const altroPiano = firmaStato({
       nonce: NONCE,
       shopDomain: NEGOZIO,
-      planName: 'Enterprise',
+      planName: 'Scale',
       listPrice: 29,
       currency: 'EUR',
       interval: 'monthly',
@@ -292,7 +295,7 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     const risposta = await request.get(urlCallback(altroPiano), { maxRedirects: 0 });
 
     expect(risposta.headers()['location']).toContain('billing=ko');
-    expect((await leggiNegozio(request)).currentPlan).toBe('Free');
+    expect((await leggiNegozio(request)).currentPlan).toBe('Basic');
   });
 
   test('uno state scaduto non attiva niente', async ({ request }) => {
@@ -302,7 +305,7 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
       {
         nonce: NONCE,
         shopDomain: NEGOZIO,
-        planName: 'Pro',
+        planName: 'Growth',
         listPrice: 29,
         currency: 'EUR',
         interval: 'monthly',
@@ -312,21 +315,21 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     const risposta = await request.get(urlCallback(scaduto), { maxRedirects: 0 });
 
     expect(risposta.headers()['location']).toContain('billing=ko');
-    expect((await leggiNegozio(request)).currentPlan).toBe('Free');
+    expect((await leggiNegozio(request)).currentPlan).toBe('Basic');
   });
 
   test('un addebito rifiutato viene registrato, e nessun piano si muove', async ({ request }) => {
-    const shop = await seminaNegozio(request, { currentPlan: 'Free' });
+    const shop = await seminaNegozio(request, { currentPlan: 'Basic' });
     await seminaTentativo(request, {
       shopId: shop.id,
       shopifyChargeId: Number(ADDEBITO),
-      planType: 'Pro',
+      planType: 'Growth',
       callbackNonce: NONCE,
     });
     await finti(request, {
       sessioni: [NEGOZIO],
       graphql: rispostePerCallback(
-        abbonamento({ chargeId: ADDEBITO, name: 'Pro', status: 'DECLINED' }),
+        abbonamento({ chargeId: ADDEBITO, name: 'Growth', status: 'DECLINED' }),
       ),
     });
 
@@ -336,7 +339,7 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     // Non e' un'attivazione ma una riconciliazione: si prende atto di uno stato
     // che Shopify dichiara per conto suo.
     expect((await leggiAddebito(request)).status).toBe('declined');
-    expect((await leggiNegozio(request)).currentPlan).toBe('Free');
+    expect((await leggiNegozio(request)).currentPlan).toBe('Basic');
   });
 
   test('un charge_id inventato non tocca niente', async ({ request }) => {
@@ -352,7 +355,7 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     });
 
     expect(risposta.headers()['location']).toContain('billing=ko');
-    expect((await leggiNegozio(request)).currentPlan).toBe('Free');
+    expect((await leggiNegozio(request)).currentPlan).toBe('Basic');
     expect((await leggiAddebito(request)).status).toBe('pending');
   });
 
@@ -380,7 +383,7 @@ test.describe('il ritorno dall approvazione dell addebito', () => {
     );
 
     expect(risposta.headers()['location']).toContain('billing=ko');
-    expect((await leggiNegozio(request)).currentPlan).toBe('Free');
+    expect((await leggiNegozio(request)).currentPlan).toBe('Basic');
   });
 
   test('nel browser il rimando di primo livello porta davvero dentro l admin', async ({

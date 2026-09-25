@@ -43,7 +43,7 @@ describe('/api/stats/customers', () => {
       id: 'shop-1',
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'enc',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
   // Le colonne da cui la policy decide: senza, il cancello di `use_app`
     // rifiuterebbe prima ancora che il test cominci — ed e' proprio quello che
     // deve fare a un negozio fermo.

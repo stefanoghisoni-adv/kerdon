@@ -96,14 +96,14 @@ describe('webhook customers/create — consenso', () => {
       authorization: 'ENABLED',
       trackingAuthorization: 'ENABLED',
       scopes: 'read_products,read_customers',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameCustomers: 'customers',
       },
     });
     (prisma.plan.findFirst as any).mockResolvedValue({
-      planName: 'pro',
+      planName: 'growth',
       customersSyncEnabled: true,
     });
     (prisma.syncJob.create as any).mockResolvedValue({});
@@ -223,7 +223,7 @@ describe('webhook customers/create — chi non ha diritto non scrive', () => {
       authorization: 'ENABLED',
       trackingAuthorization: 'ENABLED',
       scopes: 'read_products,read_customers',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: { connectionVerifiedAt: new Date(), tableNameCustomers: 'customers' },
       ...over,
     });
@@ -253,10 +253,10 @@ describe('webhook customers/create — chi non ha diritto non scrive', () => {
 
   it('piano senza clienti: nessun cliente scritto (come prima)', async () => {
     (prisma.plan.findFirst as any).mockResolvedValue({
-      planName: 'free',
+      planName: 'basic',
       customersSyncEnabled: false,
     });
-    shopCon({ currentPlan: 'free' });
+    shopCon({ currentPlan: 'basic' });
     await nonSiScrive();
   });
 
@@ -280,14 +280,14 @@ describe('webhook customers/create — una scrittura fallita non si dichiara riu
       authorization: 'ENABLED',
       trackingAuthorization: 'ENABLED',
       scopes: 'read_products,read_customers',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameCustomers: 'customers',
       },
     });
     (prisma.plan.findFirst as any).mockResolvedValue({
-      planName: 'pro',
+      planName: 'growth',
       customersSyncEnabled: true,
     });
     (prisma.syncJob.create as any).mockResolvedValue({});

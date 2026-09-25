@@ -103,7 +103,7 @@ export async function seminaNegozio(
       shopDomain,
       accessToken: 'gettone-cifrato-finto',
       scopes: AMBIENTE_DI_PROVA.SHOPIFY_SCOPES,
-      currentPlan: 'Free',
+      currentPlan: 'Basic',
       ...dati,
     },
     select: { id: true, shopDomain: true },

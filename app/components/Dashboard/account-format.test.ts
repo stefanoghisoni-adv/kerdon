@@ -11,14 +11,14 @@ import {
 
 describe('planLabel', () => {
   it('mappa i piani noti', () => {
-    expect(planLabel('free')).toBe('Free');
-    expect(planLabel('pro')).toBe('Pro');
-    expect(planLabel('business')).toBe('Business');
-    expect(planLabel('enterprise')).toBe('Enterprise');
+    expect(planLabel('basic')).toBe('Basic');
+    expect(planLabel('growth')).toBe('Growth');
+    expect(planLabel('scale')).toBe('Scale');
+    expect(planLabel('core')).toBe('Core');
     expect(planLabel('lifetime')).toBe('Lifetime');
   });
   it('tollera maiuscole e spazi', () => {
-    expect(planLabel('  PRO ')).toBe('Pro');
+    expect(planLabel('  GROWTH ')).toBe('Growth');
   });
   it('piano sconosciuto → capitalizzato', () => {
     expect(planLabel('custom')).toBe('Custom');
@@ -43,18 +43,18 @@ describe('syncStatusBadge', () => {
 
 describe('firstPlanWithCustomersSync', () => {
   const plans = [
-    { planName: 'free', priceMonthly: 0, customersSyncEnabled: false },
-    { planName: 'enterprise', priceMonthly: 99, customersSyncEnabled: true },
-    { planName: 'pro', priceMonthly: 19, customersSyncEnabled: true },
-    { planName: 'business', priceMonthly: 49, customersSyncEnabled: true },
+    { planName: 'basic', priceMonthly: 0, customersSyncEnabled: false },
+    { planName: 'core', priceMonthly: 99, customersSyncEnabled: true },
+    { planName: 'growth', priceMonthly: 19, customersSyncEnabled: true },
+    { planName: 'scale', priceMonthly: 49, customersSyncEnabled: true },
   ];
 
   it("propone il piu' economico fra quelli che includono i clienti", () => {
-    expect(firstPlanWithCustomersSync(plans, 'free')).toBe('pro');
+    expect(firstPlanWithCustomersSync(plans, 'basic')).toBe('growth');
   });
 
   it("salta il piano gia' in uso", () => {
-    expect(firstPlanWithCustomersSync(plans, 'pro')).toBe('business');
+    expect(firstPlanWithCustomersSync(plans, 'growth')).toBe('scale');
   });
 
   it('ignora i piani non acquistabili', () => {
@@ -64,15 +64,15 @@ describe('firstPlanWithCustomersSync', () => {
       { planName: 'lifetime', priceMonthly: 0, customersSyncEnabled: true },
       ...plans,
     ];
-    expect(firstPlanWithCustomersSync(withLifetime, 'free')).toBe('pro');
+    expect(firstPlanWithCustomersSync(withLifetime, 'basic')).toBe('growth');
   });
 
   it('nessun piano da proporre → null', () => {
-    expect(firstPlanWithCustomersSync([], 'free')).toBeNull();
+    expect(firstPlanWithCustomersSync([], 'basic')).toBeNull();
     expect(
       firstPlanWithCustomersSync(
-        [{ planName: 'free', priceMonthly: 0, customersSyncEnabled: false }],
-        'free',
+        [{ planName: 'basic', priceMonthly: 0, customersSyncEnabled: false }],
+        'basic',
       ),
     ).toBeNull();
   });

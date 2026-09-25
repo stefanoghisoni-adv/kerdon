@@ -67,7 +67,7 @@ import { it as dizionario } from '~/lib/i18n/it';
 const ATTIVO = {
   id: 'negozio-1',
   shopDomain: 'negozio.myshopify.com',
-  currentPlan: 'pro',
+  currentPlan: 'growth',
   ianaTimezone: 'Europe/Rome',
   birthdateMetafieldNamespace: null,
   birthdateMetafieldKey: null,
@@ -108,7 +108,7 @@ const rifiuto = async (promessa: Promise<Response>): Promise<Response> =>
 beforeEach(() => {
   vi.clearAllMocks();
   findFirstPlan.mockResolvedValue({
-    planName: 'pro',
+    planName: 'growth',
     customersSyncEnabled: true,
     productFeedsEnabled: true,
   });

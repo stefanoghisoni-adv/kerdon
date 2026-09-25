@@ -13,7 +13,7 @@ vi.mock('~/db.server', () => ({
   prisma: {
     shop: { findUnique: (...a: unknown[]) => findUniqueShop(...a) },
     // Il cancello delle capacita' legge il piano del negozio.
-    plan: { findFirst: async () => ({ planName: 'pro', customersSyncEnabled: true }) },
+    plan: { findFirst: async () => ({ planName: 'growth', customersSyncEnabled: true }) },
   },
 }));
 vi.mock('~/lib/ingest/ingest-key.server', () => ({
@@ -44,7 +44,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   findUniqueShop.mockResolvedValue({
     id: 'negozio-1',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
   // Le colonne da cui la policy decide: senza, il cancello di `use_app`
   // rifiuterebbe prima ancora che il test cominci — ed e' proprio quello che
   // deve fare a un negozio fermo.

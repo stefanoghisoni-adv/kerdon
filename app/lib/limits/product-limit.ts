@@ -1,7 +1,9 @@
 // Applicazione del limite di prodotti per piano durante la sincronizzazione.
-// I piani definiscono `maxProducts` (free 50, pro 100, business 400,
-// enterprise/lifetime = null → illimitato). La sync non deve popolare più
-// prodotti di quanti il piano consenta.
+// I piani definiscono `maxProducts` (Basic 20, Growth 200, Scale 1.000,
+// Core/Lifetime = null → illimitato; il listino sta in
+// app/lib/billing/plan-tiers.ts). La sync non deve popolare più prodotti di
+// quanti il piano consenta. Vale solo per la sync dei prodotti: gli ordini si
+// sincronizzano sempre tutti, e i feed di catalogo non hanno un tetto loro.
 
 /**
  * Ritorna il sottoinsieme di `products` da processare in questa pagina in modo

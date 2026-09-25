@@ -33,7 +33,7 @@ const RIGA: CapabilityShopRow = {
   authorization: 'ENABLED',
   trackingAuthorization: 'ENABLED',
   scopes: 'read_products,read_orders,read_all_orders',
-  currentPlan: 'pro',
+  currentPlan: 'growth',
   // Prova finita e abbonamento attivo: e' il negozio che paga, quello a cui la
   // scadenza della prova non toglie niente.
   isInTrial: false,
@@ -47,7 +47,7 @@ const PIANO = { customersSyncEnabled: true, productFeedsEnabled: true };
 beforeEach(() => {
   findUniqueShop.mockReset();
   findFirstPlan.mockReset();
-  findFirstPlan.mockResolvedValue({ planName: 'pro', ...PIANO });
+  findFirstPlan.mockResolvedValue({ planName: 'growth', ...PIANO });
 });
 
 describe("shopCapabilitiesWithPlan — il piano gia' in mano", () => {
@@ -89,7 +89,7 @@ describe('shopCapabilities — il piano lo cerca lei', () => {
     await shopCapabilities(RIGA);
     expect(findFirstPlan).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { planName: { equals: 'pro', mode: 'insensitive' } },
+        where: { planName: { equals: 'growth', mode: 'insensitive' } },
       }),
     );
   });

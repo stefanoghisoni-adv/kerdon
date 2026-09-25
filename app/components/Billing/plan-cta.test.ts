@@ -44,7 +44,7 @@ describe('planButtonState', () => {
     expect(current.loading).toBe(false);
 
     // Piano diverso da quello in sottomissione
-    const other = planButtonState('Business', false, 'Professional');
+    const other = planButtonState('Scale', false, 'Professional');
     expect(other.disabled).toBe(true);
     expect(other.loading).toBe(false);
 

@@ -13,7 +13,7 @@ vi.mock('~/db.server', () => ({
     shop: { findUnique: (...a: unknown[]) => findUniqueShop(...a) },
     // Il cancello delle capacita' legge il piano del negozio: senza questa
     // riga la rotta rifiuterebbe per un motivo che non c'entra con la verifica.
-    plan: { findFirst: async () => ({ planName: 'pro', customersSyncEnabled: true }) },
+    plan: { findFirst: async () => ({ planName: 'growth', customersSyncEnabled: true }) },
     trackingSetup: {
       findUnique: (...a: unknown[]) => findUniqueSetup(...a),
       update: (...a: unknown[]) => updateSetup(...a),
@@ -54,7 +54,7 @@ beforeEach(() => {
   findUniqueShop.mockResolvedValue({
     id: 'shop-1',
     primaryDomain: 'negozio.it',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
   // Le colonne da cui la policy decide: senza, il cancello di `use_app`
   // rifiuterebbe prima ancora che il test cominci — ed e' proprio quello che
   // deve fare a un negozio fermo.

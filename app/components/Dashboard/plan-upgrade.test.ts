@@ -10,16 +10,16 @@ import { it as itDict } from '~/lib/i18n/it';
 
 describe('hasPlanChanged', () => {
   it('nessuna sync precedente → nessun cambio da segnalare', () => {
-    expect(hasPlanChanged('pro', null)).toBe(false);
+    expect(hasPlanChanged('growth', null)).toBe(false);
   });
   it('stesso piano → false', () => {
-    expect(hasPlanChanged('free', 'free')).toBe(false);
+    expect(hasPlanChanged('basic', 'basic')).toBe(false);
   });
   it('piano diverso → true', () => {
-    expect(hasPlanChanged('pro', 'free')).toBe(true);
+    expect(hasPlanChanged('growth', 'basic')).toBe(true);
   });
   it('vale anche in downgrade', () => {
-    expect(hasPlanChanged('free', 'pro')).toBe(true);
+    expect(hasPlanChanged('basic', 'growth')).toBe(true);
   });
 });
 
@@ -200,7 +200,7 @@ describe('planChangeBanner', () => {
       previousMax: 400,
       customersEnabled: false,
       customersTableCreated: true,
-      customersUpgradePlan: 'pro',
+      customersUpgradePlan: 'growth',
     }, itDict)!;
     expect(b.tone).toBe('warning');
     expect(b.title).toBe('Piano modificato');
@@ -209,7 +209,7 @@ describe('planChangeBanner', () => {
     expect(text(b)).toContain('è stato aggiornato a 50 prodotti');
     expect(text(b)).toContain('non verranno eliminati');
     expect(text(b)).toContain('profittabilità');
-    expect(text(b)).toContain('almeno a Pro');
+    expect(text(b)).toContain('almeno a Growth');
     expect(boldText(b)).toEqual(['50 prodotti']);
   });
 

@@ -405,7 +405,7 @@ describe('Initial bulk sync processor', () => {
       uninstalledAt: null,
       authorization: 'ENABLED',
       accessToken: 'encrypted-token',
-      currentPlan: 'free',
+      currentPlan: 'basic',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -511,7 +511,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'free',
+      currentPlan: 'basic',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -572,7 +572,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'free',
+      currentPlan: 'basic',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -615,7 +615,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'free',
+      currentPlan: 'basic',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -662,7 +662,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'free',
+      currentPlan: 'basic',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -715,7 +715,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'free',
+      currentPlan: 'basic',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -773,7 +773,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -807,7 +807,7 @@ describe('Initial bulk sync processor', () => {
     expect(prisma.shop.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'shop-1' },
-        data: expect.objectContaining({ lastSyncedPlan: 'pro' }),
+        data: expect.objectContaining({ lastSyncedPlan: 'growth' }),
       }),
     );
   });
@@ -818,7 +818,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -882,7 +882,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -962,7 +962,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       scopes: 'read_products,read_customers,write_customers',
       // Il campo standard, quello che l'app sa accendere sul negozio.
       birthdateMetafieldNamespace: 'facts',
@@ -1310,7 +1310,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -1405,7 +1405,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -1478,7 +1478,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -1529,7 +1529,7 @@ describe('Initial bulk sync processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -1601,7 +1601,7 @@ describe('una corsa e un negozio che si sta cancellando', () => {
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
     uninstalledAt: null,
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     lifecycleStatus: 'active',
     erasureGeneration: 0,
     supabaseConfig: {

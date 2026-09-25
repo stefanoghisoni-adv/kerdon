@@ -37,7 +37,6 @@ import {
   parseGidId,
   type BillingAdmin,
 } from '~/lib/billing/subscription.server';
-import { samePlanName } from '~/lib/billing/plan-name';
 import { markShopUninstalled } from './handle-uninstall.server';
 import {
   applyActiveSubscription,
@@ -178,11 +177,15 @@ async function riconcilia(
 
   // Gia' allineato: e' il caso normale, ed e' anche il motivo per cui questo
   // giro di norma non scrive niente.
-  if (shop.activeChargeId === id.toString() && samePlanName(shop.currentPlan, attivo.name)) {
-    return;
-  }
+  //
+  // Basta l'id, non serve che il nome combaci: un abbonamento non cambia piano,
+  // e quelli nati prima del cambio di listino del 26 settembre 2026 portano
+  // ancora il nome di allora ("Pro", oppure "Core" per il piano da 29) mentre il
+  // negozio e' gia' sul nome di oggi. Confrontare i nomi li avrebbe "riallineati"
+  // ogni notte — e un "Core" da 29 sarebbe diventato il Core da 149.
+  if (shop.activeChargeId === id.toString()) return;
 
-  const risultato = await applyActiveSubscription(shop, attivo.name, id, now);
+  const risultato = await applyActiveSubscription(shop, attivo.name, id, now, attivo.priceAmount);
   // `done` copre anche "il nome non e' nel listino", che qui non e' un
   // allineamento: si conta solo quando il negozio e' davvero cambiato.
   if (risultato === 'done' && shop.activeChargeId !== id.toString()) {

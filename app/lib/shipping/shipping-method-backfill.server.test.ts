@@ -103,7 +103,7 @@ beforeEach(() => {
   (prisma.shop.findUnique as any).mockResolvedValue({
     id: 'shop-1',
     shopDomain: 'negozio.myshopify.com',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     scopes: 'read_orders',
     supabaseConfig: { supabaseProjectRef: 'ref-1', connectionVerifiedAt: new Date() },
   });

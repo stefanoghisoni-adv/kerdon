@@ -128,8 +128,8 @@ export function ProductOverflowBanner({
         <Text as="p">
           {reason === 'feeds' ? (
             // Prima il motivo, poi l'invito: al contrario si leggeva "Aggiorna
-            // a Business" senza sapere ancora perche', e i due pezzi — figli
-            // JSX adiacenti — finivano pure attaccati, "BusinessI feed di
+            // a Scale" senza sapere ancora perche', e i due pezzi — figli
+            // JSX adiacenti — finivano pure attaccati, "ScaleI feed di
             // catalogo". Lo spazio va scritto: JSX non ne mette fra due nodi.
             <>
               {t.catalogs.planRequired}{' '}

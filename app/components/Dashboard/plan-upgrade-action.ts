@@ -6,7 +6,7 @@ import type { PlanForSuggestion } from './plan-suggestion';
 // Parente di `nav-loading.ts` e di `filter-nav.ts`, e nato dallo stesso
 // malinteso.
 //
-// L'invito "Aggiorna a Business" compare in piu' punti della stessa card, e
+// L'invito "Aggiorna a Scale" compare in piu' punti della stessa card, e
 // finche' erano collegamenti alla tab Piano il loro stato di attesa veniva da
 // una sola `useNavLoading('/plan')`: una destinazione condivisa, quindi un
 // cerchietto condiviso. Premendone uno partivano tutti, perche' nessuno di loro

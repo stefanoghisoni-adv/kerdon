@@ -78,7 +78,7 @@ function negozio(over: Record<string, unknown> = {}) {
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
     scopes: 'read_products,read_orders',
-    currentPlan: 'Pro',
+    currentPlan: 'Growth',
     isInTrial: false,
     trialEndsAt: null,
     activeChargeId: 'gid://charge/1',
@@ -100,7 +100,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   findManyShops.mockResolvedValue([negozio()]);
   findManyPlans.mockResolvedValue([
-    { planName: 'Pro', customersSyncEnabled: true, productFeedsEnabled: true, trialDays: null },
+    { planName: 'Growth', customersSyncEnabled: true, productFeedsEnabled: true, trialDays: null },
   ]);
   // Nessuna corsa riuscita: la prova di vita e' la verifica del collegamento.
   findFirstSyncJob.mockResolvedValue(null);

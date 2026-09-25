@@ -43,7 +43,7 @@ export function PlanFeatureList({ features, planName }: Props) {
               Sulle altre righe il cerchio dice "questo il piano ce l'ha"; qui
               non servirebbe a niente, perche' il database c'e' su tutti i piani
               — quello che cambia e' quanto. Lo dicono l'etichetta ("limitato" o
-              "esteso") e il colore dell'icona: grigia sul Free, verde dove il
+              "esteso") e il colore dell'icona: grigia sul Basic, verde dove il
               database e' quello esteso.
 
               La condizione e' la stessa che sceglie l'etichetta, e viene dallo
@@ -55,9 +55,9 @@ export function PlanFeatureList({ features, planName }: Props) {
               colonna dei simboli un database a piena misura pesa piu' dei
               cerchi che gli stanno sopra e sotto, e sbilancia la lettura. */}
           {feature.key === 'database' ? (
-            /* Verde su tutti i piani, Free compreso: il database c'e' sempre,
+            /* Verde su tutti i piani, Basic compreso: il database c'e' sempre,
                e un'icona spenta direbbe che manca. Quello che cambia — quanto
-               sincronizza — lo dicono l'etichetta e il tooltip, che sul Free
+               sincronizza — lo dicono l'etichetta e il tooltip, che sul Basic
                parlano di soli prodotti. */
             <span className="plan-feature-database-icon">
               <Icon source={DatabaseIcon} tone="success" />
@@ -69,7 +69,7 @@ export function PlanFeatureList({ features, planName }: Props) {
             />
           )}
           {/* Il database e' verde su tutti i piani, icona e scritta: c'e'
-              sempre, e spegnerlo sul Free direbbe che manca. Le altre righe
+              sempre, e spegnerlo sul Basic direbbe che manca. Le altre righe
               invece si spengono quando il piano non le comprende. */}
           <Text
             as="span"
@@ -95,7 +95,7 @@ export function PlanFeatureList({ features, planName }: Props) {
               si tratta di dati utente GDPR-compliant e connessioni con ordini,
               senza nomi di tabelle o colonne. */}
           {feature.key === 'database' && (
-            /* Due spiegazioni e non una: sul Free il database sincronizza i
+            /* Due spiegazioni e non una: sul Basic il database sincronizza i
                soli prodotti — non gli ordini, non i dati dei clienti — e
                promettergli "tutti i dati utente" sarebbe scritto falso proprio
                sulla card di chi non li ha. */

@@ -31,7 +31,7 @@ BEGIN
   -- 1a. I cinque piani su cui l'app conta. Averne di piu' e' normale (un
   --     listino cresce); averne di meno vuol dire negozi senza piano valido.
   SELECT string_agg(atteso, ', ') INTO mancanti
-  FROM unnest(ARRAY['Free', 'Pro', 'Business', 'Enterprise', 'Lifetime']) AS atteso
+  FROM unnest(ARRAY['Basic', 'Growth', 'Scale', 'Core', 'Lifetime']) AS atteso
   WHERE NOT EXISTS (SELECT 1 FROM plans p WHERE p.plan_name = atteso);
 
   IF mancanti IS NOT NULL THEN

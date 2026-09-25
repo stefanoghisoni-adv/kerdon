@@ -52,7 +52,7 @@ function rigaNegozio(over: Record<string, unknown> = {}) {
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
     scopes: 'read_products',
-    currentPlan: 'free',
+    currentPlan: 'basic',
     trialEndsAt: null,
     isInTrial: false,
     activeChargeId: null,
@@ -73,7 +73,7 @@ beforeEach(() => {
   sessionDeleteMany.mockResolvedValue({ count: 1 });
   eventUpdateMany.mockResolvedValue({ count: 1 });
   planFindFirst.mockResolvedValue({
-    planName: 'free',
+    planName: 'basic',
     customersSyncEnabled: false,
     productFeedsEnabled: false,
   });

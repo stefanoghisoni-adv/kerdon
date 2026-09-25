@@ -18,7 +18,7 @@ const OWNER_ASSIGNED_PLANS = new Set(['lifetime']);
 export function canAccessPlanTab(currentPlan: string | null | undefined): boolean {
   const id = (currentPlan ?? '').trim().toLowerCase();
   // Piano sconosciuto o non ancora assegnato: la tab resta visibile, e' il caso
-  // normale di uno shop appena installato (free).
+  // normale di uno shop appena installato (Basic).
   return !OWNER_ASSIGNED_PLANS.has(id);
 }
 

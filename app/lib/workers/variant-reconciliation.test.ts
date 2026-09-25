@@ -103,7 +103,7 @@ function mockShop(id = 'shop-1') {
     shopDomain: 'test-shop.myshopify.com',
     accessToken: 'enc',
     authorization: 'ENABLED',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     supabaseConfig: shopConfig,
   } as any);
   vi.mocked(prisma.syncJob.findFirst).mockResolvedValue(null);

@@ -19,7 +19,7 @@ function righe(override: Partial<ShopExportRows> = {}): ShopExportRows {
       shopCurrency: 'EUR',
       locale: 'it',
       preferredCurrency: 'EUR',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       billingCycle: 'monthly',
       billingCurrency: 'EUR',
       planStartedAt: new Date('2026-02-01T08:00:00.000Z'),
@@ -55,7 +55,7 @@ function righe(override: Partial<ShopExportRows> = {}): ShopExportRows {
     },
     billingCharges: [
       {
-        planType: 'pro',
+        planType: 'growth',
         price: { toString: () => '29.00' },
         currency: 'EUR',
         billingCycle: 'monthly',
@@ -96,7 +96,7 @@ describe('la copia dei dati del negozio', () => {
       'read_orders',
     ]);
     expect(f.negozio.campo_data_di_nascita).toBe('custom.data_di_nascita');
-    expect(f.piano.attuale).toBe('pro');
+    expect(f.piano.attuale).toBe('growth');
     expect(f.database_collegato?.tabella_prodotti).toBe('products');
     expect(f.sincronizzazioni).toHaveLength(1);
     expect(f.accessi_ai_dati_dei_clienti).toHaveLength(1);

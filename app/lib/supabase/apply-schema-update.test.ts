@@ -31,7 +31,7 @@ import { enqueueShippingMethodBackfill } from '~/lib/shipping/shipping-method-ba
 
 const shopRow = (configOver: Record<string, unknown> = {}) => ({
   id: 'shop-1',
-  currentPlan: 'pro',
+  currentPlan: 'growth',
   supabaseConfig: {
     connectionVerifiedAt: new Date(),
     schemaVersion: 0,

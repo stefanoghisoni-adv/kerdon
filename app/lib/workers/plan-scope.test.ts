@@ -71,7 +71,7 @@ const NEGOZIO = {
   uninstalledAt: null,
   authorization: 'ENABLED',
   accessToken: 'tok',
-  currentPlan: 'free',
+  currentPlan: 'basic',
   supabaseConfig: {
     connectionVerifiedAt: new Date(),
     tableNameProducts: 'products',

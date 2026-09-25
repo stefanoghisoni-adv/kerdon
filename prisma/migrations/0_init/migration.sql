@@ -948,39 +948,51 @@ CREATE TABLE "shipping_alert_dismissals" (
 -- AddForeignKey
 ALTER TABLE "shipping_alert_dismissals" ADD CONSTRAINT "shipping_alert_dismissals_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- I piani: cinque righe copiate dal database owner in uso.
+-- I piani: i quattro del listino piu' il Lifetime, che assegniamo a mano.
 --
 -- Non si generano dallo schema perche' non sono struttura, sono scelte:
--- quanti prodotti, ogni quanto si sincronizza, quanto costa. Vanno tenute
--- allineate a mano quando il listino cambia.
+-- quanti prodotti, ogni quanto si sincronizza, quanto costa. Sono le stesse di
+-- app/lib/billing/plan-tiers.ts e dello stato in cui la migrazione
+-- 20260926000000_plans_basic_growth_scale_core porta un database esistente:
+-- prisma/plan-catalog-sync.test.ts confronta le tre e si ferma se una resta
+-- indietro. Gli ordini non hanno limite su nessun piano.
+--
+-- Gli id sono quelli delle righe di prima (Free, Pro, Business, Enterprise):
+-- la migrazione rinomina, non ricrea, e cosi' un database nuovo e uno migrato
+-- hanno le stesse righe.
 --
 -- (C'era un `prisma/seed.ts` che le costruiva ed era rimasto indietro — nomi
 -- minuscoli, prezzi vecchi. E' stato tolto, ed e' bene che non torni: una
--- seconda fonte per gli stessi cinque piani e' una seconda cosa da ricordarsi
+-- seconda fonte per gli stessi piani e' una seconda cosa da ricordarsi
 -- di aggiornare.)
 INSERT INTO "plans" ("id", "plan_name", "max_products", "max_customers", "max_sync_frequency_hours", "custom_fields_limit", "support_level", "customers_sync_enabled", "product_feeds_enabled", "created_at", "trial_days") VALUES
-  ('60b36215-e0d0-48e4-8f59-1550028a1078', 'Free',        50,  200, 168.00,    3, 'community', false, false, '2026-07-14 15:48:23.356115', 14),
-  ('316217c4-3a7b-40f8-9f7c-8d5ddc1d5daa', 'Pro',        200,  500,  96.00,   10, 'email',     true,  true,  '2026-07-14 15:48:23.356115', 14),
-  ('eb31cfe0-d134-4421-a4d6-0f6e2a89f88d', 'Business',  1000, 2000,  48.00,   50, 'priority',  true,  true,  '2026-07-14 15:48:23.356115', 14),
-  ('fdf4476c-ab51-44f7-ba28-a785cddb3ec9', 'Enterprise',NULL, NULL,  24.00, NULL, 'dedicated', true,  true,  '2026-07-14 15:48:23.356115', 14),
+  ('60b36215-e0d0-48e4-8f59-1550028a1078', 'Basic',       20,    0, 168.00,    3, 'community', false, false, '2026-07-14 15:48:23.356115', 14),
+  ('316217c4-3a7b-40f8-9f7c-8d5ddc1d5daa', 'Growth',     200,  250,  96.00,   10, 'email',     true,  true,  '2026-07-14 15:48:23.356115', 14),
+  ('eb31cfe0-d134-4421-a4d6-0f6e2a89f88d', 'Scale',     1000,  500,  48.00,   50, 'priority',  true,  true,  '2026-07-14 15:48:23.356115', 14),
+  ('fdf4476c-ab51-44f7-ba28-a785cddb3ec9', 'Core',      NULL, NULL,  24.00, NULL, 'dedicated', true,  true,  '2026-07-14 15:48:23.356115', 14),
   ('0b896582-5f98-41b3-9073-65c9874b8360', 'Lifetime',  NULL, NULL,   0.50, NULL, 'dedicated', true,  true,  '2026-07-17 02:30:10.250832', NULL);
 
--- Il listino, in dollari: la valuta base, quella della scheda dell'App Store.
+-- Il listino, in dollari e in euro.
 --
--- Ogni piano ha la sua riga, anche quelli che non si pagano: zero e' un prezzo
--- scritto, non un'assenza. E' da queste righe che l'app sa quali piani sono a
+-- Il dollaro e' la valuta base, quella della scheda dell'App Store. Ogni piano
+-- ha la sua riga, anche quelli che non si pagano: zero e' un prezzo scritto,
+-- non un'assenza. E' da queste righe che l'app sa quali piani sono a
 -- pagamento — senza, li darebbe tutti per gratuiti.
 --
--- Le altre valute si aggiungono qui accanto, una riga per piano. Una valuta si
--- usa solo se copre TUTTI i piani a pagamento: a meta' listino le card
--- mostrerebbero due valute affiancate, e a quel punto non si capisce piu' né
--- l'una né l'altra.
+-- L'euro ha le stesse cifre. Una valuta si usa solo se copre TUTTI i piani a
+-- pagamento: a meta' listino le card mostrerebbero due valute affiancate, e a
+-- quel punto non si capisce piu' né l'una né l'altra. Il Lifetime non si
+-- vende, quindi ha solo la riga in dollari a zero.
 INSERT INTO "plan_prices" ("id", "plan_name", "currency", "price_monthly", "price_yearly") VALUES
-  (gen_random_uuid(), 'Free',       'USD',  0.00,    0.00),
-  (gen_random_uuid(), 'Pro',        'USD', 19.00,  290.00),
-  (gen_random_uuid(), 'Business',   'USD', 49.00,  990.00),
-  (gen_random_uuid(), 'Enterprise', 'USD', 79.00, 2990.00),
-  (gen_random_uuid(), 'Lifetime',   'USD',  0.00,    0.00);
+  (gen_random_uuid(), 'Basic',    'USD',   0.00,    0.00),
+  (gen_random_uuid(), 'Growth',   'USD',  29.00,  290.00),
+  (gen_random_uuid(), 'Scale',    'USD',  79.00,  790.00),
+  (gen_random_uuid(), 'Core',     'USD', 149.00, 1490.00),
+  (gen_random_uuid(), 'Lifetime', 'USD',   0.00,    0.00),
+  (gen_random_uuid(), 'Basic',    'EUR',   0.00,    0.00),
+  (gen_random_uuid(), 'Growth',   'EUR',  29.00,  290.00),
+  (gen_random_uuid(), 'Scale',    'EUR',  79.00,  790.00),
+  (gen_random_uuid(), 'Core',     'EUR', 149.00, 1490.00);
 
 -- Le due chiavi esterne sul nome del piano. Non le genera `migrate diff`:
 -- schema.prisma non modella la relazione fra shops e plans, ma il database in

@@ -132,7 +132,7 @@ beforeEach(() => {
     shopDomain: 'test.myshopify.com',
     uninstalledAt: null,
     authorization: 'ENABLED',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     supabaseConfig: {
       connectionVerifiedAt: new Date(),
       tableNameProducts: 'products',

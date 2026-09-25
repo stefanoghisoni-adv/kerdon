@@ -57,12 +57,12 @@ function negozioSano(over: Record<string, unknown> = {}) {
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
     scopes: 'read_products',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     supabaseConfig: { connectionVerifiedAt: new Date('2026-01-01T00:00:00Z') },
     ...over,
   });
   findFirstPlan.mockResolvedValue({
-    planName: 'pro',
+    planName: 'growth',
     customersSyncEnabled: true,
     productFeedsEnabled: true,
   });
@@ -83,6 +83,45 @@ describe('feed pubblico — quando il catalogo esce', () => {
   it('negozio in regola e feed acceso: il file si serve', async () => {
     const res = await call();
     expect(res.status).toBe(200);
+  });
+
+  it('il feed non ha un tetto di prodotti: il limite del piano non lo tocca', async () => {
+    // I feed sono inclusi o no, mai con una quantita': un piano con 20 prodotti
+    // a listino serve comunque tutte le righe che ci sono.
+    findFirstPlan.mockResolvedValue({
+      planName: 'growth',
+      maxProducts: 20,
+      customersSyncEnabled: true,
+      productFeedsEnabled: true,
+    });
+    const products = Array.from({ length: 250 }, (_, i) => ({
+      shopify_product_id: 1000 + i,
+      shopify_variant_id: 5000 + i,
+      product_title: `Prodotto ${i}`,
+      product_description: 'Descrizione',
+      vendor: 'Acme',
+      product_type: 'Abbigliamento',
+      handle: `prodotto-${i}`,
+      product_status: 'active',
+      variant_title: null,
+      sku: `SKU-${i}`,
+      barcode: null,
+      price: 19.9,
+      compare_at_price: null,
+      inventory_quantity: 5,
+      inventory_tracked: true,
+      inventory_policy: 'deny',
+      image_url: `https://cdn.example.com/${i}.jpg`,
+    }));
+    loadFeedSource.mockResolvedValue({ domain: 'negozio.it', currency: 'EUR', products });
+
+    const res = await call();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Feed-Items')).toBe('250');
+    expect(res.headers.get('X-Feed-Truncated')).toBeNull();
+    // La lettura del catalogo non riceve nessun limite dal piano.
+    expect(loadFeedSource).toHaveBeenCalledWith('shop-1');
   });
 });
 
@@ -106,7 +145,7 @@ describe('feed pubblico — quando il catalogo NON deve uscire', () => {
     // nemmeno il piano. Chi scendeva di piano continuava a farsi servire il
     // catalogo a tempo indeterminato.
     findFirstPlan.mockResolvedValue({
-      planName: 'free',
+      planName: 'basic',
       customersSyncEnabled: false,
       productFeedsEnabled: false,
     });
@@ -155,5 +194,29 @@ describe('feed pubblico — quando il catalogo NON deve uscire', () => {
   it('token che non corrisponde a nessun feed: come prima', async () => {
     findUniqueFeed.mockResolvedValue(null);
     await nonSiServe();
+  });
+});
+
+describe('feed — nessun legame con il tetto dei prodotti', () => {
+  it('il codice che genera i feed non legge maxProducts', async () => {
+    // Il tetto del piano vale per la sincronizzazione dei prodotti, non per i
+    // feed: se un giorno qualcuno lo portasse qui, un merchant con i feed inclusi
+    // si vedrebbe servire meta' catalogo senza che niente lo dica.
+    const { readFileSync, readdirSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const root = resolve(__dirname, '..');
+    const files = [
+      ...readdirSync(resolve(root, 'lib/feeds'))
+        .filter((f) => f.endsWith('.ts') && !f.includes('.test.'))
+        .map((f) => resolve(root, 'lib/feeds', f)),
+      resolve(root, 'routes/feed.$file.tsx'),
+      ...readdirSync(resolve(root, 'routes'))
+        .filter((f) => f.startsWith('catalogs') && !f.includes('.test.'))
+        .map((f) => resolve(root, 'routes', f)),
+    ];
+    for (const file of files) {
+      const code = readFileSync(file, 'utf8');
+      expect(code, file).not.toMatch(/maxProducts|max_products|limitProducts|product-limit/);
+    }
   });
 });

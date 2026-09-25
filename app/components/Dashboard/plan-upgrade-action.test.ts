@@ -44,7 +44,7 @@ describe('upgradeRequestState', () => {
 
   it('due inviti che propongono lo STESSO piano restano comunque distinti', () => {
     // Il caso peggiore del difetto di prima: sulla stessa card i due inviti
-    // possono proporre lo stesso piano — Business include sia i clienti sia i
+    // possono proporre lo stesso piano — Scale include sia i clienti sia i
     // feed. Uno stato tenuto per destinazione li rimetterebbe insieme; qui a
     // decidere e' chi e' stato premuto, e il piano proposto non c'entra.
     const premuto = upgradeRequestState({ requested: true, ready: true });

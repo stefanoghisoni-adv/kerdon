@@ -10,10 +10,10 @@ describe('canAccessPlanTab', () => {
   });
 
   it('consente l\'accesso ai piani a pagamento e al free', () => {
-    expect(canAccessPlanTab('free')).toBe(true);
-    expect(canAccessPlanTab('pro')).toBe(true);
-    expect(canAccessPlanTab('business')).toBe(true);
-    expect(canAccessPlanTab('enterprise')).toBe(true);
+    expect(canAccessPlanTab('basic')).toBe(true);
+    expect(canAccessPlanTab('growth')).toBe(true);
+    expect(canAccessPlanTab('scale')).toBe(true);
+    expect(canAccessPlanTab('core')).toBe(true);
   });
 
   it('non blocca quando il piano non e\' noto', () => {
@@ -36,9 +36,9 @@ describe('isSelectablePlan', () => {
   });
 
   it('i piani commerciali si possono offrire', () => {
-    expect(isSelectablePlan('free')).toBe(true);
-    expect(isSelectablePlan('pro')).toBe(true);
-    expect(isSelectablePlan('business')).toBe(true);
-    expect(isSelectablePlan('enterprise')).toBe(true);
+    expect(isSelectablePlan('basic')).toBe(true);
+    expect(isSelectablePlan('growth')).toBe(true);
+    expect(isSelectablePlan('scale')).toBe(true);
+    expect(isSelectablePlan('core')).toBe(true);
   });
 });

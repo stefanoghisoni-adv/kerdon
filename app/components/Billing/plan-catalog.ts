@@ -1,4 +1,5 @@
 import { isSelectablePlan } from './plan-access';
+import { RECOMMENDED_PLAN_NAME } from '~/lib/billing/plan-tiers';
 
 // Le card della tab Piano si costruiscono dalla tabella `plans`: nome, prezzo e
 // limiti sono quelli registrati li', non una copia scritta a mano che col tempo
@@ -70,9 +71,10 @@ export interface PlanRow {
   productFeedsEnabled: boolean;
 }
 
-// Piano proposto per primo. Il confronto e' senza maiuscole perche' il nome nella
+// Piano proposto per primo: viene dal listino deciso (plan-tiers.ts), non da un
+// nome scritto qui. Il confronto e' senza maiuscole perche' il nome nella
 // tabella lo scrive l'owner e puo' cambiare forma.
-const RECOMMENDED_PLAN = 'pro';
+const RECOMMENDED_PLAN = RECOMMENDED_PLAN_NAME.toLowerCase();
 
 function productsFeature(plan: PlanRow): PlanFeature {
   return { key: 'products', included: true, value: plan.maxProducts };
@@ -82,8 +84,8 @@ function feedsFeature(plan: PlanRow): PlanFeature {
   return { key: 'feeds', included: plan.productFeedsEnabled, value: null };
 }
 
-// Il database si sincronizza su tutti i piani — incluso il Free — quindi la
-// riga e' sempre inclusa. Cambia solo l'etichetta: "limitato" sul Free (che ha
+// Il database si sincronizza su tutti i piani — incluso il Basic — quindi la
+// riga e' sempre inclusa. Cambia solo l'etichetta: "limitato" sul Basic (che ha
 // un tetto di prodotti e non sincronizza i clienti), "esteso" sugli altri.
 // L'etichetta dinamica si compone in feature-label.ts, che riceve il planName e
 // lo confronta — qui basta dichiarare che la riga c'e'.
@@ -101,7 +103,7 @@ function customersFeature(plan: PlanRow): PlanFeature {
 // Il livello di assistenza (`support_level`) decide una sola riga: se il push
 // manuale e' concesso. Le altre due che ne uscivano — email e chat — erano su
 // tutte le card o su nessuna, e una riga uguale ovunque non aiuta a scegliere.
-// Solo l'assistenza dedicata, cioe' Enterprise (e Lifetime, che assegniamo
+// Solo l'assistenza dedicata, cioe' Core (e Lifetime, che assegniamo
 // noi). Prima bastava anche "priority": una sincronizzazione chiesta a mano
 // costa una lettura completa di Shopify ogni volta che si preme, e concederla a
 // meta' listino significa pagarla noi per tutti.

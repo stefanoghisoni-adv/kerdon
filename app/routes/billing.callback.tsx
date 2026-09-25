@@ -15,8 +15,9 @@ import {
   markSupersededCharges,
 } from '~/lib/billing/cancel-outbox.server';
 import { adminAppUrl, embeddedContextParams } from '~/lib/billing/embedded-return.server';
-import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { findPlanForSubscription } from '~/lib/billing/find-plan.server';
 import { samePlanName } from '~/lib/billing/plan-name';
+import { resolvePlanName } from '~/lib/billing/plan-tiers';
 import { notAbove, sameAmount } from '~/lib/billing/amount';
 import {
   verifyBillingState,
@@ -180,7 +181,9 @@ function attemptMismatches(args: {
   if (state.shopDomain !== shopDomain) {
     out.push(`lo state e' di ${state.shopDomain}, la callback di ${shopDomain}`);
   }
-  if (!samePlanName(state.planName, planName)) {
+  // Lo state puo' essere stato firmato prima del cambio di listino, con il nome
+  // di allora: si legge con l'importo che dichiara, come l'abbonamento.
+  if (!samePlanName(resolvePlanName(state.planName, state.listPrice), planName)) {
     out.push(`piano richiesto "${state.planName}", piano confermato "${planName}"`);
   }
   if (subscription.currency && !sameCurrency(state.currency, subscription.currency)) {
@@ -313,10 +316,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // Il piano si riconosce dal nome dell'abbonamento, che e' quello che gli
     // abbiamo dato noi alla creazione: un abbonamento con un nome fuori dal
-    // listino non e' uno dei nostri e non deve cambiare niente.
+    // listino non e' uno dei nostri e non deve cambiare niente. L'importo serve
+    // per i nomi che fra il 23 e il 26 settembre 2026 indicavano un altro
+    // scaglione (un "Core" da 29 e' il Growth di oggi).
     const plan =
       subscription?.status === 'ACTIVE'
-        ? await findPlanByName(subscription.name)
+        ? await findPlanForSubscription(subscription.name, subscription.priceAmount)
         : null;
 
     if (!subscription || subscription.status !== 'ACTIVE' || !plan) {

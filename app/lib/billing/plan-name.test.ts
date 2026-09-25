@@ -3,8 +3,8 @@ import { normalizePlanName, samePlanName } from './plan-name';
 
 describe('normalizePlanName', () => {
   it('minuscolo e senza spazi ai bordi', () => {
-    expect(normalizePlanName('  Pro  ')).toBe('pro');
-    expect(normalizePlanName('BUSINESS')).toBe('business');
+    expect(normalizePlanName('  Growth  ')).toBe('growth');
+    expect(normalizePlanName('SCALE')).toBe('scale');
   });
 
   it('assente → stringa vuota', () => {
@@ -15,17 +15,17 @@ describe('normalizePlanName', () => {
 
 describe('samePlanName', () => {
   it('stesso piano scritto diversamente', () => {
-    expect(samePlanName('pro', 'Pro')).toBe(true);
-    expect(samePlanName('  Free ', 'free')).toBe(true);
+    expect(samePlanName('growth', 'Growth')).toBe(true);
+    expect(samePlanName('  Free ', 'basic')).toBe(true);
   });
 
   it('piani diversi', () => {
-    expect(samePlanName('pro', 'business')).toBe(false);
+    expect(samePlanName('growth', 'scale')).toBe(false);
   });
 
   it('due assenze non sono lo stesso piano', () => {
     expect(samePlanName(null, null)).toBe(false);
     expect(samePlanName('', '   ')).toBe(false);
-    expect(samePlanName('pro', null)).toBe(false);
+    expect(samePlanName('growth', null)).toBe(false);
   });
 });

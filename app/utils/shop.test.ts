@@ -19,7 +19,7 @@ vi.mock('~/utils/crypto.server', () => ({
   decrypt: (v: string) => v,
 }));
 
-const initialPlan = vi.fn(async () => ({ planName: 'Free', trialDays: 14 }));
+const initialPlan = vi.fn(async () => ({ planName: 'Basic', trialDays: 14 }));
 vi.mock('~/lib/billing/find-plan.server', () => ({
   initialPlan: () => initialPlan(),
 }));
@@ -40,7 +40,7 @@ describe('shopCreateData', () => {
     // Qui c'erano sette giorni scritti a mano mentre il listino ne dichiarava
     // quattordici: il negozio nasceva con una scadenza che non corrispondeva a
     // nessuna delle promesse fatte al merchant.
-    initialPlan.mockResolvedValueOnce({ planName: 'Free', trialDays: 14 });
+    initialPlan.mockResolvedValueOnce({ planName: 'Basic', trialDays: 14 });
 
     const data = await shopCreateData({ shop: 'x.myshopify.com', accessToken: 'tok' });
 
@@ -53,7 +53,7 @@ describe('shopCreateData', () => {
     // Zero giorni non e' una prova che scade subito: e' nessuna prova. La
     // differenza conta, perche' una scadenza gia' passata spegnerebbe l'app
     // all'installazione.
-    initialPlan.mockResolvedValueOnce({ planName: 'Free', trialDays: 0 });
+    initialPlan.mockResolvedValueOnce({ planName: 'Basic', trialDays: 0 });
 
     const data = await shopCreateData({ shop: 'x.myshopify.com', accessToken: 'tok' });
 

@@ -10,9 +10,9 @@ import { BASE_CURRENCY, formatMoney, formatMoneyExact } from './money';
 
 /** Nel listino i piani sono nomi e limiti: i prezzi stanno in `plan_prices`. */
 const PLANS: NamedPlan[] = [
-  { planName: 'free' },
+  { planName: 'basic' },
   { planName: 'starter' },
-  { planName: 'pro' },
+  { planName: 'growth' },
 ];
 
 /** Una riga in valuta base: e' quella che dice se un piano si paga. */
@@ -26,24 +26,24 @@ function gbp(planName: string, priceMonthly: number, priceYearly: number): PlanP
 }
 
 /** Il listino base completo: free a zero, gli altri due a pagamento. */
-const BASE: PlanPriceRow[] = [usd('free', 0, 0), usd('starter', 19, 190), usd('pro', 29, 290)];
+const BASE: PlanPriceRow[] = [usd('basic', 0, 0), usd('starter', 19, 190), usd('growth', 29, 290)];
 
 describe('completeCurrencies', () => {
   it('elenca solo le valute che coprono ogni piano a pagamento', () => {
-    const prices = [...BASE, gbp('starter', 21, 210), gbp('pro', 32, 320)];
+    const prices = [...BASE, gbp('starter', 21, 210), gbp('growth', 32, 320)];
     expect(completeCurrencies(PLANS, prices)).toEqual(['GBP']);
   });
 
   it("un listino a meta' non conta: due valute nella stessa schermata non si leggono", () => {
-    expect(completeCurrencies(PLANS, [...BASE, gbp('pro', 32, 320)])).toEqual([]);
+    expect(completeCurrencies(PLANS, [...BASE, gbp('growth', 32, 320)])).toEqual([]);
   });
 
   it('il piano gratuito non ha bisogno di una riga nelle altre valute', () => {
     // Zero e' zero in ogni valuta: chiedere di tradurlo sarebbe lavoro inutile
     // per chi amministra, e una valuta in meno fra quelle offerte.
-    const prices = [...BASE, gbp('starter', 21, 210), gbp('pro', 32, 320)];
+    const prices = [...BASE, gbp('starter', 21, 210), gbp('growth', 32, 320)];
     expect(completeCurrencies(PLANS, prices)).toContain('GBP');
-    expect(prices.some((row) => row.currency === 'GBP' && row.planName === 'free')).toBe(false);
+    expect(prices.some((row) => row.currency === 'GBP' && row.planName === 'basic')).toBe(false);
   });
 
   it('la valuta base non si offre come alternativa a se stessa', () => {
@@ -53,8 +53,8 @@ describe('completeCurrencies', () => {
   it('chi si paga lo dice la riga in valuta base', () => {
     // Nessun piano a pagamento nel listino: non c'e' niente da coprire, e
     // offrire una valuta per un listino tutto gratis non vuol dire niente.
-    const free = [usd('free', 0, 0), usd('starter', 0, 0), usd('pro', 0, 0)];
-    expect(completeCurrencies(PLANS, [...free, gbp('pro', 32, 320)])).toEqual([]);
+    const free = [usd('basic', 0, 0), usd('starter', 0, 0), usd('growth', 0, 0)];
+    expect(completeCurrencies(PLANS, [...free, gbp('growth', 32, 320)])).toEqual([]);
   });
 });
 
@@ -86,7 +86,7 @@ describe('resolveShopCurrency', () => {
 
 describe('withPrices', () => {
   it('attacca i prezzi della valuta scelta', () => {
-    const priced = withPrices(PLANS, [...BASE, gbp('starter', 21, 210), gbp('pro', 32, 320)], 'GBP');
+    const priced = withPrices(PLANS, [...BASE, gbp('starter', 21, 210), gbp('growth', 32, 320)], 'GBP');
     expect(priced.map((p) => p.priceMonthly)).toEqual([0, 21, 32]);
   });
 
@@ -95,16 +95,16 @@ describe('withPrices', () => {
     // letto da nessuno, perche' l'app prendeva la colonna su `plans`. Si
     // cambiava il prezzo in un posto e l'app ne mostrava un altro, senza che
     // niente segnalasse il conflitto.
-    const priced = withPrices(PLANS, [usd('pro', 39, 199)], BASE_CURRENCY);
-    expect(priced.find((p) => p.planName === 'pro')?.priceYearly).toBe(199);
+    const priced = withPrices(PLANS, [usd('growth', 39, 199)], BASE_CURRENCY);
+    expect(priced.find((p) => p.planName === 'growth')?.priceYearly).toBe(199);
   });
 
   it('senza riga nella valuta chiesta ripiega sulla base, non sul vuoto', () => {
-    const priced = withPrices(PLANS, [...BASE, gbp('pro', 32, 320)], 'GBP');
+    const priced = withPrices(PLANS, [...BASE, gbp('growth', 32, 320)], 'GBP');
     // starter non ha la riga in sterline: meglio il prezzo in dollari di una
     // card senza cifra.
     expect(priced.find((p) => p.planName === 'starter')?.priceMonthly).toBe(19);
-    expect(priced.find((p) => p.planName === 'pro')?.priceMonthly).toBe(32);
+    expect(priced.find((p) => p.planName === 'growth')?.priceMonthly).toBe(32);
   });
 
   it('un piano senza nessuna riga vale zero, non "prezzo mancante"', () => {
@@ -115,7 +115,7 @@ describe('withPrices', () => {
   it('i campi del piano restano al loro posto', () => {
     // I limiti viaggiano insieme al prezzo: chi riceve queste righe si aspetta
     // il piano intero, non un nome con due numeri.
-    const priced = withPrices([{ planName: 'pro', maxProducts: 200 }], BASE, BASE_CURRENCY);
+    const priced = withPrices([{ planName: 'growth', maxProducts: 200 }], BASE, BASE_CURRENCY);
     expect(priced[0].maxProducts).toBe(200);
     expect(priced[0].priceMonthly).toBe(29);
   });
