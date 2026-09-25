@@ -3,10 +3,10 @@ import type { Dictionary } from '~/lib/i18n/context';
 
 // Il nome tecnico del piano (colonna plan_name) non e' adatto alla UI: mappa esplicita.
 const PLAN_LABELS: Record<string, string> = {
-  free: 'Free',
-  core: 'Core',
+  basic: 'Basic',
   growth: 'Growth',
   scale: 'Scale',
+  core: 'Core',
   lifetime: 'Lifetime',
 };
 

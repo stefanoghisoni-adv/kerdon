@@ -13,8 +13,8 @@ export function hasPlanChanged(
 ): boolean {
   if (!lastSyncedPlan) return false;
   // Confronto insensibile a maiuscole e spazi: i due nomi vengono scritti in
-  // momenti diversi, e una semplice differenza di scrittura ("pro" contro
-  // "Pro") farebbe credere a un cambio di piano che non c'e' — con il banner
+  // momenti diversi, e una semplice differenza di scrittura ("growth" contro
+  // "Growth") farebbe credere a un cambio di piano che non c'e' — con il banner
   // "Piano modificato" e il recupero che ripartono a ogni giro.
   return !samePlanName(currentPlan, lastSyncedPlan);
 }

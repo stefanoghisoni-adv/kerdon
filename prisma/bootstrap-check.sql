@@ -21,21 +21,62 @@
 -- migrazione dopo aver toccato la produzione.
 --
 -- Si esegue con `-v ON_ERROR_STOP=1`: un'eccezione qui deve fermare tutto.
+--
+-- DUE FASI. Il workflow di migrazione lo esegue due volte, e le due volte il
+-- listino non e' lo stesso:
+--
+--   -v fase=pre   PRIMA di `migrate deploy`. La produzione puo' essere ancora
+--                 su uno dei listini di prima — Free/Pro/Business/Enterprise
+--                 (A) o Free/Core/Growth/Scale (B, dopo pricing_alignment) —
+--                 e deve poter arrivare alla migrazione che la porta al
+--                 listino finale. Qui basta che uno dei tre listini ci sia
+--                 per intero.
+--   -v fase=post  DOPO (e il default, se `fase` non si passa: la CI). Il
+--                 listino deve essere quello finale, Basic/Growth/Scale/Core.
+--
+-- Senza la fase `pre` il controllo fermerebbe la produzione proprio prima
+-- della migrazione che la mette a posto.
+
+\if :{?fase}
+\else
+  \set fase post
+\endif
+SELECT set_config('kerdon.fase', :'fase', false);
 
 DO $$
 DECLARE
+  fase text := coalesce(nullif(current_setting('kerdon.fase', true), ''), 'post');
   mancanti text;
   senza_rls text;
   senza_fk text;
 BEGIN
-  -- 1a. I cinque piani su cui l'app conta. Averne di piu' e' normale (un
-  --     listino cresce); averne di meno vuol dire negozi senza piano valido.
+  IF fase NOT IN ('pre', 'post') THEN
+    RAISE EXCEPTION 'fase sconosciuta: % (attese: pre, post)', fase;
+  END IF;
+
+  -- 1a. I piani su cui l'app conta. Averne di piu' e' normale (un listino
+  --     cresce); averne di meno vuol dire negozi senza piano valido.
   SELECT string_agg(atteso, ', ') INTO mancanti
-  FROM unnest(ARRAY['Free', 'Pro', 'Business', 'Enterprise', 'Lifetime']) AS atteso
+  FROM unnest(ARRAY['Basic', 'Growth', 'Scale', 'Core', 'Lifetime']) AS atteso
   WHERE NOT EXISTS (SELECT 1 FROM plans p WHERE p.plan_name = atteso);
 
+  -- Prima della migrazione vanno bene anche i due listini di prima, purche'
+  -- completi: e' da li' che 20260926000000_plans_basic_growth_scale_core parte.
+  IF mancanti IS NOT NULL AND fase = 'pre' AND (
+    NOT EXISTS (
+      SELECT 1 FROM unnest(ARRAY['Free', 'Pro', 'Business', 'Enterprise', 'Lifetime']) AS a
+      WHERE NOT EXISTS (SELECT 1 FROM plans p WHERE p.plan_name = a)
+    )
+    OR NOT EXISTS (
+      SELECT 1 FROM unnest(ARRAY['Free', 'Core', 'Growth', 'Scale', 'Lifetime']) AS b
+      WHERE NOT EXISTS (SELECT 1 FROM plans p WHERE p.plan_name = b)
+    )
+  ) THEN
+    mancanti := NULL;
+  END IF;
+
   IF mancanti IS NOT NULL THEN
-    RAISE EXCEPTION 'piani mancanti in plans: %', mancanti;
+    RAISE EXCEPTION 'piani mancanti in plans (fase %): %', fase, mancanti;
   END IF;
 
   -- 1b. Ogni piano ha il suo prezzo in dollari: e' la valuta base, quella della

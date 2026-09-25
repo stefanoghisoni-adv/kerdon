@@ -12,7 +12,7 @@ import {
 
 function card(overrides: Partial<PlanCard> = {}): PlanCard {
   return {
-    name: 'Pro',
+    name: 'Growth',
     priceMonthly: 29,
     priceYearly: 290,
     partnerMonthly: null,
@@ -59,10 +59,10 @@ describe('planPriceLabel', () => {
 
 describe('yearlySaving', () => {
   it('dice il risparmio piu alto fra i piani', () => {
-    // 29x12 - 290 = 58 su Pro; 47x12 - 400 = 164 su Business: vince il secondo.
+    // 29x12 - 290 = 58 su Growth; 47x12 - 400 = 164 su Scale: vince il secondo.
     const saving = yearlySaving([
       card(),
-      card({ name: 'Business', priceMonthly: 47, priceYearly: 400 }),
+      card({ name: 'Scale', priceMonthly: 47, priceYearly: 400 }),
     ]);
     expect(saving).toBe(164);
   });
@@ -100,7 +100,7 @@ describe('planSavingBadge', () => {
 
 describe('preselectedPlan', () => {
   it('sceglie il piano che il negozio ha adesso', () => {
-    expect(preselectedPlan([card({ name: 'Free' }), card()], 'free')).toBe('Free');
+    expect(preselectedPlan([card({ name: 'Basic' }), card()], 'basic')).toBe('Basic');
   });
 
   it('senza corrispondenza non preseleziona niente', () => {
@@ -113,32 +113,32 @@ describe('preselectedPlan', () => {
 
 describe('recommendedPlan', () => {
   const listino = [
-    card({ name: 'Free', priceMonthly: 0 }),
-    card({ name: 'Pro', priceMonthly: 27 }),
-    card({ name: 'Business', priceMonthly: 47 }),
-    card({ name: 'Enterprise', priceMonthly: 97 }),
+    card({ name: 'Basic', priceMonthly: 0 }),
+    card({ name: 'Growth', priceMonthly: 27 }),
+    card({ name: 'Scale', priceMonthly: 47 }),
+    card({ name: 'Core', priceMonthly: 97 }),
   ];
-  const tetti = { Free: 10, Pro: 200, Business: 1000, Enterprise: 5000 };
+  const tetti = { Basic: 10, Growth: 200, Scale: 1000, Core: 5000 };
 
   it('consiglia il piu economico che contiene tutto il catalogo', () => {
-    expect(recommendedPlan(listino, 8, tetti)).toBe('Free');
-    expect(recommendedPlan(listino, 26, tetti)).toBe('Pro');
-    expect(recommendedPlan(listino, 900, tetti)).toBe('Business');
+    expect(recommendedPlan(listino, 8, tetti)).toBe('Basic');
+    expect(recommendedPlan(listino, 26, tetti)).toBe('Growth');
+    expect(recommendedPlan(listino, 900, tetti)).toBe('Scale');
   });
 
   it('sul confine sta il piano che ci arriva esatto', () => {
-    expect(recommendedPlan(listino, 10, tetti)).toBe('Free');
-    expect(recommendedPlan(listino, 11, tetti)).toBe('Pro');
+    expect(recommendedPlan(listino, 10, tetti)).toBe('Basic');
+    expect(recommendedPlan(listino, 11, tetti)).toBe('Growth');
   });
 
   it('se nessuno basta consiglia il piu capiente', () => {
     // Tacere lascerebbe senza indicazione proprio il negozio piu' grande.
-    expect(recommendedPlan(listino, 99_999, tetti)).toBe('Enterprise');
+    expect(recommendedPlan(listino, 99_999, tetti)).toBe('Core');
   });
 
   it('un piano senza tetto contiene qualunque catalogo', () => {
-    expect(recommendedPlan([card({ name: 'Pro', priceMonthly: 27 })], 99_999, { Pro: null })).toBe(
-      'Pro',
+    expect(recommendedPlan([card({ name: 'Growth', priceMonthly: 27 })], 99_999, { Growth: null })).toBe(
+      'Growth',
     );
   });
 

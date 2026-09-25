@@ -207,7 +207,7 @@ function negozio(over: Record<string, unknown> = {}) {
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
     scopes: 'read_products,read_customers',
-    currentPlan: 'Pro',
+    currentPlan: 'Growth',
     isInTrial: false,
     trialEndsAt: null,
     activeChargeId: 'ch-1',

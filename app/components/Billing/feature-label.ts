@@ -1,6 +1,7 @@
 import type { Dictionary } from '~/lib/i18n/context';
 import type { Locale } from '~/lib/i18n/locales';
 import { syncFrequencyLabel } from '~/components/Dashboard/account-format';
+import { isBasePlan } from '~/lib/billing/plan-tiers';
 import type { PlanFeature } from './plan-catalog';
 
 /**
@@ -13,7 +14,7 @@ import type { PlanFeature } from './plan-catalog';
 /**
  * Il database di questo piano e' quello esteso?
  *
- * Il database si sincronizza su tutti i piani, ma sul Free e' limitato (solo
+ * Il database si sincronizza su tutti i piani, ma sul Basic e' limitato (solo
  * prodotti, con un tetto) mentre sugli altri e' esteso (prodotti e clienti,
  * tetti piu' alti o assenti).
  *
@@ -23,7 +24,9 @@ import type { PlanFeature } from './plan-catalog';
  * l'icona spenta, e nessuno saprebbe a quale delle due credere.
  */
 export function isDatabaseExtended(planName?: string): boolean {
-  return (planName ?? '').trim().toLowerCase() !== 'free';
+  // Il gratuito si riconosce anche col nome di prima ("Free"): un link o una
+  // card rimasti in giro non devono promettere il database esteso.
+  return !isBasePlan(planName);
 }
 
 export function featureLabel(

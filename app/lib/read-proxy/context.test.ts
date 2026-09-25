@@ -29,7 +29,7 @@ const shopRow = (over: Record<string, unknown> = {}) => ({
   authorization: 'ENABLED',
   trackingAuthorization: 'ENABLED',
   scopes: 'read_products',
-  currentPlan: 'free',
+  currentPlan: 'basic',
   supabaseConfig: {
     supabaseProjectRef: 'abcref',
     supabaseServiceRoleKey: 'enc(svc)',

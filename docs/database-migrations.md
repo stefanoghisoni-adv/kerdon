@@ -24,6 +24,17 @@ automatico insieme al deploy dell'app.
 database costruito con lo script e uno costruito con le migrazioni sono lo
 stesso database.
 
+> **`0_init` si puo' modificare solo PRIMA della linea di base di produzione, mai
+> dopo.** Finche' la produzione non ha la riga di `0_init` in
+> `_prisma_migrations`, `0_init` e `owner-bootstrap.sql` si aggiornano insieme
+> (e' successo il 26 settembre 2026, per seminare il listino Basic/Growth/Scale/
+> Core). Dal momento in cui si esegue `migrate resolve --applied 0_init` Prisma
+> ne registra l'impronta: modificarlo dopo vuol dire un database di produzione
+> che non corrisponde piu' alla storia scritta. Da li' in poi ogni cambiamento,
+> anche ai dati iniziali, e' una migrazione nuova; `owner-bootstrap.sql` si
+> aggiorna per descrivere lo stato finale e `0_init` resta com'era — a quel
+> punto il test che li vuole identici va rivisto insieme.
+
 ## Prima di tutto: la connessione diretta, non il pooler
 
 Supabase espone due porte. Il pooler (**6543**, `pgbouncer=true`) in modalita'
@@ -81,6 +92,12 @@ per mostrare la deriva che c'e' davvero. Quello che ci si aspetta di vedere:
   `String @id` scrive `text`. Se compare, **non convertire il tipo**: e' una
   colonna di chiave primaria con delle chiavi esterne addosso, e la conversione
   va pensata a parte;
+- **`plans.max_orders`** (solo se la produzione e' nello stato di
+  `pricing_alignment`): prima di `migrate deploy` e' atteso, perche' lo toglie
+  la migrazione del 26. I controlli prima delle migrazioni girano in fase `pre`
+  (`expected-drift.ts --fase=pre`, `bootstrap-check.sql -v fase=pre`), che
+  accetta questo stato di partenza e anche i due listini di prima; quelli dopo
+  girano in fase `post` e pretendono il listino finale e niente `max_orders`;
 - qualunque altra cosa: fermarsi e guardarla.
 
 Per ogni differenza che compare ci sono tre risposte possibili, e nessuna e'
@@ -109,6 +126,8 @@ for cartella in prisma/migrations/*/; do
     20260904160000_supabase_managed_resources) continue ;;
     20260905120000_sync_request_queue) continue ;;
     20260905190000_sync_repairs) continue ;;
+    20260922000000_pricing_alignment_guard) continue ;;
+    20260926000000_plans_basic_growth_scale_core) continue ;;
   esac
   npx prisma migrate resolve --applied "$nome"
 done
@@ -162,18 +181,43 @@ dire quale riga fosse rimasta indietro.
 Va dopo `sync_request_queue` solo perche' e' piu' recente: non dipende da
 quella. Nasce gia' con RLS attiva, come tutte.
 
+Le ultime due esclusioni riguardano il listino.
+
+`20260926000000_plans_basic_growth_scale_core` porta il listino a Basic/Growth/
+Scale/Core, toglie `plans.max_orders` e riallinea negozi, addebiti e prezzi
+riservati. Dichiararla applicata senza eseguirla lascerebbe la produzione sui
+nomi di prima per sempre, con l'app che si aspetta quelli nuovi. Deve girare
+davvero, e non importa da dove parte: arriva al listino finale sia da
+Free/Pro/Business/Enterprise sia da Free/Core/Growth/Scale.
+
+Per lo stesso motivo **`20260923000000_pricing_alignment` si puo' dichiarare
+applicata** anche se in produzione non e' mai passata: la migrazione del 26
+va dallo stato di prima direttamente a quello finale, senza bisogno del passo
+intermedio.
+
+`20260922000000_pricing_alignment_guard` resta fuori perche' e' comunque
+innocua: sul listino di produzione non fa niente (crea una riga provvisoria
+solo su un database nuovo, dove il listino e' gia' quello finale e ne' la
+migrazione del 23 ne' quella del 26 risultano passate). Lasciarla girare
+costa zero; dichiararla applicata non servirebbe a niente.
+
+Se la migrazione del 26 e' stata incollata a mano nell'editor di Supabase, va
+comunque lasciata fuori dal ciclo: rieseguita, non cambia niente.
+
 ### 4. Controllare che la linea di base sia giusta
 
 ```bash
 npx prisma migrate status
 ```
 
-Deve elencare **quattro** migrazioni da applicare, in questo ordine:
+Deve elencare **sei** migrazioni da applicare, in questo ordine:
 
 1. `20260904120000_row_level_security_everywhere`
 2. `20260904160000_supabase_managed_resources`
 3. `20260905120000_sync_request_queue`
 4. `20260905190000_sync_repairs`
+5. `20260922000000_pricing_alignment_guard`
+6. `20260926000000_plans_basic_growth_scale_core`
 
 Se ne elenca altre, qualcosa non e' stato dichiarato: rifare il passo 3 prima di
 andare avanti.

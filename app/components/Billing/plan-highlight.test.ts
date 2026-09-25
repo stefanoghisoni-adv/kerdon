@@ -13,21 +13,21 @@ const card = (name: string, priceMonthly: number, recommended = false): PlanCard
 });
 
 const CARDS = [
-  card('free', 0),
-  card('pro', 29, true),
-  card('business', 99),
-  card('enterprise', 299),
+  card('basic', 0),
+  card('growth', 29, true),
+  card('scale', 99),
+  card('core', 299),
 ];
 
 describe('shouldHighlightRecommended', () => {
   it('risalta il consigliato se il piano attuale e piu basso', () => {
-    expect(shouldHighlightRecommended(CARDS, 'free')).toBe(true);
+    expect(shouldHighlightRecommended(CARDS, 'basic')).toBe(true);
   });
 
   it('non risalta nulla se sono gia sul consigliato o piu su', () => {
-    expect(shouldHighlightRecommended(CARDS, 'pro')).toBe(false);
-    expect(shouldHighlightRecommended(CARDS, 'business')).toBe(false);
-    expect(shouldHighlightRecommended(CARDS, 'enterprise')).toBe(false);
+    expect(shouldHighlightRecommended(CARDS, 'growth')).toBe(false);
+    expect(shouldHighlightRecommended(CARDS, 'scale')).toBe(false);
+    expect(shouldHighlightRecommended(CARDS, 'core')).toBe(false);
   });
 
   it('tratta un piano fuori listino come superiore', () => {
@@ -41,12 +41,12 @@ describe('shouldHighlightRecommended', () => {
   });
 
   it('ignora maiuscole e spazi', () => {
-    expect(shouldHighlightRecommended(CARDS, '  FREE ')).toBe(true);
-    expect(shouldHighlightRecommended(CARDS, 'Business')).toBe(false);
+    expect(shouldHighlightRecommended(CARDS, '  BASIC ')).toBe(true);
+    expect(shouldHighlightRecommended(CARDS, 'Scale')).toBe(false);
   });
 
   it('listino senza consigliato → niente da risaltare', () => {
-    expect(shouldHighlightRecommended([card('free', 0)], 'free')).toBe(false);
-    expect(shouldHighlightRecommended([], 'free')).toBe(false);
+    expect(shouldHighlightRecommended([card('basic', 0)], 'basic')).toBe(false);
+    expect(shouldHighlightRecommended([], 'basic')).toBe(false);
   });
 });

@@ -25,6 +25,11 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_non_esiste?schema=public
+      # Chiavi Shopify fittizie: il server di prova importa `shopify.server.ts`,
+      # che richiede queste variabili anche se i finti rispondono al posto di Shopify.
+      SHOPIFY_API_KEY: 00000000000000000000000000000000
+      SHOPIFY_API_SECRET: 00000000000000000000000000000000
+      SHOPIFY_APP_URL: https://ci.invalid
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

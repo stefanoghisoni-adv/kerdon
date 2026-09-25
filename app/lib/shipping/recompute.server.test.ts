@@ -118,7 +118,7 @@ beforeEach(() => {
   (prisma.syncRequest.findUnique as any).mockImplementation(findUniqueInMemoria);
   (prisma.shop.findUnique as any).mockResolvedValue({
     id: 'shop-1',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     scopes: 'read_orders',
     supabaseConfig: { supabaseProjectRef: 'ref-1', connectionVerifiedAt: new Date() },
   });

@@ -32,7 +32,7 @@ const SUB_GID = 'gid://shopify/AppSubscription/1234';
 function rawSubscription(overrides: Record<string, unknown> = {}) {
   return {
     id: SUB_GID,
-    name: 'Pro',
+    name: 'Growth',
     status: 'ACTIVE',
     test: false,
     createdAt: '2026-08-01T10:00:00Z',
@@ -99,18 +99,18 @@ describe('createAppSubscription', () => {
   it('costruisce le variabili della mutation e restituisce chargeId numerico', async () => {
     const admin = adminWith(okPayload);
     const result = await createAppSubscription(admin, {
-      planName: 'Pro',
+      planName: 'Growth',
       price: 29,
       currency: 'EUR',
       interval: 'monthly',
       trialDays: 7,
-      returnUrl: 'https://app.example.com/billing/callback?plan=Pro',
+      returnUrl: 'https://app.example.com/billing/callback?plan=Growth',
       test: false,
     });
 
     const variables = variablesOf(admin);
-    expect(variables.name).toBe('Pro');
-    expect(variables.returnUrl).toBe('https://app.example.com/billing/callback?plan=Pro');
+    expect(variables.name).toBe('Growth');
+    expect(variables.returnUrl).toBe('https://app.example.com/billing/callback?plan=Growth');
     expect(variables.test).toBe(false);
     expect(variables.trialDays).toBe(7);
     expect(variables.lineItems).toEqual([
@@ -169,7 +169,7 @@ describe('createAppSubscription', () => {
 
     await expect(
       createAppSubscription(admin, {
-        planName: 'Pro',
+        planName: 'Growth',
         price: 29,
         currency: 'EUR',
         interval: 'monthly',
@@ -193,7 +193,7 @@ describe('createAppSubscription', () => {
 
     await expect(
       createAppSubscription(admin, {
-        planName: 'Pro',
+        planName: 'Growth',
         price: 29,
         currency: 'EUR',
         interval: 'monthly',
@@ -209,7 +209,7 @@ describe('createAppSubscription', () => {
 
     await expect(
       createAppSubscription(admin, {
-        planName: 'Pro',
+        planName: 'Growth',
         price: 29,
         currency: 'EUR',
         interval: 'monthly',
@@ -231,7 +231,7 @@ describe('createAppSubscription', () => {
 
     await expect(
       createAppSubscription(admin, {
-        planName: 'Pro',
+        planName: 'Growth',
         price: 29,
         currency: 'EUR',
         interval: 'monthly',
@@ -252,7 +252,7 @@ describe('getActiveSubscriptions', () => {
     expect(await getActiveSubscriptions(admin)).toEqual([
       {
         gid: SUB_GID,
-        name: 'Pro',
+        name: 'Growth',
         status: 'ACTIVE',
         test: false,
         trialDays: 7,

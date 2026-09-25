@@ -270,7 +270,7 @@ prova.describe('lo scollegamento di Supabase', () => {
       // domanda e' se qualcuna di quelle risposte scaldate continui a far
       // passare un negozio la cui prova nel frattempo e' scaduta.
       const shop = await seminaCollegato(request, {
-        currentPlan: 'Pro',
+        currentPlan: 'Growth',
         isInTrial: true,
         trialEndsAt: new Date(Date.now() + 5 * MINUTO).toISOString(),
         activeChargeId: null,

@@ -85,7 +85,7 @@ vi.mock('~/utils/crypto.server', () => ({
 
 vi.mock('~/lib/billing/find-plan.server', () => ({
   findPlanByName: async () => ({
-    planName: 'pro',
+    planName: 'growth',
     customersSyncEnabled: true,
     productFeedsEnabled: true,
   }),
@@ -126,7 +126,7 @@ function negozioSano(id = 'negozio-1') {
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
     scopes: 'read_products,read_customers,read_orders',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     isInTrial: false,
     trialEndsAt: null,
     activeChargeId: null,

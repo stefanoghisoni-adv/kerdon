@@ -93,12 +93,12 @@ function mockShop(over: Record<string, unknown> = {}) {
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
     scopes: 'read_products',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     supabaseConfig: { connectionVerifiedAt: new Date(), tableNameProducts: 'products' },
     ...over,
   });
   (prisma.plan.findFirst as any).mockResolvedValue({
-    planName: 'pro',
+    planName: 'growth',
     customersSyncEnabled: true,
     productFeedsEnabled: true,
   });

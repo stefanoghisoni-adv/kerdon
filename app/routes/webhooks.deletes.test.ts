@@ -91,7 +91,7 @@ function mockShop(over: Record<string, unknown> = {}) {
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
     scopes: 'read_products,read_customers',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     supabaseConfig: {
       connectionVerifiedAt: new Date(),
       tableNameProducts: 'products',
@@ -100,7 +100,7 @@ function mockShop(over: Record<string, unknown> = {}) {
     ...over,
   });
   (prisma.plan.findFirst as any).mockResolvedValue({
-    planName: 'pro',
+    planName: 'growth',
     customersSyncEnabled: true,
     productFeedsEnabled: true,
   });
@@ -212,9 +212,9 @@ describe('webhook customers/delete', () => {
     // qui. Ma se il piano non prevede i clienti, quella tabella non riceve piu'
     // ne' aggiunte ne' aggiornamenti da un pezzo — lasciar passare le sole
     // rimozioni la eroderebbe senza mai rimpiazzarne il contenuto.
-    mockShop({ currentPlan: 'free' });
+    mockShop({ currentPlan: 'basic' });
     (prisma.plan.findFirst as any).mockResolvedValue({
-      planName: 'free',
+      planName: 'basic',
       customersSyncEnabled: false,
     });
     await nonSiCancella();

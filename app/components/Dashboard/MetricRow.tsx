@@ -11,7 +11,7 @@ export interface MetricRowProps {
    */
   label: ReactNode;
   /**
-   * Omesso quando l'azione dice gia' tutto (es. "Aggiorna a Business" al posto
+   * Omesso quando l'azione dice gia' tutto (es. "Aggiorna a Scale" al posto
    * di "Non attiva"): la riga resta a due colonne invece di ripetere lo stesso
    * concetto due volte.
    */

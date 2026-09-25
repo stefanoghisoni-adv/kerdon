@@ -137,7 +137,7 @@ model Shop {
   // Se la transazione fallisce la colonna RESTA su 'erasing', ed e' voluto: il
   // negozio e' in attesa di cancellazione, e riaprirlo al lavoro nel frattempo
   // vorrebbe dire riscrivere quel che il ritentativo dovra' togliere.
-  lifecycleStatus       String             @default("active") @map("lifecycle_status")
+  lifecycleStatus String @default("active") @map("lifecycle_status")
 
   // Cresce a ogni inizio di cancellazione, e non riparte mai da zero.
   //
@@ -147,7 +147,7 @@ model Shop {
   // e' cambiato, quella corsa non ha piu' titolo per scrivere e si ferma —
   // senza questo, una sincronizzazione lunga avviata un minuto prima
   // continuerebbe a riempire di dati un negozio gia' cancellato.
-  erasureGeneration     Int                @default(0) @map("erasure_generation")
+  erasureGeneration Int @default(0) @map("erasure_generation")
 
   // Quando abbiamo chiesto a Shopify come stanno davvero le cose per questo
   // negozio: se l'app risulta ancora installata e quale abbonamento e' attivo.
@@ -207,6 +207,9 @@ model Shop {
   trackingIngestKeys       TrackingIngestKey[]
   autoResume               SupabaseAutoResume?
   birthdateNotice          BirthdateNoticeDismissal?
+  shippingZones            ShippingZone[]
+  packagingConfig          PackagingConfig?
+  shippingAlertDismissal   ShippingAlertDismissal?
 
   @@index([shopDomain])
   @@map("shops")
@@ -952,25 +955,25 @@ model ComplianceRequest {
 /// Una riga per tabella e per progetto: ricollegare lo stesso negozio a un
 /// database diverso non eredita la proprieta' del precedente.
 model SupabaseManagedResource {
-  id                String   @id @default(uuid())
-  shopId            String   @map("shop_id")
+  id              String   @id @default(uuid())
+  shopId          String   @map("shop_id")
   /// Il progetto Supabase a cui la riga si riferisce. Fa parte della chiave:
   /// la stessa `products` su due progetti diversi sono due cose diverse.
-  projectRef        String   @map("project_ref")
-  schemaName        String   @default("public") @map("schema_name")
+  projectRef      String   @map("project_ref")
+  schemaName      String   @default("public") @map("schema_name")
   /// Nome della tabella cosi' com'e' nel database del merchant.
-  resourceName      String   @map("resource_name")
+  resourceName    String   @map("resource_name")
   /// Per ora solo 'table'. C'e' come colonna e non come sottinteso perche' il
   /// giorno in cui l'app creera' anche una vista o una funzione, l'ordine con
   /// cui si eliminano non e' lo stesso.
-  resourceKind      String   @default("table") @map("resource_kind")
+  resourceKind    String   @default("table") @map("resource_kind")
   /// L'unica domanda che conta al momento dell'eliminazione. false = la tabella
   /// c'era gia', e' del merchant, non si tocca.
   createdByKerdon Boolean  @map("created_by_kerdon")
   /// Versione dello schema con cui la risorsa e' stata creata: dice quale DDL
   /// l'ha fatta, senza doverlo dedurre dalla data.
-  schemaVersion     Int      @map("schema_version")
-  createdAt         DateTime @default(now()) @map("created_at")
+  schemaVersion   Int      @map("schema_version")
+  createdAt       DateTime @default(now()) @map("created_at")
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -1451,7 +1454,11 @@ model ConsentRevocation {
   lastError String? @map("last_error")
 
   requestedAt DateTime  @default(now()) @map("requested_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  /// Scritta sempre dal client Prisma (`@updatedAt`) su create e updateMany; il
+  /// default nel database c'e' dalla migrazione 20260905240000 e resta, cosi'
+  /// una riga inserita a mano non nasce senza istante. Lo schema lo dichiara
+  /// per non lasciare deriva: la pulizia della ritenzione ne legge il valore.
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
   startedAt   DateTime? @map("started_at")
   completedAt DateTime? @map("completed_at")
 
@@ -1647,6 +1654,7 @@ model ShippingZone {
   syncedAt    DateTime         @default(now()) @map("synced_at")
   rates       ShippingRate[]
   options     ShippingOption[]
+  shop        Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, zoneName])
   @@index([shopId])
@@ -1701,6 +1709,7 @@ model PackagingConfig {
   defaultWeightPerItem Decimal? @map("default_weight_per_item") @db.Decimal(10, 3)
   returnCost           Decimal? @map("return_cost") @db.Decimal(10, 2)
   updatedAt            DateTime @updatedAt @map("updated_at")
+  shop                 Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("packaging_config")
 }
@@ -1708,6 +1717,7 @@ model PackagingConfig {
 model ShippingAlertDismissal {
   shopId      String   @id @map("shop_id")
   dismissedAt DateTime @default(now()) @map("dismissed_at")
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("shipping_alert_dismissals")
 }

@@ -171,7 +171,7 @@ describe('le buste che non nominano niente', () => {
   it('gli amministrativi conservano il corpo intero, e restano com erano', () => {
     // Parlano di un negozio e di un abbonamento, non di una persona, e il
     // processore dell'abbonamento del payload legge molto piu' di un id.
-    const corpo = { app_subscription: { status: 'ACTIVE', name: 'Pro' } };
+    const corpo = { app_subscription: { status: 'ACTIVE', name: 'Growth' } };
     expect(distillTrigger('app_subscriptions/update', corpo)).toEqual(corpo);
   });
 });

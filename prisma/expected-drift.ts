@@ -58,6 +58,25 @@ export const DERIVA_DA_RISOLVERE = [
 ];
 
 /**
+ * Quello che il database puo' avere in piu' PRIMA di `migrate deploy`, e solo
+ * allora: lo stato di partenza che una migrazione in attesa sta per togliere.
+ *
+ * Non e' deriva tollerata. Nella fase `post` (dopo le migrazioni, e in CI)
+ * queste righe tornano a essere deriva inattesa e fermano tutto: se ci sono
+ * ancora vuol dire che la migrazione che doveva toglierle non e' passata.
+ *
+ * - `plans.max_orders`: aggiunta da 20260923000000_pricing_alignment (stato B)
+ *   e tolta da 20260926000000_plans_basic_growth_scale_core. Gli ordini non
+ *   hanno limite su nessun piano.
+ */
+export const STATO_PRIMA_DELLE_MIGRAZIONI = [
+  'ALTER TABLE "plans" DROP COLUMN "max_orders";',
+];
+
+/** Prima di `migrate deploy` (`pre`) o dopo (`post`, il default). */
+export type Fase = 'pre' | 'post';
+
+/**
  * Le istruzioni di uno script SQL, una per riga, senza commenti e con gli spazi
  * normalizzati: la stessa istruzione scritta su tre righe e su una sola deve
  * risultare uguale, altrimenti il confronto con la lista dipenderebbe da come
@@ -77,8 +96,14 @@ export function istruzioni(script: string): string[] {
 }
 
 /** Cio' che il diff dice e che nessuna delle due liste conosce. */
-export function derivaInattesa(script: string): string[] {
-  const ammesse = new Set([...DERIVA_VOLUTA, ...DERIVA_DA_RISOLVERE].map((riga) => riga.trim()));
+export function derivaInattesa(script: string, fase: Fase = 'post'): string[] {
+  const ammesse = new Set(
+    [
+      ...DERIVA_VOLUTA,
+      ...DERIVA_DA_RISOLVERE,
+      ...(fase === 'pre' ? STATO_PRIMA_DELLE_MIGRAZIONI : []),
+    ].map((riga) => riga.trim()),
+  );
   return istruzioni(script).filter((istruzione) => !ammesse.has(istruzione));
 }
 
@@ -126,6 +151,8 @@ function diff(origine: { url: string } | { migrazioni: string; shadow: string })
 
 function principale(): void {
   const daMigrazioni = process.argv.includes('--from-migrations');
+  // `--fase=pre` solo nel workflow di produzione, prima di `migrate deploy`.
+  const fase: Fase = process.argv.includes('--fase=pre') ? 'pre' : 'post';
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -141,7 +168,7 @@ function principale(): void {
     ? 'la catena delle migrazioni'
     : 'il database indicato da DATABASE_URL';
 
-  const inattesa = derivaInattesa(script);
+  const inattesa = derivaInattesa(script, fase);
   const mancante = daMigrazioni ? [] : derivaVolutaMancante(script);
 
   if (inattesa.length === 0 && mancante.length === 0) {

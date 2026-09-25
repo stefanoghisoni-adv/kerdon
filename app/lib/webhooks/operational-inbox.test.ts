@@ -105,7 +105,7 @@ function negozioInRegola(over: Record<string, unknown> = {}) {
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
     scopes: 'read_products,read_customers,read_orders,read_all_orders',
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     supabaseConfig: {
       connectionVerifiedAt: new Date(),
       tableNameProducts: 'products',
@@ -114,7 +114,7 @@ function negozioInRegola(over: Record<string, unknown> = {}) {
     ...over,
   });
   planFindFirst.mockResolvedValue({
-    planName: 'pro',
+    planName: 'growth',
     customersSyncEnabled: true,
     productFeedsEnabled: true,
   });

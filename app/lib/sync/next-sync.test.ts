@@ -39,7 +39,7 @@ describe('nextSyncAt', () => {
     expect(nextSyncAt(at('2026-08-01T03:00:00Z'), 0, at('2026-08-05T10:00:00Z'))).toBeNull();
   });
 
-  it('regge l intervallo settimanale del piano Free', () => {
+  it('regge l intervallo settimanale del piano Basic', () => {
     // 168 ore = 7 giorni.
     const next = nextSyncAt(at('2026-08-01T03:00:00Z'), 168, at('2026-08-02T10:00:00Z'));
     expect(next?.toISOString()).toBe('2026-08-08T03:00:00.000Z');

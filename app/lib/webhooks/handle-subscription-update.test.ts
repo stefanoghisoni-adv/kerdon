@@ -40,8 +40,9 @@ function abbonamento(status: string, over: Record<string, unknown> = {}) {
   return {
     app_subscription: {
       admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
-      name: 'pro',
+      name: 'growth',
       status,
+      price: '29.00',
       ...over,
     },
   };
@@ -51,7 +52,7 @@ function negozio(over: Record<string, unknown> = {}) {
   return {
     id: 'shop-1',
     shopDomain: DOMINIO,
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     activeChargeId: '123',
     ...over,
   };
@@ -97,10 +98,10 @@ describe('cosa si chiude senza fare niente', () => {
 describe('un abbonamento attivo', () => {
   beforeEach(() => {
     (prisma.shop.findUnique as never as ReturnType<typeof vi.fn>).mockResolvedValue(
-      negozio({ currentPlan: 'free', activeChargeId: null }),
+      negozio({ currentPlan: 'basic', activeChargeId: null }),
     );
     (findPlanByName as never as ReturnType<typeof vi.fn>).mockResolvedValue({
-      planName: 'Pro',
+      planName: 'Growth',
       trialDays: 14,
     });
   });
@@ -109,7 +110,7 @@ describe('un abbonamento attivo', () => {
     expect(await handleSubscriptionUpdate(evento(abbonamento('ACTIVE')), ORA)).toBe('done');
 
     expect(applyPlanToShop).toHaveBeenCalledWith(
-      expect.objectContaining({ shopId: 'shop-1', planName: 'Pro', chargeId: '123' }),
+      expect.objectContaining({ shopId: 'shop-1', planName: 'Growth', chargeId: '123' }),
     );
     expect(prisma.billingCharge.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'active' }) }),
@@ -121,12 +122,59 @@ describe('un abbonamento attivo', () => {
     // ricalcolerebbe `trialEndsAt` da adesso, regalando giorni gratis a ogni
     // consegna ripetuta.
     (prisma.shop.findUnique as never as ReturnType<typeof vi.fn>).mockResolvedValue(
-      negozio({ currentPlan: 'Pro', activeChargeId: '123' }),
+      negozio({ currentPlan: 'Growth', activeChargeId: '123' }),
     );
 
     expect(await handleSubscriptionUpdate(evento(abbonamento('ACTIVE')), ORA)).toBe('done');
     expect(applyPlanToShop).not.toHaveBeenCalled();
   });
+
+  it('abbonamento gia attivo col nome di prima ("Core" da 29) → non riscrive e non promuove', async () => {
+    (prisma.shop.findUnique as never as ReturnType<typeof vi.fn>).mockResolvedValue(
+      negozio({ currentPlan: 'Growth', activeChargeId: '123' }),
+    );
+
+    expect(
+      await handleSubscriptionUpdate(evento(abbonamento('ACTIVE', { name: 'Core' })), ORA),
+    ).toBe('done');
+    expect(findPlanByName).not.toHaveBeenCalled();
+    expect(applyPlanToShop).not.toHaveBeenCalled();
+  });
+
+  it('abbonamento nuovo col nome di prima → cercato col nome di oggi', async () => {
+    expect(
+      await handleSubscriptionUpdate(evento(abbonamento('ACTIVE', { name: 'Enterprise' })), ORA),
+    ).toBe('done');
+    expect(findPlanByName).toHaveBeenCalledWith('Core');
+  });
+
+  it('abbonamento nuovo "Core" con importo da 29 → e il Growth di oggi', async () => {
+    expect(
+      await handleSubscriptionUpdate(
+        evento(abbonamento('ACTIVE', { name: 'Core', price: '29.00' })),
+        ORA,
+      ),
+    ).toBe('done');
+    expect(findPlanByName).toHaveBeenCalledWith('Growth');
+  });
+
+  it.each([
+    ['senza prezzo', { name: 'Core', price: undefined }],
+    ['con un prezzo di nessuno scaglione (uno sconto)', { name: 'Core', price: '14.00' }],
+    ['Growth senza prezzo', { name: 'Growth', price: null }],
+  ])(
+    'nome di mezzo %s → non attiva niente per ipotesi: lo allinea la riconciliazione',
+    async (_caso, over) => {
+      const avviso = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      expect(await handleSubscriptionUpdate(evento(abbonamento('ACTIVE', over)), ORA)).toBe(
+        'done',
+      );
+      expect(findPlanByName).not.toHaveBeenCalled();
+      expect(applyPlanToShop).not.toHaveBeenCalled();
+      avviso.mockRestore();
+    },
+  );
 
   it('nome fuori dal listino → concluso: non e un abbonamento nostro', async () => {
     (findPlanByName as never as ReturnType<typeof vi.fn>).mockResolvedValue(null);
@@ -140,7 +188,7 @@ describe('un abbonamento finito', () => {
   beforeEach(() => {
     (prisma.shop.findUnique as never as ReturnType<typeof vi.fn>).mockResolvedValue(negozio());
     (findFreePlan as never as ReturnType<typeof vi.fn>).mockResolvedValue({
-      planName: 'Free',
+      planName: 'Basic',
       trialDays: 14,
     });
   });
@@ -150,7 +198,7 @@ describe('un abbonamento finito', () => {
       expect(await handleSubscriptionUpdate(evento(abbonamento(stato)), ORA)).toBe('done');
 
       expect(applyPlanToShop).toHaveBeenCalledWith(
-        expect.objectContaining({ planName: 'Free', chargeId: null }),
+        expect.objectContaining({ planName: 'Basic', chargeId: null }),
       );
     });
   }
@@ -169,7 +217,7 @@ describe('un abbonamento finito', () => {
     // La prima lavorazione azzera `activeChargeId`. E' quello — e non un
     // controllo a parte — a rendere innocua la consegna ripetuta.
     (prisma.shop.findUnique as never as ReturnType<typeof vi.fn>).mockResolvedValue(
-      negozio({ currentPlan: 'Free', activeChargeId: null }),
+      negozio({ currentPlan: 'Basic', activeChargeId: null }),
     );
 
     expect(await handleSubscriptionUpdate(evento(abbonamento('CANCELLED')), ORA)).toBe('done');

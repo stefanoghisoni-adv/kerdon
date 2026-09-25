@@ -605,7 +605,7 @@ describe('Periodic sync check processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'free',
+      currentPlan: 'basic',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -661,7 +661,7 @@ describe('Periodic sync check processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'pro',
+      currentPlan: 'growth',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -763,7 +763,7 @@ describe('Periodic sync check processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'free',
+      currentPlan: 'basic',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',
@@ -855,7 +855,7 @@ describe('Periodic sync check processor', () => {
       shopDomain: 'test-shop.myshopify.com',
       accessToken: 'encrypted-token',
       authorization: 'ENABLED',
-      currentPlan: 'free',
+      currentPlan: 'basic',
       supabaseConfig: {
         connectionVerifiedAt: new Date(),
         tableNameProducts: 'products',

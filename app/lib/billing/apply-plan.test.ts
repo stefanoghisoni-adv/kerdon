@@ -37,7 +37,7 @@ describe('applyPlanToShop', () => {
   it('piano a pagamento senza prova: nessun trial e addebito collegato', async () => {
     await applyPlanToShop({
       shopId: 'shop-1',
-      planName: 'Pro',
+      planName: 'Growth',
       chargeId: '1234',
       trialDays: 0,
       now: NOW,
@@ -47,7 +47,7 @@ describe('applyPlanToShop', () => {
       expect.objectContaining({ where: { id: 'shop-1' } }),
     );
     expect(writtenData()).toMatchObject({
-      currentPlan: 'Pro',
+      currentPlan: 'Growth',
       activeChargeId: '1234',
       billingCycle: 'monthly',
       isInTrial: false,
@@ -59,7 +59,7 @@ describe('applyPlanToShop', () => {
   it('con giorni di prova calcola la scadenza dal momento indicato', async () => {
     await applyPlanToShop({
       shopId: 'shop-1',
-      planName: 'Pro',
+      planName: 'Growth',
       chargeId: '1234',
       trialDays: 7,
       now: NOW,
@@ -71,10 +71,10 @@ describe('applyPlanToShop', () => {
   });
 
   it('piano gratuito: nessun addebito collegato e nessuna lettura dello stato', async () => {
-    await applyPlanToShop({ shopId: 'shop-1', planName: 'Free', chargeId: null, now: NOW });
+    await applyPlanToShop({ shopId: 'shop-1', planName: 'Basic', chargeId: null, now: NOW });
 
     expect(findUniqueShop).not.toHaveBeenCalled();
-    expect(writtenData()).toMatchObject({ currentPlan: 'Free', activeChargeId: null });
+    expect(writtenData()).toMatchObject({ currentPlan: 'Basic', activeChargeId: null });
     expect(writtenData()).not.toHaveProperty('authorization');
   });
 
@@ -84,7 +84,7 @@ describe('applyPlanToShop', () => {
       trackingAuthorization: 'PENDING',
     });
 
-    await applyPlanToShop({ shopId: 'shop-1', planName: 'Pro', chargeId: '1234', now: NOW });
+    await applyPlanToShop({ shopId: 'shop-1', planName: 'Growth', chargeId: '1234', now: NOW });
 
     expect(writtenData()).toMatchObject({
       authorization: 'ENABLED',
@@ -98,7 +98,7 @@ describe('applyPlanToShop', () => {
       trackingAuthorization: 'DISABLED',
     });
 
-    await applyPlanToShop({ shopId: 'shop-1', planName: 'Pro', chargeId: '1234', now: NOW });
+    await applyPlanToShop({ shopId: 'shop-1', planName: 'Growth', chargeId: '1234', now: NOW });
 
     expect(writtenData()).not.toHaveProperty('authorization');
     expect(writtenData()).not.toHaveProperty('trackingAuthorization');
@@ -109,7 +109,7 @@ describe('applyPlanToShop', () => {
     // mensile sulla colonna da cui si racconta il piano al merchant.
     await applyPlanToShop({
       shopId: 'shop-1',
-      planName: 'Pro',
+      planName: 'Growth',
       chargeId: '1234',
       billingCycle: 'yearly',
       now: NOW,
@@ -121,12 +121,12 @@ describe('applyPlanToShop', () => {
   it('senza cadenza indicata resta mensile, che e il caso comune', async () => {
     // Il webhook di stato porta solo il nome del piano: non ha una cadenza da
     // dichiarare, e non deve inventarsene una.
-    await applyPlanToShop({ shopId: 'shop-1', planName: 'Pro', chargeId: '1234', now: NOW });
+    await applyPlanToShop({ shopId: 'shop-1', planName: 'Growth', chargeId: '1234', now: NOW });
     expect(writtenData()).toMatchObject({ billingCycle: 'monthly' });
   });
 
   it('non tocca lastSyncedPlan: e il confronto che innesca il recupero', async () => {
-    await applyPlanToShop({ shopId: 'shop-1', planName: 'Pro', chargeId: '1234', now: NOW });
+    await applyPlanToShop({ shopId: 'shop-1', planName: 'Growth', chargeId: '1234', now: NOW });
     expect(writtenData()).not.toHaveProperty('lastSyncedPlan');
   });
 });

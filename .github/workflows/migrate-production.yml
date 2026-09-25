@@ -122,11 +122,21 @@ jobs:
       # Verifica anche il rovescio, che `migrate diff` da solo non vede: che le
       # due chiavi esterne sul nome del piano — volute, e non modellate in
       # schema.prisma — ci siano ancora.
+      #
+      # Fase `pre`: il database non e' ancora migrato, quindi puo' avere lo stato
+      # di partenza che una migrazione in attesa sta per togliere (oggi:
+      # `plans.max_orders` dello stato B). E' conoscenza esplicita in
+      # expected-drift.ts, non deriva tollerata: dopo le migrazioni torna a
+      # fermare tutto.
       - name: Refuse to proceed on unexpected drift
-        run: npx tsx prisma/expected-drift.ts
+        run: npx tsx prisma/expected-drift.ts --fase=pre
 
+      # Fase `pre` anche qui: il listino puo' essere ancora uno dei due di prima
+      # (Free/Pro/Business/Enterprise o Free/Core/Growth/Scale). Pretendere
+      # quello finale fermerebbe la produzione proprio prima della migrazione
+      # che ce la porta.
       - name: Check seed rows, row level security and the plan foreign keys
-        run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql
+        run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -v fase=pre -f prisma/bootstrap-check.sql
 
       # Il backup non lo puo' prendere questo workflow: sta dentro Supabase, e
       # una migrazione sbagliata si torna indietro da li'. Quindi si chiede, e
@@ -149,9 +159,12 @@ jobs:
       # esterne sul nome del piano cancellate da un `migrate diff` applicato alla
       # lettera. E' gia' successo con compliance_requests, che conteneva le
       # esportazioni GDPR complete.
+      #
+      # Fase `post`: qui il listino deve essere quello finale e `max_orders` non
+      # deve esserci piu'.
       - name: Check the migrated database
         if: inputs.azione == 'applica' && inputs.backup
         run: |
-          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql
-          npx tsx prisma/expected-drift.ts
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -v fase=post -f prisma/bootstrap-check.sql
+          npx tsx prisma/expected-drift.ts --fase=post
           npx prisma migrate status

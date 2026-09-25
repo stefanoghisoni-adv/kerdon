@@ -152,8 +152,8 @@ describe('drainSupersededCharges', () => {
 describe('enqueueUnknownActiveSubscriptions', () => {
   it('mette in coda quel che Shopify dice attivo e noi non aspettavamo', async () => {
     getActiveSubscriptions.mockResolvedValue([
-      { gid: 'gid://shopify/AppSubscription/1234', name: 'Pro' },
-      { gid: 'gid://shopify/AppSubscription/9876', name: 'Business' },
+      { gid: 'gid://shopify/AppSubscription/1234', name: 'Growth' },
+      { gid: 'gid://shopify/AppSubscription/9876', name: 'Scale' },
     ]);
 
     await enqueueUnknownActiveSubscriptions(

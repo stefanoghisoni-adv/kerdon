@@ -36,7 +36,7 @@ const richiesta = () => new Request('https://app.example.com/api/stats/customers
 const ATTIVO = {
   id: 'negozio-1',
   shopDomain: 'negozio.myshopify.com',
-  currentPlan: 'pro',
+  currentPlan: 'growth',
   lifecycleStatus: 'active',
   uninstalledAt: null,
   authorization: 'ENABLED',
@@ -54,7 +54,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   findUniqueShop.mockResolvedValue(ATTIVO);
   findFirstPlan.mockResolvedValue({
-    planName: 'pro',
+    planName: 'growth',
     customersSyncEnabled: true,
     productFeedsEnabled: true,
   });

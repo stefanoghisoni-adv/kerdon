@@ -9,42 +9,42 @@ import { it as itDict } from '~/lib/i18n/it';
 
 // Listino reale, cosi' i casi limite sono quelli che i merchant incontrano.
 const PLANS: PlanForSuggestion[] = [
-  { planName: 'free', priceMonthly: 0, priceYearly: 0, maxProducts: 50, maxCustomers: 200, customersSyncEnabled: false },
-  { planName: 'pro', priceMonthly: 19, priceYearly: 290, maxProducts: 200, maxCustomers: 500, customersSyncEnabled: true },
-  { planName: 'business', priceMonthly: 49, priceYearly: 990, maxProducts: 1000, maxCustomers: 2000, customersSyncEnabled: true },
-  { planName: 'enterprise', priceMonthly: 79, priceYearly: 2990, maxProducts: null, maxCustomers: null, customersSyncEnabled: true },
+  { planName: 'basic', priceMonthly: 0, priceYearly: 0, maxProducts: 50, maxCustomers: 200, customersSyncEnabled: false },
+  { planName: 'growth', priceMonthly: 19, priceYearly: 290, maxProducts: 200, maxCustomers: 500, customersSyncEnabled: true },
+  { planName: 'scale', priceMonthly: 49, priceYearly: 990, maxProducts: 1000, maxCustomers: 2000, customersSyncEnabled: true },
+  { planName: 'core', priceMonthly: 79, priceYearly: 2990, maxProducts: null, maxCustomers: null, customersSyncEnabled: true },
   { planName: 'lifetime', priceMonthly: 0, priceYearly: 0, maxProducts: null, maxCustomers: null, customersSyncEnabled: true },
 ];
 
 describe('suggestPlanForProducts', () => {
   it('propone il piu economico che contiene tutti i prodotti', () => {
-    // 78 prodotti su Free (tetto 50): Pro ne regge 200 e basta.
-    expect(suggestPlanForProducts(PLANS, 'free', 78)?.planName).toBe('pro');
+    // 78 prodotti su Basic (tetto 50): Growth ne regge 200 e basta.
+    expect(suggestPlanForProducts(PLANS, 'basic', 78)?.planName).toBe('growth');
   });
 
   it('sale di piu quando il primo passo non basterebbe', () => {
-    // 640 supera anche Pro: il primo che li contiene tutti e' Business.
-    expect(suggestPlanForProducts(PLANS, 'free', 640)?.planName).toBe('business');
+    // 640 supera anche Growth: il primo che li contiene tutti e' Scale.
+    expect(suggestPlanForProducts(PLANS, 'basic', 640)?.planName).toBe('scale');
   });
 
   it('arriva al piano senza tetto quando nessun tetto basta', () => {
-    expect(suggestPlanForProducts(PLANS, 'business', 5000)?.planName).toBe('enterprise');
+    expect(suggestPlanForProducts(PLANS, 'scale', 5000)?.planName).toBe('core');
   });
 
   it('non propone nulla se i prodotti stanno nel tetto attuale', () => {
-    expect(suggestPlanForProducts(PLANS, 'free', 50)).toBeNull();
-    expect(suggestPlanForProducts(PLANS, 'free', 12)).toBeNull();
+    expect(suggestPlanForProducts(PLANS, 'basic', 50)).toBeNull();
+    expect(suggestPlanForProducts(PLANS, 'basic', 12)).toBeNull();
   });
 
   it('non propone nulla a chi non ha tetto', () => {
-    expect(suggestPlanForProducts(PLANS, 'enterprise', 99999)).toBeNull();
+    expect(suggestPlanForProducts(PLANS, 'core', 99999)).toBeNull();
   });
 
   it('non propone MAI il piano interno, per quanto conveniente sembri', () => {
     // Lifetime costa zero e non ha tetti: senza il filtro sarebbe sempre il
     // primo scelto, e manderebbe il merchant su una pagina che per lui non
     // esiste.
-    const suggested = suggestPlanForProducts(PLANS, 'free', 78);
+    const suggested = suggestPlanForProducts(PLANS, 'basic', 78);
     expect(suggested?.planName).not.toBe('lifetime');
   });
 
@@ -59,7 +59,7 @@ describe('suggestPlanForProducts', () => {
       ...PLANS,
       { planName: 'strano', priceMonthly: 0, priceYearly: 0, maxProducts: 9999, maxCustomers: 1, customersSyncEnabled: false },
     ];
-    expect(suggestPlanForProducts(strano, 'free', 78)?.planName).toBe('pro');
+    expect(suggestPlanForProducts(strano, 'basic', 78)?.planName).toBe('growth');
   });
 
   it('piano corrente sconosciuto: nessuna proposta', () => {
@@ -112,7 +112,7 @@ describe('planComparisonRows', () => {
   });
 
   it('il matching dice se il piano proposto lo comprende', () => {
-    // Free non sincronizza i clienti, Pro si': senza clienti da riconoscere non
+    // Basic non sincronizza i clienti, Growth si': senza clienti da riconoscere non
     // c'e' matching, e la riga lo dice con le stesse parole delle card.
     const rows = planComparisonRows(free, pro, 'USD', 'it', itDict);
     const matching = rows.find((r) => r.key === 'matching')!;

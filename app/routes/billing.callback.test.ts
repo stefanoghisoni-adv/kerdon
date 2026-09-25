@@ -81,7 +81,7 @@ const NONCE = 'nonce-del-tentativo';
 const SHOP = {
   id: 'shop-1',
   shopDomain: SHOP_DOMAIN,
-  currentPlan: 'Free',
+  currentPlan: 'Basic',
   activeChargeId: null as string | null,
   billingCycle: null as string | null,
   setupCompletedAt: null as Date | null,
@@ -95,7 +95,7 @@ function tentativo(overrides: Record<string, unknown> = {}) {
     id: 'charge-row-1',
     shopId: 'shop-1',
     shopifyChargeId: 1234n,
-    planType: 'Pro',
+    planType: 'Growth',
     price: 29,
     currency: 'USD',
     billingCycle: 'monthly',
@@ -109,7 +109,7 @@ function tentativo(overrides: Record<string, unknown> = {}) {
 function subscription(overrides: Record<string, unknown> = {}) {
   return {
     gid: 'gid://shopify/AppSubscription/1234',
-    name: 'Pro',
+    name: 'Growth',
     status: 'ACTIVE',
     test: false,
     trialDays: 7,
@@ -126,7 +126,7 @@ function state(overrides: Partial<Parameters<typeof signBillingState>[0]> = {}):
   return signBillingState({
     nonce: NONCE,
     shopDomain: SHOP_DOMAIN,
-    planName: 'Pro',
+    planName: 'Growth',
     listPrice: 29,
     currency: 'USD',
     interval: 'monthly',
@@ -166,7 +166,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.SHOPIFY_API_SECRET = 'segreto-di-prova';
   findUniqueShop.mockResolvedValue({ ...SHOP });
-  findPlanMock.mockResolvedValue({ planName: 'Pro', priceMonthly: 29, trialDays: 7 });
+  findPlanMock.mockResolvedValue({ planName: 'Growth', priceMonthly: 29, trialDays: 7 });
   findFirstCharge.mockResolvedValue(tentativo());
   // Il conteggio della compare-and-set: uno vuol dire "il tentativo era mio e
   // l'ho appena speso io".
@@ -231,7 +231,7 @@ describe('/billing/callback', () => {
     getSubscription.mockResolvedValue(subscription());
     getActiveSubscriptions.mockResolvedValue([
       subscription(),
-      subscription({ gid: 'gid://shopify/AppSubscription/9876', name: 'Business' }),
+      subscription({ gid: 'gid://shopify/AppSubscription/9876', name: 'Scale' }),
     ]);
     findManyCharges.mockResolvedValue([{ id: 'row-9876', shopifyChargeId: 9876n }]);
 
@@ -248,7 +248,7 @@ describe('/billing/callback', () => {
       expect.objectContaining({
         where: { id: 'shop-1' },
         data: expect.objectContaining({
-          currentPlan: 'Pro',
+          currentPlan: 'Growth',
           activeChargeId: '1234',
           billingCycle: 'monthly',
           isInTrial: true,
@@ -267,6 +267,33 @@ describe('/billing/callback', () => {
         data: expect.objectContaining({ status: 'cancelled' }),
       }),
     );
+    expect(location(res).searchParams.get('billing')).toBe('ok');
+  });
+
+  it('abbonamento "Core" nato a 29 prima del cambio di listino → attiva il Growth, non il Core', async () => {
+    // State e abbonamento firmati fra il 23 e il 26 settembre 2026, quando "Core"
+    // era il piano da 29. La riga del tentativo l'ha gia' riscritta la migrazione.
+    getSubscription.mockResolvedValue(subscription({ name: 'Core', priceAmount: 29 }));
+
+    const res = await call(url({ state: state({ planName: 'Core', listPrice: 29 }) }));
+
+    expect(findPlanMock).toHaveBeenCalledWith({
+      where: { planName: { equals: 'Growth', mode: 'insensitive' } },
+    });
+    expect(updateShop.mock.calls[0][0].data).toMatchObject({ currentPlan: 'Growth' });
+    expect(location(res).searchParams.get('billing')).toBe('ok');
+  });
+
+  it('abbonamento "Core" a 149 → e il Core di oggi', async () => {
+    findPlanMock.mockResolvedValue({ planName: 'Core', priceMonthly: 149, trialDays: 7 });
+    findFirstCharge.mockResolvedValue(tentativo({ planType: 'Core', price: 149 }));
+    getSubscription.mockResolvedValue(subscription({ name: 'Core', priceAmount: 149 }));
+
+    const res = await call(url({ state: state({ planName: 'Core', listPrice: 149 }) }));
+
+    expect(findPlanMock).toHaveBeenCalledWith({
+      where: { planName: { equals: 'Core', mode: 'insensitive' } },
+    });
     expect(location(res).searchParams.get('billing')).toBe('ok');
   });
 
@@ -380,7 +407,7 @@ describe('il tentativo si spende una volta sola', () => {
     );
     findUniqueShop.mockResolvedValue({
       ...SHOP,
-      currentPlan: 'Pro',
+      currentPlan: 'Growth',
       activeChargeId: '1234',
       billingCycle: 'monthly',
     });
@@ -416,7 +443,7 @@ describe('il tentativo si spende una volta sola', () => {
     findFirstCharge.mockResolvedValue(tentativo({ status: 'active' }));
     findUniqueShop.mockResolvedValue({
       ...SHOP,
-      currentPlan: 'Pro',
+      currentPlan: 'Growth',
       activeChargeId: '1234',
       billingCycle: 'yearly',
     });
@@ -442,7 +469,7 @@ describe('lo state e la condizione di ogni attivazione nuova', () => {
       'con uno state di un altro negozio',
       url({ state: state({ shopDomain: 'altro-negozio.myshopify.com' }) }),
     ],
-    ['con un piano diverso da quello confermato', url({ state: state({ planName: 'Business' }) })],
+    ['con un piano diverso da quello confermato', url({ state: state({ planName: 'Scale' }) })],
     ['con un importo diverso da quello confermato', url({ state: state({ listPrice: 9 }) })],
     ['con una valuta diversa da quella confermata', url({ state: state({ currency: 'GBP' }) })],
     ['con una cadenza diversa da quella confermata', url({ state: state({ interval: 'yearly' }) })],
@@ -481,7 +508,7 @@ describe('lo state e la condizione di ogni attivazione nuova', () => {
     findFirstCharge.mockResolvedValue(tentativo({ status: 'active' }));
     findUniqueShop.mockResolvedValue({
       ...SHOP,
-      currentPlan: 'Pro',
+      currentPlan: 'Growth',
       activeChargeId: '1234',
       billingCycle: 'monthly',
     });

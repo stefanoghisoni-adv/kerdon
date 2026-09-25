@@ -79,12 +79,13 @@ function req(payload: object, over: { webhookId?: string } = {}): Request {
   });
 }
 
-function abbonamento(status: string, name = 'pro') {
+function abbonamento(status: string, name = 'growth') {
   return {
     app_subscription: {
       admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
       name,
       status,
+      price: '29.00',
     },
   };
 }
@@ -93,7 +94,7 @@ function negozio(over: Record<string, unknown> = {}) {
   return {
     id: 'shop-1',
     shopDomain: DOMINIO,
-    currentPlan: 'pro',
+    currentPlan: 'growth',
     activeChargeId: '123',
     ...over,
   };
@@ -154,14 +155,14 @@ describe('webhook app_subscriptions/update', () => {
   });
 
   it('ACTIVE con piano a listino → il piano viene applicato', async () => {
-    shopFindUnique.mockResolvedValue(negozio({ currentPlan: 'free', activeChargeId: null }));
-    mock(findPlanByName).mockResolvedValue({ planName: 'Pro', trialDays: 14 });
+    shopFindUnique.mockResolvedValue(negozio({ currentPlan: 'basic', activeChargeId: null }));
+    mock(findPlanByName).mockResolvedValue({ planName: 'Growth', trialDays: 14 });
 
     const res = await action({ request: req(abbonamento('ACTIVE')) } as never);
 
     expect(res.status).toBe(200);
     expect(applyPlanToShop).toHaveBeenCalledWith(
-      expect.objectContaining({ planName: 'Pro', chargeId: '123' }),
+      expect.objectContaining({ planName: 'Growth', chargeId: '123' }),
     );
     expect(store.righe[0].status).toBe('completed');
   });
@@ -170,8 +171,8 @@ describe('webhook app_subscriptions/update', () => {
     // Shopify puo' rimandare lo stesso ACTIVE piu' volte: riapplicare il piano
     // ricalcolerebbe `trialEndsAt` da adesso, regalando giorni gratis a ogni
     // consegna ripetuta.
-    shopFindUnique.mockResolvedValue(negozio({ currentPlan: 'Pro' }));
-    mock(findPlanByName).mockResolvedValue({ planName: 'Pro', trialDays: 14 });
+    shopFindUnique.mockResolvedValue(negozio({ currentPlan: 'Growth' }));
+    mock(findPlanByName).mockResolvedValue({ planName: 'Growth', trialDays: 14 });
 
     await action({ request: req(abbonamento('ACTIVE')) } as never);
 
@@ -187,13 +188,13 @@ describe('webhook app_subscriptions/update', () => {
 
   for (const stato of ['CANCELLED', 'DECLINED', 'EXPIRED', 'FROZEN']) {
     it(`${stato} sull abbonamento attivo → retrocessione al piano gratuito`, async () => {
-      mock(findFreePlan).mockResolvedValue({ planName: 'Free', trialDays: 14 });
+      mock(findFreePlan).mockResolvedValue({ planName: 'Basic', trialDays: 14 });
 
       const res = await action({ request: req(abbonamento(stato)) } as never);
 
       expect(res.status).toBe(200);
       expect(applyPlanToShop).toHaveBeenCalledWith(
-        expect.objectContaining({ planName: 'Free', chargeId: null, trialDays: null }),
+        expect.objectContaining({ planName: 'Basic', chargeId: null, trialDays: null }),
       );
       expect(chargeUpdateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
@@ -215,11 +216,11 @@ describe('webhook app_subscriptions/update', () => {
   });
 
   it('retrocessione idempotente: la seconda consegna non fa niente', async () => {
-    mock(findFreePlan).mockResolvedValue({ planName: 'Free', trialDays: 14 });
+    mock(findFreePlan).mockResolvedValue({ planName: 'Basic', trialDays: 14 });
 
     await action({ request: req(abbonamento('CANCELLED'), { webhookId: 'c1' }) } as never);
     // Dopo la prima, il negozio non ha piu' un addebito attivo.
-    shopFindUnique.mockResolvedValue(negozio({ currentPlan: 'Free', activeChargeId: null }));
+    shopFindUnique.mockResolvedValue(negozio({ currentPlan: 'Basic', activeChargeId: null }));
     mock(applyPlanToShop).mockClear();
 
     await action({ request: req(abbonamento('CANCELLED'), { webhookId: 'c2' }) } as never);
@@ -255,7 +256,7 @@ describe('webhook app_subscriptions/update', () => {
   });
 
   it('lo stesso webhook id due volte → un solo effetto', async () => {
-    mock(findFreePlan).mockResolvedValue({ planName: 'Free', trialDays: 14 });
+    mock(findFreePlan).mockResolvedValue({ planName: 'Basic', trialDays: 14 });
 
     await action({ request: req(abbonamento('CANCELLED'), { webhookId: 'c1' }) } as never);
     const seconda = await action(

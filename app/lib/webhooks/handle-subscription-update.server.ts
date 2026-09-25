@@ -29,7 +29,7 @@ import { prisma } from '~/db.server';
 import { applyPlanToShop } from '~/lib/billing/apply-plan.server';
 import { parseGidId } from '~/lib/billing/subscription.server';
 import { findFreePlan, findPlanByName } from '~/lib/billing/find-plan.server';
-import { samePlanName } from '~/lib/billing/plan-name';
+import { resolvePlanNameStrict } from '~/lib/billing/plan-tiers';
 import { subscriptionOutcome } from '~/lib/billing/subscription-status';
 import type { ClaimedWebhookEvent } from './inbox.server';
 import type { WebhookOutcome } from './inbox-model';
@@ -39,7 +39,16 @@ interface AppSubscriptionPayload {
     admin_graphql_api_id?: string;
     name?: string;
     status?: string;
+    /** Importo dell'abbonamento, quando Shopify lo manda (stringa decimale). */
+    price?: string | number | null;
   };
+}
+
+/** L'importo del corpo, se c'e' ed e' un numero. */
+function payloadPrice(price: string | number | null | undefined): number | null {
+  if (price == null || price === '') return null;
+  const value = Number(price);
+  return Number.isFinite(value) ? value : null;
 }
 
 export async function handleSubscriptionUpdate(
@@ -86,7 +95,13 @@ export async function handleSubscriptionUpdate(
   if (esito === 'ignore') return 'done';
 
   if (esito === 'active') {
-    return applyActiveSubscription(shop, subscription.name, subscriptionId, now);
+    return applyActiveSubscription(
+      shop,
+      subscription.name,
+      subscriptionId,
+      now,
+      payloadPrice(subscription.price),
+    );
   }
 
   // PUNTO CRITICO: si agisce SOLO se questo abbonamento e' quello attivo dello
@@ -129,24 +144,47 @@ export async function applyActiveSubscription(
   planName: string,
   subscriptionId: bigint,
   now: Date = new Date(),
+  /** Importo di listino dell'abbonamento, se noto: distingue i nomi di mezzo. */
+  listPrice: number | null = null,
 ): Promise<WebhookOutcome> {
   const subscriptionIdStr = subscriptionId.toString();
-  const plan = await findPlanByName(planName);
-
-  // Nome fuori dal listino: non e' un abbonamento gestito da questa app.
-  // Definitivo, non un fallimento — ritentare non lo farebbe comparire.
-  if (!plan) return 'done';
 
   // Gia' allineato: non riscrivere. Shopify puo' rimandare lo stesso ACTIVE piu'
   // volte, e riapplicare il piano farebbe ripartire da capo il periodo di prova
   // (`trialEndsAt` viene ricalcolato da adesso), regalando giorni gratis a ogni
   // consegna ripetuta.
-  if (
-    samePlanName(shop.currentPlan, plan.planName) &&
-    shop.activeChargeId === subscriptionIdStr
-  ) {
+  //
+  // Basta l'id: e' gia' l'abbonamento attivo del negozio, il piano l'ha deciso
+  // lui, e il nome che l'abbonamento porta non puo' dire niente di nuovo. Un abbonamento
+  // Shopify non cambia piano: cambiare piano ne crea un altro, con un altro id.
+  //
+  // Conta per gli abbonamenti nati prima del cambio di listino del 26 settembre
+  // 2026. Il negozio e' stato spostato sul nome nuovo dalla migrazione, ma
+  // l'abbonamento si chiama ancora come allora: un "Core" nato come piano da 29
+  // letto col listino di oggi sarebbe il Core da 149, e il negozio salirebbe di
+  // due scaglioni senza pagare.
+  if (shop.activeChargeId === subscriptionIdStr) return 'done';
+
+  // Il nome, letto senza tirare a indovinare. "Core", "Growth" e "Scale" fra il
+  // 23 e il 26 settembre 2026 indicavano lo scaglione sotto: senza un importo
+  // che lo dica non si sa quale dei due sia, e attivare quello sbagliato
+  // regalerebbe fino a due scaglioni. In quel caso non si fa niente: la
+  // riconciliazione rilegge l'abbonamento da Shopify, con il suo importo, e lo
+  // allinea lei. Il corpo del webhook il prezzo non sempre ce l'ha.
+  const resolved = resolvePlanNameStrict(planName, listPrice);
+  if (resolved === null) {
+    console.warn(
+      `[app_subscriptions/update] abbonamento "${planName}" per ${shop.shopDomain} ` +
+        "senza un importo che dica di che scaglione e': lo allinea la riconciliazione",
+    );
     return 'done';
   }
+
+  const plan = await findPlanByName(resolved);
+
+  // Nome fuori dal listino: non e' un abbonamento gestito da questa app.
+  // Definitivo, non un fallimento — ritentare non lo farebbe comparire.
+  if (!plan) return 'done';
 
   await applyPlanToShop({
     shopId: shop.id,

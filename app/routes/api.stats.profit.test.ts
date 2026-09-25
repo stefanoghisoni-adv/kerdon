@@ -22,7 +22,7 @@ vi.mock('~/db.server', () => ({
       findUnique: async () => ({
         id: 'shop-1',
         shopDomain: 'test-shop.myshopify.com',
-        currentPlan: 'pro',
+        currentPlan: 'growth',
         lifecycleStatus: 'active',
         uninstalledAt: null,
         authorization: 'ENABLED',
@@ -34,7 +34,7 @@ vi.mock('~/db.server', () => ({
         ianaTimezone: 'Europe/Rome',
       }),
     },
-    plan: { findFirst: async () => ({ planName: 'pro', customersSyncEnabled: true }) },
+    plan: { findFirst: async () => ({ planName: 'growth', customersSyncEnabled: true }) },
   },
 }));
 vi.mock('~/lib/customers/profit.server', () => ({

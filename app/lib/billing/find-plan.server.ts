@@ -2,6 +2,7 @@ import type { Plan } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { isSelectablePlan } from '~/components/Billing/plan-access';
 import { BASE_CURRENCY } from './money';
+import { BASE_PLAN_NAME, resolvePlanName } from './plan-tiers';
 
 // Il nome del piano viaggia in due posti che non si aggiornano insieme: la
 // colonna `plans.plan_name` (il listino) e `shops.current_plan` (quello scritto
@@ -18,6 +19,10 @@ import { BASE_CURRENCY } from './money';
 /**
  * Il piano con questo nome, confronto insensibile a maiuscole/minuscole e spazi
  * ai bordi. Null se il nome e' vuoto o non c'e' nel listino.
+ *
+ * Un nome di prima che nel listino non c'e' piu' ("Pro", "Enterprise") porta al
+ * piano che oggi ne ha preso il posto: e' la strada di un link o di un
+ * abbonamento nati prima del cambio di nome.
  */
 export async function findPlanByName(
   name: string | null | undefined,
@@ -27,16 +32,38 @@ export async function findPlanByName(
 
   // findFirst e non findUnique: il confronto insensibile a maiuscole richiede
   // `mode: 'insensitive'`, che Prisma accetta solo sulle query non-unique.
-  return prisma.plan.findFirst({
+  const plan = await prisma.plan.findFirst({
     where: { planName: { equals: trimmed, mode: 'insensitive' } },
   });
+  if (plan) return plan;
+
+  const today = resolvePlanName(trimmed);
+  if (today.toLowerCase() === trimmed.toLowerCase()) return null;
+  return prisma.plan.findFirst({
+    where: { planName: { equals: today, mode: 'insensitive' } },
+  });
+}
+
+/**
+ * Il piano di un abbonamento Shopify, dal nome e — se c'e' — dall'importo di
+ * listino.
+ *
+ * Un abbonamento porta il nome con cui e' nato, e i nomi Core/Growth/Scale fra
+ * il 23 e il 26 settembre 2026 indicavano lo scaglione sotto: un "Core" da 29 e'
+ * il Growth di oggi, non il Core da 149. L'importo lo dice; il nome da solo no.
+ */
+export async function findPlanForSubscription(
+  name: string | null | undefined,
+  listPrice?: number | null,
+): Promise<Plan | null> {
+  return findPlanByName(resolvePlanName(name, listPrice));
 }
 
 // Nome da usare se il listino non ha nessun piano gratuito. E' l'ultima
 // spiaggia: serve solo a non far fallire un'installazione, e se e' sbagliato la
 // foreign key su shops.current_plan lo rifiuta subito invece di lasciar passare
 // un negozio con un piano che non esiste.
-const FALLBACK_FREE_PLAN_NAME = 'Free';
+const FALLBACK_FREE_PLAN_NAME = BASE_PLAN_NAME;
 
 /**
  * Il piano gratuito del listino: quello a prezzo zero, il piu' vecchio se ce

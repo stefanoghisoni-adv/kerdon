@@ -13,7 +13,7 @@ import {
 
 // Il listino come sta nella tabella `plans`.
 const row = (over: Partial<PlanRow> = {}): PlanRow => ({
-  planName: 'free',
+  planName: 'basic',
   priceMonthly: 0,
   priceYearly: 0,
   maxProducts: 50,
@@ -28,7 +28,7 @@ const row = (over: Partial<PlanRow> = {}): PlanRow => ({
 const PLANS: PlanRow[] = [
   row(),
   row({
-    planName: 'pro',
+    planName: 'growth',
     priceMonthly: 29,
     maxProducts: 100,
     maxCustomers: 5000,
@@ -37,7 +37,7 @@ const PLANS: PlanRow[] = [
     supportLevel: 'email',
   }),
   row({
-    planName: 'business',
+    planName: 'scale',
     priceMonthly: 99,
     maxProducts: 400,
     maxCustomers: 50000,
@@ -46,7 +46,7 @@ const PLANS: PlanRow[] = [
     supportLevel: 'priority',
   }),
   row({
-    planName: 'enterprise',
+    planName: 'core',
     priceMonthly: 299,
     maxProducts: null,
     maxCustomers: null,
@@ -68,10 +68,10 @@ const PLANS: PlanRow[] = [
 describe('buildPlanCards', () => {
   it('lifetime non compare: non e’ un piano che si compra', () => {
     expect(buildPlanCards(PLANS).map((p) => p.name)).toEqual([
-      'free',
-      'pro',
-      'business',
-      'enterprise',
+      'basic',
+      'growth',
+      'scale',
+      'core',
     ]);
   });
 
@@ -165,7 +165,7 @@ describe('buildPlanFeatures', () => {
   });
 
   it('il database e sempre incluso su tutti i piani', () => {
-    // Il Free ha un database limitato (solo prodotti, con tetto), gli altri ce
+    // Il Basic ha un database limitato (solo prodotti, con tetto), gli altri ce
     // l'hanno esteso (prodotti e clienti, tetti piu' alti o assenti), ma tutti
     // i piani sincronizzano qualcosa: la riga e' sempre verde. L'etichetta
     // cambia col piano (limitato/esteso), non l'inclusione.
@@ -176,18 +176,18 @@ describe('buildPlanFeatures', () => {
     }
   });
 
-  it('le label del database cambiano col piano: limitato sul Free, esteso sugli altri', () => {
-    // Il Free sincronizza solo prodotti (con tetto), gli altri anche clienti e
+  it('le label del database cambiano col piano: limitato sul Basic, esteso sugli altri', () => {
+    // Il Basic sincronizza solo prodotti (con tetto), gli altri anche clienti e
     // con tetti piu' alti: l'etichetta dice "limitato" o "esteso" di
     // conseguenza. Il planName serve a featureLabel per scegliere.
     const database = buildPlanFeatures(row()).find((f) => f.key === 'database')!;
-    expect(featureLabel(database, itDict, 'it', 'free')).toBe('Database limitato');
-    expect(featureLabel(database, itDict, 'it', 'pro')).toBe('Database esteso');
-    expect(featureLabel(database, itDict, 'it', 'business')).toBe('Database esteso');
-    expect(featureLabel(database, itDict, 'it', 'enterprise')).toBe('Database esteso');
+    expect(featureLabel(database, itDict, 'it', 'basic')).toBe('Database limitato');
+    expect(featureLabel(database, itDict, 'it', 'growth')).toBe('Database esteso');
+    expect(featureLabel(database, itDict, 'it', 'scale')).toBe('Database esteso');
+    expect(featureLabel(database, itDict, 'it', 'core')).toBe('Database esteso');
     // Inglese
-    expect(featureLabel(database, enDict, 'en', 'free')).toBe('Limited database');
-    expect(featureLabel(database, enDict, 'en', 'pro')).toBe('Extended database');
+    expect(featureLabel(database, enDict, 'en', 'basic')).toBe('Limited database');
+    expect(featureLabel(database, enDict, 'en', 'growth')).toBe('Extended database');
   });
 
   it('le label restano corte in ogni lingua, altrimenti una card si alza sulle altre', () => {
@@ -205,7 +205,7 @@ describe('buildPlanFeatures', () => {
 });
 
 describe('manualSyncAllowed', () => {
-  it('lo concede la sola assistenza dedicata, cioe Enterprise', () => {
+  it('lo concede la sola assistenza dedicata, cioe Core', () => {
     // Una sincronizzazione chiesta a mano costa una lettura completa di Shopify
     // ogni volta che si preme: concederla a meta' listino significa pagarla noi
     // per tutti.
@@ -247,17 +247,17 @@ describe('manualSyncAllowed', () => {
 // a quale delle due credere. Vengono dalla stessa condizione, e questo test
 // esiste perche' resti una sola.
 describe('limitato o esteso', () => {
-  it('il Free ha il database limitato, gli altri esteso', () => {
-    expect(isDatabaseExtended('Free')).toBe(false);
-    expect(isDatabaseExtended('free')).toBe(false);
+  it('il Basic ha il database limitato (anche col nome di prima), gli altri esteso', () => {
+    expect(isDatabaseExtended('Basic')).toBe(false);
+    expect(isDatabaseExtended('basic')).toBe(false);
     expect(isDatabaseExtended('  Free  ')).toBe(false);
 
-    for (const piano of ['Pro', 'Business', 'Enterprise', 'Lifetime']) {
+    for (const piano of ['Growth', 'Scale', 'Core', 'Lifetime']) {
       expect(isDatabaseExtended(piano)).toBe(true);
     }
   });
 
-  // Senza nome del piano non si puo' dire che sia il Free: meglio l'esteso, che
+  // Senza nome del piano non si puo' dire che sia il Basic: meglio l'esteso, che
   // e' il caso di tutti i piani tranne uno.
   it('senza nome del piano vale l esteso', () => {
     expect(isDatabaseExtended(undefined)).toBe(true);
