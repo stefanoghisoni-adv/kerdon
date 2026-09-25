@@ -292,3 +292,136 @@ describe('il listino e\' lo stesso in codice, bootstrap e migrazioni', () => {
     await db.close();
   }, 60_000);
 });
+
+const GUARDIA = '20260922000000_pricing_alignment_guard';
+const LISTINO_FINALE = '20260926000000_plans_basic_growth_scale_core';
+
+async function haFree(db: PGlite): Promise<boolean> {
+  const { rows } = await db.query(`SELECT 1 FROM "plans" WHERE "plan_name" = 'Free'`);
+  return rows.length > 0;
+}
+
+/** La tabella di Prisma, ridotta alle colonne che la guardia legge. */
+async function registroPrisma(db: PGlite, concluse: string[]): Promise<void> {
+  await db.exec(`
+    CREATE TABLE "_prisma_migrations" (
+      "id" text PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      "migration_name" text NOT NULL,
+      "finished_at" timestamptz,
+      "rolled_back_at" timestamptz
+    );
+  `);
+  for (const nome of concluse) {
+    await db.query(
+      `INSERT INTO "_prisma_migrations" ("migration_name", "finished_at") VALUES ($1, now())`,
+      [nome],
+    );
+  }
+}
+
+describe('la guardia del 22 agisce solo su un database nuovo', () => {
+  it('dopo la migrazione del 26 incollata a mano (senza registro Prisma, con negozi): nessun Free orfano', async () => {
+    const db = new PGlite();
+    await applica(db, cartelle());
+    await negozio(db, 'n1', 'Growth');
+
+    await applica(db, [GUARDIA]);
+
+    expect(await haFree(db)).toBe(false);
+    await verificaListino(db);
+    await db.close();
+  }, 60_000);
+
+  it('dopo la migrazione del 26 registrata da Prisma (anche senza negozi): nessun Free orfano', async () => {
+    const db = new PGlite();
+    await applica(db, cartelle());
+    await registroPrisma(db, [PRICING_ALIGNMENT, LISTINO_FINALE]);
+
+    await applica(db, [GUARDIA]);
+
+    expect(await haFree(db)).toBe(false);
+    await db.close();
+  }, 60_000);
+
+  it('su un database nuovo con Prisma (nulla ancora registrato) la catena arriva in fondo pulita', async () => {
+    const db = new PGlite();
+    const [init, ...resto] = cartelle();
+    await applica(db, [init]);
+    await registroPrisma(db, ['0_init']);
+
+    await applica(db, [GUARDIA]);
+    expect(await haFree(db)).toBe(true);
+
+    await applica(db, resto.filter((c) => c !== GUARDIA));
+    expect(await haFree(db)).toBe(false);
+    await verificaListino(db);
+    await db.close();
+  }, 60_000);
+});
+
+/**
+ * bootstrap-check.sql si esegue con psql, che prima del blocco legge la fase
+ * con i suoi comandi (`\if`, `\set`, `:'fase'`). PGlite quei comandi non li
+ * conosce: si tolgono e la fase si scrive al loro posto, che e' esattamente
+ * cio' che psql farebbe.
+ */
+function controllo(fase: 'pre' | 'post'): string {
+  return readFileSync(resolve(ROOT, 'prisma/bootstrap-check.sql'), 'utf8')
+    .split('\n')
+    .filter((riga) => !riga.trimStart().startsWith('\\'))
+    .join('\n')
+    .replace(":'fase'", `'${fase}'`);
+}
+
+describe('bootstrap-check.sql: fase pre (prima di migrate deploy) e post (dopo)', () => {
+  it('psql riceve la fase come variabile, con post come default', () => {
+    const testo = readFileSync(resolve(ROOT, 'prisma/bootstrap-check.sql'), 'utf8');
+    expect(testo).toMatch(/\\if :\{\?fase\}/);
+    expect(testo).toMatch(/\\set fase post/);
+    expect(testo).toContain("set_config('kerdon.fase', :'fase', false)");
+  });
+
+  it('sul listino finale passano entrambe', async () => {
+    const db = new PGlite();
+    await applica(db, cartelle());
+    await db.exec(controllo('pre'));
+    await db.exec(controllo('post'));
+    await db.close();
+  }, 60_000);
+
+  it.each([
+    ['A (Free/Pro/Business/Enterprise)', false],
+    ['B (Free/Core/Growth/Scale)', true],
+  ])('stato %s: pre passa, post si ferma', async (_stato, conB) => {
+    const db = new PGlite();
+    const tutte = cartelle();
+    const [init, ...primaDelB] = tutte.filter((c) => c <= PRICING_ALIGNMENT && c !== GUARDIA);
+    await applica(db, [init]);
+    await db.exec(LISTINO_A);
+    if (conB) await applica(db, primaDelB);
+
+    await db.exec(controllo('pre'));
+    await expect(db.exec(controllo('post'))).rejects.toThrow(/piani mancanti/);
+    await db.close();
+  }, 60_000);
+
+  it('pre non accetta un listino incompleto', async () => {
+    const db = new PGlite();
+    const [init] = cartelle();
+    await applica(db, [init]);
+    await db.exec(LISTINO_A);
+    await db.exec(`DELETE FROM "plans" WHERE "plan_name" = 'Enterprise'`);
+
+    await expect(db.exec(controllo('pre'))).rejects.toThrow(/piani mancanti/);
+    await db.close();
+  }, 60_000);
+
+  it('una fase sconosciuta si ferma', async () => {
+    const db = new PGlite();
+    await applica(db, cartelle());
+    await expect(
+      db.exec(controllo('post').replace("'post', false)", "'boh', false)")),
+    ).rejects.toThrow(/fase sconosciuta/);
+    await db.close();
+  }, 60_000);
+});

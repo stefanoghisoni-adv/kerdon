@@ -29,7 +29,7 @@ import { prisma } from '~/db.server';
 import { applyPlanToShop } from '~/lib/billing/apply-plan.server';
 import { parseGidId } from '~/lib/billing/subscription.server';
 import { findFreePlan, findPlanByName } from '~/lib/billing/find-plan.server';
-import { resolvePlanName } from '~/lib/billing/plan-tiers';
+import { resolvePlanNameStrict } from '~/lib/billing/plan-tiers';
 import { subscriptionOutcome } from '~/lib/billing/subscription-status';
 import type { ClaimedWebhookEvent } from './inbox.server';
 import type { WebhookOutcome } from './inbox-model';
@@ -165,7 +165,22 @@ export async function applyActiveSubscription(
   // due scaglioni senza pagare.
   if (shop.activeChargeId === subscriptionIdStr) return 'done';
 
-  const plan = await findPlanByName(resolvePlanName(planName, listPrice));
+  // Il nome, letto senza tirare a indovinare. "Core", "Growth" e "Scale" fra il
+  // 23 e il 26 settembre 2026 indicavano lo scaglione sotto: senza un importo
+  // che lo dica non si sa quale dei due sia, e attivare quello sbagliato
+  // regalerebbe fino a due scaglioni. In quel caso non si fa niente: la
+  // riconciliazione rilegge l'abbonamento da Shopify, con il suo importo, e lo
+  // allinea lei. Il corpo del webhook il prezzo non sempre ce l'ha.
+  const resolved = resolvePlanNameStrict(planName, listPrice);
+  if (resolved === null) {
+    console.warn(
+      `[app_subscriptions/update] abbonamento "${planName}" per ${shop.shopDomain} ` +
+        "senza un importo che dica di che scaglione e': lo allinea la riconciliazione",
+    );
+    return 'done';
+  }
+
+  const plan = await findPlanByName(resolved);
 
   // Nome fuori dal listino: non e' un abbonamento gestito da questa app.
   // Definitivo, non un fallimento — ritentare non lo farebbe comparire.

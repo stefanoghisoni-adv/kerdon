@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DERIVA_VOLUTA,
+  STATO_PRIMA_DELLE_MIGRAZIONI,
   derivaInattesa,
   derivaVolutaMancante,
   istruzioni,
@@ -81,5 +82,36 @@ describe('derivaVolutaMancante', () => {
 
   it('le segnala entrambe su un diff vuoto', () => {
     expect(derivaVolutaMancante('')).toEqual(DERIVA_VOLUTA);
+  });
+});
+
+describe('le due fasi del workflow di produzione', () => {
+  const CON_MAX_ORDERS = `${DERIVA_NOTA}\n-- AlterTable\nALTER TABLE "plans" DROP COLUMN "max_orders";\n`;
+
+  it('prima di migrate deploy, max_orders dello stato B e\' atteso', () => {
+    expect(derivaInattesa(CON_MAX_ORDERS, 'pre')).toEqual([]);
+  });
+
+  it('dopo migrate deploy, max_orders ancora li\' e\' deriva inattesa', () => {
+    expect(derivaInattesa(CON_MAX_ORDERS, 'post')).toEqual([
+      'ALTER TABLE "plans" DROP COLUMN "max_orders";',
+    ]);
+    // Il default e' la fase post: la CI non passa la fase.
+    expect(derivaInattesa(CON_MAX_ORDERS)).toEqual([
+      'ALTER TABLE "plans" DROP COLUMN "max_orders";',
+    ]);
+  });
+
+  it('la fase pre non apre la porta a nient\'altro', () => {
+    const script = `${CON_MAX_ORDERS}\nALTER TABLE "plans" DROP COLUMN "max_products";\n`;
+    expect(derivaInattesa(script, 'pre')).toEqual([
+      'ALTER TABLE "plans" DROP COLUMN "max_products";',
+    ]);
+  });
+
+  it('lo stato di prima non e\' nella lista delle derive tollerate', () => {
+    for (const riga of STATO_PRIMA_DELLE_MIGRAZIONI) {
+      expect(DERIVA_VOLUTA).not.toContain(riga);
+    }
   });
 });

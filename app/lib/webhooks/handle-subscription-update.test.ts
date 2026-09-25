@@ -42,6 +42,7 @@ function abbonamento(status: string, over: Record<string, unknown> = {}) {
       admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
       name: 'growth',
       status,
+      price: '29.00',
       ...over,
     },
   };
@@ -156,6 +157,24 @@ describe('un abbonamento attivo', () => {
     ).toBe('done');
     expect(findPlanByName).toHaveBeenCalledWith('Growth');
   });
+
+  it.each([
+    ['senza prezzo', { name: 'Core', price: undefined }],
+    ['con un prezzo di nessuno scaglione (uno sconto)', { name: 'Core', price: '14.00' }],
+    ['Growth senza prezzo', { name: 'Growth', price: null }],
+  ])(
+    'nome di mezzo %s → non attiva niente per ipotesi: lo allinea la riconciliazione',
+    async (_caso, over) => {
+      const avviso = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      expect(await handleSubscriptionUpdate(evento(abbonamento('ACTIVE', over)), ORA)).toBe(
+        'done',
+      );
+      expect(findPlanByName).not.toHaveBeenCalled();
+      expect(applyPlanToShop).not.toHaveBeenCalled();
+      avviso.mockRestore();
+    },
+  );
 
   it('nome fuori dal listino → concluso: non e un abbonamento nostro', async () => {
     (findPlanByName as never as ReturnType<typeof vi.fn>).mockResolvedValue(null);

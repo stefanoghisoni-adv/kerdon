@@ -16,6 +16,13 @@
 -- Il piano Lifetime (assegnato a mano dall'owner, illimitato, non in vendita)
 -- resta com'e'.
 --
+-- VALORI VINCOLANTI. Prezzi (EUR e USD), limiti di prodotti e clienti e le due
+-- funzioni (sync clienti, feed) dei quattro piani si scrivono come valori
+-- assoluti del listino deciso, non come correzioni: qualsiasi ritocco fatto a
+-- mano su queste colonne prima di questa migrazione viene sovrascritto. Il
+-- listino sta in app/lib/billing/plan-tiers.ts; per cambiarlo si scrive una
+-- migrazione nuova, non si modifica questa.
+--
 -- DA DOVE PARTE. Non si sa con certezza in che stato sia la produzione: il
 -- workflow delle migrazioni non e' mai stato lanciato e parte dell'SQL e' stato
 -- applicato a mano. Questa migrazione arriva al listino finale da ognuno dei

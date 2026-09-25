@@ -7,6 +7,7 @@ import {
   RECOMMENDED_PLAN_NAME,
   isBasePlan,
   resolvePlanName,
+  resolvePlanNameStrict,
 } from './plan-tiers';
 import { samePlanName } from './plan-name';
 
@@ -126,5 +127,35 @@ describe('confronti fra nomi', () => {
     expect(isBasePlan(' free ')).toBe(true);
     expect(isBasePlan('Growth')).toBe(false);
     expect(isBasePlan('Lifetime')).toBe(false);
+  });
+});
+
+describe('resolvePlanNameStrict: senza tirare a indovinare', () => {
+  it.each([
+    ['Core', 29, 'Growth'],
+    ['Core', 149, 'Core'],
+    ['Growth', 29, 'Growth'],
+    ['Growth', 790, 'Scale'],
+    ['Scale', 79, 'Scale'],
+    ['Scale', 1490, 'Core'],
+  ])('"%s" a %d → %s', (nome, importo, atteso) => {
+    expect(resolvePlanNameStrict(nome, importo)).toBe(atteso);
+  });
+
+  it.each([
+    ['Core', null],
+    ['Core', undefined],
+    ['Core', 14],
+    ['Growth', NaN],
+    ['scale', null],
+  ])('"%s" a %s → null: non si sa quale scaglione sia', (nome, importo) => {
+    expect(resolvePlanNameStrict(nome, importo as number | null | undefined)).toBeNull();
+  });
+
+  it('i nomi non ambigui non hanno bisogno dell importo', () => {
+    expect(resolvePlanNameStrict('Pro')).toBe('Growth');
+    expect(resolvePlanNameStrict('Enterprise', null)).toBe('Core');
+    expect(resolvePlanNameStrict('Basic')).toBe('Basic');
+    expect(resolvePlanNameStrict('Lifetime')).toBe('Lifetime');
   });
 });

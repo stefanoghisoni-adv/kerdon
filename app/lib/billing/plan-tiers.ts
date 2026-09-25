@@ -151,6 +151,32 @@ export function resolvePlanName(
   return trimmed;
 }
 
+/**
+ * Come `resolvePlanName`, ma senza tirare a indovinare: null quando il nome e'
+ * uno di quelli di mezzo (Core/Growth/Scale) e l'importo non basta a dire se
+ * l'abbonamento e' nato prima o dopo il cambio di listino — importo assente, o
+ * che non e' ne' quello di oggi ne' quello di allora (uno sconto, una valuta
+ * con altre cifre).
+ *
+ * Serve dove un errore si paga: attivare un piano. Letto col nome di oggi, un
+ * "Core" nato da 29 diventerebbe il Core da 149.
+ */
+export function resolvePlanNameStrict(
+  name: string | null | undefined,
+  listPrice?: number | null,
+): string | null {
+  const trimmed = (name ?? '').trim();
+  const id = key(trimmed);
+  const interim = INTERIM_PLAN_NAMES[id];
+  if (!interim) return resolvePlanName(trimmed, listPrice);
+
+  if (listPrice == null || !Number.isFinite(listPrice)) return null;
+  const today = hasListPrice(tierByName(trimmed), listPrice);
+  const before = hasListPrice(tierByName(interim), listPrice);
+  if (today === before) return null;
+  return today ? tierByName(trimmed)!.name : interim;
+}
+
 /** Se questo e' il piano gratuito del listino, con il nome di oggi o di prima. */
 export function isBasePlan(name: string | null | undefined): boolean {
   return key(resolvePlanName(name)) === key(BASE_PLAN_NAME);

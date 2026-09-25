@@ -85,6 +85,7 @@ function abbonamento(status: string, name = 'growth') {
       admin_graphql_api_id: 'gid://shopify/AppSubscription/123',
       name,
       status,
+      price: '29.00',
     },
   };
 }
