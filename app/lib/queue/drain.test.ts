@@ -11,11 +11,13 @@ vi.mock('~/lib/gdpr/process-compliance.server', () => ({
 }));
 vi.mock('./shop-lock.server', () => ({ runWithShopLease: vi.fn() }));
 vi.mock('~/lib/shipping/recompute.server', () => ({ processLogisticsRecompute: vi.fn() }));
+vi.mock('~/lib/shipping/shipping-method-backfill.server', () => ({ processShippingMethodBackfill: vi.fn() }));
 
 import { drainSyncRequests, type Handler } from './drain.server';
 import { runWithShopLease } from './shop-lock.server';
 import { processManualSync } from '~/lib/workers/processors.server';
 import { processLogisticsRecompute } from '~/lib/shipping/recompute.server';
+import { processShippingMethodBackfill } from '~/lib/shipping/shipping-method-backfill.server';
 import type { QueueStore } from './queue-store.server';
 import {
   LEASE_TTL_MS,
@@ -383,6 +385,33 @@ describe('il ricalcolo dei costi logistici', () => {
 
     expect(esito.skippedLocked).toBe(1);
     expect(coda.trova('item-1').attempts).toBe(0);
+  });
+});
+
+describe('il recupero dell opzione sugli ordini storici', () => {
+  // Scrive sugli ordini: in fila con sincronizzazioni e ricalcolo, sotto lo
+  // stesso lucchetto, con il cursore della sua continuazione.
+  it('gira sotto il lucchetto del negozio con possesso, segnale, id e cursore', async () => {
+    const coda = codaInMemoria([
+      riga({ type: 'shipping-method-backfill', shopId: 'shop-1', payload: { cursor: '777' } }),
+    ]);
+
+    const esito = await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
+
+    expect(esito.completed).toBe(1);
+    expect(runWithShopLease).toHaveBeenCalledWith('shop-1', expect.any(Function), expect.anything());
+    const [shopId, ctx] = (processShippingMethodBackfill as any).mock.calls[0];
+    expect(shopId).toBe('shop-1');
+    expect(typeof ctx.lease.assertHeld).toBe('function');
+    expect(ctx.signal).toBeInstanceOf(AbortSignal);
+    expect(ctx.jobId).toBe('item-1');
+    expect(ctx.cursor).toBe('777');
+  });
+
+  it('primo giro: nessun cursore', async () => {
+    const coda = codaInMemoria([riga({ type: 'shipping-method-backfill', shopId: 'shop-1' })]);
+    await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
+    expect((processShippingMethodBackfill as any).mock.calls[0][1].cursor).toBeNull();
   });
 });
 

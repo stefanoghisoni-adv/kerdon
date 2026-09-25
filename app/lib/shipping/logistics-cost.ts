@@ -47,7 +47,7 @@ export function findZone(zones: ZoneConfig[], country: string | null): ZoneConfi
 
 /**
  * Trova l'opzione di spedizione per nome, con confronto case-insensitive e spazi rimossi.
- * Ritorna null se il metodo e' null o se nessuna opzione confermata combacia.
+ * Ritorna null se il metodo e' null o vuoto, o se nessuna opzione confermata combacia.
  *
  * Le opzioni non confermate non contano: l'import le crea con costo zero da
  * compilare, e abbinarle farebbe risultare gratuita ogni spedizione con quel
@@ -56,6 +56,10 @@ export function findZone(zones: ZoneConfig[], country: string | null): ZoneConfi
 export function findOption(zone: ZoneConfig, method: string | null): ShippingOptionConfig | null {
   if (!method) return null;
   const normalized = method.trim().toLowerCase();
+  // Vuoto dopo il trim vale come assente: la stringa vuota e' la sentinella
+  // "controllato, nessuna shipping line" del recupero dello storico, e non
+  // deve poter abbinare un'opzione dal nome vuoto.
+  if (normalized === '') return null;
   return zone.options.find((opt) => opt.confirmed && opt.name.trim().toLowerCase() === normalized) ?? null;
 }
 

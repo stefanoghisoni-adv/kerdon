@@ -44,6 +44,7 @@ import {
 } from '~/lib/workers/processors.server';
 import { processComplianceRequest } from '~/lib/gdpr/process-compliance.server';
 import { processLogisticsRecompute } from '~/lib/shipping/recompute.server';
+import { processShippingMethodBackfill } from '~/lib/shipping/shipping-method-backfill.server';
 import { randomUUID } from 'node:crypto';
 
 /** Quanto si aspetta prima di riprovare un negozio che era occupato. */
@@ -96,11 +97,23 @@ export const defaultHandlers: Record<SyncRequestType, Handler> = {
     }
     await processComplianceRequest(requestId);
   },
-  'logistics-recompute': (row, ctx) => {
+  'logistics-recompute': async (row, ctx) => {
     // Una continuazione porta nel payload il punto da cui riprendere; un
     // ricalcolo da salvataggio non porta niente e parte da zero.
     const cursor = (row.payload as { cursor?: unknown } | null)?.cursor;
-    return processLogisticsRecompute(row.shopId!, {
+    // L'esito serve solo al ricalcolo dentro il salvataggio: per la coda conta
+    // che non abbia sollevato.
+    await processLogisticsRecompute(row.shopId!, {
+      lease: ctx.lease,
+      signal: ctx.signal,
+      jobId: row.id,
+      cursor: typeof cursor === 'string' ? cursor : null,
+    });
+  },
+  'shipping-method-backfill': async (row, ctx) => {
+    // Come il ricalcolo: una continuazione porta il cursore, il primo giro no.
+    const cursor = (row.payload as { cursor?: unknown } | null)?.cursor;
+    await processShippingMethodBackfill(row.shopId!, {
       lease: ctx.lease,
       signal: ctx.signal,
       jobId: row.id,
@@ -125,6 +138,9 @@ const RICHIEDE_LUCCHETTO: ReadonlySet<string> = new Set([
   // le nuove — potrebbero finire nell'ordine sbagliato, e l'ultimo a scrivere
   // lascerebbe sugli ordini i costi di ieri.
   'logistics-recompute',
+  // Scrive sugli ordini come le sincronizzazioni: in fila con loro, e con il
+  // ricalcolo che accoda alla fine.
+  'shipping-method-backfill',
 ]);
 
 export interface DrainOptions {

@@ -1124,3 +1124,102 @@ describe('i guasti passeggeri si ritentano', () => {
     vi.useRealTimers();
   });
 });
+
+// Il recupero dell'opzione sugli ordini storici (shipping-method-backfill):
+// una query leggera per lotti di id, solo il titolo della prima shipping line.
+describe('getOrderShippingTitles', () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+
+  it('chiede solo la prima shipping line, con nodes(ids:), per gli id dati', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({
+        nodes: [
+          { id: 'gid://shopify/Order/11', shippingLines: { nodes: [{ title: 'Express' }] } },
+          { id: 'gid://shopify/Order/12', shippingLines: { nodes: [] } },
+        ],
+      }),
+    );
+
+    const titoli = await client().getOrderShippingTitles(['11', '12']);
+
+    const corpo = sentBody();
+    expect(corpo.query).toContain('nodes(ids: $ids)');
+    expect(corpo.query).toContain('shippingLines(first: 1) { nodes { title } }');
+    // Niente righe, clienti o importi: il costo della query resta minimo.
+    expect(corpo.query).not.toContain('lineItems');
+    expect(corpo.variables.ids).toEqual(['gid://shopify/Order/11', 'gid://shopify/Order/12']);
+    expect(titoli.get('11')).toBe('Express');
+    expect(titoli.get('12')).toBe('');
+  });
+
+  it('shipping line assente, titolo vuoto o ordine non piu\' su Shopify: stringa vuota', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({
+        nodes: [
+          { id: 'gid://shopify/Order/1', shippingLines: null },
+          { id: 'gid://shopify/Order/2', shippingLines: { nodes: [{ title: null }] } },
+          null,
+        ],
+      }),
+    );
+
+    const titoli = await client().getOrderShippingTitles(['1', '2', '3']);
+
+    expect(titoli.get('1')).toBe('');
+    expect(titoli.get('2')).toBe('');
+    // Il nodo nullo e' l'ordine 3 (stessa posizione): cancellato su Shopify.
+    expect(titoli.get('3')).toBe('');
+  });
+
+  it('id oltre 2^53 restano esatti: si confrontano come testo', async () => {
+    const grande = '9007199254740993';
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ nodes: [{ id: `gid://shopify/Order/${grande}`, shippingLines: { nodes: [{ title: 'Std' }] } }] }),
+    );
+    const titoli = await client().getOrderShippingTitles([grande]);
+    expect(titoli.get(grande)).toBe('Std');
+  });
+
+  it('nessun id: nessuna chiamata', async () => {
+    const titoli = await client().getOrderShippingTitles([]);
+    expect(titoli.size).toBe(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('serbatoio di punti sotto il costo del lotto successivo: aspetta e lo dice nei log', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'X-Shopify-API-Version': '2026-07' }),
+      json: async () => ({
+        data: { nodes: [] },
+        extensions: {
+          cost: {
+            requestedQueryCost: 400,
+            throttleStatus: { maximumAvailable: 2000, currentlyAvailable: 250, restoreRate: 100 },
+          },
+        },
+      }),
+    });
+
+    let finito = false;
+    const promessa = client()
+      .getOrderShippingTitles(['1'])
+      .then(() => {
+        finito = true;
+      });
+    // (400 - 250) punti a 100 al secondo: un secondo e mezzo prima del
+    // prossimo lotto (sotto la soglia del 90%, quindi nessun'altra attesa).
+    await vi.advanceTimersByTimeAsync(1_400);
+    expect(finito).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    await promessa;
+    expect(finito).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('limite di costo'));
+    warn.mockRestore();
+    vi.useRealTimers();
+  });
+});

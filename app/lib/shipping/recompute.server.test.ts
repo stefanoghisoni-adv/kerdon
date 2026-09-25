@@ -235,7 +235,7 @@ describe('processLogisticsRecompute', () => {
       new Error('Supabase query error: 400 — relation "orders" does not exist'),
     );
 
-    await expect(processLogisticsRecompute('shop-1')).resolves.toBeUndefined();
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBe('skipped');
     expect(runQuery).not.toHaveBeenCalled();
   });
 
@@ -245,7 +245,7 @@ describe('processLogisticsRecompute', () => {
       new Error('Supabase query error: 400 — column "logistics_cost" of relation "orders" does not exist'),
     );
 
-    await expect(processLogisticsRecompute('shop-1')).resolves.toBeUndefined();
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBe('skipped');
   });
 
   it('database in pausa gia\' noto: si ferma prima di chiedere qualunque cosa', async () => {
@@ -257,7 +257,7 @@ describe('processLogisticsRecompute', () => {
       resumeBlocked: null,
     });
 
-    await expect(processLogisticsRecompute('shop-1')).resolves.toBeUndefined();
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBe('skipped');
     expect(runQueryRows).not.toHaveBeenCalled();
     expect(runQuery).not.toHaveBeenCalled();
   });
@@ -274,7 +274,7 @@ describe('processLogisticsRecompute', () => {
         resumeBlocked: null,
       });
 
-    await expect(processLogisticsRecompute('shop-1')).resolves.toBeUndefined();
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBe('skipped');
     expect(noteDatabaseUnreachable).toHaveBeenCalledWith('shop-1');
   });
 
@@ -496,7 +496,7 @@ describe('ricalcolo: l opzione di spedizione scelta', () => {
       new Error('Supabase query error: 400 — ERROR: 42703: column "shipping_method" does not exist'),
     );
 
-    await expect(processLogisticsRecompute('shop-1')).resolves.toBeUndefined();
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBe('skipped');
     expect(runQuery).not.toHaveBeenCalled();
     expect(console.error).not.toHaveBeenCalled();
   });
@@ -573,5 +573,37 @@ describe('ricalcolo: l opzione di spedizione scelta', () => {
     }
     // Non un confronto fra due zeri: i costi devono essere quelli attesi.
     expect(scritti.map((r) => r.logistics_cost)).toEqual([10, 7, 7, 8.5, 1]);
+  });
+});
+
+// Il ricalcolo dentro il salvataggio (recompute-inline.server) deve sapere com'e'
+// finita la corsa per scegliere il messaggio: "numeri aggiornati" solo se ha
+// davvero riscritto tutto, "a breve" se ha passato il testimone.
+describe('esito della corsa', () => {
+  it('tutto riscritto: completed', async () => {
+    (runQueryRows as any).mockResolvedValueOnce([ordine({ shopify_order_id: '1001' })]);
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBe('completed');
+  });
+
+  it('nessun ordine: completed (non c\'era niente di vecchio)', async () => {
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBe('completed');
+  });
+
+  it('budget esaurito con continuazione accodata: continued', async () => {
+    (runQueryRows as any).mockResolvedValueOnce(
+      Array.from({ length: RECOMPUTE_PAGE_SIZE }, (_, i) => ordine({ shopify_order_id: String(1 + i) })),
+    );
+    const istanti = [0, 2_000];
+    await expect(
+      processLogisticsRecompute('shop-1', { jobId: 'j', budgetMs: 1_000, clock: () => istanti.shift() ?? 2_000 }),
+    ).resolves.toBe('continued');
+  });
+
+  it('negozio senza ordini o tabella assente: skipped', async () => {
+    (can as any).mockReturnValueOnce(false);
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBe('skipped');
+
+    (runQueryRows as any).mockRejectedValueOnce(new Error('relation "orders" does not exist'));
+    await expect(processLogisticsRecompute('shop-1')).resolves.toBe('skipped');
   });
 });

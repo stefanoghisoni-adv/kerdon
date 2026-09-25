@@ -44,7 +44,8 @@ export const RECOMPUTE_PAGE_SIZE = 500;
  */
 export const RECOMPUTE_BUDGET_MS = 200_000;
 
-const ID_VALIDO = /^[0-9]{1,19}$/;
+/** Un id d'ordine di Shopify come testo: solo cifre, al massimo un bigint. */
+export const ID_VALIDO = /^[0-9]{1,19}$/;
 
 interface LeaseLike {
   assertHeld(): Promise<void>;
@@ -97,7 +98,7 @@ function inputDi(riga: OrderRow): OrderLogisticsInput {
  * Nessun id finisce nell'SQL senza passare di qui: e' un bigint di Shopify, e
  * tutto cio' che non e' fatto di sole cifre non e' un id ma un problema.
  */
-function idSicuro(valore: string | number): string {
+export function idSicuro(valore: string | number): string {
   const testo = typeof valore === 'number' ? (Number.isSafeInteger(valore) ? String(valore) : '') : valore;
   if (!ID_VALIDO.test(testo)) {
     throw new Error(`shopify_order_id non valido nel ricalcolo: ${String(valore).slice(0, 40)}`);
@@ -153,13 +154,13 @@ WHERE o.shopify_order_id = v.id
  * e un ricalcolo senza di lei riporterebbe tutti gli ordini alla tariffa
  * generica. Meglio non scrivere niente e lasciare i costi di prima.
  */
-function tabellaAssente(error: unknown): boolean {
+export function tabellaAssente(error: unknown): boolean {
   const messaggio = error instanceof Error ? error.message : String(error);
   return /relation .* does not exist|column .* does not exist|42P01|42703/i.test(messaggio);
 }
 
 /** Il database del merchant risulta fermo secondo quel che sappiamo. */
-async function databaseFermo(shopId: string): Promise<boolean> {
+export async function databaseFermo(shopId: string): Promise<boolean> {
   const stato = await getDatabasePauseState(shopId);
   return stato !== null && databaseIsStopped(effectiveAvailability(stato, new Date()));
 }
@@ -188,10 +189,23 @@ export interface RecomputeContext {
   clock?: () => number;
 }
 
+/**
+ * Com'e' finita una corsa.
+ *
+ * - completed: tutti gli ordini hanno il costo delle tariffe lette adesso.
+ * - continued: budget finito, il resto e' in coda come continuazione.
+ * - skipped: non c'era niente da fare o non si poteva farlo adesso (niente
+ *   database, niente ordini, database fermo, tabella o colonna assente).
+ *
+ * Serve al ricalcolo dentro il salvataggio (recompute-inline.server): e' da qui
+ * che sa se puo' dire al merchant "numeri aggiornati" o solo "a breve".
+ */
+export type RecomputeOutcome = 'completed' | 'continued' | 'skipped';
+
 export async function processLogisticsRecompute(
   shopId: string,
   ctx: RecomputeContext = {},
-): Promise<void> {
+): Promise<RecomputeOutcome> {
   const orologio = ctx.clock ?? (() => Date.now());
   const partenza = orologio();
   const budget = ctx.budgetMs ?? RECOMPUTE_BUDGET_MS;
@@ -203,7 +217,7 @@ export async function processLogisticsRecompute(
   const ref = shop?.supabaseConfig?.supabaseProjectRef;
   if (!shop || !ref) {
     console.log(`[logistics-recompute] negozio ${shopId} senza database collegato: niente da ricalcolare`);
-    return;
+    return 'skipped';
   }
 
   // La stessa porta delle sincronizzazioni: collegamento, disinstallazione,
@@ -212,12 +226,12 @@ export async function processLogisticsRecompute(
   const plan = await findPlanByName(shop.currentPlan);
   if (!can(shopCapabilitiesWithPlan(shop, plan), 'sync_orders')) {
     console.log(`[logistics-recompute] negozio ${shopId} senza sync ordini: ricalcolo saltato`);
-    return;
+    return 'skipped';
   }
 
   if (await databaseFermo(shopId)) {
     console.warn(`[logistics-recompute] database del negozio ${shopId} in pausa: ricalcolo saltato`);
-    return;
+    return 'skipped';
   }
 
   // Le tariffe una volta sola, PRIMA di toccare il database del merchant: se
@@ -243,7 +257,7 @@ export async function processLogisticsRecompute(
     // Collegamento revocato: ritentare non lo riaccende. Lo dira' il banner.
     if (isSupabaseCredentialDead(error)) {
       console.warn(`[logistics-recompute] collegamento Supabase non valido per il negozio ${shopId}: ricalcolo saltato`);
-      return;
+      return 'skipped';
     }
     throw error;
   }
@@ -322,7 +336,7 @@ export async function processLogisticsRecompute(
       }
     }
   } catch (error) {
-    if (error instanceof Salta) return;
+    if (error instanceof Salta) return 'skipped';
     throw error;
   }
 
@@ -333,8 +347,9 @@ export async function processLogisticsRecompute(
     console.log(
       `[logistics-recompute] negozio ${shopId}: ${aggiornati} ordini ricalcolati, si prosegue dopo l'ordine ${passaggio}`,
     );
-    return;
+    return 'continued';
   }
 
   console.log(`[logistics-recompute] negozio ${shopId}: ${aggiornati} ordini ricalcolati`);
+  return 'completed';
 }

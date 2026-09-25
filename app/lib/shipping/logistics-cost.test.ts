@@ -257,3 +257,32 @@ describe('computeLogisticsCost con opzioni non ancora confermate', () => {
     expect(findOption(zona(true), 'Standard')?.name).toBe('Standard');
   });
 });
+
+// La stringa vuota e' la sentinella del recupero dello storico (vedi
+// shipping-method-backfill.server): "controllato, nessuna shipping line". Deve
+// valere esattamente come NULL, cioe' tariffa della zona, anche nel caso
+// patologico di un'opzione confermata dal nome vuoto o di soli spazi.
+describe('shipping_method vuoto: la sentinella del recupero vale come nessuna opzione', () => {
+  const zona = {
+    zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear' as const,
+    rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }],
+    options: [
+      { name: '', costType: 'flat' as const, confirmed: true, brackets: [{ from: null, to: null, cost: 99 }] },
+      { name: '  ', costType: 'flat' as const, confirmed: true, brackets: [{ from: null, to: null, cost: 77 }] },
+    ],
+  };
+  const conZona: LogisticsConfig = { ...config, zones: [zona] };
+
+  it('findOption con stringa vuota o di soli spazi non trova niente', () => {
+    expect(findOption(zona, '')).toBeNull();
+    expect(findOption(zona, '   ')).toBeNull();
+  });
+
+  it('il costo con stringa vuota e\' identico a quello con NULL', () => {
+    const conNull = computeLogisticsCost({ ...base, shipping_method: null }, conZona);
+    const conVuoto = computeLogisticsCost({ ...base, shipping_method: '' }, conZona);
+    expect(conVuoto).toEqual(conNull);
+    // 3 kg x 2 €/kg: la tariffa della zona, non l'opzione dal nome vuoto.
+    expect(conVuoto.shipping).toBe(6);
+  });
+});
