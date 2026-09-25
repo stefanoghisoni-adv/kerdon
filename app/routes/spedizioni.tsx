@@ -572,23 +572,15 @@ export default function ShippingPage() {
             </EmptyState>
           </Card>
         ) : (
-          <Card padding="0">
-            <ShippingZonesTable zones={zones} onEdit={handleEdit} onEditOption={handleEditOption} />
-          </Card>
-        )}
-
-        {/* Imballi e resi dopo le zone, come prima: senza zone la pagina
-            chiede per prima cosa di importarle. */}
-        {zones.length > 0 && (
           <>
-            <PackagingCategoriesCard
-              categories={packaging.categories}
-              onAdd={() => openPackagingDialog({ kind: 'category', category: null })}
-              onEdit={(category) => openPackagingDialog({ kind: 'category', category })}
-              onDelete={(category) => openPackagingDialog({ kind: 'delete-category', category })}
-            />
-
-            <InlineGrid columns={{ xs: 1, md: '2fr 1fr' }} gap="400">
+            {/* Riga 1: Categorie di imballo + Regole per peso */}
+            <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+              <PackagingCategoriesCard
+                categories={packaging.categories}
+                onAdd={() => openPackagingDialog({ kind: 'category', category: null })}
+                onEdit={(category) => openPackagingDialog({ kind: 'category', category })}
+                onDelete={(category) => openPackagingDialog({ kind: 'delete-category', category })}
+              />
               <PackagingRulesCard
                 rules={packaging.fallbackRules}
                 hasCategories={packaging.categories.length > 0}
@@ -596,13 +588,24 @@ export default function ShippingPage() {
                 onEdit={(index) => openPackagingDialog({ kind: 'rule', index })}
                 onDelete={(index) => openPackagingDialog({ kind: 'delete-rule', index })}
               />
-              <PackagingDefaultsCard
-                key={packaging.configKey}
-                initialDefaultWeight={packaging.defaultWeightPerItemKg}
-                initialReturnCost={packaging.returnCost}
-                onSave={handleDefaultsSave}
-                isSaving={isSavingDefaults}
-              />
+            </InlineGrid>
+
+            {/* Riga 2: Prezzi di spedizione + Peso di default e costo resi */}
+            <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+              <BlockStack>
+                <Card padding="0">
+                  <ShippingZonesTable zones={zones} onEdit={handleEdit} onEditOption={handleEditOption} />
+                </Card>
+              </BlockStack>
+              <BlockStack>
+                <PackagingDefaultsCard
+                  key={packaging.configKey}
+                  initialDefaultWeight={packaging.defaultWeightPerItemKg}
+                  initialReturnCost={packaging.returnCost}
+                  onSave={handleDefaultsSave}
+                  isSaving={isSavingDefaults}
+                />
+              </BlockStack>
             </InlineGrid>
           </>
         )}
