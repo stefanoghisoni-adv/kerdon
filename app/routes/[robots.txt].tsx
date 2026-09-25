@@ -1,4 +1,5 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
+import { PRIVACY_POLICY_PATH } from '~/lib/legal/privacy-policy';
 
 /**
  * Questo host non e' un sito: e' il backend di un'app Shopify.
@@ -15,7 +16,7 @@ import type { LoaderFunctionArgs } from '@remix-run/node';
  */
 export async function loader(_args: LoaderFunctionArgs) {
   return new Response(
-    'User-agent: *\nDisallow: /\nAllow: /policies/privacy-policy\n',
+    `User-agent: *\nDisallow: /\nAllow: ${PRIVACY_POLICY_PATH}\n`,
     {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',

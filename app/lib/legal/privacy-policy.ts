@@ -133,6 +133,18 @@ export function versioneEData(sorgente: string): { versione: string; data: strin
 }
 
 /**
+ * Il percorso della rotta dell'informativa.
+ *
+ * UNICO PUNTO IN CUI SI DICHIARA IL PERCORSO. Questa costante corrisponde al
+ * nome del file di rotta `policies.privacy-policy.tsx`, che in Remix flat-route
+ * naming diventa `/policies/privacy-policy`. Cambiare il file senza cambiare
+ * questa costante rompe il test, e viceversa: la rotta e il percorso restano
+ * allineati. Usata da `linkInformativa()`, `robots.txt` e qualsiasi altro punto
+ * che deve nominare questa rotta.
+ */
+export const PRIVACY_POLICY_PATH = '/policies/privacy-policy';
+
+/**
  * Il percorso relativo dell'informativa, con la lingua scritta dentro.
  *
  * UNICO PUNTO IN CUI SI COSTRUISCE L'INDIRIZZO. Prima stavano tre versioni
@@ -142,7 +154,7 @@ export function versioneEData(sorgente: string): { versione: string; data: strin
  * si cambia in un posto solo e niente si rompe.
  */
 export function linkInformativa(locale: Locale): string {
-  return `/policies/privacy-policy?lang=${locale}`;
+  return `${PRIVACY_POLICY_PATH}?lang=${locale}`;
 }
 
 /**

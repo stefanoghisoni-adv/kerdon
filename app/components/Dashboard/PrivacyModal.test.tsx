@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { linkInformativa } from '~/lib/legal/privacy-policy';
+import { PRIVACY_POLICY_PATH, linkInformativa } from '~/lib/legal/privacy-policy';
 import { LOCALES } from '~/lib/i18n/locales';
 
 /**
@@ -13,14 +13,12 @@ import { LOCALES } from '~/lib/i18n/locales';
  * un percorso che esiste.
  */
 describe('PrivacyModal: il link all informativa', () => {
-  const ROTTA_CORRETTA = '/policies/privacy-policy';
-
   it.each(LOCALES)('per %s punta alla rotta corretta', (locale) => {
     // Il componente usa `linkInformativa(locale)`, quindi questa e' la URL che
     // il Link di Polaris riceve.
     const url = linkInformativa(locale);
 
-    expect(url).toContain(ROTTA_CORRETTA);
+    expect(url).toContain(PRIVACY_POLICY_PATH);
     expect(url).toContain(`lang=${locale}`);
     // NON il vecchio percorso sbagliato
     expect(url).not.toContain('/policies/policies/');
