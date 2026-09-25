@@ -2,9 +2,8 @@ import { Fragment } from 'react';
 import { Badge, BlockStack, Button, IndexTable, Text } from '@shopify/polaris';
 import type { IndexTableProps } from '@shopify/polaris';
 import { useT, useLocale } from '~/lib/i18n/context';
-import { formatMoney } from '~/lib/billing/money';
-import { isCarrierCalculated, optionCostCell } from './option-cost';
-import type { OptionCostType } from '~/lib/shipping/types';
+import { formatIndicativeZoneCost, isCarrierCalculated, optionCostCell } from './option-cost';
+import type { OptionCostType, RateType } from '~/lib/shipping/types';
 
 interface Option {
   id: string;
@@ -25,7 +24,7 @@ interface Zone {
   zoneName: string;
   countries: string[];
   restOfWorld: boolean;
-  rateType: 'linear' | 'brackets';
+  rateType: RateType;
   rates: Array<{
     id: string;
     weightFromKg: number | null;
@@ -66,39 +65,10 @@ export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZone
     return t.shipping.countriesList(first, others);
   };
 
-  const formatIndicativeCost = (zone: Zone): string => {
-    if (zone.rates.length === 0) {
-      return t.shipping.costDisplay.empty;
-    }
-
-    if (zone.rateType === 'linear') {
-      const cost = zone.rates[0].cost;
-      return t.shipping.costDisplay.linear(
-        formatMoney(cost, 'EUR', locale)
-      );
-    }
-
-    // Fasce: dal costo minimo al massimo, oppure uno solo se coincidono.
-    const costs = zone.rates.map(r => r.cost);
-    const min = Math.min(...costs);
-    const max = Math.max(...costs);
-
-    if (min === max) {
-      return formatMoney(min, 'EUR', locale);
-    }
-
-    return t.shipping.costDisplay.brackets(
-      formatMoney(min, 'EUR', locale),
-      formatMoney(max, 'EUR', locale)
-    );
-  };
-
-  const costTypeLabels: Record<OptionCostType, string> = {
-    flat: t.shipping.optionModal.flatLabel,
-    linear: t.shipping.optionModal.linearLabel,
-    weight_brackets: t.shipping.optionModal.weightBracketsLabel,
-    value_brackets: t.shipping.optionModal.valueBracketsLabel,
-  };
+  // Le etichette brevi, non quelle della modale: nella tabella le celle non
+  // vanno a capo, e "Fasce di valore dell'ordine" bastava da sola a far
+  // scorrere di lato la tabella a meta' pagina.
+  const costTypeLabels: Record<OptionCostType, string> = t.shipping.table.costTypes;
 
   const headings: IndexTableProps['headings'] = [
     { title: t.shipping.table.option },
@@ -167,18 +137,14 @@ export function ShippingZonesTable({ zones, onEdit, onEditOption }: ShippingZone
     const genericId = `zona-${zone.id}-generica`;
     const genericRow = (
       <IndexTable.Row rowType="child" tone="subdued" id={genericId} key={genericId} position={position++}>
+        {/* Solo l'etichetta, senza riga di spiegazione: le celle della
+            tabella non vanno a capo, e una frase lunga qui allargava la
+            colonna fino a far scorrere di lato la tabella a meta' pagina. */}
         <IndexTable.Cell headers={headerId}>
-          <BlockStack gap="050">
-            <Text as="span">{t.shipping.table.genericRate}</Text>
-            {zone.options.length > 0 && (
-              <Text as="span" tone="subdued" variant="bodySm">
-                {t.shipping.table.genericRateHelp}
-              </Text>
-            )}
-          </BlockStack>
+          <Text as="span">{t.shipping.table.genericRate}</Text>
         </IndexTable.Cell>
         <IndexTable.Cell headers={headerId}>{t.shipping.rateTypes[zone.rateType]}</IndexTable.Cell>
-        <IndexTable.Cell headers={headerId}>{formatIndicativeCost(zone)}</IndexTable.Cell>
+        <IndexTable.Cell headers={headerId}>{formatIndicativeZoneCost(zone, t, locale)}</IndexTable.Cell>
         <IndexTable.Cell headers={headerId}>
           <Button
             size="slim"

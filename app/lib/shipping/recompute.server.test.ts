@@ -99,6 +99,7 @@ function ordine(over: Record<string, unknown>) {
     packaging_category: null,
     shipping_method: null,
     total_price: null,
+    package_count: null,
     ...over,
   };
 }
@@ -460,15 +461,46 @@ describe('ricalcolo: l opzione di spedizione scelta', () => {
               { from: 50, to: null, cost: 3 },
             ],
           },
+          { name: 'Corriere', costType: 'per_package', confirmed: true, brackets: [{ from: null, to: null, cost: 4 }] },
         ],
       },
     ],
   };
 
-  it('la SELECT legge anche opzione e totale dell ordine', () => {
+  it('la SELECT legge anche opzione, totale e pacchi dell ordine', () => {
     const sql = recomputeSelectSQL(null);
     expect(sql).toContain('shipping_method');
     expect(sql).toContain('total_price');
+    expect(sql).toContain('package_count');
+  });
+
+  it('il costo per pacco usa i pacchi letti dal database (anche come testo)', async () => {
+    (loadLogisticsConfigStrict as any).mockResolvedValue({
+      ...CONFIG,
+      zones: [
+        {
+          ...CONFIG.zones[0],
+          options: [
+            { name: 'Corriere', costType: 'per_package', confirmed: true, brackets: [{ from: null, to: null, cost: 4 }] },
+          ],
+        },
+      ],
+      categories: [],
+      returnCost: null,
+    });
+    (runQueryRows as any).mockResolvedValueOnce([
+      ordine({ shopify_order_id: '2101', shipping_method: 'Corriere', package_count: 3 }),
+      ordine({ shopify_order_id: '2102', shipping_method: 'Corriere', package_count: '2' }),
+      // Non ancora recuperato: un pacco.
+      ordine({ shopify_order_id: '2103', shipping_method: 'Corriere', package_count: null }),
+    ]);
+
+    await processLogisticsRecompute('shop-1');
+
+    const sql = scritture()[0];
+    expect(sql).toContain('(2101::bigint, 12.00::numeric)');
+    expect(sql).toContain('(2102::bigint, 8.00::numeric)');
+    expect(sql).toContain('(2103::bigint, 4.00::numeric)');
   });
 
   it('il costo segue l opzione e il totale letti dal database', async () => {
@@ -544,6 +576,9 @@ describe('ricalcolo: l opzione di spedizione scelta', () => {
       { ...base, id: 3003, shipping_method: 'Standard', total_price: '50.00', returned_at: '2026-09-05T00:00:00Z' },
       { ...base, id: 3004, shipping_method: 'Ritiro', total_price: '10.00' },
       { ...base, id: 3005, shipping_method: null, total_price: null, total_weight_grams: null },
+      // Per pacco: 3 pacchi, e nessun conteggio (vale uno).
+      { ...base, id: 3006, shipping_method: 'Corriere', total_price: '30.00', package_count: 3 },
+      { ...base, id: 3007, shipping_method: 'Corriere', total_price: '30.00', package_count: null },
     ];
 
     const scritti = ordini.map((o) => orderToRows(o, new Date(), CON_OPZIONI)!.order);
@@ -562,6 +597,7 @@ describe('ricalcolo: l opzione di spedizione scelta', () => {
         packaging_category: r.packaging_category,
         shipping_method: r.shipping_method,
         total_price: r.total_price == null ? null : r.total_price.toFixed(2),
+        package_count: r.package_count,
       })),
     );
 
@@ -572,7 +608,7 @@ describe('ricalcolo: l opzione di spedizione scelta', () => {
       expect(sql).toContain(`(${r.shopify_order_id}::bigint, ${r.logistics_cost.toFixed(2)}::numeric)`);
     }
     // Non un confronto fra due zeri: i costi devono essere quelli attesi.
-    expect(scritti.map((r) => r.logistics_cost)).toEqual([10, 7, 7, 8.5, 1]);
+    expect(scritti.map((r) => r.logistics_cost)).toEqual([10, 7, 7, 8.5, 1, 13, 5]);
   });
 });
 

@@ -384,3 +384,45 @@ describe('orderToRows — opzione di spedizione scelta dal cliente', () => {
     ).toBe(3);
   });
 });
+
+describe('orderToRows — pacchi spediti', () => {
+  const config: LogisticsConfig = {
+    zones: [
+      {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        restOfWorld: false,
+        rateType: 'per_package',
+        rates: [{ weightFromKg: null, weightToKg: null, cost: 5 }],
+        options: [
+          { name: 'Corriere', costType: 'per_package', confirmed: true, brackets: [{ from: null, to: null, cost: 4.9 }] },
+        ],
+      },
+    ],
+    categories: [],
+    fallbackRules: [],
+    defaultWeightPerItemKg: null,
+    returnCost: null,
+  };
+
+  const spedito = (over: Partial<ShopifyOrder> = {}) =>
+    order({ fulfillment_status: 'FULFILLED', shipping_country_code: 'IT', total_weight_grams: 1000, ...over });
+
+  it('scrive sull ordine il numero di pacchi', () => {
+    expect(orderToRows(spedito({ package_count: 2 }), SYNCED)!.order.package_count).toBe(2);
+  });
+
+  it('senza conteggio la colonna resta NULL', () => {
+    expect(orderToRows(spedito(), SYNCED)!.order.package_count).toBeNull();
+  });
+
+  it('il costo per pacco moltiplica per i pacchi spediti', () => {
+    expect(orderToRows(spedito({ shipping_method: 'Corriere', package_count: 2 }), SYNCED, config)!.order.logistics_cost).toBe(9.8);
+    // Tariffa generica della zona, anch'essa per pacco.
+    expect(orderToRows(spedito({ package_count: 3 }), SYNCED, config)!.order.logistics_cost).toBe(15);
+  });
+
+  it('spedito ma zero pacchi registrati: si paga un pacco', () => {
+    expect(orderToRows(spedito({ shipping_method: 'Corriere', package_count: 0 }), SYNCED, config)!.order.logistics_cost).toBe(4.9);
+  });
+});

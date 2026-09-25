@@ -917,6 +917,8 @@ describe('ordini: i dati di spedizione', () => {
     for (const field of [
       'displayFulfillmentStatus',
       'trackingInfo { number }',
+      // Lo stato di ogni spedizione: quelle annullate non sono pacchi.
+      'fulfillments(first: 10) { status trackingInfo { number } }',
       'countryCodeV2',
       'totalWeight',
       'returns(first: 5)',
@@ -952,6 +954,31 @@ describe('ordini: i dati di spedizione', () => {
     );
     const order = await client().getOrderById(700);
     expect(order?.fulfillment_status).toBe('FULFILLED');
+  });
+
+  it('i pacchi sono le spedizioni partite davvero', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({
+        order: orderNode({
+          displayFulfillmentStatus: 'FULFILLED',
+          fulfillments: [
+            { status: 'SUCCESS', trackingInfo: [{ number: 'A' }] },
+            { status: 'CANCELLED', trackingInfo: [{ number: 'B' }] },
+            { status: 'SUCCESS', trackingInfo: [] },
+          ],
+        }),
+      }),
+    );
+    const order = await client().getOrderById(700);
+    expect(order?.package_count).toBe(2);
+  });
+
+  it('nessuna spedizione: zero pacchi', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce(ok({ order: orderNode({ fulfillments: [] }) }))
+      .mockResolvedValueOnce(ok({ order: orderNode({ fulfillments: null }) }));
+    expect((await client().getOrderById(700))?.package_count).toBe(0);
+    expect((await client().getOrderById(700))?.package_count).toBe(0);
   });
 
   it('un reso annullato o rifiutato non e un pacco rientrato', async () => {
@@ -1127,64 +1154,69 @@ describe('i guasti passeggeri si ritentano', () => {
 
 // Il recupero dell'opzione sugli ordini storici (shipping-method-backfill):
 // una query leggera per lotti di id, solo il titolo della prima shipping line.
-describe('getOrderShippingTitles', () => {
+describe('getOrderShippingFacts', () => {
   beforeEach(() => {
     global.fetch = vi.fn();
   });
 
-  it('chiede solo la prima shipping line, con nodes(ids:), per gli id dati', async () => {
+  it('chiede prima shipping line e stato delle spedizioni, con nodes(ids:), per gli id dati', async () => {
     (global.fetch as any).mockResolvedValueOnce(
       ok({
         nodes: [
-          { id: 'gid://shopify/Order/11', shippingLines: { nodes: [{ title: 'Express' }] } },
-          { id: 'gid://shopify/Order/12', shippingLines: { nodes: [] } },
+          {
+            id: 'gid://shopify/Order/11',
+            shippingLines: { nodes: [{ title: 'Express' }] },
+            fulfillments: [{ status: 'SUCCESS' }, { status: 'CANCELLED' }, { status: 'SUCCESS' }],
+          },
+          { id: 'gid://shopify/Order/12', shippingLines: { nodes: [] }, fulfillments: [] },
         ],
       }),
     );
 
-    const titoli = await client().getOrderShippingTitles(['11', '12']);
+    const fatti = await client().getOrderShippingFacts(['11', '12']);
 
     const corpo = sentBody();
     expect(corpo.query).toContain('nodes(ids: $ids)');
     expect(corpo.query).toContain('shippingLines(first: 1) { nodes { title } }');
+    expect(corpo.query).toContain('fulfillments(first: 10) { status }');
     // Niente righe, clienti o importi: il costo della query resta minimo.
     expect(corpo.query).not.toContain('lineItems');
     expect(corpo.variables.ids).toEqual(['gid://shopify/Order/11', 'gid://shopify/Order/12']);
-    expect(titoli.get('11')).toBe('Express');
-    expect(titoli.get('12')).toBe('');
+    expect(fatti.get('11')).toEqual({ method: 'Express', packageCount: 2 });
+    expect(fatti.get('12')).toEqual({ method: '', packageCount: 0 });
   });
 
-  it('shipping line assente, titolo vuoto o ordine non piu\' su Shopify: stringa vuota', async () => {
+  it('shipping line assente, titolo vuoto o ordine non piu\' su Shopify: stringa vuota e zero pacchi', async () => {
     (global.fetch as any).mockResolvedValueOnce(
       ok({
         nodes: [
-          { id: 'gid://shopify/Order/1', shippingLines: null },
+          { id: 'gid://shopify/Order/1', shippingLines: null, fulfillments: null },
           { id: 'gid://shopify/Order/2', shippingLines: { nodes: [{ title: null }] } },
           null,
         ],
       }),
     );
 
-    const titoli = await client().getOrderShippingTitles(['1', '2', '3']);
+    const fatti = await client().getOrderShippingFacts(['1', '2', '3']);
 
-    expect(titoli.get('1')).toBe('');
-    expect(titoli.get('2')).toBe('');
+    expect(fatti.get('1')).toEqual({ method: '', packageCount: 0 });
+    expect(fatti.get('2')).toEqual({ method: '', packageCount: 0 });
     // Il nodo nullo e' l'ordine 3 (stessa posizione): cancellato su Shopify.
-    expect(titoli.get('3')).toBe('');
+    expect(fatti.get('3')).toEqual({ method: '', packageCount: 0 });
   });
 
   it('id oltre 2^53 restano esatti: si confrontano come testo', async () => {
     const grande = '9007199254740993';
     (global.fetch as any).mockResolvedValueOnce(
-      ok({ nodes: [{ id: `gid://shopify/Order/${grande}`, shippingLines: { nodes: [{ title: 'Std' }] } }] }),
+      ok({ nodes: [{ id: `gid://shopify/Order/${grande}`, shippingLines: { nodes: [{ title: 'Std' }] }, fulfillments: [{ status: 'SUCCESS' }] }] }),
     );
-    const titoli = await client().getOrderShippingTitles([grande]);
-    expect(titoli.get(grande)).toBe('Std');
+    const fatti = await client().getOrderShippingFacts([grande]);
+    expect(fatti.get(grande)).toEqual({ method: 'Std', packageCount: 1 });
   });
 
   it('nessun id: nessuna chiamata', async () => {
-    const titoli = await client().getOrderShippingTitles([]);
-    expect(titoli.size).toBe(0);
+    const fatti = await client().getOrderShippingFacts([]);
+    expect(fatti.size).toBe(0);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -1207,7 +1239,7 @@ describe('getOrderShippingTitles', () => {
 
     let finito = false;
     const promessa = client()
-      .getOrderShippingTitles(['1'])
+      .getOrderShippingFacts(['1'])
       .then(() => {
         finito = true;
       });

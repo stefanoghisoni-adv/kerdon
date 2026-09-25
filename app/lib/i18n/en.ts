@@ -1055,10 +1055,16 @@ export const en: typeof it = {
       indicativeCost: "Indicative cost",
       actions: "Actions",
       edit: "Edit",
-      genericRate: "Zone's generic rate",
-      genericRateHelp:
-        "Applies to orders whose shipping option you haven't filled in yet, or that we can't match to one of the options below",
+      genericRate: "Generic rate",
       toFill: "To fill in",
+      // Short cost type labels for the table column (see it.ts).
+      costTypes: {
+        flat: "Flat",
+        linear: "Per kg",
+        weight_brackets: "Weight brackets",
+        value_brackets: "Value brackets",
+        per_package: "Per package",
+      },
       carrierNameHelp:
         "Rate calculated at checkout: this cost applies only when the order shows exactly this name, otherwise the zone rate applies",
       editGenericRateLabel: (zoneName: string) => `Edit the generic rate for ${zoneName}`,
@@ -1073,9 +1079,11 @@ export const en: typeof it = {
     rateTypes: {
       linear: "Linear",
       brackets: "Weight brackets",
+      per_package: "Per package",
     },
     costDisplay: {
       linear: (costPerKg: string) => `${costPerKg}/kg`,
+      perPackage: (costPerPackage: string) => `${costPerPackage}/package`,
       brackets: (min: string, max: string) => `${min} – ${max}`,
       empty: "—",
     },
@@ -1083,9 +1091,14 @@ export const en: typeof it = {
       title: (zoneName: string) => `Rates for ${zoneName}`,
       rateTypeLabel: "Rate type",
       rateTypeHelp:
-        "Choose whether cost grows linearly with weight or you use weight brackets with fixed costs.",
+        "Choose whether the cost depends on weight, with a price per kg or brackets, or on the number of packages shipped.",
       linearLabel: "Linear (€/kg)",
       bracketsLabel: "Weight brackets",
+      perPackageLabel: "Per shipped package",
+      perPackageCostLabel: "€ per package",
+      perPackageCostPlaceholder: "0.00",
+      perPackageCostHelp:
+        "Each shipment Shopify records for the order counts as one package: an order sent in two packages costs twice as much.",
       linearCostLabel: "Cost per kg",
       linearCostPlaceholder: "0.00",
       linearCostHelp: "How much it costs you to ship 1 kg to this zone",
@@ -1114,6 +1127,7 @@ export const en: typeof it = {
         "A bracket can't start after it ends",
       invalidLinearCost: "Enter a valid cost per kg, 0 or more",
       invalidFlatCost: "Enter a valid flat cost, 0 or more",
+      invalidPerPackageCost: "Enter a valid cost per package, 0 or more",
       invalidBrackets: "The brackets aren't valid: check the thresholds and costs",
     },
     optionModal: {
@@ -1127,12 +1141,17 @@ export const en: typeof it = {
       linearLabel: "Per kg",
       weightBracketsLabel: "Weight brackets",
       valueBracketsLabel: "Order value brackets",
+      perPackageLabel: "Per shipped package",
       flatCostLabel: "Flat cost (€)",
       flatCostPlaceholder: "0.00",
       flatCostHelp: "What this shipment costs you, regardless of weight or value",
       linearCostLabel: "Cost per kg (€)",
       linearCostPlaceholder: "0.00",
       linearCostHelp: "What it costs you to ship 1 kg with this option",
+      perPackageCostLabel: "€ per package",
+      perPackageCostPlaceholder: "0.00",
+      perPackageCostHelp:
+        "Each shipment Shopify records for the order counts as one package: an order sent in two packages costs twice as much.",
       weightBracketsHelp:
         "Thresholds in kg on the order weight. The first bracket starts at 0 kg, brackets are contiguous, and only the last can be unlimited.",
       valueBracketsHelp:

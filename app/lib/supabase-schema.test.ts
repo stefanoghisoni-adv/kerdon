@@ -183,6 +183,7 @@ describe('ordini: i dati di spedizione', () => {
       'packaging_category TEXT',
       'logistics_cost NUMERIC(10, 2)',
       'shipping_method TEXT',
+      'package_count INTEGER',
     ]) {
       expect(sql).toContain(`ADD COLUMN IF NOT EXISTS ${column}`);
     }

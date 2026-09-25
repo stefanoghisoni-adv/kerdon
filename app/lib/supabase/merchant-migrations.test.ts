@@ -92,6 +92,12 @@ describe('numero di versione e cio che promette', () => {
     expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(13);
   });
 
+  it('la 14 porta sugli ordini il numero di pacchi spediti', () => {
+    // Come la 13: una colonna aggiunta, che arriva solo se il numero sale.
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(14);
+    expect(buildSchemaUpdateSQL(13, true, true)).toContain('ADD COLUMN IF NOT EXISTS package_count INTEGER');
+  });
+
   it('l aggiornamento porta le colonne dell indirizzo del cliente', () => {
     // Sono aggiunte, quindi non hanno un passo esplicito: le porta la DDL
     // idempotente, che pero' viaggia solo se il numero di versione e' salito.

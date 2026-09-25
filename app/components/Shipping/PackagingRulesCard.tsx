@@ -1,4 +1,4 @@
-import { BlockStack, Box, Button, Card, IndexTable, InlineStack, Text } from '@shopify/polaris';
+import { BlockStack, Box, Button, Card, IndexTable, InlineGrid, InlineStack, Text } from '@shopify/polaris';
 import type { IndexTableProps } from '@shopify/polaris';
 import { useLocale, useT } from '~/lib/i18n/context';
 import type { Dictionary } from '~/lib/i18n/context';
@@ -33,7 +33,10 @@ export function PackagingRulesCard({ rules, hasCategories, onAdd, onEdit, onDele
     <Card padding="0">
       <BlockStack gap="0">
         <Box padding="400">
-          <InlineStack align="space-between" blockAlign="start" gap="400" wrap={false}>
+          {/* Il testo prende lo spazio che resta e va a capo; il pulsante resta
+              della sua larghezza, su una riga. Con InlineStack senza a capo
+              era il pulsante a stringersi e a spezzare l'etichetta. */}
+          <InlineGrid columns="minmax(0, 1fr) max-content" gap="400" alignItems="start">
             <BlockStack gap="100">
               <Text as="h2" variant="headingMd">
                 {r.title}
@@ -47,7 +50,7 @@ export function PackagingRulesCard({ rules, hasCategories, onAdd, onEdit, onDele
                 {r.add}
               </Button>
             </Box>
-          </InlineStack>
+          </InlineGrid>
         </Box>
         {rules.length === 0 ? (
           <Box paddingInline="400" paddingBlockEnd="400">

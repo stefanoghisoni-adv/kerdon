@@ -1,5 +1,9 @@
 // app/lib/shipping/types.ts
-export type RateType = 'linear' | 'brackets';
+/**
+ * `per_package`: costo per pacco spedito, `rates[0].cost` x numero di pacchi.
+ * Per chi paga il corriere a collo e non a peso.
+ */
+export type RateType = 'linear' | 'brackets' | 'per_package';
 
 export interface RateBracket {
   weightFromKg: number | null;
@@ -7,7 +11,8 @@ export interface RateBracket {
   cost: number;
 }
 
-export type OptionCostType = 'flat' | 'linear' | 'weight_brackets' | 'value_brackets';
+/** `per_package`: come la tariffa di zona omonima, `brackets[0].cost` x pacchi. */
+export type OptionCostType = 'flat' | 'linear' | 'weight_brackets' | 'value_brackets' | 'per_package';
 
 export interface OptionBracket {
   from: number | null;
@@ -64,4 +69,10 @@ export interface OrderLogisticsInput {
   packaging_category: string | null;
   shipping_method: string | null;
   total_price: number | null;
+  /**
+   * Quante spedizioni partite davvero Shopify ha registrato per l'ordine: un
+   * pacco ciascuna. NULL sugli ordini scritti prima dello schema 14 e non
+   * ancora recuperati; il calcolo lo legge con `effectivePackageCount`.
+   */
+  package_count: number | null;
 }

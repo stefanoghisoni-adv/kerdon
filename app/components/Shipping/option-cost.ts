@@ -4,13 +4,58 @@
 // vivono qui: sono quelle delle fasce di zona (brackets.ts), cosi' una modifica
 // alle regole vale per entrambe e le due modali non possono divergere.
 
-import type { OptionCostType, OptionBracket, RateBracket } from '~/lib/shipping/types';
+import type { OptionCostType, OptionBracket, RateBracket, RateType } from '~/lib/shipping/types';
 import type { Locale } from '~/lib/i18n/locales';
 import type { Dictionary } from '~/lib/i18n/context';
-import { formatMoneyExact } from '~/lib/billing/money';
+import { formatMoney, formatMoneyExact } from '~/lib/billing/money';
+import { it as italiano } from '~/lib/i18n/it';
+import { en as inglese } from '~/lib/i18n/en';
 import { INVALID_BRACKETS, validateBrackets, parseBrackets } from './brackets';
 
 export { INVALID_BRACKETS };
+
+/**
+ * I tipi con un costo solo, scritto in un campo: fisso, al kg e per pacco.
+ * Non hanno fasce, e il loro campo si controlla con la stessa regola.
+ */
+export type SingleCostType = 'flat' | 'linear' | 'per_package';
+
+export const isSingleCostType = (c: OptionCostType): c is SingleCostType =>
+  c === 'flat' || c === 'linear' || c === 'per_package';
+
+/** Il dizionario della lingua, per i pochi testi che le funzioni pure scrivono. */
+const dizionario = (locale: Locale): Dictionary => (locale === 'en' ? inglese : italiano);
+
+/**
+ * Il costo indicativo della tariffa generica di una zona, per la tabella.
+ *
+ * Era scritto dentro il componente; e' qui per poterlo provare, ora che i
+ * tipi sono tre. Importi con formatMoney (senza centesimi quando sono tondi)
+ * come prima, tranne il per pacco, che si scrive come quello delle opzioni:
+ * "€ 4,90/pacco" nelle due righe della stessa zona deve leggersi uguale.
+ */
+export function formatIndicativeZoneCost(
+  zone: { rateType: RateType; rates: ReadonlyArray<{ cost: number }> },
+  t: Dictionary,
+  locale: Locale,
+): string {
+  if (zone.rates.length === 0) return t.shipping.costDisplay.empty;
+
+  if (zone.rateType === 'per_package') {
+    return t.shipping.costDisplay.perPackage(formatMoneyExact(zone.rates[0].cost, 'EUR', locale));
+  }
+
+  if (zone.rateType === 'linear') {
+    return t.shipping.costDisplay.linear(formatMoney(zone.rates[0].cost, 'EUR', locale));
+  }
+
+  // Fasce: dal costo minimo al massimo, oppure uno solo se coincidono.
+  const costs = zone.rates.map((r) => r.cost);
+  const min = Math.min(...costs);
+  const max = Math.max(...costs);
+  if (min === max) return formatMoney(min, 'EUR', locale);
+  return t.shipping.costDisplay.brackets(formatMoney(min, 'EUR', locale), formatMoney(max, 'EUR', locale));
+}
 
 /**
  * Il costo indicativo di un'opzione, per la tabella delle zone.
@@ -34,6 +79,10 @@ export function formatIndicativeOptionCost(
 
   if (costType === 'linear') {
     return `${formatMoneyExact(rates[0].cost, currency, locale)}/kg`;
+  }
+
+  if (costType === 'per_package') {
+    return dizionario(locale).shipping.costDisplay.perPackage(formatMoneyExact(rates[0].cost, currency, locale));
   }
 
   // Fasce: dal costo minimo al massimo, oppure uno solo se coincidono.
@@ -104,7 +153,7 @@ function comeFasceDiZona(input: unknown): unknown {
  * @returns la chiave i18n dell'errore, oppure null se le fasce vanno bene
  */
 export function validateOptionBrackets(costType: OptionCostType, input: unknown): string | null {
-  if (costType === 'flat' || costType === 'linear') return null;
+  if (isSingleCostType(costType)) return null;
   return validateBrackets(comeFasceDiZona(input));
 }
 
@@ -120,8 +169,8 @@ export function parseOptionBrackets(
   costType: OptionCostType,
   raw: string | undefined,
 ): { brackets: OptionBracket[]; error: null } | { brackets: null; error: string } {
-  // Il fisso e il costo al kg non hanno fasce: niente da leggere dal campo.
-  if (costType === 'flat' || costType === 'linear') return { brackets: [], error: null };
+  // Fisso, al kg e per pacco non hanno fasce: niente da leggere dal campo.
+  if (isSingleCostType(costType)) return { brackets: [], error: null };
   const letto = parseBrackets(raw, comeFasceDiZona);
   if (letto.error !== null) return { brackets: null, error: letto.error };
   return { brackets: fromRateBrackets(letto.brackets), error: null };
@@ -164,11 +213,18 @@ export function bracketEditorLabels(
  *
  * Ogni tipo ha il suo errore, perche' il messaggio compare sotto il suo campo.
  */
-export function validateCostField(costType: 'flat' | 'linear', raw: string): string | null {
+export function validateCostField(costType: SingleCostType, raw: string): string | null {
   const n = parseFloat(raw);
   if (Number.isFinite(n) && n >= 0) return null;
-  return costType === 'flat' ? 'shipping.errors.invalidFlatCost' : 'shipping.errors.invalidLinearCost';
+  return COST_FIELD_ERROR[costType];
 }
+
+/** L'errore di ciascun campo di costo, anche per il server che lo rimanda. */
+export const COST_FIELD_ERROR: Record<SingleCostType, string> = {
+  flat: 'shipping.errors.invalidFlatCost',
+  linear: 'shipping.errors.invalidLinearCost',
+  per_package: 'shipping.errors.invalidPerPackageCost',
+};
 
 /**
  * L'errore da mostrare mentre il merchant scrive.
@@ -177,7 +233,7 @@ export function validateCostField(costType: 'flat' | 'linear', raw: string): str
  * valido e Salva si riabilita. Il campo vuoto non e' ancora un errore: il
  * merchant lo sta riscrivendo. Al salvataggio invece vale validateCostField.
  */
-export function costFieldErrorWhileTyping(costType: 'flat' | 'linear', raw: string): string | null {
+export function costFieldErrorWhileTyping(costType: SingleCostType, raw: string): string | null {
   if (raw.trim() === '') return null;
   return validateCostField(costType, raw);
 }

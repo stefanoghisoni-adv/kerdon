@@ -10,6 +10,8 @@ import {
   bracketEditorLabels,
   toRateBrackets,
   fromRateBrackets,
+  isSingleCostType,
+  COST_FIELD_ERROR,
 } from './option-cost';
 import type { OptionCostType, OptionBracket } from '~/lib/shipping/types';
 
@@ -31,6 +33,7 @@ function getValidationErrorMessage(
     'shipping.errors.weightFromGreaterThanWeightTo': t.shipping.errors.weightFromGreaterThanWeightTo,
     'shipping.errors.invalidLinearCost': t.shipping.errors.invalidLinearCost,
     'shipping.errors.invalidFlatCost': t.shipping.errors.invalidFlatCost,
+    'shipping.errors.invalidPerPackageCost': t.shipping.errors.invalidPerPackageCost,
     'shipping.errors.invalidBrackets': t.shipping.errors.invalidBrackets,
   };
 
@@ -61,6 +64,7 @@ interface EditOptionModalProps {
     costType: OptionCostType;
     flatCost?: string;
     linearCost?: string;
+    perPackageCost?: string;
     brackets?: OptionBracket[];
   }) => void;
   /** Il salvataggio e' partito e il server non ha ancora risposto. */
@@ -97,6 +101,9 @@ export function EditOptionModal({
   const [linearCost, setLinearCost] = useState(
     option.costType === 'linear' && option.rates.length > 0 ? option.rates[0].cost.toString() : ''
   );
+  const [perPackageCost, setPerPackageCost] = useState(
+    option.costType === 'per_package' && option.rates.length > 0 ? option.rates[0].cost.toString() : ''
+  );
 
   // Le fasce partono sempre da cio' che l'editor mostra (mai da una lista
   // vuota), cosi' passare a fasce e salvare subito salva la fascia visibile.
@@ -126,15 +133,22 @@ export function EditOptionModal({
     setValidationError(costFieldErrorWhileTyping('linear', value));
   }, []);
 
+  const handlePerPackageCostChange = useCallback((value: string) => {
+    setPerPackageCost(value);
+    setValidationError(costFieldErrorWhileTyping('per_package', value));
+  }, []);
+
   const handleSave = () => {
-    if (costType === 'flat' || costType === 'linear') {
-      const valore = costType === 'flat' ? flatCost : linearCost;
+    if (isSingleCostType(costType)) {
+      const valore = costType === 'flat' ? flatCost : costType === 'linear' ? linearCost : perPackageCost;
       const error = validateCostField(costType, valore);
       if (error) {
         setValidationError(error);
         return;
       }
-      onSave(costType === 'flat' ? { costType, flatCost } : { costType, linearCost });
+      if (costType === 'flat') onSave({ costType, flatCost });
+      else if (costType === 'linear') onSave({ costType, linearCost });
+      else onSave({ costType, perPackageCost });
       return;
     }
     const error = validateOptionBrackets(costType, brackets);
@@ -148,8 +162,7 @@ export function EditOptionModal({
   // Gli errori dei campi di costo compaiono sotto il campo; quelli delle
   // fasce, che riguardano l'insieme, sotto l'editor.
   const costFieldError =
-    validationError === 'shipping.errors.invalidFlatCost' ||
-    validationError === 'shipping.errors.invalidLinearCost'
+    validationError !== null && Object.values(COST_FIELD_ERROR).includes(validationError)
       ? getValidationErrorMessage(validationError, t) ?? undefined
       : undefined;
 
@@ -191,6 +204,7 @@ export function EditOptionModal({
               { label: t.shipping.optionModal.linearLabel, value: 'linear' },
               { label: t.shipping.optionModal.weightBracketsLabel, value: 'weight_brackets' },
               { label: t.shipping.optionModal.valueBracketsLabel, value: 'value_brackets' },
+              { label: t.shipping.optionModal.perPackageLabel, value: 'per_package' },
             ]}
             selected={[costType]}
             onChange={handleCostTypeChange}
@@ -219,6 +233,21 @@ export function EditOptionModal({
               onChange={handleLinearCostChange}
               placeholder={t.shipping.optionModal.linearCostPlaceholder}
               helpText={t.shipping.optionModal.linearCostHelp}
+              autoComplete="off"
+              min={0}
+              step={0.01}
+              error={costFieldError}
+            />
+          )}
+
+          {costType === 'per_package' && (
+            <TextField
+              label={t.shipping.optionModal.perPackageCostLabel}
+              type="number"
+              value={perPackageCost}
+              onChange={handlePerPackageCostChange}
+              placeholder={t.shipping.optionModal.perPackageCostPlaceholder}
+              helpText={t.shipping.optionModal.perPackageCostHelp}
               autoComplete="off"
               min={0}
               step={0.01}

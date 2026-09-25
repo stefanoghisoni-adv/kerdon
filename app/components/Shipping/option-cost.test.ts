@@ -16,6 +16,7 @@ import {
   DEFAULT_OPTION_BRACKET,
   optionCostCell,
   isCarrierCalculated,
+  formatIndicativeZoneCost,
 } from './option-cost';
 import { validateBrackets } from './brackets';
 import { it as italiano } from '~/lib/i18n/it';
@@ -354,5 +355,60 @@ describe('isCarrierCalculated', () => {
     expect(isCarrierCalculated('DeliveryRateDefinition')).toBe(false);
     expect(isCarrierCalculated('DeliveryRateDefinition:TOTAL_WEIGHT')).toBe(false);
     expect(isCarrierCalculated(null)).toBe(false);
+  });
+});
+
+describe('costo per pacco spedito', () => {
+  const uno = [{ from: null, to: null, cost: 4.9 }];
+
+  it('costo indicativo: "€ 4,90/pacco", in inglese "/package"', () => {
+    expect(formatIndicativeOptionCost('per_package', uno, 'EUR', 'it')).toBe('€\u00a04,90/pacco');
+    expect(formatIndicativeOptionCost('per_package', uno, 'EUR', 'en')).toBe('€\u00a04.90/package');
+  });
+
+  it('senza tariffe: il trattino, come gli altri tipi', () => {
+    expect(formatIndicativeOptionCost('per_package', [], 'EUR', 'it')).toBe('—');
+  });
+
+  it('il campo del costo si controlla come fisso e al kg, con il suo errore', () => {
+    expect(validateCostField('per_package', '4.9')).toBeNull();
+    expect(validateCostField('per_package', '0')).toBeNull();
+    expect(validateCostField('per_package', '-1')).toBe('shipping.errors.invalidPerPackageCost');
+    expect(validateCostField('per_package', 'abc')).toBe('shipping.errors.invalidPerPackageCost');
+    expect(validateCostField('per_package', '')).toBe('shipping.errors.invalidPerPackageCost');
+    expect(costFieldErrorWhileTyping('per_package', '')).toBeNull();
+    expect(costFieldErrorWhileTyping('per_package', '-3')).toBe('shipping.errors.invalidPerPackageCost');
+  });
+
+  it('niente fasce da leggere o controllare', () => {
+    expect(validateOptionBrackets('per_package', [])).toBeNull();
+    expect(parseOptionBrackets('per_package', undefined)).toEqual({ brackets: [], error: null });
+    expect(initialOptionBrackets({ costType: 'per_package', rates: [{ from: null, to: null, cost: 3 }] })).toEqual([
+      DEFAULT_OPTION_BRACKET,
+    ]);
+  });
+
+  it('il messaggio d\'errore esiste in entrambe le lingue', () => {
+    expect(italiano.shipping.errors.invalidPerPackageCost).toMatch(/pacco/);
+    expect(inglese.shipping.errors.invalidPerPackageCost).toMatch(/package/);
+  });
+});
+
+describe('formatIndicativeZoneCost: la tariffa generica nella tabella', () => {
+  const zona = (rateType: 'linear' | 'brackets' | 'per_package', costs: number[]) => ({
+    rateType,
+    rates: costs.map((cost) => ({ cost })),
+  });
+
+  it('per pacco: "€ 4,90/pacco"', () => {
+    expect(formatIndicativeZoneCost(zona('per_package', [4.9]), italiano, 'it')).toBe('€\u00a04,90/pacco');
+    expect(formatIndicativeZoneCost(zona('per_package', [4.9]), inglese, 'en')).toBe('€\u00a04.90/package');
+  });
+
+  it('i tipi di prima restano come erano', () => {
+    expect(formatIndicativeZoneCost(zona('linear', [1.2]), italiano, 'it')).toBe('€\u00a01,20/kg');
+    expect(formatIndicativeZoneCost(zona('brackets', [5, 8]), italiano, 'it')).toBe('€\u00a05 – €\u00a08');
+    expect(formatIndicativeZoneCost(zona('brackets', [5, 5]), italiano, 'it')).toBe('€\u00a05');
+    expect(formatIndicativeZoneCost(zona('per_package', []), italiano, 'it')).toBe('—');
   });
 });

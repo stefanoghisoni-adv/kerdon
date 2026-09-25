@@ -9,7 +9,8 @@ import {
 import { useT } from '~/lib/i18n/context';
 import { BracketsEditor } from './BracketsEditor';
 import { validateBrackets } from './brackets';
-import type { RateBracket } from '~/lib/shipping/types';
+import { costFieldErrorWhileTyping, validateCostField } from './option-cost';
+import type { RateBracket, RateType } from '~/lib/shipping/types';
 
 // Mappa tipizzata degli errori di validazione alle chiavi i18n
 function getValidationErrorMessage(
@@ -27,6 +28,7 @@ function getValidationErrorMessage(
     'shipping.errors.costMustBeNonNegative': t.shipping.errors.costMustBeNonNegative,
     'shipping.errors.weightFromGreaterThanWeightTo': t.shipping.errors.weightFromGreaterThanWeightTo,
     'shipping.errors.invalidLinearCost': t.shipping.errors.invalidLinearCost,
+    'shipping.errors.invalidPerPackageCost': t.shipping.errors.invalidPerPackageCost,
     'shipping.errors.invalidBrackets': t.shipping.errors.invalidBrackets,
   };
 
@@ -38,7 +40,7 @@ interface Zone {
   zoneName: string;
   countries: string[];
   restOfWorld: boolean;
-  rateType: 'linear' | 'brackets';
+  rateType: RateType;
   rates: Array<{
     id: string;
     weightFromKg: number | null;
@@ -51,8 +53,9 @@ interface EditZoneModalProps {
   zone: Zone;
   onClose: () => void;
   onSave: (data: {
-    rateType: 'linear' | 'brackets';
+    rateType: RateType;
     costPerKg?: string;
+    costPerPackage?: string;
     brackets?: RateBracket[];
   }) => void;
   /** Il salvataggio e' partito e il server non ha ancora risposto. */
@@ -68,7 +71,7 @@ interface EditZoneModalProps {
 export function EditZoneModal({ zone, onClose, onSave, isSaving = false, serverError = null }: EditZoneModalProps) {
   const t = useT();
 
-  const [rateType, setRateType] = useState<'linear' | 'brackets'>(zone.rateType);
+  const [rateType, setRateType] = useState<RateType>(zone.rateType);
 
   // Linear rate
   const initialLinearCost =
@@ -76,6 +79,13 @@ export function EditZoneModal({ zone, onClose, onSave, isSaving = false, serverE
       ? zone.rates[0].cost.toString()
       : '';
   const [linearCost, setLinearCost] = useState(initialLinearCost);
+
+  // Il costo per pacco parte dal valore salvato solo se la zona e' gia' per
+  // pacco: un costo al kg riletto come costo per pacco sarebbe un numero
+  // giusto nel posto sbagliato.
+  const [perPackageCost, setPerPackageCost] = useState(
+    zone.rateType === 'per_package' && zone.rates.length > 0 ? zone.rates[0].cost.toString() : '',
+  );
 
   // Brackets
   const initialBrackets: RateBracket[] =
@@ -92,7 +102,7 @@ export function EditZoneModal({ zone, onClose, onSave, isSaving = false, serverE
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const handleRateTypeChange = useCallback((selected: string[]) => {
-    const newType = selected[0] as 'linear' | 'brackets';
+    const newType = selected[0] as RateType;
     setRateType(newType);
     setValidationError(null);
   }, []);
@@ -103,7 +113,23 @@ export function EditZoneModal({ zone, onClose, onSave, isSaving = false, serverE
     setValidationError(error);
   }, []);
 
+  // Come nella modale delle opzioni: l'errore si ricalcola a ogni tasto e
+  // sparisce appena il valore torna valido.
+  const handlePerPackageCostChange = useCallback((value: string) => {
+    setPerPackageCost(value);
+    setValidationError(costFieldErrorWhileTyping('per_package', value));
+  }, []);
+
   const handleSave = () => {
+    if (rateType === 'per_package') {
+      const error = validateCostField('per_package', perPackageCost);
+      if (error) {
+        setValidationError(error);
+        return;
+      }
+      onSave({ rateType: 'per_package', costPerPackage: perPackageCost });
+      return;
+    }
     if (rateType === 'linear') {
       const cost = parseFloat(linearCost);
       if (isNaN(cost) || cost < 0) {
@@ -153,12 +179,33 @@ export function EditZoneModal({ zone, onClose, onSave, isSaving = false, serverE
                 label: t.shipping.modal.bracketsLabel,
                 value: 'brackets',
               },
+              {
+                label: t.shipping.modal.perPackageLabel,
+                value: 'per_package',
+              },
             ]}
             selected={[rateType]}
             onChange={handleRateTypeChange}
           />
 
-          {rateType === 'linear' ? (
+          {rateType === 'per_package' ? (
+            <TextField
+              label={t.shipping.modal.perPackageCostLabel}
+              type="number"
+              value={perPackageCost}
+              onChange={handlePerPackageCostChange}
+              placeholder={t.shipping.modal.perPackageCostPlaceholder}
+              helpText={t.shipping.modal.perPackageCostHelp}
+              autoComplete="off"
+              min={0}
+              step={0.01}
+              error={
+                validationError === 'shipping.errors.invalidPerPackageCost'
+                  ? t.shipping.errors.invalidPerPackageCost
+                  : undefined
+              }
+            />
+          ) : rateType === 'linear' ? (
             <TextField
               label={t.shipping.modal.linearCostLabel}
               type="number"
@@ -179,7 +226,9 @@ export function EditZoneModal({ zone, onClose, onSave, isSaving = false, serverE
             <BracketsEditor initialBrackets={brackets} onChange={handleBracketsChange} />
           )}
 
-          {validationError && validationError !== 'shipping.errors.invalidLinearCost' && (
+          {validationError &&
+            validationError !== 'shipping.errors.invalidLinearCost' &&
+            validationError !== 'shipping.errors.invalidPerPackageCost' && (
             <Text as="p" tone="critical">
               {getValidationErrorMessage(validationError, t)}
             </Text>

@@ -11,7 +11,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { validateCategories, validateFallbackRules } from './load-config.server';
-import type { FallbackRule, PackagingCategory, OptionCostType } from './types';
+import type { FallbackRule, PackagingCategory, OptionCostType, RateType } from './types';
 
 export interface ShippingPageOption {
   id: string;
@@ -29,7 +29,7 @@ export interface ShippingPageZone {
   zoneName: string;
   countries: string[];
   restOfWorld: boolean;
-  rateType: 'linear' | 'brackets';
+  rateType: RateType;
   rates: Array<{ id: string; weightFromKg: number | null; weightToKg: number | null; cost: number }>;
   options: ShippingPageOption[];
 }
@@ -116,7 +116,7 @@ export async function loadShippingPageData(
         zoneName: zone.zoneName,
         countries: zone.countries,
         restOfWorld: zone.restOfWorld,
-        rateType: zone.rateType as 'linear' | 'brackets',
+        rateType: zone.rateType as RateType,
         rates: zone.rates.map((rate) => ({
           id: rate.id,
           weightFromKg: rate.weightFrom != null ? Number(rate.weightFrom) : null,

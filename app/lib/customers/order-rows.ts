@@ -102,6 +102,12 @@ export interface ShopifyOrder {
    * una con lo stesso nome; altrimenti vale la tariffa generica.
    */
   shipping_method?: string | null;
+  /**
+   * Le spedizioni partite davvero dell'ordine: un pacco ciascuna. Serve al
+   * costo per pacco; assente vale NULL, e un ordine spedito senza conteggio
+   * paga un pacco (effectivePackageCount).
+   */
+  package_count?: number | null;
 }
 
 export interface OrderRow {
@@ -124,6 +130,7 @@ export interface OrderRow {
   returned_at: string | null;
   packaging_category: string | null;
   shipping_method: string | null;
+  package_count: number | null;
   /** Spedizione + imballo + rientro, gia' sommati. Zero senza configurazione. */
   logistics_cost: number;
 }
@@ -186,6 +193,7 @@ export function orderToRows(
     packaging_category: order.packaging_category ?? null,
     shipping_method: order.shipping_method ?? null,
     total_price: money(order.total_price),
+    package_count: order.package_count ?? null,
   };
 
   return {
