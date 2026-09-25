@@ -1362,6 +1362,7 @@ export const it = {
         linear: "Al kg",
         weight_brackets: "Fasce di peso",
         value_brackets: "Fasce di valore",
+        per_package: "Per pacco",
       },
       carrierNameHelp:
         "Tariffa calcolata al checkout: questo costo vale solo se l'ordine riporta esattamente questo nome, altrimenti vale la tariffa della zona",
@@ -1377,9 +1378,11 @@ export const it = {
     rateTypes: {
       linear: "Lineare",
       brackets: "Fasce peso",
+      per_package: "Per pacco",
     },
     costDisplay: {
       linear: (costPerKg: string) => `${costPerKg}/kg`,
+      perPackage: (costPerPackage: string) => `${costPerPackage}/pacco`,
       brackets: (min: string, max: string) => `${min} – ${max}`,
       empty: "—",
     },
@@ -1387,9 +1390,14 @@ export const it = {
       title: (zoneName: string) => `Tariffe per ${zoneName}`,
       rateTypeLabel: "Tipo di tariffa",
       rateTypeHelp:
-        "Scegli se il costo cresce linearmente col peso o se usi fasce di peso con costi fissi.",
+        "Scegli se il costo dipende dal peso, con un prezzo al kg o a fasce, oppure dal numero di pacchi spediti.",
       linearLabel: "Lineare (€/kg)",
       bracketsLabel: "Fasce peso",
+      perPackageLabel: "Per pacco spedito",
+      perPackageCostLabel: "€ per pacco",
+      perPackageCostPlaceholder: "0,00",
+      perPackageCostHelp:
+        "Ogni spedizione che Shopify registra per l'ordine conta come un pacco: un ordine partito in due pacchi costa il doppio.",
       linearCostLabel: "Costo per kg",
       linearCostPlaceholder: "0,00",
       linearCostHelp: "Quanto ti costa spedire 1 kg in questa zona",
@@ -1419,6 +1427,7 @@ export const it = {
         "L'inizio di una fascia non può superare la sua fine",
       invalidLinearCost: "Inserisci un costo per kg valido, pari o superiore a 0",
       invalidFlatCost: "Inserisci un costo fisso valido, pari o superiore a 0",
+      invalidPerPackageCost: "Inserisci un costo per pacco valido, pari o superiore a 0",
       invalidBrackets: "Le fasce non sono valide: controlla soglie e costi",
     },
     optionModal: {
@@ -1432,12 +1441,17 @@ export const it = {
       linearLabel: "Al kg",
       weightBracketsLabel: "Fasce di peso",
       valueBracketsLabel: "Fasce di valore dell'ordine",
+      perPackageLabel: "Per pacco spedito",
       flatCostLabel: "Costo fisso (€)",
       flatCostPlaceholder: "0,00",
       flatCostHelp: "Quanto ti costa questa spedizione, indipendentemente dal peso o dal valore",
       linearCostLabel: "Costo per kg (€)",
       linearCostPlaceholder: "0,00",
       linearCostHelp: "Quanto ti costa spedire 1 kg con questa opzione",
+      perPackageCostLabel: "€ per pacco",
+      perPackageCostPlaceholder: "0,00",
+      perPackageCostHelp:
+        "Ogni spedizione che Shopify registra per l'ordine conta come un pacco: un ordine partito in due pacchi costa il doppio.",
       weightBracketsHelp:
         "Soglie in kg sul peso dell'ordine. La prima fascia parte da 0 kg, le fasce sono contigue e solo l'ultima può essere illimitata.",
       valueBracketsHelp:

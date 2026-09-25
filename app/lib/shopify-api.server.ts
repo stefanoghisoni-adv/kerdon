@@ -1,4 +1,5 @@
 import { unauthenticated } from '~/shopify.server';
+import { countShippedPackages } from '~/lib/shipping/package-count';
 import {
   BIRTHDATE_METAFIELD,
   BIRTHDATE_METAFIELD_ACCESS,
@@ -254,7 +255,7 @@ interface GqlOrder {
   // rompere la mappatura, solo lasciare vuote le colonne.
   displayFulfillmentStatus?: string | null;
   /** Una lista, non una connessione: `first` e' un argomento, non ci sono `nodes`. */
-  fulfillments?: { trackingInfo: { number: string | null }[] | null }[] | null;
+  fulfillments?: { status?: string | null; trackingInfo: { number: string | null }[] | null }[] | null;
   shippingAddress?: { countryCodeV2: string | null } | null;
   /** UnsignedInt64, in grammi: in JSON arriva come stringa. */
   totalWeight?: string | number | null;
@@ -278,7 +279,7 @@ function orderNodeFields(lineItemsFirst: number): string {
     currentTotalPriceSet { shopMoney { amount currencyCode } }
     customer { id firstName lastName }
     displayFulfillmentStatus
-    fulfillments(first: 10) { trackingInfo { number } }
+    fulfillments(first: 10) { status trackingInfo { number } }
     shippingAddress { countryCodeV2 }
     totalWeight
     returns(first: 5) { nodes { status createdAt } }
@@ -314,6 +315,7 @@ function mapOrderLogistics(o: GqlOrder): Pick<
   | 'returned_at'
   | 'packaging_category'
   | 'shipping_method'
+  | 'package_count'
 > {
   const tracciato = (o.fulfillments ?? []).some((f) =>
     (f.trackingInfo ?? []).some((t) => !!t.number),
@@ -335,6 +337,10 @@ function mapOrderLogistics(o: GqlOrder): Pick<
     // si abbina a un'opzione sola. Un titolo vuoto non abbina niente, quindi
     // vale come assente.
     shipping_method: o.shippingLines?.nodes?.[0]?.title || null,
+    // Un pacco per spedizione non annullata; zero se non ce n'e'. Le prime 10
+    // bastano: un ordine in piu' di dieci pacchi e' fuori dal caso comune, e
+    // contarne dieci sottostima invece di inventare.
+    package_count: countShippedPackages(o.fulfillments),
   };
 }
 
@@ -953,43 +959,55 @@ export class ShopifyAPIClient {
   }
 
   /**
-   * Il titolo della prima shipping line di ciascun ordine, per id.
+   * Opzione di spedizione e pacchi spediti di ciascun ordine, per id.
    *
-   * La query piu' leggera possibile per un compito solo: gli ordini salvati
-   * prima dello schema 13 non sanno quale opzione ha scelto il cliente, e il
-   * recupero (shipping-method-backfill) la chiede qui a lotti. Niente righe,
-   * clienti o importi: con `nodes(ids:)` e una connessione da un elemento il
-   * costo richiesto e' circa 4 punti per ordine, quindi un lotto da 50 sta
-   * lontano dal tetto di 1000 per query.
+   * La query piu' leggera possibile per il recupero dello storico
+   * (shipping-method-backfill): gli ordini salvati prima dello schema 13 non
+   * sanno quale opzione ha scelto il cliente, quelli prima del 14 quanti pacchi
+   * sono partiti, e i due dati si chiedono insieme per non interrogare Shopify
+   * due volte sugli stessi ordini. Niente righe, clienti o importi: con
+   * `nodes(ids:)`, una connessione da un elemento e la sola lista delle
+   * spedizioni (al piu' 10, solo lo stato) il costo richiesto resta sotto i
+   * 15 punti per ordine, quindi un lotto da 50 sta sotto il tetto di 1000.
    *
-   * Stringa vuota per "nessuna opzione": shipping line assente, titolo vuoto o
-   * ordine non piu' su Shopify. Il chiamante la scrive come sentinella, cosi'
-   * lo stesso ordine non si richiede a ogni corsa.
+   * Titolo vuoto per "nessuna opzione" e zero pacchi per "nessuna spedizione":
+   * shipping line o spedizioni assenti, oppure ordine non piu' su Shopify. Il
+   * chiamante le scrive come sentinelle, cosi' lo stesso ordine non si
+   * richiede a ogni corsa. I pacchi si contano con la stessa funzione della
+   * scrittura dell'ordine (countShippedPackages): annullate escluse.
    *
    * L'abbinamento e' per posizione: `nodes` risponde nello stesso ordine degli
    * id chiesti, con `null` dove l'ordine non c'e', e cosi' un id oltre 2^53
    * non passa mai per un numero.
    */
-  async getOrderShippingTitles(ids: string[]): Promise<Map<string, string>> {
-    const titoli = new Map<string, string>();
-    if (ids.length === 0) return titoli;
+  async getOrderShippingFacts(ids: string[]): Promise<Map<string, { method: string; packageCount: number }>> {
+    const fatti = new Map<string, { method: string; packageCount: number }>();
+    if (ids.length === 0) return fatti;
 
     const data = await this.graphql<{
-      nodes: ({ id: string; shippingLines?: { nodes: { title: string | null }[] | null } | null } | null)[];
+      nodes: ({
+        id: string;
+        shippingLines?: { nodes: { title: string | null }[] | null } | null;
+        fulfillments?: { status: string | null }[] | null;
+      } | null)[];
     }>(
-      `query OrderShippingTitles($ids: [ID!]!) {
-        nodes(ids: $ids) { ... on Order { id shippingLines(first: 1) { nodes { title } } } }
+      `query OrderShippingFacts($ids: [ID!]!) {
+        nodes(ids: $ids) { ... on Order { id shippingLines(first: 1) { nodes { title } } fulfillments(first: 10) { status } } }
       }`,
       { ids: ids.map((id) => `gid://shopify/Order/${id}`) },
     );
 
     const nodi = data.nodes ?? [];
     ids.forEach((id, i) => {
-      titoli.set(id, nodi[i]?.shippingLines?.nodes?.[0]?.title || '');
+      const nodo = nodi[i];
+      fatti.set(id, {
+        method: nodo?.shippingLines?.nodes?.[0]?.title || '',
+        packageCount: countShippedPackages(nodo?.fulfillments),
+      });
     });
 
     await this.attendiSerbatoioPer(this.ultimoCosto?.requestedQueryCost);
-    return titoli;
+    return fatti;
   }
 
   /**

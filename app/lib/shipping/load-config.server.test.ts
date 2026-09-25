@@ -354,6 +354,40 @@ describe('loadLogisticsConfig', () => {
   });
 });
 
+describe('loadLogisticsConfig: costo per pacco', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('tiene le opzioni e le zone per pacco', async () => {
+    findMany.mockResolvedValue([
+      {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        restOfWorld: false,
+        rateType: 'per_package',
+        rates: [{ weightFrom: null, weightTo: null, cost: new Prisma.Decimal(5) }],
+        options: [
+          {
+            name: 'Corriere',
+            costType: 'per_package',
+            confirmed: true,
+            rates: [{ rangeFrom: null, rangeTo: null, cost: new Prisma.Decimal('4.9') }],
+          },
+        ],
+      },
+    ]);
+    findUnique.mockResolvedValue(null);
+
+    const result = await loadLogisticsConfig('shop-1');
+
+    expect(result?.zones[0].rateType).toBe('per_package');
+    expect(result?.zones[0].options).toEqual([
+      { name: 'Corriere', costType: 'per_package', confirmed: true, brackets: [{ from: null, to: null, cost: 4.9 }] },
+    ]);
+  });
+});
+
 /**
  * La variante severa serve al ricalcolo in background: li' "nessuna tariffa" e
  * "tariffe illeggibili" portano a scritture opposte (zero su tutti gli ordini

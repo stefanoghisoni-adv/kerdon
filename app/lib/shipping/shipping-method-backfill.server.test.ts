@@ -57,10 +57,16 @@ import {
 } from './shipping-method-backfill.server';
 import { enqueueShippingMethodBackfill } from './shipping-method-backfill-enqueue.server';
 
-/** Un client Shopify finto: per ogni id il titolo scelto dalla prova. */
-function clientFinto(titoli: Record<string, string> = {}) {
+/**
+ * Un client Shopify finto: per ogni id il titolo e i pacchi scelti dalla
+ * prova (titolo vuoto e zero pacchi se la prova non dice niente).
+ */
+function clientFinto(titoli: Record<string, string> = {}, pacchi: Record<string, number> = {}) {
   return {
-    getOrderShippingTitles: vi.fn(async (ids: string[]) => new Map(ids.map((id) => [id, titoli[id] ?? '']))),
+    getOrderShippingFacts: vi.fn(
+      async (ids: string[]) =>
+        new Map(ids.map((id) => [id, { method: titoli[id] ?? '', packageCount: pacchi[id] ?? 0 }])),
+    ),
   };
 }
 
@@ -108,9 +114,9 @@ beforeEach(() => {
 });
 
 describe('backfillSelectSQL', () => {
-  prova('legge solo gli ordini senza opzione, a pagine per id', () => {
+  prova('legge solo gli ordini senza opzione o senza pacchi, a pagine per id', () => {
     const sql = backfillSelectSQL(null);
-    expect(sql).toContain('WHERE shipping_method IS NULL');
+    expect(sql).toContain('WHERE (shipping_method IS NULL OR package_count IS NULL)');
     expect(sql).toContain('ORDER BY shopify_order_id');
     expect(sql).toContain(`LIMIT ${BACKFILL_PAGE_SIZE}`);
     expect(backfillSelectSQL('42')).toContain('AND shopify_order_id > 42');
@@ -123,29 +129,43 @@ describe('backfillSelectSQL', () => {
 
 describe('backfillUpdateSQL', () => {
   prova('non sovrascrive mai un valore gia\' scritto', () => {
-    const sql = backfillUpdateSQL([{ id: '7', method: 'Express' }]);
-    expect(sql).toContain('AND o.shipping_method IS NULL');
+    const sql = backfillUpdateSQL([{ id: '7', method: 'Express', packageCount: 2 }]);
+    // Ogni colonna tiene il suo valore se ce l'ha: si riempie solo il vuoto.
+    expect(sql).toContain('shipping_method = COALESCE(o.shipping_method, v.m)');
+    expect(sql).toContain('package_count = COALESCE(o.package_count, v.p)');
+    expect(sql).toContain('AND (o.shipping_method IS NULL OR o.package_count IS NULL)');
+  });
+
+  prova('i pacchi entrano come intero verificato', () => {
+    const sql = backfillUpdateSQL([{ id: '7', method: 'Express', packageCount: 2 }]);
+    expect(sql).toContain(`(7::bigint, convert_from(decode('${Buffer.from('Express').toString('hex')}', 'hex'), 'UTF8'), 2::integer)`);
+  });
+
+  prova('un numero di pacchi che non e\' un intero non negativo non entra nel testo', () => {
+    expect(() => backfillUpdateSQL([{ id: '7', method: 'x', packageCount: -1 }])).toThrow();
+    expect(() => backfillUpdateSQL([{ id: '7', method: 'x', packageCount: 1.5 }])).toThrow();
+    expect(() => backfillUpdateSQL([{ id: '7', method: 'x', packageCount: Number.NaN }])).toThrow();
   });
 
   prova('i titoli arrivano come esadecimale: nessun carattere di Shopify finisce nel testo SQL', () => {
     const ostile = "x'); DROP TABLE orders; --";
-    const sql = backfillUpdateSQL([{ id: '7', method: ostile }]);
+    const sql = backfillUpdateSQL([{ id: '7', method: ostile, packageCount: 0 }]);
     expect(sql).not.toContain('DROP');
     const hex = Buffer.from(ostile, 'utf8').toString('hex');
-    expect(sql).toContain(`(7::bigint, convert_from(decode('${hex}', 'hex'), 'UTF8'))`);
+    expect(sql).toContain(`(7::bigint, convert_from(decode('${hex}', 'hex'), 'UTF8'), 0::integer)`);
   });
 
   prova('la sentinella vuota e\' una stringa vuota, non NULL', () => {
-    expect(backfillUpdateSQL([{ id: '7', method: '' }])).toContain("(7::bigint, convert_from(decode('', 'hex'), 'UTF8'))");
+    expect(backfillUpdateSQL([{ id: '7', method: '', packageCount: 0 }])).toContain("(7::bigint, convert_from(decode('', 'hex'), 'UTF8'), 0::integer)");
   });
 
   prova('un carattere NUL (che Postgres rifiuta nel testo) viene tolto', () => {
-    const sql = backfillUpdateSQL([{ id: '7', method: 'A\u0000B' }]);
+    const sql = backfillUpdateSQL([{ id: '7', method: 'A\u0000B', packageCount: 0 }]);
     expect(sql).toContain(`decode('${Buffer.from('AB').toString('hex')}', 'hex')`);
   });
 
   prova('rifiuta un id che non e\' un intero', () => {
-    expect(() => backfillUpdateSQL([{ id: '1; DROP TABLE orders', method: 'x' }])).toThrow();
+    expect(() => backfillUpdateSQL([{ id: '1; DROP TABLE orders', method: 'x', packageCount: 0 }])).toThrow();
   });
 });
 
@@ -153,24 +173,25 @@ describe('processShippingMethodBackfill', () => {
   prova('chiede a Shopify a lotti, scrive titoli e sentinelle, poi accoda il ricalcolo', async () => {
     const ids = Array.from({ length: BACKFILL_NODES_BATCH + 3 }, (_, i) => String(1000 + i));
     (runQueryRows as any).mockResolvedValueOnce(righe(ids));
-    const client = clientFinto({ '1000': 'Express', '1001': 'Standard' });
+    const client = clientFinto({ '1000': 'Express', '1001': 'Standard' }, { '1000': 2, '1001': 1 });
 
     await expect(processShippingMethodBackfill('shop-1', { client })).resolves.toBe('completed');
 
     // Due lotti: il primo pieno, il secondo con il resto. Mai oltre il tetto.
-    expect(client.getOrderShippingTitles).toHaveBeenCalledTimes(2);
-    for (const [lotto] of client.getOrderShippingTitles.mock.calls) {
+    expect(client.getOrderShippingFacts).toHaveBeenCalledTimes(2);
+    for (const [lotto] of client.getOrderShippingFacts.mock.calls) {
       expect(lotto.length).toBeLessThanOrEqual(BACKFILL_NODES_BATCH);
     }
-    expect(client.getOrderShippingTitles.mock.calls[0][0]).toEqual(ids.slice(0, BACKFILL_NODES_BATCH));
+    expect(client.getOrderShippingFacts.mock.calls[0][0]).toEqual(ids.slice(0, BACKFILL_NODES_BATCH));
 
     // Una scrittura per pagina, con dentro ogni ordine della pagina.
     expect(scritture()).toHaveLength(1);
     const sql = scritture()[0];
-    expect(sql).toContain(`(1000::bigint, convert_from(decode('${Buffer.from('Express').toString('hex')}', 'hex'), 'UTF8'))`);
+    expect(sql).toContain(`(1000::bigint, convert_from(decode('${Buffer.from('Express').toString('hex')}', 'hex'), 'UTF8'), 2::integer)`);
     // Nessuna shipping line: la sentinella, cosi' non lo si richiede per sempre.
-    expect(sql).toContain("(1002::bigint, convert_from(decode('', 'hex'), 'UTF8'))");
-    expect(sql).toContain('AND o.shipping_method IS NULL');
+    // Nessuna spedizione: zero pacchi, che toglie l'ordine dalla lettura dopo.
+    expect(sql).toContain("(1002::bigint, convert_from(decode('', 'hex'), 'UTF8'), 0::integer)");
+    expect(sql).toContain('AND (o.shipping_method IS NULL OR o.package_count IS NULL)');
 
     expect(enqueueLogisticsRecompute).toHaveBeenCalledWith('shop-1');
   });
@@ -180,7 +201,7 @@ describe('processShippingMethodBackfill', () => {
 
     await expect(processShippingMethodBackfill('shop-1', { client })).resolves.toBe('completed');
 
-    expect(client.getOrderShippingTitles).not.toHaveBeenCalled();
+    expect(client.getOrderShippingFacts).not.toHaveBeenCalled();
     expect(runQuery).not.toHaveBeenCalled();
     expect(enqueueLogisticsRecompute).not.toHaveBeenCalled();
   });
@@ -193,7 +214,7 @@ describe('processShippingMethodBackfill', () => {
     await processShippingMethodBackfill('shop-1');
 
     expect(ShopifyAPIClient.forShop).toHaveBeenCalledWith('negozio.myshopify.com');
-    expect(client.getOrderShippingTitles).toHaveBeenCalledWith(['5']);
+    expect(client.getOrderShippingFacts).toHaveBeenCalledWith(['5']);
   });
 
   prova('pagina piena: riparte dall ultimo id visto', async () => {
@@ -255,7 +276,7 @@ describe('processShippingMethodBackfill', () => {
 
     await expect(processShippingMethodBackfill('shop-1', { client })).resolves.toBe('skipped');
     expect(runQueryRows).not.toHaveBeenCalled();
-    expect(client.getOrderShippingTitles).not.toHaveBeenCalled();
+    expect(client.getOrderShippingFacts).not.toHaveBeenCalled();
   });
 
   prova('colonna shipping_method assente (schema 13 non applicato): esce in silenzio', async () => {
@@ -263,8 +284,16 @@ describe('processShippingMethodBackfill', () => {
     const client = clientFinto();
 
     await expect(processShippingMethodBackfill('shop-1', { client })).resolves.toBe('skipped');
-    expect(client.getOrderShippingTitles).not.toHaveBeenCalled();
+    expect(client.getOrderShippingFacts).not.toHaveBeenCalled();
     expect(enqueueLogisticsRecompute).not.toHaveBeenCalled();
+  });
+
+  prova('colonna package_count assente (schema 14 non applicato): esce in silenzio', async () => {
+    (runQueryRows as any).mockRejectedValueOnce(new Error('ERROR: 42703: column "package_count" does not exist'));
+    const client = clientFinto();
+
+    await expect(processShippingMethodBackfill('shop-1', { client })).resolves.toBe('skipped');
+    expect(client.getOrderShippingFacts).not.toHaveBeenCalled();
   });
 
   prova('negozio senza ordini sincronizzati o senza database: non fa niente', async () => {
@@ -278,7 +307,7 @@ describe('processShippingMethodBackfill', () => {
 
   prova('un guasto di Shopify si propaga: la coda ritenta, e quel che era scritto resta', async () => {
     (runQueryRows as any).mockResolvedValueOnce(righe(['1']));
-    const client = { getOrderShippingTitles: vi.fn().mockRejectedValue(new Error('THROTTLED')) };
+    const client = { getOrderShippingFacts: vi.fn().mockRejectedValue(new Error('THROTTLED')) };
 
     await expect(processShippingMethodBackfill('shop-1', { client })).rejects.toThrow('THROTTLED');
     expect(runQuery).not.toHaveBeenCalled();

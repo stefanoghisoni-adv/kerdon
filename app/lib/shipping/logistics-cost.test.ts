@@ -1,6 +1,6 @@
 // app/lib/shipping/logistics-cost.test.ts
 import { describe, it, expect } from 'vitest';
-import { computeLogisticsCost, findOption, findZone, isShipped, resolvePackagingCategory, resolveWeightKg } from './logistics-cost';
+import { computeLogisticsCost, effectivePackageCount, findOption, findZone, isShipped, resolvePackagingCategory, resolveWeightKg } from './logistics-cost';
 import type { LogisticsConfig, OrderLogisticsInput } from './types';
 
 const config: LogisticsConfig = {
@@ -22,6 +22,7 @@ const config: LogisticsConfig = {
 const base: OrderLogisticsInput = {
   fulfillment_status: 'fulfilled', shipping_country_code: 'IT', total_weight_grams: 3000,
   item_count: 2, returned_at: null, packaging_category: 'Box', shipping_method: null, total_price: null,
+  package_count: null,
 };
 
 describe('isShipped', () => {
@@ -284,5 +285,74 @@ describe('shipping_method vuoto: la sentinella del recupero vale come nessuna op
     expect(conVuoto).toEqual(conNull);
     // 3 kg x 2 €/kg: la tariffa della zona, non l'opzione dal nome vuoto.
     expect(conVuoto.shipping).toBe(6);
+  });
+});
+
+// Il costo per pacco: quanti pacchi sono partiti = quante spedizioni Shopify
+// ha registrato per l'ordine (le annullate escluse, le conta chi scrive).
+describe('effectivePackageCount', () => {
+  it('il numero di spedizioni registrate, quando c\'e\'', () => {
+    expect(effectivePackageCount(1)).toBe(1);
+    expect(effectivePackageCount(3)).toBe(3);
+  });
+
+  it('null o 0 su un ordine spedito valgono 1: se e\' partito, almeno un pacco c\'e\'', () => {
+    expect(effectivePackageCount(null)).toBe(1);
+    expect(effectivePackageCount(0)).toBe(1);
+  });
+
+  it('un valore che non ha senso (negativo, non finito, decimale) non moltiplica il costo', () => {
+    expect(effectivePackageCount(-2)).toBe(1);
+    expect(effectivePackageCount(Number.NaN)).toBe(1);
+    expect(effectivePackageCount(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(effectivePackageCount(2.7)).toBe(2);
+  });
+});
+
+describe('computeLogisticsCost per pacco spedito', () => {
+  const zonaPerPacco = {
+    zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'per_package' as const,
+    rates: [{ weightFromKg: null, weightToKg: null, cost: 5 }],
+    options: [
+      { name: 'Standard', costType: 'per_package' as const, confirmed: true, brackets: [{ from: null, to: null, cost: 4.9 }] },
+    ],
+  };
+  const conPacchi: LogisticsConfig = { ...config, zones: [zonaPerPacco] };
+
+  it('opzione per pacco: costo x numero di pacchi', () => {
+    const c = computeLogisticsCost({ ...base, shipping_method: 'Standard', package_count: 2 }, conPacchi);
+    expect(c.shipping).toBe(9.8);
+  });
+
+  it('opzione per pacco senza conteggio: un pacco', () => {
+    expect(computeLogisticsCost({ ...base, shipping_method: 'Standard', package_count: null }, conPacchi).shipping).toBe(4.9);
+    expect(computeLogisticsCost({ ...base, shipping_method: 'Standard', package_count: 0 }, conPacchi).shipping).toBe(4.9);
+  });
+
+  it('opzione per pacco: il peso non serve', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Standard', package_count: 3, total_weight_grams: null, item_count: 0 },
+      conPacchi,
+    );
+    expect(c.shipping).toBe(14.7);
+  });
+
+  it('tariffa generica per pacco: costo x pacchi, anche senza peso', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Sconosciuta', package_count: 2, total_weight_grams: null, item_count: 0 },
+      conPacchi,
+    );
+    expect(c.shipping).toBe(10);
+  });
+
+  it('ordine non spedito: niente spedizione, per quanti pacchi dica', () => {
+    const c = computeLogisticsCost({ ...base, fulfillment_status: 'UNFULFILLED', shipping_method: 'Standard', package_count: 2 }, conPacchi);
+    expect(c.shipping).toBe(0);
+  });
+
+  it('i tipi al peso ignorano il numero di pacchi', () => {
+    const c = computeLogisticsCost({ ...base, package_count: 4 }, config);
+    // Italia lineare 2 €/kg x 3 kg, come senza pacchi.
+    expect(c.shipping).toBe(6);
   });
 });

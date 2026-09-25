@@ -18,6 +18,12 @@ import {
  */
 const VERSIONE_OPZIONE_SPEDIZIONE = 13;
 
+/**
+ * La versione che porta `package_count`. Lo completa lo stesso recupero,
+ * nella stessa domanda a Shopify: chi attraversa la 14 lo riceve di nuovo.
+ */
+const VERSIONE_PACCHI = 14;
+
 export type SchemaUpdateStatus =
   /** Non c'era nulla da aggiornare. */
   | 'up_to_date'
@@ -91,9 +97,14 @@ export async function applyMerchantSchemaUpdate(
   // Solo a chi attraversa la 13 e ha gli ordini: agli altri non serve. Non
   // solleva, e un database appena creato (versione 0) lo chiude subito perche'
   // non trova ordini da completare.
+  //
+  // Dalla 14 lo stesso recupero completa anche i pacchi: basta attraversare
+  // una delle due versioni, e un salto 12 -> 14 accoda un recupero solo
+  // (l'accodamento non ne aggiunge un secondo se uno e' gia' in coda).
+  const attraversa = (versione: number) =>
+    config.schemaVersion < versione && LATEST_SCHEMA_VERSION >= versione;
   if (
-    config.schemaVersion < VERSIONE_OPZIONE_SPEDIZIONE &&
-    LATEST_SCHEMA_VERSION >= VERSIONE_OPZIONE_SPEDIZIONE &&
+    (attraversa(VERSIONE_OPZIONE_SPEDIZIONE) || attraversa(VERSIONE_PACCHI)) &&
     hasOrdersAccess(shop.scopes)
   ) {
     await enqueueShippingMethodBackfill(shopId);

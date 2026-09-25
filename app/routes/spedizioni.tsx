@@ -30,7 +30,7 @@ import {
   type PackagingEditResult,
 } from '~/components/Shipping/packaging-edit';
 import { readPackaging, writePackaging } from '~/lib/shipping/packaging-store.server';
-import { parseOptionBrackets } from '~/components/Shipping/option-cost';
+import { COST_FIELD_ERROR, isSingleCostType, parseOptionBrackets } from '~/components/Shipping/option-cost';
 import { feedbackFromActionData, type ShippingIntent } from '~/components/Shipping/feedback';
 import { ShippingZonesTable } from '~/components/Shipping/ShippingZonesTable';
 import { EditZoneModal } from '~/components/Shipping/EditZoneModal';
@@ -39,7 +39,7 @@ import { PackagingCategoriesCard } from '~/components/Shipping/PackagingCategori
 import { PackagingRulesCard, describeRuleWeight } from '~/components/Shipping/PackagingRulesCard';
 import { PackagingDefaultsCard } from '~/components/Shipping/PackagingDefaultsCard';
 import { CategoryModal, ConfirmDeleteModal, RuleModal } from '~/components/Shipping/PackagingModals';
-import type { RateBracket, PackagingCategory, OptionCostType, OptionBracket } from '~/lib/shipping/types';
+import type { RateBracket, RateType, PackagingCategory, OptionCostType, OptionBracket } from '~/lib/shipping/types';
 
 /** La modale aperta sulle tabelle di imballo, una alla volta. */
 type PackagingDialog =
@@ -170,7 +170,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const zoneId = formData.get('zoneId')?.toString();
     const rateType = formData.get('rateType')?.toString();
 
-    if (!zoneId || (rateType !== 'linear' && rateType !== 'brackets')) {
+    if (!zoneId || (rateType !== 'linear' && rateType !== 'brackets' && rateType !== 'per_package')) {
       return risposta('save-zone-rates', { success: false, error: 'invalid_request' });
     }
 
@@ -183,11 +183,16 @@ export async function action({ request }: ActionFunctionArgs) {
       return risposta('save-zone-rates', { success: false, error: 'zone_not_found' });
     }
 
-    if (rateType === 'linear') {
-      const cost = importoFacoltativo(formData.get('costPerKg')?.toString());
+    if (rateType === 'linear' || rateType === 'per_package') {
+      // Al kg e per pacco hanno la stessa forma: un costo solo, in una tariffa
+      // senza soglie. Cambiano il campo del form e il messaggio d'errore, che
+      // il merchant legge sotto il campo che ha compilato.
+      const perPacco = rateType === 'per_package';
+      const cost = importoFacoltativo(formData.get(perPacco ? 'costPerPackage' : 'costPerKg')?.toString());
 
       if (cost === null || Number.isNaN(cost)) {
-        return risposta('save-zone-rates', { success: false, error: 'shipping.errors.invalidLinearCost' });
+        const error = perPacco ? 'shipping.errors.invalidPerPackageCost' : 'shipping.errors.invalidLinearCost';
+        return risposta('save-zone-rates', { success: false, error });
       }
 
       // Sostituisci le tariffe in una transazione
@@ -195,7 +200,7 @@ export async function action({ request }: ActionFunctionArgs) {
         prisma.shippingRate.deleteMany({ where: { zoneId } }),
         prisma.shippingZone.update({
           where: { id: zoneId },
-          data: { rateType: 'linear' },
+          data: { rateType },
         }),
         prisma.shippingRate.create({
           data: {
@@ -323,7 +328,13 @@ export async function action({ request }: ActionFunctionArgs) {
       return risposta('save-option-cost', { success: false, error: 'invalid_request' });
     }
 
-    if (costType !== 'flat' && costType !== 'linear' && costType !== 'weight_brackets' && costType !== 'value_brackets') {
+    if (
+      costType !== 'flat' &&
+      costType !== 'linear' &&
+      costType !== 'weight_brackets' &&
+      costType !== 'value_brackets' &&
+      costType !== 'per_package'
+    ) {
       return risposta('save-option-cost', { success: false, error: 'invalid_request' });
     }
 
@@ -337,15 +348,14 @@ export async function action({ request }: ActionFunctionArgs) {
       return risposta('save-option-cost', { success: false, error: 'option_not_found' });
     }
 
-    if (costType === 'flat' || costType === 'linear') {
-      const costField = costType === 'flat' ? 'flatCost' : 'linearCost';
+    if (isSingleCostType(costType)) {
+      const costField = { flat: 'flatCost', linear: 'linearCost', per_package: 'perPackageCost' }[costType];
       const cost = importoFacoltativo(formData.get(costField)?.toString());
 
       if (cost === null || Number.isNaN(cost)) {
         // Ogni tipo ha il suo messaggio: il merchant legge l'errore sotto il
-        // campo che ha compilato, fisso o al kg.
-        const error = costType === 'flat' ? 'shipping.errors.invalidFlatCost' : 'shipping.errors.invalidLinearCost';
-        return risposta('save-option-cost', { success: false, error });
+        // campo che ha compilato, fisso, al kg o per pacco.
+        return risposta('save-option-cost', { success: false, error: COST_FIELD_ERROR[costType] });
       }
 
       // Sostituisci le tariffe in una transazione
@@ -487,7 +497,12 @@ export default function ShippingPage() {
     setEditingZone(null);
   };
 
-  const handleModalSave = (data: { rateType: 'linear' | 'brackets'; costPerKg?: string; brackets?: RateBracket[] }) => {
+  const handleModalSave = (data: {
+    rateType: RateType;
+    costPerKg?: string;
+    costPerPackage?: string;
+    brackets?: RateBracket[];
+  }) => {
     if (!editingZone) return;
 
     const formData = new FormData();
@@ -497,6 +512,8 @@ export default function ShippingPage() {
 
     if (data.rateType === 'linear' && data.costPerKg) {
       formData.append('costPerKg', data.costPerKg);
+    } else if (data.rateType === 'per_package' && data.costPerPackage) {
+      formData.append('costPerPackage', data.costPerPackage);
     } else if (data.rateType === 'brackets' && data.brackets) {
       formData.append('brackets', JSON.stringify(data.brackets));
     }
@@ -521,6 +538,7 @@ export default function ShippingPage() {
     costType: OptionCostType;
     flatCost?: string;
     linearCost?: string;
+    perPackageCost?: string;
     brackets?: OptionBracket[];
   }) => {
     if (!editingOption) return;
@@ -534,6 +552,8 @@ export default function ShippingPage() {
       formData.append('flatCost', data.flatCost);
     } else if (data.costType === 'linear' && data.linearCost) {
       formData.append('linearCost', data.linearCost);
+    } else if (data.costType === 'per_package' && data.perPackageCost) {
+      formData.append('perPackageCost', data.perPackageCost);
     } else if ((data.costType === 'weight_brackets' || data.costType === 'value_brackets') && data.brackets) {
       formData.append('brackets', JSON.stringify(data.brackets));
     }

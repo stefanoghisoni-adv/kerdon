@@ -198,6 +198,10 @@ const ORDERS_COLUMNS: Column[] = [
   // costo di un'opzione, il costo si riscrive dagli ordini senza richiedere
   // niente a Shopify.
   { name: 'shipping_method', type: 'TEXT' },
+  // Quanti pacchi sono partiti: le spedizioni non annullate che Shopify ha
+  // registrato. Serve al costo per pacco, che il merchant sceglie quando paga
+  // il corriere a collo e non a peso. NULL = non ancora letto.
+  { name: 'package_count', type: 'INTEGER' },
 ];
 
 const ORDERS_INDEXES = [

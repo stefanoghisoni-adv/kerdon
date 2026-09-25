@@ -95,8 +95,9 @@ async function salvaTariffe(
   context: BrowserContext,
   dati: {
     zoneId: string;
-    rateType: 'linear' | 'brackets';
+    rateType: 'linear' | 'brackets' | 'per_package';
     costPerKg?: string;
+    costPerPackage?: string;
     brackets?: Array<{ weightFromKg: number | null; weightToKg: number | null; cost: number }>;
   },
 ): Promise<{ stato: number; corpo: Record<string, unknown> }> {
@@ -107,6 +108,8 @@ async function salvaTariffe(
 
   if (dati.rateType === 'linear' && dati.costPerKg) {
     form.set('costPerKg', dati.costPerKg);
+  } else if (dati.rateType === 'per_package' && dati.costPerPackage) {
+    form.set('costPerPackage', dati.costPerPackage);
   } else if (dati.rateType === 'brackets' && dati.brackets) {
     form.set('brackets', JSON.stringify(dati.brackets));
   }
@@ -124,9 +127,10 @@ async function salvaCostiOpzione(
   context: BrowserContext,
   dati: {
     optionId: string;
-    costType: 'flat' | 'linear' | 'weight_brackets' | 'value_brackets';
+    costType: 'flat' | 'linear' | 'weight_brackets' | 'value_brackets' | 'per_package';
     flatCost?: string;
     linearCost?: string;
+    perPackageCost?: string;
     brackets?: Array<{ from: number | null; to: number | null; cost: number }>;
   },
 ): Promise<{ stato: number; corpo: Record<string, unknown> }> {
@@ -139,6 +143,8 @@ async function salvaCostiOpzione(
     form.set('flatCost', dati.flatCost);
   } else if (dati.costType === 'linear' && dati.linearCost) {
     form.set('linearCost', dati.linearCost);
+  } else if (dati.costType === 'per_package' && dati.perPackageCost) {
+    form.set('perPackageCost', dati.perPackageCost);
   } else if ((dati.costType === 'weight_brackets' || dati.costType === 'value_brackets') && dati.brackets) {
     form.set('brackets', JSON.stringify(dati.brackets));
   }
@@ -255,6 +261,67 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       expect(Number(tariffe[0].weightFrom)).toBe(0);
       expect(Number(tariffe[0].weightTo)).toBe(5);
       expect(Number(tariffe[0].cost)).toBe(10);
+    });
+
+    prova('per pacco spedito: salva il costo e il tipo della zona', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        rateType: 'brackets',
+        rates: [
+          { weightFrom: 0, weightTo: 5, cost: 10 },
+          { weightFrom: 5, weightTo: null, cost: 15 },
+        ],
+      });
+
+      const { stato, corpo } = await salvaTariffe(context, {
+        zoneId: zona.id,
+        rateType: 'per_package',
+        costPerPackage: '4.9',
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo.success).toBe(true);
+
+      // Le fasce di prima spariscono: resta una tariffa sola, senza soglie.
+      const tariffe = await db<Array<{ weightFrom: string | null; weightTo: string | null; cost: string }>>(
+        request,
+        'shippingRate',
+        'findMany',
+        { where: { zoneId: zona.id } },
+      );
+      expect(tariffe).toHaveLength(1);
+      expect(tariffe[0].weightFrom).toBeNull();
+      expect(tariffe[0].weightTo).toBeNull();
+      expect(Number(tariffe[0].cost)).toBe(4.9);
+
+      const zonaAggiornata = await db<{ rateType: string } | null>(request, 'shippingZone', 'findUnique', {
+        where: { id: zona.id },
+        select: { rateType: true },
+      });
+      expect(zonaAggiornata?.rateType).toBe('per_package');
+    });
+
+    prova('per pacco con costo negativo: rifiuta con l errore del campo per pacco', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3 }],
+      });
+
+      const { corpo } = await salvaTariffe(context, { zoneId: zona.id, rateType: 'per_package', costPerPackage: '-1' });
+
+      expect(corpo.success).toBe(false);
+      expect(corpo.error).toBe('shipping.errors.invalidPerPackageCost');
+      // Niente toccato: la tariffa di prima resta.
+      const zonaDopo = await db<{ rateType: string } | null>(request, 'shippingZone', 'findUnique', {
+        where: { id: zona.id },
+        select: { rateType: true },
+      });
+      expect(zonaDopo?.rateType).toBe('linear');
     });
 
     prova('con brackets non contigui rifiuta con errore di validazione', async ({ request, context }) => {
@@ -604,6 +671,75 @@ prova.describe('le azioni della pagina Spedizioni', () => {
       expect(opzioneAggiornata?.costType).toBe('flat');
       // Salvare conferma l'opzione: da qui il suo costo vale sugli ordini.
       expect(opzioneAggiornata?.confirmed).toBe(true);
+    });
+
+    prova('per pacco spedito: salva il costo, il tipo e conferma l opzione', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3.0 }],
+      });
+      const opzione = await seminaOpzione(request, zona.id, {
+        name: 'Corriere',
+        costType: 'weight_brackets',
+        rates: [
+          { from: 0, to: 2, cost: 5 },
+          { from: 2, to: null, cost: 9 },
+        ],
+      });
+
+      const { stato, corpo } = await salvaCostiOpzione(context, {
+        optionId: opzione.id,
+        costType: 'per_package',
+        perPackageCost: '4.9',
+      });
+
+      expect(stato).toBe(200);
+      expect(corpo.success).toBe(true);
+
+      const tariffe = await db<Array<{ rangeFrom: string | null; rangeTo: string | null; cost: string }>>(
+        request,
+        'shippingOptionRate',
+        'findMany',
+        { where: { optionId: opzione.id } },
+      );
+      expect(tariffe).toHaveLength(1);
+      expect(tariffe[0].rangeFrom).toBeNull();
+      expect(tariffe[0].rangeTo).toBeNull();
+      expect(Number(tariffe[0].cost)).toBe(4.9);
+
+      const opzioneAggiornata = await db<{ costType: string; confirmed: boolean } | null>(
+        request,
+        'shippingOption',
+        'findUnique',
+        { where: { id: opzione.id }, select: { costType: true, confirmed: true } },
+      );
+      expect(opzioneAggiornata?.costType).toBe('per_package');
+      expect(opzioneAggiornata?.confirmed).toBe(true);
+    });
+
+    prova('per pacco senza costo: rifiuta con l errore del campo per pacco', async ({ request, context }) => {
+      const shop = await seminaNegozio(request, { setupCompletedAt: new Date().toISOString() });
+      const zona = await seminaZona(request, shop.id, {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        rateType: 'linear',
+        rates: [{ weightFrom: null, weightTo: null, cost: 3.0 }],
+      });
+      const opzione = await seminaOpzione(request, zona.id, {
+        name: 'Corriere',
+        costType: 'flat',
+        rates: [{ from: null, to: null, cost: 5 }],
+      });
+
+      const { corpo } = await salvaCostiOpzione(context, { optionId: opzione.id, costType: 'per_package', perPackageCost: 'abc' });
+
+      expect(corpo.success).toBe(false);
+      expect(corpo.error).toBe('shipping.errors.invalidPerPackageCost');
+      // Il merchant legge il messaggio giusto, non quello generico.
+      expect(JSON.stringify(cosaVede(corpo))).toContain(italiano.shipping.errors.invalidPerPackageCost);
     });
 
     prova('con fasce di valore contigue salva con successo', async ({ request, context }) => {

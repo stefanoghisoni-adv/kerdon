@@ -9,6 +9,7 @@ import type {
   FallbackRule,
   ShippingOptionConfig,
   OptionCostType,
+  RateType,
 } from './types';
 
 export async function loadLogisticsConfig(shopId: string): Promise<LogisticsConfig | null> {
@@ -55,7 +56,7 @@ export async function loadLogisticsConfigStrict(
       zoneName: zone.zoneName,
       countries: zone.countries,
       restOfWorld: zone.restOfWorld,
-      rateType: zone.rateType as 'linear' | 'brackets',
+      rateType: zone.rateType as RateType,
       rates: zone.rates.map((rate) => ({
         weightFromKg: rate.weightFrom ? Number(rate.weightFrom) : null,
         weightToKg: rate.weightTo ? Number(rate.weightTo) : null,
@@ -190,7 +191,7 @@ function convertOptions(
     }>;
   }>,
 ): ShippingOptionConfig[] {
-  const validTypes: OptionCostType[] = ['flat', 'linear', 'weight_brackets', 'value_brackets'];
+  const validTypes: OptionCostType[] = ['flat', 'linear', 'weight_brackets', 'value_brackets', 'per_package'];
 
   return options
     .filter((option) => {

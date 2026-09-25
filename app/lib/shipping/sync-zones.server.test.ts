@@ -657,6 +657,7 @@ describe('syncShippingZones — opzioni', () => {
       packaging_category: null,
       shipping_method: 'Standard',
       total_price,
+      package_count: null,
     });
 
     expect(computeLogisticsCost(order(49.99), config).shipping).toBe(4);
@@ -814,6 +815,7 @@ describe('syncShippingZones — opzioni', () => {
         packaging_category: null,
         shipping_method: 'Corriere',
         total_price: 100,
+        package_count: null,
       },
       config,
     );

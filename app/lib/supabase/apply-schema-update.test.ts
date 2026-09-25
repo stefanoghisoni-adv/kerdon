@@ -171,6 +171,40 @@ describe('recupero dell opzione quando lo schema arriva alla 13', () => {
   });
 });
 
+// Lo schema 14 porta `package_count`: gli ordini gia' salvati lo hanno NULL, e
+// lo stesso recupero dell'opzione lo completa.
+describe('recupero dei pacchi quando lo schema arriva alla 14', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSchemaUpdateAttempts();
+    findPlanMock.mockResolvedValue({ customersSyncEnabled: true });
+    configUpdate.mockResolvedValue({});
+    vi.mocked(getValidAccessToken).mockResolvedValue('token');
+    vi.mocked(runQuery).mockResolvedValue(undefined as never);
+  });
+
+  it('da 13 a 14 con gli ordini: accoda il recupero', async () => {
+    shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 13 }), scopes: 'read_orders,read_all_orders' });
+
+    expect((await applyMerchantSchemaUpdate('shop-1')).status).toBe('applied');
+    expect(enqueueShippingMethodBackfill).toHaveBeenCalledWith('shop-1');
+  });
+
+  it('da 12 a 14: un recupero solo, che completa opzione e pacchi insieme', async () => {
+    shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 12 }), scopes: 'read_orders,read_all_orders' });
+
+    await applyMerchantSchemaUpdate('shop-1');
+    expect(enqueueShippingMethodBackfill).toHaveBeenCalledTimes(1);
+  });
+
+  it('da 13 a 14 senza permesso sugli ordini: niente da recuperare', async () => {
+    shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 13 }), scopes: 'read_products' });
+
+    await applyMerchantSchemaUpdate('shop-1');
+    expect(enqueueShippingMethodBackfill).not.toHaveBeenCalled();
+  });
+});
+
 describe('triggerMerchantSchemaUpdate', () => {
   beforeEach(() => {
     vi.clearAllMocks();

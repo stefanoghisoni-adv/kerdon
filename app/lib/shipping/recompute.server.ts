@@ -67,6 +67,8 @@ interface OrderRow {
   shipping_method: string | null;
   /** NUMERIC: la Management API puo' restituirlo come testo. */
   total_price: number | string | null;
+  /** INTEGER, ma come gli altri numeri lo si accetta anche come testo. */
+  package_count: number | string | null;
 }
 
 /** Un numero dal JSON della Management API, o null se non lo e'. */
@@ -89,6 +91,10 @@ function inputDi(riga: OrderRow): OrderLogisticsInput {
     // generica e il costo cambierebbe a seconda di chi ha scritto per ultimo.
     shipping_method: riga.shipping_method ?? null,
     total_price: numeroOppureNull(riga.total_price),
+    // Come l'opzione: se il ricalcolo non leggesse i pacchi, ogni ordine
+    // riletto pagherebbe un pacco solo, e il costo cambierebbe a seconda di
+    // chi ha scritto per ultimo.
+    package_count: numeroOppureNull(riga.package_count),
   };
 }
 
@@ -123,7 +129,7 @@ export function recomputeSelectSQL(dopoId: string | null): string {
   // L'id torna come testo: un bigint nel JSON perderebbe precisione oltre 2^53.
   return `SELECT shopify_order_id::text AS shopify_order_id, fulfillment_status,
   shipping_country_code, total_weight_grams, item_count, returned_at, packaging_category,
-  shipping_method, total_price
+  shipping_method, total_price, package_count
 FROM orders
 ${filtro}ORDER BY shopify_order_id
 LIMIT ${RECOMPUTE_PAGE_SIZE};`;
