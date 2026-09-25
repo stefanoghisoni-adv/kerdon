@@ -242,11 +242,20 @@ prova.describe('la posta in arrivo degli webhook', () => {
     const risposta = await consegna(request, { idConsegna: 'consegna-da-ritentare' });
     expect(risposta.status()).toBe(200);
 
+    // Attendi che la lavorazione arrivi a uno stato finale. Non basta che non
+    // sia piu' 'queued': passa per 'processing', e quella transizione non e'
+    // istantanea. Il poll riprova fino a che lo stato non e' uno di quelli
+    // terminali.
+    const statiFinali = ['failed', 'completed', 'dead_letter', 'done'];
     await expect
-      .poll(async () => (await evento(request, 'consegna-da-ritentare'))?.status, {
-        timeout: 10_000,
-      })
-      .not.toBe('queued');
+      .poll(
+        async () => {
+          const status = (await evento(request, 'consegna-da-ritentare'))?.status;
+          return status !== undefined && statiFinali.includes(status);
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
 
     const riga = await evento(request, 'consegna-da-ritentare');
     expect(riga).toBeDefined();
@@ -256,7 +265,7 @@ prova.describe('la posta in arrivo degli webhook', () => {
     expect(riga.attempts).toBeGreaterThanOrEqual(1);
     // Un esito, qualunque sia: cio' che NON deve succedere e' che la riga resti
     // in lavorazione per sempre, invisibile a chi dovrebbe riprenderla.
-    expect(['failed', 'completed', 'dead_letter', 'done']).toContain(riga.status);
+    expect(statiFinali).toContain(riga.status);
     if (riga.status === 'failed') {
       // Un ritentativo ha un'ora: senza, la riga resterebbe li' senza che
       // nessuno la riprenda.
