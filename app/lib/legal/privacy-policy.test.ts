@@ -4,10 +4,13 @@ import { join } from 'node:path';
 import { LOCALES, type Locale } from '~/lib/i18n/locales';
 import { COSTRUTTI_NON_SUPPORTATI, renderMarkdown } from './markdown';
 import {
+  PRIVACY_POLICY_PATH,
   SORGENTI,
   documento,
+  indirizzoInformativa,
   linguaDallIntestazione,
   linguaDellaPagina,
+  linkInformativa,
   paginaInformativa,
   versioneEData,
 } from './privacy-policy';
@@ -48,6 +51,34 @@ describe('le fonti', () => {
     // una frase sbagliata. O si toglie il costrutto, o lo si insegna a
     // `markdown.ts`.
     expect(trovati).toEqual([]);
+  });
+});
+
+/**
+ * La costante del percorso corrisponde alla rotta vera.
+ *
+ * IL DIFETTO CHE QUESTO TEST IMPEDISCE. Prima il percorso era scritto a mano in
+ * tre posti, e due di quelli tre sbagliavano. Ora c'e' una costante
+ * `PRIVACY_POLICY_PATH` usata ovunque. Questo test verifica che quella costante
+ * corrisponda al file di rotta effettivo: se qualcuno rinomina
+ * `policies.privacy-policy.tsx` senza aggiornare la costante, o viceversa, il
+ * test fallisce. Il percorso e il file restano allineati.
+ */
+describe('il percorso corrisponde alla rotta', () => {
+  it('PRIVACY_POLICY_PATH corrisponde al file policies.privacy-policy.tsx', () => {
+    // In Remix flat-route naming, `policies.privacy-policy.tsx` diventa
+    // `/policies/privacy-policy`. Si deriva il percorso dal nome del file per
+    // verificare che la costante sia allineata.
+    const nomeFile = 'policies.privacy-policy.tsx';
+    const percorsoAtteso = '/' + nomeFile.replace('.tsx', '').replace(/\./g, '/');
+
+    expect(PRIVACY_POLICY_PATH).toBe(percorsoAtteso);
+    expect(PRIVACY_POLICY_PATH).toBe('/policies/privacy-policy');
+  });
+
+  it('il file di rotta esiste davvero', () => {
+    const percorsoFile = join(process.cwd(), 'app', 'routes', 'policies.privacy-policy.tsx');
+    expect(() => readFileSync(percorsoFile, 'utf-8')).not.toThrow();
   });
 });
 
@@ -223,5 +254,56 @@ describe('la pagina resa', () => {
     expect(reso.corpo).toContain('&lt;img');
     expect(reso.corpo).not.toContain('<img');
     expect(reso.corpo).toContain('<strong>ok</strong>');
+  });
+});
+
+/**
+ * I link all'informativa generati dall'app portano tutti alla rotta giusta.
+ *
+ * IL DIFETTO CHE QUESTO TEST IMPEDISCE. Prima di questo cambio stavano tre
+ * versioni sparse del percorso: una nel modal, una negli hreflang della pagina
+ * stessa, e una — quella giusta — nell'helper. Due di quelle tre sbagliavano,
+ * e chi le apriva trovava un 410. Ora c'e' un solo punto in cui si costruisce
+ * il percorso, e questo test verifica che ogni link generato dall'app punti
+ * alla rotta vera.
+ */
+describe('i link generati portano alla rotta giusta', () => {
+  it.each(LOCALES)('linkInformativa(%s) genera la rotta corretta', (locale) => {
+    const link = linkInformativa(locale);
+    expect(link).toContain(PRIVACY_POLICY_PATH);
+    expect(link).toContain(`lang=${locale}`);
+    // Inizia con il percorso corretto, non con doppie barre ne' percorsi sbagliati
+    expect(link).toMatch(/^\/policies\/privacy-policy\?lang=/);
+  });
+
+  it.each(LOCALES)('indirizzoInformativa(%s) costruisce l URL assoluto corretto', (locale) => {
+    const base = 'https://api.kerdon.io';
+    const url = indirizzoInformativa(base, locale);
+    expect(url).toBe(`${base}${linkInformativa(locale)}`);
+    expect(url).toContain(PRIVACY_POLICY_PATH);
+    expect(url).not.toContain('/policies/policies/'); // il doppio che c'era prima
+  });
+
+  it('tutti i link nella pagina resa usano la rotta corretta', () => {
+    for (const locale of LOCALES) {
+      const pagina = paginaInformativa(locale);
+
+      // Gli hreflang alternates devono tutti puntare alla rotta corretta
+      const hreflangMatch = pagina.match(/hreflang="[^"]+"\s+href="([^"]+)"/g);
+      expect(hreflangMatch).toBeTruthy();
+
+      for (const match of hreflangMatch!) {
+        const href = /href="([^"]+)"/.exec(match)?.[1];
+        expect(href).toContain(PRIVACY_POLICY_PATH);
+        // NON il percorso senza il prefisso /policies/ (il vecchio sbagliato)
+        expect(href).not.toMatch(/^\/privacy-policy\?/);
+        // NON il doppio che c'era prima
+        expect(href).not.toContain('/policies/policies/');
+      }
+
+      // Il link di cambio lingua deve usare la rotta corretta
+      const switchLink = /href="\?lang=(en|it)"/.exec(pagina);
+      expect(switchLink).toBeTruthy(); // usa parametro relativo, che va bene
+    }
   });
 });

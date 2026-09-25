@@ -132,9 +132,39 @@ export function versioneEData(sorgente: string): { versione: string; data: strin
   };
 }
 
-/** L'indirizzo pubblico della pagina, con la lingua scritta dentro. */
+/**
+ * Il percorso della rotta dell'informativa.
+ *
+ * UNICO PUNTO IN CUI SI DICHIARA IL PERCORSO. Questa costante corrisponde al
+ * nome del file di rotta `policies.privacy-policy.tsx`, che in Remix flat-route
+ * naming diventa `/policies/privacy-policy`. Cambiare il file senza cambiare
+ * questa costante rompe il test, e viceversa: la rotta e il percorso restano
+ * allineati. Usata da `linkInformativa()`, `robots.txt` e qualsiasi altro punto
+ * che deve nominare questa rotta.
+ */
+export const PRIVACY_POLICY_PATH = '/policies/privacy-policy';
+
+/**
+ * Il percorso relativo dell'informativa, con la lingua scritta dentro.
+ *
+ * UNICO PUNTO IN CUI SI COSTRUISCE L'INDIRIZZO. Prima stavano tre versioni
+ * sparse per il codice: una nel modal, una negli hreflang, e una — quella
+ * giusta — qui. Due di quelle tre sbagliavano la rotta, e chi le apriva
+ * trovava un 410. Ora tutte passano da qui: se un giorno il percorso cambia,
+ * si cambia in un posto solo e niente si rompe.
+ */
+export function linkInformativa(locale: Locale): string {
+  return `${PRIVACY_POLICY_PATH}?lang=${locale}`;
+}
+
+/**
+ * L'indirizzo pubblico della pagina, con la lingua scritta dentro.
+ *
+ * Per i riferimenti esterni (canonical, sitemaps, email) che hanno bisogno
+ * dell'URL assoluto. I link interni all'app usano `linkInformativa`.
+ */
 export function indirizzoInformativa(base: string, locale: Locale): string {
-  return `${base.replace(/\/+$/, '')}/policies/privacy-policy?lang=${locale}`;
+  return `${base.replace(/\/+$/, '')}${linkInformativa(locale)}`;
 }
 
 /** Il testo, gia' innocuo, dentro un attributo. */
@@ -180,9 +210,9 @@ export function paginaInformativa(locale: Locale): string {
 <title>${attributo(doc.titolo)}</title>
 <!-- Le due lingue si dichiarano a chi indicizza: senza, la pagina italiana e
      quella inglese sembrano due documenti diversi con lo stesso contenuto. -->
-<link rel="alternate" hreflang="it" href="/privacy-policy?lang=it">
-<link rel="alternate" hreflang="en" href="/privacy-policy?lang=en">
-<link rel="alternate" hreflang="x-default" href="/privacy-policy?lang=${FALLBACK_LOCALE}">
+<link rel="alternate" hreflang="it" href="${linkInformativa('it')}">
+<link rel="alternate" hreflang="en" href="${linkInformativa('en')}">
+<link rel="alternate" hreflang="x-default" href="${linkInformativa(FALLBACK_LOCALE)}">
 <style>${STILE_DOCUMENTO}</style>
 </head>
 <body>
