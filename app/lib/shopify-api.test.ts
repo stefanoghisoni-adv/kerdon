@@ -956,7 +956,7 @@ describe('ordini: i dati di spedizione', () => {
     expect(order?.fulfillment_status).toBe('FULFILLED');
   });
 
-  it('i pacchi sono le spedizioni non annullate', async () => {
+  it('i pacchi sono le spedizioni partite davvero', async () => {
     (global.fetch as any).mockResolvedValueOnce(
       ok({
         order: orderNode({

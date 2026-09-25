@@ -337,7 +337,8 @@ function mapOrderLogistics(o: GqlOrder): Pick<
     // si abbina a un'opzione sola. Un titolo vuoto non abbina niente, quindi
     // vale come assente.
     shipping_method: o.shippingLines?.nodes?.[0]?.title || null,
-    // Un pacco per spedizione non annullata; zero se non ce n'e'. Le prime 10
+    // Un pacco per spedizione partita davvero (vedi package-count); zero se
+    // non ce n'e'. Le prime 10
     // bastano: un ordine in piu' di dieci pacchi e' fuori dal caso comune, e
     // contarne dieci sottostima invece di inventare.
     package_count: countShippedPackages(o.fulfillments),
@@ -974,7 +975,7 @@ export class ShopifyAPIClient {
    * shipping line o spedizioni assenti, oppure ordine non piu' su Shopify. Il
    * chiamante le scrive come sentinelle, cosi' lo stesso ordine non si
    * richiede a ogni corsa. I pacchi si contano con la stessa funzione della
-   * scrittura dell'ordine (countShippedPackages): annullate escluse.
+   * scrittura dell'ordine (countShippedPackages): contano solo le partite.
    *
    * L'abbinamento e' per posizione: `nodes` risponde nello stesso ordine degli
    * id chiesti, con `null` dove l'ordine non c'e', e cosi' un id oltre 2^53

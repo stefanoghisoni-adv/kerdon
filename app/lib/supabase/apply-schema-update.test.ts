@@ -141,7 +141,8 @@ describe('recupero dell opzione quando lo schema arriva alla 13', () => {
     shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 12 }), scopes: 'read_orders,read_all_orders' });
 
     expect((await applyMerchantSchemaUpdate('shop-1')).status).toBe('applied');
-    expect(enqueueShippingMethodBackfill).toHaveBeenCalledWith('shop-1');
+    // Oggi l'ultima versione e' la 14: chi arriva dalla 12 la attraversa.
+    expect(enqueueShippingMethodBackfill).toHaveBeenCalledWith('shop-1', { restartIfRunning: true });
   });
 
   it('senza permesso sugli ordini: niente da recuperare', async () => {
@@ -183,11 +184,13 @@ describe('recupero dei pacchi quando lo schema arriva alla 14', () => {
     vi.mocked(runQuery).mockResolvedValue(undefined as never);
   });
 
-  it('da 13 a 14 con gli ordini: accoda il recupero', async () => {
+  it('da 13 a 14 con gli ordini: accoda il recupero, e da zero anche se uno e\' in corso', async () => {
     shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 13 }), scopes: 'read_orders,read_all_orders' });
 
     expect((await applyMerchantSchemaUpdate('shop-1')).status).toBe('applied');
-    expect(enqueueShippingMethodBackfill).toHaveBeenCalledWith('shop-1');
+    // Un recupero della 13 a meta' riprende dal suo cursore: gli ordini gia'
+    // passati resterebbero senza pacchi. Da qui il seguito da zero.
+    expect(enqueueShippingMethodBackfill).toHaveBeenCalledWith('shop-1', { restartIfRunning: true });
   });
 
   it('da 12 a 14: un recupero solo, che completa opzione e pacchi insieme', async () => {

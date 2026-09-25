@@ -339,8 +339,8 @@ END $$;
  * resta NULL finche' l'ordine non viene riscritto, e un ordine senza opzione
  * usa la tariffa generica della zona: il costo di prima, non uno zero.
  *
- * La 14 porta sugli ordini `package_count`, i pacchi spediti (spedizioni non
- * annullate), per il costo per pacco. Ancora solo una colonna: nessun passo
+ * La 14 porta sugli ordini `package_count`, i pacchi spediti (spedizioni
+ * partite davvero), per il costo per pacco. Ancora solo una colonna: nessun passo
  * esplicito. Lo storico lo completa il recupero da Shopify che
  * l'aggiornamento accoda (apply-schema-update), e intanto un ordine spedito
  * senza conteggio paga un pacco.

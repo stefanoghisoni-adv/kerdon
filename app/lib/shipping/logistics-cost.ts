@@ -1,7 +1,13 @@
 // app/lib/shipping/logistics-cost.ts
 import type { FallbackRule, LogisticsConfig, OrderLogisticsInput, ShippingOptionConfig, ZoneConfig } from './types';
 
-const SPEDITO = new Set(['FULFILLED', 'PARTIALLY_FULFILLED']);
+/**
+ * Gli stati che contano come spedito. Esportati perche' il recupero dello
+ * storico li scrive in SQL: la sua idea di "spedito" deve essere questa.
+ */
+export const SHIPPED_STATUSES = ['FULFILLED', 'PARTIALLY_FULFILLED'] as const;
+
+const SPEDITO = new Set<string>(SHIPPED_STATUSES);
 
 const centesimi = (n: number) => Math.round(n * 100) / 100;
 

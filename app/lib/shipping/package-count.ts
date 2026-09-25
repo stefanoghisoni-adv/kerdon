@@ -5,17 +5,20 @@
 //
 // PERCHE' COSI'. Il merchant che paga il corriere a collo vuole il costo per
 // pacco, e l'unica traccia dei pacchi che Shopify tiene e' l'elenco delle
-// spedizioni dell'ordine: ogni spedizione e' un invio, cioe' un pacco. Le
-// annullate (stato CANCELLED, verificato sulla 2026-07: FulfillmentStatus)
-// non sono mai partite, quindi non contano. Gli altri stati contano: SUCCESS e'
-// il caso normale, e OPEN/PENDING (deprecati) o ERROR/FAILURE riguardano la
-// richiesta al servizio di evasione, non dicono che il pacco non esista.
+// spedizioni dell'ordine: ogni spedizione partita e' un pacco. Contano solo
+// quelle partite davvero (FulfillmentStatus, verificato sulla 2026-07):
+// SUCCESS, piu' OPEN e PENDING, deprecati ma ancora possibili sugli ordini
+// vecchi. CANCELLED, ERROR e FAILURE no: una spedizione annullata o fallita
+// non e' mai uscita dal magazzino, e contarla farebbe pagare un pacco mai
+// partito. Lo stesso per uno stato assente o sconosciuto. Il rischio opposto
+// e' coperto altrove: un ordine spedito con zero pacchi contati ne paga
+// comunque uno (effectivePackageCount).
 //
 // In un file suo perche' lo usano due strade che devono contare allo stesso
 // modo: la scrittura dell'ordine (orderNodeFields) e il recupero dello storico
 // (shipping-method-backfill). Due conteggi scritti a mano divergerebbero.
 
-const NON_PARTITA = 'CANCELLED';
+const PARTITA = new Set(['SUCCESS', 'OPEN', 'PENDING']);
 
 /** Una spedizione come arriva da Shopify: basta lo stato. */
 export interface FulfillmentLike {
@@ -23,11 +26,11 @@ export interface FulfillmentLike {
 }
 
 /**
- * Le spedizioni non annullate. Zero se non ce n'e' nessuna: il calcolo del
+ * Le spedizioni partite davvero. Zero se non ce n'e' nessuna: il calcolo del
  * costo poi decide cosa vuol dire zero su un ordine spedito
  * (`effectivePackageCount`), qui si conta e basta.
  */
 export function countShippedPackages(fulfillments: ReadonlyArray<FulfillmentLike | null> | null | undefined): number {
   if (!fulfillments) return 0;
-  return fulfillments.filter((f) => f != null && (f.status ?? '').toUpperCase() !== NON_PARTITA).length;
+  return fulfillments.filter((f) => f != null && PARTITA.has((f.status ?? '').toUpperCase())).length;
 }

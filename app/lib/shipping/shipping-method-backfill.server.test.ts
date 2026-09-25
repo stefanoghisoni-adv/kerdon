@@ -15,7 +15,7 @@ const righeCoda = new Map<string, { id: string; status: string; dedupKey: string
 vi.mock('~/db.server', () => ({
   prisma: {
     shop: { findUnique: vi.fn() },
-    syncRequest: { createMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn() },
+    syncRequest: { createMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
   },
 }));
 vi.mock('~/lib/supabase-management.server', () => ({
@@ -88,6 +88,11 @@ beforeEach(() => {
     return { count: 1 };
   });
   (prisma.syncRequest.findUnique as any).mockImplementation(async ({ where }: any) => righeCoda.get(where.dedupKey) ?? null);
+  (prisma.syncRequest.findMany as any).mockImplementation(async ({ where }: any) =>
+    [...righeCoda.values()].filter(
+      (r) => r.shopId === where.shopId && r.type === where.type && where.status.in.includes(r.status),
+    ),
+  );
   (prisma.syncRequest.findFirst as any).mockImplementation(async ({ where }: any) => {
     return (
       [...righeCoda.values()].find(
@@ -114,9 +119,14 @@ beforeEach(() => {
 });
 
 describe('backfillSelectSQL', () => {
-  prova('legge solo gli ordini senza opzione o senza pacchi, a pagine per id', () => {
+  prova('legge gli ordini senza opzione, o senza pacchi ma spediti con un paese, a pagine per id', () => {
     const sql = backfillSelectSQL(null);
-    expect(sql).toContain('WHERE (shipping_method IS NULL OR package_count IS NULL)');
+    expect(sql).toContain('WHERE (shipping_method IS NULL');
+    // I pacchi servono solo a chi il calcolo fa pagare la spedizione: spedito
+    // (la stessa definizione di isShipped) e con un paese.
+    expect(sql).toContain(
+      "OR (package_count IS NULL AND UPPER(fulfillment_status) IN ('FULFILLED', 'PARTIALLY_FULFILLED') AND COALESCE(shipping_country_code, '') <> ''))",
+    );
     expect(sql).toContain('ORDER BY shopify_order_id');
     expect(sql).toContain(`LIMIT ${BACKFILL_PAGE_SIZE}`);
     expect(backfillSelectSQL('42')).toContain('AND shopify_order_id > 42');
@@ -350,6 +360,41 @@ describe('enqueueShippingMethodBackfill', () => {
     await enqueueShippingMethodBackfill('shop-1');
     await enqueueShippingMethodBackfill('shop-2');
     expect([...righeCoda.values()].filter((r) => r.type === 'shipping-method-backfill')).toHaveLength(2);
+  });
+
+  prova('v14 durante un recupero in corso: un solo seguito, da zero', async () => {
+    // Il recupero della 13 e' partito e avanza dal suo cursore: gli ordini che
+    // ha gia' passato non tornano nella sua lettura, e resterebbero senza pacchi.
+    await enqueueShippingMethodBackfill('shop-1');
+    for (const r of righeCoda.values()) r.status = 'processing';
+
+    await enqueueShippingMethodBackfill('shop-1', { restartIfRunning: true });
+    await enqueueShippingMethodBackfill('shop-1', { restartIfRunning: true });
+
+    const accodati = [...righeCoda.values()].filter((r) => r.type === 'shipping-method-backfill');
+    expect(accodati).toHaveLength(2);
+    const seguito = accodati.find((r) => r.status === 'queued')!;
+    // Senza cursore: riparte dal primo ordine.
+    expect((seguito.payload as { cursor?: string } | null)?.cursor).toBeUndefined();
+    expect(seguito.dedupKey).toContain(':da-capo:');
+  });
+
+  prova('v14 con una continuazione ancora in coda: anche li\' un seguito da zero', async () => {
+    righeCoda.set('k', {
+      id: 'job-c', status: 'queued', dedupKey: 'k', payload: { cursor: '500' },
+      type: 'shipping-method-backfill', shopId: 'shop-1',
+    });
+
+    await enqueueShippingMethodBackfill('shop-1', { restartIfRunning: true });
+
+    const daZero = [...righeCoda.values()].filter((r) => r.type === 'shipping-method-backfill' && (r.payload as { cursor?: string } | null)?.cursor === undefined);
+    expect(daZero).toHaveLength(1);
+  });
+
+  prova('v14 con un recupero da zero ancora in coda: basta lui', async () => {
+    await enqueueShippingMethodBackfill('shop-1');
+    await enqueueShippingMethodBackfill('shop-1', { restartIfRunning: true });
+    expect([...righeCoda.values()].filter((r) => r.type === 'shipping-method-backfill')).toHaveLength(1);
   });
 
   prova('un guasto della coda non solleva: chi chiama ha gia\' salvato', async () => {

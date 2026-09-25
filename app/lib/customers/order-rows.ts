@@ -103,7 +103,7 @@ export interface ShopifyOrder {
    */
   shipping_method?: string | null;
   /**
-   * Le spedizioni non annullate dell'ordine: un pacco ciascuna. Serve al
+   * Le spedizioni partite davvero dell'ordine: un pacco ciascuna. Serve al
    * costo per pacco; assente vale NULL, e un ordine spedito senza conteggio
    * paga un pacco (effectivePackageCount).
    */

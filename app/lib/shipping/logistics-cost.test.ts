@@ -289,7 +289,7 @@ describe('shipping_method vuoto: la sentinella del recupero vale come nessuna op
 });
 
 // Il costo per pacco: quanti pacchi sono partiti = quante spedizioni Shopify
-// ha registrato per l'ordine (le annullate escluse, le conta chi scrive).
+// ha registrato per l'ordine (solo le partite davvero, le conta chi scrive).
 describe('effectivePackageCount', () => {
   it('il numero di spedizioni registrate, quando c\'e\'', () => {
     expect(effectivePackageCount(1)).toBe(1);

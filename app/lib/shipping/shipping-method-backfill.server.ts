@@ -42,6 +42,7 @@ import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import { enqueueLogisticsRecompute } from './recompute-enqueue.server';
 import { enqueueShippingMethodBackfillContinuation } from './shipping-method-backfill-enqueue.server';
 import { ID_VALIDO, databaseFermo, idSicuro, tabellaAssente, type RecomputeOutcome } from './recompute.server';
+import { SHIPPED_STATUSES } from './logistics-cost';
 
 /** Ordini senza opzione letti dal database del merchant per giro. */
 export const BACKFILL_PAGE_SIZE = 250;
@@ -108,13 +109,28 @@ function pacchiSicuri(valore: number): string {
   return `${valore}::integer`;
 }
 
-/** La lettura di una pagina di ordini ancora da completare, dopo l'ultimo id visto. */
+/**
+ * "Spedito con un paese" in SQL: le stesse due condizioni con cui il calcolo
+ * decide se far pagare la spedizione (isShipped e il paese non vuoto). Gli
+ * stati arrivano dalla costante del calcolo, non riscritti a mano.
+ */
+const SPEDITO_CON_PAESE = `UPPER(fulfillment_status) IN (${SHIPPED_STATUSES.map((s) => `'${s}'`).join(', ')}) AND COALESCE(shipping_country_code, '') <> ''`;
+
+/**
+ * La lettura di una pagina di ordini ancora da completare, dopo l'ultimo id visto.
+ *
+ * L'opzione serve a ogni ordine; i pacchi solo a chi il calcolo fa pagare la
+ * spedizione. Un ordine mai spedito o senza paese non la paga, quindi i suoi
+ * pacchi non cambierebbero niente: chiederli a Shopify sarebbe solo costo. Se
+ * piu' avanti parte, la sincronizzazione lo riscrive con i pacchi.
+ */
 export function backfillSelectSQL(dopoId: string | null): string {
   const filtro = dopoId === null ? '' : `\n  AND shopify_order_id > ${idSicuro(dopoId)}`;
   // L'id torna come testo: un bigint nel JSON perderebbe precisione oltre 2^53.
   return `SELECT shopify_order_id::text AS shopify_order_id
 FROM orders
-WHERE (shipping_method IS NULL OR package_count IS NULL)${filtro}
+WHERE (shipping_method IS NULL
+  OR (package_count IS NULL AND ${SPEDITO_CON_PAESE}))${filtro}
 ORDER BY shopify_order_id
 LIMIT ${BACKFILL_PAGE_SIZE};`;
 }

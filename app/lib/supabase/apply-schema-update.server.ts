@@ -107,7 +107,10 @@ export async function applyMerchantSchemaUpdate(
     (attraversa(VERSIONE_OPZIONE_SPEDIZIONE) || attraversa(VERSIONE_PACCHI)) &&
     hasOrdersAccess(shop.scopes)
   ) {
-    await enqueueShippingMethodBackfill(shopId);
+    // Chi attraversa la 14 potrebbe avere un recupero della 13 a meta': quello
+    // riprende dal suo cursore e non torna sugli ordini gia' passati, che
+    // resterebbero senza pacchi. Si accoda allora un seguito da zero.
+    await enqueueShippingMethodBackfill(shopId, { restartIfRunning: attraversa(VERSIONE_PACCHI) });
   }
 
   return { status: 'applied', version: LATEST_SCHEMA_VERSION };

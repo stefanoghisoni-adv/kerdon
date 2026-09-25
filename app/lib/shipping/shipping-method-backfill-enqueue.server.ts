@@ -14,6 +14,23 @@ import { triggerSyncDrain } from '~/lib/queue/trigger.server';
 
 const TIPO = 'shipping-method-backfill' as const;
 
+/** Un item in coda riparte dal primo ordine se non porta un cursore. */
+function parteDaZero(payload: unknown): boolean {
+  return !(typeof payload === 'object' && payload !== null && 'cursor' in payload);
+}
+
+export interface EnqueueBackfillOptions {
+  /**
+   * Accoda un recupero da zero anche se uno e' gia' in corso.
+   *
+   * Serve al passaggio allo schema 14: un recupero partito prima legge gli
+   * ordini con la condizione di allora, e va avanti dal suo cursore. Gli
+   * ordini che ha gia' passato non tornano nella sua lettura, e resterebbero
+   * senza pacchi per sempre.
+   */
+  restartIfRunning?: boolean;
+}
+
 /**
  * Mette in coda il recupero per un negozio.
  *
@@ -21,29 +38,52 @@ const TIPO = 'shipping-method-backfill' as const;
  * finestra di un minuto, sull'indice unico). Il secondo e' proprio di questo
  * lavoro: se un recupero del negozio e' gia' in coda o in corso, non se ne
  * aggiunge un altro nemmeno a distanza di ore. Quello in corso legge gli
- * ordini ancora senza opzione mentre avanza, quindi copre anche chi e' arrivato
+ * ordini ancora da completare mentre avanza, quindi copre anche chi e' arrivato
  * dopo; un secondo farebbe solo le stesse domande a Shopify.
+ *
+ * L'ECCEZIONE, con `restartIfRunning`: quando cambia cio' che c'e' da
+ * completare (una colonna nuova), un recupero gia' partito non basta, perche'
+ * non torna sugli ordini che ha passato. Allora se ne accoda UNO da zero,
+ * legato con la chiave all'item in corso, come il ricalcolo fa con i
+ * salvataggi che arrivano mentre lavora: chiamarlo di nuovo non ne aggiunge
+ * un secondo. Se in coda c'e' gia' un recupero da zero non ancora partito,
+ * basta lui: leggera' tutto con la condizione nuova.
  *
  * Il controllo e l'inserimento non sono atomici, ed e' accettabile: nel caso
  * raro di due chiamate simultanee entrano due item, e il secondo trova gli
- * ordini gia' valorizzati (la scrittura tocca solo i NULL) e finisce subito.
+ * ordini gia' valorizzati (la scrittura riempie solo i vuoti) e finisce subito.
  *
  * NON SOLLEVA. Chi chiama ha gia' fatto il suo lavoro (importato le zone,
  * aggiornato lo schema): un guasto della coda non deve farlo sembrare fallito.
  */
-export async function enqueueShippingMethodBackfill(shopId: string): Promise<void> {
+export async function enqueueShippingMethodBackfill(
+  shopId: string,
+  opzioni: EnqueueBackfillOptions = {},
+): Promise<void> {
   try {
-    const giaInCorso = await prisma.syncRequest.findFirst({
-      where: { shopId, type: TIPO, status: { in: ['queued', 'processing'] } },
-      select: { id: true },
-    });
-    if (giaInCorso) return;
+    let dedupKey = dedupKeyFor(TIPO, shopId, new Date());
 
-    await enqueueSyncRequest({
-      type: TIPO,
-      shopId,
-      dedupKey: dedupKeyFor(TIPO, shopId, new Date()),
-    });
+    if (opzioni.restartIfRunning) {
+      const inCorso = await prisma.syncRequest.findMany({
+        where: { shopId, type: TIPO, status: { in: ['queued', 'processing'] } },
+        select: { id: true, status: true, payload: true },
+      });
+      if (inCorso.some((r) => r.status === 'queued' && parteDaZero(r.payload))) return;
+      if (inCorso.length > 0) {
+        // Legato al primo item in corso: la stessa chiave a ogni chiamata, e
+        // l'indice unico ne fa entrare uno solo.
+        const riferimento = inCorso.find((r) => r.status === 'processing') ?? inCorso[0];
+        dedupKey = `${TIPO}:${shopId}:da-capo:${riferimento.id}`;
+      }
+    } else {
+      const giaInCorso = await prisma.syncRequest.findFirst({
+        where: { shopId, type: TIPO, status: { in: ['queued', 'processing'] } },
+        select: { id: true },
+      });
+      if (giaInCorso) return;
+    }
+
+    await enqueueSyncRequest({ type: TIPO, shopId, dedupKey });
     triggerSyncDrain(shopId);
   } catch (error) {
     console.error(

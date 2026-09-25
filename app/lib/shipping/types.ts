@@ -70,7 +70,7 @@ export interface OrderLogisticsInput {
   shipping_method: string | null;
   total_price: number | null;
   /**
-   * Quante spedizioni non annullate Shopify ha registrato per l'ordine: un
+   * Quante spedizioni partite davvero Shopify ha registrato per l'ordine: un
    * pacco ciascuna. NULL sugli ordini scritti prima dello schema 14 e non
    * ancora recuperati; il calcolo lo legge con `effectivePackageCount`.
    */
