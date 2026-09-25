@@ -12,6 +12,7 @@ import {
   lifetimeProfitSQL,
   previousRange,
 } from './customers-query';
+import { ALL_TIME_START } from '~/lib/dates/ranges';
 
 /**
  * I clienti con i loro numeri, pronti per la tabella.
@@ -53,6 +54,12 @@ export interface CustomersReport {
   rows: CustomerRow[];
   /** La valuta con cui il negozio vende. */
   currency: string;
+  /**
+   * Quanti clienti hanno comprato da sempre (con lo stesso tetto della
+   * tabella). Serve alla pagina per accorgersi che il periodo scelto ne lascia
+   * fuori qualcuno, e dirlo invece di mostrare meno clienti in silenzio.
+   */
+  lifetimeCustomers: number;
   /** Perche' non c'e' niente da mostrare, quando non c'e'. */
   unavailable: 'no_orders_access' | 'not_connected' | 'plan_required' | 'failed' | null;
 }
@@ -101,6 +108,7 @@ export async function loadCustomersReport(opts: {
   const empty = (unavailable: CustomersReport['unavailable']): CustomersReport => ({
     rows: [],
     currency: 'EUR',
+    lifetimeCustomers: 0,
     unavailable,
   });
 
@@ -116,7 +124,9 @@ export async function loadCustomersReport(opts: {
   // Il fuso e' del negozio, non della richiesta: si legge dalla sua riga
   // insieme a tutto il resto, cosi' chi chiama non puo' scordarselo.
   const timeZone = shop.ianaTimezone;
-  const before = previousRange(opts.from, opts.to);
+  // "Da sempre" non ha un prima: il periodo precedente cadrebbe interamente
+  // prima che Shopify esistesse, e sarebbe una query che torna vuota per forza.
+  const before = opts.from <= ALL_TIME_START ? null : previousRange(opts.from, opts.to);
 
   await ensureReportTables(token, ref);
 
@@ -126,11 +136,13 @@ export async function loadCustomersReport(opts: {
       ref,
       customersInRangeSQL({ ...opts, timeZone, limit: opts.limit }),
     ),
-    runQueryRows<RangeRow>(
-      token,
-      ref,
-      customersInRangeSQL({ ...before, timeZone, limit: opts.limit }),
-    ),
+    before
+      ? runQueryRows<RangeRow>(
+          token,
+          ref,
+          customersInRangeSQL({ ...before, timeZone, limit: opts.limit }),
+        )
+      : Promise.resolve([] as RangeRow[]),
     runQueryRows<LifetimeRow>(token, ref, lifetimeProfitSQL(opts.limit)),
   ]);
 
@@ -168,6 +180,7 @@ export async function loadCustomersReport(opts: {
   return {
     rows,
     currency: current.find((row) => row.currency)?.currency ?? 'EUR',
+    lifetimeCustomers: lifetime.length,
     unavailable: null,
   };
 }

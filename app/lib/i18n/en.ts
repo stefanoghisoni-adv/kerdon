@@ -888,6 +888,8 @@ export const en: typeof it = {
     notSynced: "Not synced",
     noName: "No name",
     empty: "No orders in the selected period.",
+    periodHint:
+      "This list shows the customers who ordered in the chosen period. Pick \u201cAll time\u201d to see all of them.",
     warning: (missing: number) =>
       `This customer's profit is worked out from ${missing} ${
         missing === 1 ? "product with no cost" : "products with no cost"
@@ -1015,6 +1017,7 @@ export const en: typeof it = {
       lastMonth: "Last month",
       lastQuarter: "Last quarter",
       lastYear: "Last year",
+      allTime: "All time",
       custom: "Custom range",
     },
     comparisons: {

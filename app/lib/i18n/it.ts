@@ -1112,6 +1112,12 @@ export const it = {
     noName: "Senza nome",
     empty: "Nessun ordine nel periodo scelto.",
     /**
+     * Sotto la tabella quando il periodo ne lascia fuori qualcuno: chi ha
+     * ordinato prima c'e' ancora, basta allargare il periodo.
+     */
+    periodHint:
+      "Qui trovi i clienti che hanno ordinato nel periodo scelto. Scegli \u00abDa sempre\u00bb per vederli tutti.",
+    /**
      * Il tooltip della spia, al posto della nota sotto il nome: la stessa cosa
      * detta a chi la cerca, invece che a tutti in ogni riga.
      */
@@ -1311,6 +1317,7 @@ export const it = {
       lastMonth: "Mese scorso",
       lastQuarter: "Trimestre scorso",
       lastYear: "Anno scorso",
+      allTime: "Da sempre",
       custom: "Intervallo personalizzato",
     },
     comparisons: {

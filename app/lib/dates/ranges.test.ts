@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  ALL_TIME_LEAF,
+  ALL_TIME_START,
+  CUSTOMERS_DEFAULT_PRESET,
   bfcmRange,
   todayIn,
   fromIso,
@@ -462,5 +465,58 @@ describe('defaultRange', () => {
     // Se il default cambia, questo test non deve passare per caso: la voce
     // scelta deve essere una di quelle che il menu mostra davvero.
     expect(matchPreset(defaultRange(null, istante), istante)).toBe(DEFAULT_PRESET);
+  });
+});
+
+// "Da sempre": la tab Clienti si apre su tutti i clienti che hanno comprato, non
+// su chi ha comprato nell'ultimo mese. Con trenta giorni di partenza e nessun
+// selettore a vista, chi aveva ordinato prima spariva senza un segno.
+describe('allTime', () => {
+  it('parte da una data sicura e finisce oggi', () => {
+    expect(presetRange('allTime', NOW)).toEqual({ from: ALL_TIME_START, to: '2026-08-25' });
+  });
+
+  it('comincia prima di qualunque ordine possibile', () => {
+    // Shopify nasce nel 2006: un ordine precedente non puo' esistere.
+    expect(ALL_TIME_START <= '2006-01-01').toBe(true);
+  });
+
+  it('finisce nel giorno del negozio, non in quello del server', () => {
+    const istante = new Date('2026-09-03T23:30:00Z');
+
+    expect(defaultRange('Europe/Rome', istante, 'allTime')).toEqual({
+      from: ALL_TIME_START,
+      to: '2026-09-04',
+    });
+    expect(defaultRange('America/Los_Angeles', istante, 'allTime')).toEqual({
+      from: ALL_TIME_START,
+      to: '2026-09-03',
+    });
+  });
+
+  it('il selettore la riconosce per nome', () => {
+    expect(matchPreset({ from: ALL_TIME_START, to: '2026-08-25' }, NOW)).toBe('allTime');
+    expect(matchLeaf({ from: ALL_TIME_START, to: '2026-08-25' }, NOW)).toEqual(ALL_TIME_LEAF);
+    expect(leafRange(ALL_TIME_LEAF, NOW)).toEqual({ from: ALL_TIME_START, to: '2026-08-25' });
+  });
+
+  it('con una fine diversa da oggi non e\' piu\' "da sempre"', () => {
+    expect(matchPreset({ from: ALL_TIME_START, to: '2026-08-24' }, NOW)).toBe('custom');
+  });
+
+  it('e\' il default dei Clienti, non della dashboard', () => {
+    expect(CUSTOMERS_DEFAULT_PRESET).toBe('allTime');
+    expect(DEFAULT_PRESET).toBe('last30');
+    const istante = new Date('2026-09-03T12:00:00Z');
+    expect(defaultRange(null, istante)).toEqual({ from: '2026-08-05', to: '2026-09-03' });
+    expect(defaultRange(null, istante, CUSTOMERS_DEFAULT_PRESET)).toEqual({
+      from: ALL_TIME_START,
+      to: '2026-09-03',
+    });
+  });
+
+  it('non entra nel menu della dashboard', () => {
+    const chiavi = [...HEAD_LEAVES, ...presetGroups(NOW).flatMap((g) => g.leaves)].map(leafKey);
+    expect(chiavi).not.toContain(leafKey(ALL_TIME_LEAF));
   });
 });
