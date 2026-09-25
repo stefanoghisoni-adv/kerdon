@@ -36,6 +36,8 @@
 | 5 | UI: zone → opzioni, modale costi per tipo | sonnet |
 | 6 | E2E azioni | sonnet |
 | 7 | Pagina a tutta larghezza, tabella categorie di imballo (importate o create) | opus |
+| 8 | Layout: due card in alto, prezzi a metà sotto con la card dei default accanto | sonnet |
+| 9 | Ricalcolo immediato al salvataggio + recupero dell'opzione sugli ordini storici | opus |
 
 ---
 
@@ -196,6 +198,42 @@ Requisiti (richiesta dell'utente del 2026-09-24):
 6. Test unitari delle parti pure; E2E delle nuove azioni (aggiungi, modifica, elimina categoria; import se presente).
 
 - [ ] TDD sulle parti pure → implementazione → tsc → suite completa → e2e spedizioni → commit `feat(spedizioni): pagina a tutta larghezza e tabella delle categorie di imballo`.
+
+---
+
+### Task 8: Layout della pagina (richiesta utente del 2026-09-25)
+
+**Files:** `app/routes/spedizioni.tsx`, componenti in `app/components/Shipping/`.
+
+Disposizione scelta dall'utente (opzione A):
+```
+┌──────────────────────┬──────────────────────┐
+│ Categorie di imballo │ Regole per peso      │
+└──────────────────────┴──────────────────────┘
+┌──────────────────────┬──────────────────────┐
+│ Prezzi di spedizione │ Peso di default      │
+│ (zone e opzioni)     │ e costo dei resi     │
+│                      └──────────────────────┘
+│                      │
+└──────────────────────┘
+```
+- Pagina a tutta larghezza (resta). Riga 1: `InlineGrid columns={{ xs: 1, md: 2 }}` con le due card; riga 2: stessa griglia, a sinistra la tabella zone/opzioni, a destra la card dei default allineata in alto (non stirata all'altezza della tabella).
+- Su mobile tutto in colonna, nell'ordine: prezzi, categorie, regole, default.
+- Solo layout: nessuna logica cambia. Polaris only, niente `style`. Verifica con tsc, suite completa ed e2e spedizioni.
+- Commit `feat(spedizioni): impaginazione a due colonne della pagina Spedizioni`.
+
+---
+
+### Task 9: Ricalcolo immediato e opzione sugli ordini storici (richiesta utente del 2026-09-25)
+
+**Files:** `app/lib/shipping/recompute.server.ts`, `app/lib/shipping/recompute-enqueue.server.ts`, `app/routes/spedizioni.tsx`, `app/lib/shopify-api.server.ts` (query leggera), coda/worker esistenti, test.
+
+Requisiti:
+1. **Ricalcolo nel salvataggio.** Ogni intent che cambia la configurazione (tariffe di zona, costo opzione, categorie, regole, default, import zone) esegue il ricalcolo dentro la richiesta, con un budget di tempo (es. 15 s) riusando la stessa funzione del job a pagine. Se finisce: risposta di successo e i numeri di Dashboard e Clienti sono già aggiornati al caricamento successivo. Se il budget scade: si accoda la continuazione dal cursore (meccanismo gia' esistente) e il toast dice che l'aggiornamento dei numeri si completa a breve. Un errore del ricalcolo non fa fallire il salvataggio (la configurazione e' salva): si ripiega sull'accodamento.
+2. **Opzione sugli ordini storici.** Gli ordini salvati prima dello schema v13 hanno `shipping_method` NULL, quindi le opzioni non li raggiungono. Aggiungi un job di coda "recupero opzione" che: legge dal DB merchant gli ordini con `shipping_method IS NULL` a pagine; chiede a Shopify solo `shippingLines(first:1){nodes{title}}` per quegli id (query `nodes(ids:[...])`, a lotti rispettando il limite di costo); scrive `shipping_method`; alla fine accoda il ricalcolo. Si accoda: al primo import delle zone e quando lo schema merchant passa a v13. Idempotente, dedup per negozio, niente riscritture di ordini già valorizzati. Ordini senza shipping line → valore sentinella che eviti di ricontrollarli per sempre (es. stringa vuota), trattato come "nessuna opzione".
+3. Dopo un salvataggio, il loader della dashboard non deve servire numeri vecchi dalla cache: se esiste una cache dei numeri (vedi `app/routes/_index.tsx` ~268, ~877), invalidala per il negozio al termine del ricalcolo.
+4. Test: salvataggio che ricalcola dentro il budget (nessun job accodato); budget superato → continuazione accodata; errore del ricalcolo → salvataggio riuscito e job accodato; recupero opzione a lotti, ordini gia' valorizzati intatti, sentinella per ordini senza shipping line; invalidazione cache.
+- Commit `feat(spedizioni): i numeri si aggiornano appena salvi un prezzo`.
 
 ## Dopo l'esecuzione (utente)
 
