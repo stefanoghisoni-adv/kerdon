@@ -70,7 +70,7 @@ npm run dev             # shopify app dev
    ```
    SHOPIFY_API_KEY=xxx
    SHOPIFY_API_SECRET=xxx
-   SHOPIFY_SCOPES=read_products,write_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders
+   SHOPIFY_SCOPES=read_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders,read_shipping,read_returns
    SHOPIFY_APP_URL=https://your-app.vercel.app
    SHOPIFY_API_VERSION=2026-07
    DATABASE_URL=postgresql://...   # Supabase Free, pooler transaction mode

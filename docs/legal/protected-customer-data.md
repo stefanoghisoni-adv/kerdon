@@ -125,9 +125,10 @@ differenza che il revisore trova.
 
 **Che gli scope dichiarati siano quelli veri.** La fonte di verità è `scopes` in
 `shopify.app.toml`; `SHOPIFY_SCOPES` in `.env.example` e nel README deve ripetere
-quella riga parola per parola. Oggi sono: `read_products`, `write_products`,
-`read_inventory`, `write_inventory`, `read_customers`, `write_customers`,
-`read_publications`, `read_themes`, `read_orders`, `read_all_orders`. Fra questi,
-`write_customers` serve **soltanto** ad abilitare la definizione del metafield
-"Data di nascita" e a scrivere quel metafield: se il modulo chiede a cosa serve un
-permesso di scrittura sui clienti, la risposta è questa e nient'altro.
+quella riga parola per parola. Oggi sono: `read_products`, `read_inventory`,
+`write_inventory`, `read_customers`, `write_customers`, `read_publications`,
+`read_themes`, `read_orders`, `read_all_orders`, `read_shipping`, `read_returns`.
+Fra questi, `write_customers` serve **soltanto** ad abilitare la definizione del
+metafield "Data di nascita" e a scrivere il valore di quel metafield quando il
+merchant ha il dato e Shopify no: se il modulo chiede a cosa serve un permesso di
+scrittura sui clienti, la risposta è questa e nient'altro.
