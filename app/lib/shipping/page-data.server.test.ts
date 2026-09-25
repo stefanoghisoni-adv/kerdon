@@ -32,6 +32,7 @@ describe('loadShippingPageData', () => {
         restOfWorld: false,
         rateType: 'linear',
         rates: [{ id: 'r1', weightFrom: null, weightTo: null, cost: new Prisma.Decimal('2.50') }],
+        options: [],
       },
     ]);
     findUnique.mockResolvedValue({
@@ -52,15 +53,43 @@ describe('loadShippingPageData', () => {
         restOfWorld: false,
         rateType: 'linear',
         rates: [{ id: 'r1', weightFromKg: null, weightToKg: null, cost: 2.5 }],
+        options: [],
       },
     ]);
     expect(dati.packaging).toEqual({
-      categories: [{ name: 'Busta', cost: 1 }],
+      categories: [{ name: 'Busta', cost: 1, origin: 'manual' }],
       fallbackRules: [{ weightMaxKg: null, category: 'Busta' }],
       defaultWeightPerItemKg: 0.5,
       returnCost: null,
       configKey: '2026-09-23T10:00:00.000Z',
     });
+  });
+
+  it('regole salvate fuori ordine: la pagina le mostra nell ordine in cui si applicano', async () => {
+    findMany.mockResolvedValue([]);
+    findUnique.mockResolvedValue({
+      categories: [
+        { name: 'A', cost: 1 },
+        { name: 'B', cost: 1 },
+        { name: 'C', cost: 1 },
+      ],
+      fallbackRules: [
+        { weightMaxKg: 5, category: 'A' },
+        { weightMaxKg: 1, category: 'B' },
+        { weightMaxKg: null, category: 'C' },
+      ],
+      defaultWeightPerItem: null,
+      returnCost: null,
+      updatedAt: new Date('2026-09-23T10:00:00Z'),
+    });
+
+    const dati = await loadShippingPageData('shop-1');
+
+    expect(dati.packaging.fallbackRules).toEqual([
+      { weightMaxKg: 1, category: 'B' },
+      { weightMaxKg: 5, category: 'A' },
+      { weightMaxKg: null, category: 'C' },
+    ]);
   });
 
   it('senza packaging salvato: la configurazione vuota', async () => {
@@ -85,5 +114,39 @@ describe('loadShippingPageData', () => {
     findMany.mockRejectedValue(new Error('connessione caduta'));
     findUnique.mockResolvedValue(null);
     await expect(loadShippingPageData('shop-1')).rejects.toThrow('connessione caduta');
+  });
+});
+
+describe('loadShippingPageData con le tabelle delle opzioni non ancora create', () => {
+  it.each(['P2021', 'P2022'])('%s sulle opzioni: zone e imballo restano, le opzioni sono vuote', async (code) => {
+    findMany.mockImplementation(async (args: { include?: { options?: unknown } }) => {
+      if (args?.include?.options) throw erroreDiPrisma(code);
+      return [
+        {
+          id: 'z1',
+          zoneName: 'Italia',
+          countries: ['IT'],
+          restOfWorld: false,
+          rateType: 'linear',
+          rates: [{ id: 'r1', weightFrom: null, weightTo: null, cost: new Prisma.Decimal(5) }],
+        },
+      ];
+    });
+    findUnique.mockResolvedValue({
+      categories: [],
+      fallbackRules: [],
+      defaultWeightPerItem: new Prisma.Decimal(0.5),
+      returnCost: new Prisma.Decimal(4),
+      updatedAt: new Date('2026-09-24T10:00:00Z'),
+    });
+
+    const data = await loadShippingPageData('shop-1');
+
+    expect(data.zones).toHaveLength(1);
+    expect(data.zones[0].rates[0].cost).toBe(5);
+    expect(data.zones[0].options).toEqual([]);
+    // I default salvati si vedono: salvarli di nuovo non li azzera.
+    expect(data.packaging.defaultWeightPerItemKg).toBe(0.5);
+    expect(data.packaging.returnCost).toBe(4);
   });
 });

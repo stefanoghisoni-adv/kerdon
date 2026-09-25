@@ -1,5 +1,5 @@
 // app/lib/shipping/logistics-cost.ts
-import type { FallbackRule, LogisticsConfig, OrderLogisticsInput, ZoneConfig } from './types';
+import type { FallbackRule, LogisticsConfig, OrderLogisticsInput, ShippingOptionConfig, ZoneConfig } from './types';
 
 const SPEDITO = new Set(['FULFILLED', 'PARTIALLY_FULFILLED']);
 
@@ -45,6 +45,24 @@ export function findZone(zones: ZoneConfig[], country: string | null): ZoneConfi
   return zones.find((z) => z.restOfWorld) ?? null;
 }
 
+/**
+ * Trova l'opzione di spedizione per nome, con confronto case-insensitive e spazi rimossi.
+ * Ritorna null se il metodo e' null o vuoto, o se nessuna opzione confermata combacia.
+ *
+ * Le opzioni non confermate non contano: l'import le crea con costo zero da
+ * compilare, e abbinarle farebbe risultare gratuita ogni spedizione con quel
+ * nome. Finche' il merchant non salva l'opzione vale la tariffa della zona.
+ */
+export function findOption(zone: ZoneConfig, method: string | null): ShippingOptionConfig | null {
+  if (!method) return null;
+  const normalized = method.trim().toLowerCase();
+  // Vuoto dopo il trim vale come assente: la stringa vuota e' la sentinella
+  // "controllato, nessuna shipping line" del recupero dello storico, e non
+  // deve poter abbinare un'opzione dal nome vuoto.
+  if (normalized === '') return null;
+  return zone.options.find((opt) => opt.confirmed && opt.name.trim().toLowerCase() === normalized) ?? null;
+}
+
 function shippingFor(zone: ZoneConfig, weightKg: number): number {
   if (zone.rateType === 'linear') {
     return (zone.rates[0]?.cost ?? 0) * weightKg;
@@ -53,6 +71,39 @@ function shippingFor(zone: ZoneConfig, weightKg: number): number {
     (r) => weightKg >= (r.weightFromKg ?? 0) && (r.weightToKg == null || weightKg < r.weightToKg),
   );
   return fascia?.cost ?? 0;
+}
+
+function shippingForOption(
+  option: ShippingOptionConfig,
+  weightKg: number | null,
+  totalPrice: number | null,
+): number {
+  if (option.costType === 'flat') {
+    return option.brackets[0]?.cost ?? 0;
+  }
+
+  if (option.costType === 'linear') {
+    if (weightKg == null) return 0;
+    return (option.brackets[0]?.cost ?? 0) * weightKg;
+  }
+
+  if (option.costType === 'weight_brackets') {
+    if (weightKg == null) return 0;
+    const fascia = option.brackets.find(
+      (b) => weightKg >= (b.from ?? 0) && (b.to == null || weightKg < b.to),
+    );
+    return fascia?.cost ?? 0;
+  }
+
+  if (option.costType === 'value_brackets') {
+    if (totalPrice == null) return 0;
+    const fascia = option.brackets.find(
+      (b) => totalPrice >= (b.from ?? 0) && (b.to == null || totalPrice < b.to),
+    );
+    return fascia?.cost ?? 0;
+  }
+
+  return 0;
 }
 
 export function computeLogisticsCost(
@@ -72,7 +123,15 @@ export function computeLogisticsCost(
   if (isShipped(order.fulfillment_status) && order.shipping_country_code) {
     const weightKg = resolveWeightKg(order, config.defaultWeightPerItemKg);
     const zone = findZone(config.zones, order.shipping_country_code);
-    if (zone && weightKg != null) shipping = centesimi(shippingFor(zone, weightKg));
+
+    if (zone) {
+      const option = findOption(zone, order.shipping_method);
+      if (option) {
+        shipping = centesimi(shippingForOption(option, weightKg, order.total_price));
+      } else if (weightKg != null) {
+        shipping = centesimi(shippingFor(zone, weightKg));
+      }
+    }
 
     const categoria = resolvePackagingCategory(order.packaging_category, weightKg, config.fallbackRules);
     packaging = config.categories.find((c) => c.name === categoria)?.cost ?? 0;

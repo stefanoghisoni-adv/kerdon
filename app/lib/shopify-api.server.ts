@@ -260,6 +260,8 @@ interface GqlOrder {
   totalWeight?: string | number | null;
   returns?: { nodes: { status: string | null; createdAt: string | null }[] | null } | null;
   metafield?: { value: string | null } | null;
+  /** Una connessione (verificato sulla 2026-07): il titolo sta nei `nodes`. */
+  shippingLines?: { nodes: { title: string | null }[] | null } | null;
 }
 
 /**
@@ -281,6 +283,7 @@ function orderNodeFields(lineItemsFirst: number): string {
     totalWeight
     returns(first: 5) { nodes { status createdAt } }
     metafield(namespace: "custom", key: "packaging_category") { value }
+    shippingLines(first: 1) { nodes { title } }
     lineItems(first: ${lineItemsFirst}) {
       pageInfo { hasNextPage endCursor }
       nodes { ${LINE_ITEM_FIELDS} }
@@ -310,6 +313,7 @@ function mapOrderLogistics(o: GqlOrder): Pick<
   | 'total_weight_grams'
   | 'returned_at'
   | 'packaging_category'
+  | 'shipping_method'
 > {
   const tracciato = (o.fulfillments ?? []).some((f) =>
     (f.trackingInfo ?? []).some((t) => !!t.number),
@@ -327,6 +331,10 @@ function mapOrderLogistics(o: GqlOrder): Pick<
     total_weight_grams: Number.isFinite(peso) ? Math.round(peso) : null,
     returned_at: reso?.createdAt ?? null,
     packaging_category: o.metafield?.value || null,
+    // La prima riga e basta: un ordine con piu' spedizioni e' raro, e il costo
+    // si abbina a un'opzione sola. Un titolo vuoto non abbina niente, quindi
+    // vale come assente.
+    shipping_method: o.shippingLines?.nodes?.[0]?.title || null,
   };
 }
 
@@ -540,6 +548,16 @@ export class ShopifyAPIClient {
   private apiVersion: string;
   private readonly RATE_LIMIT_THRESHOLD = 0.9;
   private readonly THROTTLE_DELAY_MS = 500;
+  /**
+   * Il costo dell'ultima risposta, come lo dichiara Shopify. Serve a chi fa
+   * molte query uguali di fila (il recupero dell'opzione sugli ordini storici)
+   * per aspettare che il serbatoio basti al lotto dopo, invece di farsi
+   * respingere e bruciare i ritentativi.
+   */
+  private ultimoCosto: {
+    requestedQueryCost?: number;
+    throttleStatus?: { maximumAvailable: number; currentlyAvailable: number; restoreRate?: number };
+  } | null = null;
 
   /** Il token va passato in chiaro: chi lo procura e' `forShop`. */
   constructor(shopDomain: string, accessToken: string) {
@@ -625,7 +643,12 @@ export class ShopifyAPIClient {
     const body = (await response.json()) as {
       data?: T;
       errors?: unknown;
-      extensions?: { cost?: { throttleStatus?: { maximumAvailable: number; currentlyAvailable: number } } };
+      extensions?: {
+        cost?: {
+          requestedQueryCost?: number;
+          throttleStatus?: { maximumAvailable: number; currentlyAvailable: number; restoreRate?: number };
+        };
+      };
     };
 
     // Qui sta la trappola di GraphQL: una query fallita risponde comunque 200,
@@ -652,6 +675,7 @@ export class ShopifyAPIClient {
     // Il limite non si conta piu' in richieste ma in punti: il serbatoio si
     // svuota in proporzione a quanto chiede la query e si ricarica da solo.
     // Stessa soglia di prima (90% consumato), letta dove ora vive il dato.
+    this.ultimoCosto = body.extensions?.cost ?? null;
     const t = body.extensions?.cost?.throttleStatus;
     if (t && t.maximumAvailable > 0) {
       const used = t.maximumAvailable - t.currentlyAvailable;
@@ -926,6 +950,64 @@ export class ShopifyAPIClient {
     return (data.nodes ?? [])
       .filter((n): n is { id: string; unitCost: { amount: string } | null } => n != null)
       .map((n) => ({ id: gidToId(n.id) as number, cost: n.unitCost?.amount ?? null }));
+  }
+
+  /**
+   * Il titolo della prima shipping line di ciascun ordine, per id.
+   *
+   * La query piu' leggera possibile per un compito solo: gli ordini salvati
+   * prima dello schema 13 non sanno quale opzione ha scelto il cliente, e il
+   * recupero (shipping-method-backfill) la chiede qui a lotti. Niente righe,
+   * clienti o importi: con `nodes(ids:)` e una connessione da un elemento il
+   * costo richiesto e' circa 4 punti per ordine, quindi un lotto da 50 sta
+   * lontano dal tetto di 1000 per query.
+   *
+   * Stringa vuota per "nessuna opzione": shipping line assente, titolo vuoto o
+   * ordine non piu' su Shopify. Il chiamante la scrive come sentinella, cosi'
+   * lo stesso ordine non si richiede a ogni corsa.
+   *
+   * L'abbinamento e' per posizione: `nodes` risponde nello stesso ordine degli
+   * id chiesti, con `null` dove l'ordine non c'e', e cosi' un id oltre 2^53
+   * non passa mai per un numero.
+   */
+  async getOrderShippingTitles(ids: string[]): Promise<Map<string, string>> {
+    const titoli = new Map<string, string>();
+    if (ids.length === 0) return titoli;
+
+    const data = await this.graphql<{
+      nodes: ({ id: string; shippingLines?: { nodes: { title: string | null }[] | null } | null } | null)[];
+    }>(
+      `query OrderShippingTitles($ids: [ID!]!) {
+        nodes(ids: $ids) { ... on Order { id shippingLines(first: 1) { nodes { title } } } }
+      }`,
+      { ids: ids.map((id) => `gid://shopify/Order/${id}`) },
+    );
+
+    const nodi = data.nodes ?? [];
+    ids.forEach((id, i) => {
+      titoli.set(id, nodi[i]?.shippingLines?.nodes?.[0]?.title || '');
+    });
+
+    await this.attendiSerbatoioPer(this.ultimoCosto?.requestedQueryCost);
+    return titoli;
+  }
+
+  /**
+   * Aspetta che il serbatoio di punti basti per un'altra query dello stesso
+   * costo. Shopify dichiara quanti punti restano e quanti ne rientrano al
+   * secondo: se non bastano si aspetta il tempo esatto, e lo si scrive nei log
+   * perche' un recupero lento deve potersi spiegare.
+   */
+  private async attendiSerbatoioPer(costo: number | undefined): Promise<void> {
+    const t = this.ultimoCosto?.throttleStatus;
+    if (!costo || !t || !t.restoreRate || t.restoreRate <= 0) return;
+    const mancano = costo - t.currentlyAvailable;
+    if (mancano <= 0) return;
+    const attesaMs = Math.ceil((mancano / t.restoreRate) * 1000);
+    console.warn(
+      `[shopify-api] limite di costo: ${t.currentlyAvailable}/${t.maximumAvailable} punti, ne servono ${costo}; attendo ${attesaMs}ms`,
+    );
+    await this.sleep(attesaMs);
   }
 
   async updateInventoryItemCost(

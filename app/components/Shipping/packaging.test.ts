@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePackaging, validatePackaging } from './packaging';
+import { validatePackaging } from './packaging';
 import type { PackagingCategory, FallbackRule } from '~/lib/shipping/types';
 
 describe('validatePackaging', () => {
@@ -151,26 +151,5 @@ describe('validatePackaging — tipi', () => {
     const categories = [{ name: 'Busta', cost: 1 }];
     expect(validatePackaging({ categories, rules: [{ weightMaxKg: '1', category: 'Busta' }] } as unknown)).toBe(INVALIDO);
     expect(validatePackaging({ categories, rules: [{ weightMaxKg: NaN, category: 'Busta' }] })).toBe(INVALIDO);
-  });
-});
-
-describe('parsePackaging', () => {
-  it('JSON valido: restituisce categorie e regole', () => {
-    const r = parsePackaging(JSON.stringify([{ name: 'Busta', cost: 1 }]), JSON.stringify([{ weightMaxKg: null, category: 'Busta' }]));
-    expect(r).toEqual({
-      value: { categories: [{ name: 'Busta', cost: 1 }], rules: [{ weightMaxKg: null, category: 'Busta' }] },
-      error: null,
-    });
-  });
-  it('JSON malformato: errore tipizzato, nessuna eccezione', () => {
-    expect(parsePackaging('[{', '[]')).toEqual({ value: null, error: 'shipping.packaging.errors.invalidData' });
-  });
-  it('campi assenti: errore tipizzato', () => {
-    expect(parsePackaging(undefined, undefined)).toEqual({ value: null, error: 'shipping.packaging.errors.invalidData' });
-  });
-  it('JSON valido ma incoerente: l errore di validazione', () => {
-    expect(parsePackaging('[{"name":"Busta","cost":1}]', '[{"weightMaxKg":null,"category":"Scatola"}]').error).toBe(
-      'shipping.packaging.errors.ruleInvalidCategory',
-    );
   });
 });

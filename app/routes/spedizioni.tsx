@@ -12,22 +12,41 @@ import {
   InlineGrid,
   Page,
 } from '@shopify/polaris';
-import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import { requireShopCapability } from '~/lib/authz/require-capability.server';
-import { useT } from '~/lib/i18n/context';
+import { useLocale, useT } from '~/lib/i18n/context';
 import { authenticate } from '~/shopify.server';
 import { syncShippingZones } from '~/lib/shipping/sync-zones.server';
-import { enqueueLogisticsRecompute } from '~/lib/shipping/recompute.server';
+import { recomputeLogisticsAfterSave, type NumbersRefresh } from '~/lib/shipping/recompute-inline.server';
+import { enqueueShippingMethodBackfill } from '~/lib/shipping/shipping-method-backfill-enqueue.server';
 import { loadShippingPageData } from '~/lib/shipping/page-data.server';
 import { parseBrackets } from '~/components/Shipping/brackets';
-import { parsePackaging } from '~/components/Shipping/packaging';
+import {
+  deleteCategory,
+  deleteRule,
+  saveCategory,
+  saveRule,
+  type PackagingEditResult,
+} from '~/components/Shipping/packaging-edit';
+import { readPackaging, writePackaging } from '~/lib/shipping/packaging-store.server';
+import { parseOptionBrackets } from '~/components/Shipping/option-cost';
 import { feedbackFromActionData, type ShippingIntent } from '~/components/Shipping/feedback';
 import { ShippingZonesTable } from '~/components/Shipping/ShippingZonesTable';
 import { EditZoneModal } from '~/components/Shipping/EditZoneModal';
-import { PackagingCard } from '~/components/Shipping/PackagingCard';
-import type { RateBracket, PackagingCategory, FallbackRule } from '~/lib/shipping/types';
+import { EditOptionModal } from '~/components/Shipping/EditOptionModal';
+import { PackagingCategoriesCard } from '~/components/Shipping/PackagingCategoriesCard';
+import { PackagingRulesCard, describeRuleWeight } from '~/components/Shipping/PackagingRulesCard';
+import { PackagingDefaultsCard } from '~/components/Shipping/PackagingDefaultsCard';
+import { CategoryModal, ConfirmDeleteModal, RuleModal } from '~/components/Shipping/PackagingModals';
+import type { RateBracket, PackagingCategory, OptionCostType, OptionBracket } from '~/lib/shipping/types';
+
+/** La modale aperta sulle tabelle di imballo, una alla volta. */
+type PackagingDialog =
+  | { kind: 'category'; category: PackagingCategory | null }
+  | { kind: 'delete-category'; category: PackagingCategory }
+  | { kind: 'rule'; index: number | null }
+  | { kind: 'delete-rule'; index: number };
 import { Decimal } from '@prisma/client/runtime/library';
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -44,12 +63,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
 /**
  * La risposta dell'azione, sempre con l'intento a cui risponde.
  *
- * La pagina usa un fetcher solo per tre azioni, e quando la risposta arriva
+ * La pagina usa un fetcher solo per tutte le azioni, e quando la risposta arriva
  * `fetcher.formData` e' gia' stato azzerato da Remix: l'intento va rimandato
  * qui, o il client non sa quale toast mostrare (vedi feedback.ts).
  */
-function risposta(intent: ShippingIntent | null, esito: { success: true } | { success: false; error: string }) {
-  return json({ intent, ...esito } as { intent: ShippingIntent | null; success: boolean; error?: string });
+function risposta(
+  intent: ShippingIntent | null,
+  esito: { success: true; numbers?: NumbersRefresh } | { success: false; error: string },
+) {
+  // `numbers` solo quando c'e' qualcosa da dire: una risposta senza ricalcolo
+  // resta identica a prima.
+  const { numbers, ...resto } = esito as { numbers?: NumbersRefresh };
+  const corpo = numbers ? { intent, ...resto, numbers } : { intent, ...resto };
+  return json(corpo as { intent: ShippingIntent | null; success: boolean; error?: string; numbers?: NumbersRefresh });
 }
 
 /**
@@ -63,6 +89,40 @@ function importoFacoltativo(valore: string | undefined): number | null {
   return Number.isFinite(n) && n >= 0 ? n : Number.NaN;
 }
 
+/** Una posizione nell'elenco delle regole: solo cifre, o null. */
+function indiceRegola(valore: string | undefined): number | null {
+  return valore !== undefined && /^\d+$/.test(valore) ? Number(valore) : null;
+}
+
+/**
+ * Applica una modifica di una riga (categoria o regola) alla configurazione
+ * salvata, la riscrive se passa e solo allora ricalcola i costi sugli ordini.
+ */
+async function modificaPackaging(
+  shopId: string,
+  intent: ShippingIntent,
+  modifica: (attuale: Awaited<ReturnType<typeof readPackaging>>) => PackagingEditResult,
+) {
+  const esito = modifica(await readPackaging(shopId));
+  if (esito.error !== null) return risposta(intent, { success: false, error: esito.error });
+  await writePackaging(shopId, esito.value);
+  const numbers = await recomputeLogisticsAfterSave(shopId);
+  return risposta(intent, { success: true, numbers });
+}
+
+/*
+ * NIENTE `export const config = { maxDuration }` QUI, e non per dimenticanza.
+ * La configurazione per rotta la legge solo il preset Vercel di Remix
+ * (`vercelPreset()` da `@vercel/remix`), che questo progetto non usa:
+ * vite.config.ts monta il plugin di Remix nudo, e Vercel impacchetta l'app in
+ * una funzione sola. Un `config` esportato qui verrebbe ignorato in silenzio,
+ * cioe' dichiarerebbe un tetto che non esiste.
+ *
+ * Vale quindi il tetto di default del progetto, lo stesso su cui contano i job
+ * della coda (MAX_RUN_MS, 270 s). Il ricalcolo nel salvataggio sta molto sotto:
+ * INLINE_RECOMPUTE_BUDGET_MS (15 s) e, come interruzione dura,
+ * INLINE_RECOMPUTE_MAX_RUN_MS (45 s), in recompute-inline.server.ts.
+ */
 export async function action({ request }: ActionFunctionArgs) {
   const { session, shop } = await requireShopCapability(request, 'use_app', {
     onDenied: 'redirect',
@@ -89,10 +149,21 @@ export async function action({ request }: ActionFunctionArgs) {
     // L'importazione puo' cambiare i paesi di una zona o quale zona fa da
     // resto del mondo: i costi gia' scritti sugli ordini vanno rifatti come
     // dopo un salvataggio delle tariffe. Non solleva mai (vedi
-    // recompute-enqueue.server): le zone sono gia' salvate comunque.
-    await enqueueLogisticsRecompute(shop.id);
+    // recompute-inline.server): le zone sono gia' salvate comunque.
+    const numbers = await recomputeLogisticsAfterSave(shop.id);
 
-    return risposta('sync-zones', { success: true });
+    // Le opzioni appena importate raggiungono solo gli ordini che sanno quale
+    // opzione ha scelto il cliente: quelli scritti prima dello schema 13 non
+    // lo sanno. Il recupero lo chiede a Shopify in sottofondo e alla fine
+    // ricalcola. Idempotente e deduplicato: reimportare non costa niente se
+    // lo storico e' gia' completo. Non solleva mai.
+    //
+    // DOPO il ricalcolo, non prima: l'accodamento sveglia la coda con
+    // un'autochiamata che spesso prende il lucchetto del negozio per prima, e
+    // il ricalcolo qui sopra tornerebbe 'occupato' proprio al primo import.
+    await enqueueShippingMethodBackfill(shop.id);
+
+    return risposta('sync-zones', { success: true, numbers });
   }
 
   if (intent === 'save-zone-rates') {
@@ -165,56 +236,170 @@ export async function action({ request }: ActionFunctionArgs) {
       ]);
     }
 
-    // Accoda il ricalcolo dei costi logistici in background
-    await enqueueLogisticsRecompute(shop.id);
+    // I costi sugli ordini si ricalcolano adesso, cosi' Dashboard e Clienti
+    // mostrano gia' i numeri nuovi; oltre il budget il resto va in coda.
+    const numbers = await recomputeLogisticsAfterSave(shop.id);
 
-    return risposta('save-zone-rates', { success: true });
+    return risposta('save-zone-rates', { success: true, numbers });
   }
 
-  if (intent === 'save-packaging') {
-    const parsed = parsePackaging(
-      formData.get('categories')?.toString(),
-      formData.get('rules')?.toString(),
+  if (intent === 'save-category') {
+    const originalName = formData.get('originalName')?.toString() || null;
+    const name = formData.get('name')?.toString() ?? '';
+    // Il costo e' obbligatorio: vuoto vale come non valido, non come zero.
+    const cost = importoFacoltativo(formData.get('cost')?.toString()) ?? Number.NaN;
+    return modificaPackaging(shop.id, 'save-category', (attuale) =>
+      saveCategory(attuale, originalName, { name, cost }),
     );
-    if (parsed.error !== null) {
-      return risposta('save-packaging', { success: false, error: parsed.error });
-    }
-    const categories: PackagingCategory[] = parsed.value.categories;
-    const rules: FallbackRule[] = parsed.value.rules;
+  }
 
+  if (intent === 'delete-category') {
+    const name = formData.get('name')?.toString() ?? '';
+    return modificaPackaging(shop.id, 'delete-category', (attuale) => deleteCategory(attuale, name));
+  }
+
+  if (intent === 'save-rule') {
+    const indexRaw = formData.get('index')?.toString();
+    const index = indiceRegola(indexRaw);
+    if (indexRaw && index === null) {
+      return risposta('save-rule', { success: false, error: 'shipping.packaging.errors.ruleNotFound' });
+    }
+    const category = formData.get('category')?.toString() ?? '';
+    // Peso vuoto = "tutto il resto"; un peso non valido arriva come NaN e lo
+    // rifiuta la validazione.
+    const weightRaw = formData.get('weightMaxKg')?.toString();
+    const weightMaxKg = weightRaw === undefined || weightRaw === '' ? null : Number(weightRaw);
+    return modificaPackaging(shop.id, 'save-rule', (attuale) =>
+      saveRule(attuale, index, { weightMaxKg, category }),
+    );
+  }
+
+  if (intent === 'delete-rule') {
+    const index = indiceRegola(formData.get('index')?.toString());
+    if (index === null) {
+      return risposta('delete-rule', { success: false, error: 'shipping.packaging.errors.ruleNotFound' });
+    }
+    return modificaPackaging(shop.id, 'delete-rule', (attuale) => deleteRule(attuale, index));
+  }
+
+  if (intent === 'save-packaging-defaults') {
     const defaultWeight = importoFacoltativo(formData.get('defaultWeightPerItemKg')?.toString());
     const returnCost = importoFacoltativo(formData.get('returnCost')?.toString());
 
-    // Verifica valori finiti e non negativi
     if (defaultWeight !== null && Number.isNaN(defaultWeight)) {
-      return risposta('save-packaging', { success: false, error: 'invalid_default_weight' });
+      return risposta('save-packaging-defaults', {
+        success: false,
+        error: 'shipping.packaging.errors.invalidDefaultWeight',
+      });
     }
     if (returnCost !== null && Number.isNaN(returnCost)) {
-      return risposta('save-packaging', { success: false, error: 'invalid_return_cost' });
+      return risposta('save-packaging-defaults', {
+        success: false,
+        error: 'shipping.packaging.errors.invalidReturnCost',
+      });
     }
 
-    // Upsert della configurazione
+    // Solo questi due campi: categorie e regole hanno il loro salvataggio.
+    const data = {
+      defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
+      returnCost: returnCost !== null ? new Decimal(returnCost) : null,
+    };
     await prisma.packagingConfig.upsert({
       where: { shopId: shop.id },
-      create: {
-        shopId: shop.id,
-        categories: categories as unknown as Prisma.InputJsonValue,
-        fallbackRules: rules as unknown as Prisma.InputJsonValue,
-        defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
-        returnCost: returnCost !== null ? new Decimal(returnCost) : null,
-      },
-      update: {
-        categories: categories as unknown as Prisma.InputJsonValue,
-        fallbackRules: rules as unknown as Prisma.InputJsonValue,
-        defaultWeightPerItem: defaultWeight !== null ? new Decimal(defaultWeight) : null,
-        returnCost: returnCost !== null ? new Decimal(returnCost) : null,
-      },
+      create: { shopId: shop.id, ...data },
+      update: data,
     });
 
-    // Accoda il ricalcolo dei costi logistici in background
-    await enqueueLogisticsRecompute(shop.id);
+    const numbers = await recomputeLogisticsAfterSave(shop.id);
 
-    return risposta('save-packaging', { success: true });
+    return risposta('save-packaging-defaults', { success: true, numbers });
+  }
+
+  if (intent === 'save-option-cost') {
+    const optionId = formData.get('optionId')?.toString();
+    const costType = formData.get('costType')?.toString();
+
+    if (!optionId || !costType) {
+      return risposta('save-option-cost', { success: false, error: 'invalid_request' });
+    }
+
+    if (costType !== 'flat' && costType !== 'linear' && costType !== 'weight_brackets' && costType !== 'value_brackets') {
+      return risposta('save-option-cost', { success: false, error: 'invalid_request' });
+    }
+
+    // Verifica che l'opzione appartenga a una zona di questo shop (ownership)
+    const option = await prisma.shippingOption.findFirst({
+      where: { id: optionId },
+      include: { zone: true },
+    });
+
+    if (!option || option.zone.shopId !== shop.id) {
+      return risposta('save-option-cost', { success: false, error: 'option_not_found' });
+    }
+
+    if (costType === 'flat' || costType === 'linear') {
+      const costField = costType === 'flat' ? 'flatCost' : 'linearCost';
+      const cost = importoFacoltativo(formData.get(costField)?.toString());
+
+      if (cost === null || Number.isNaN(cost)) {
+        // Ogni tipo ha il suo messaggio: il merchant legge l'errore sotto il
+        // campo che ha compilato, fisso o al kg.
+        const error = costType === 'flat' ? 'shipping.errors.invalidFlatCost' : 'shipping.errors.invalidLinearCost';
+        return risposta('save-option-cost', { success: false, error });
+      }
+
+      // Sostituisci le tariffe in una transazione
+      await prisma.$transaction([
+        prisma.shippingOptionRate.deleteMany({ where: { optionId } }),
+        // Salvare conferma l'opzione: da qui in poi il suo costo vale sugli
+        // ordini al posto della tariffa della zona.
+        prisma.shippingOption.update({
+          where: { id: optionId },
+          data: { costType, confirmed: true },
+        }),
+        prisma.shippingOptionRate.create({
+          data: {
+            optionId,
+            rangeFrom: null,
+            rangeTo: null,
+            cost: new Decimal(cost),
+          },
+        }),
+      ]);
+    } else {
+      // weight_brackets o value_brackets
+      const parsed = parseOptionBrackets(costType, formData.get('brackets')?.toString());
+      if (parsed.error !== null) {
+        return risposta('save-option-cost', { success: false, error: parsed.error });
+      }
+      const brackets: OptionBracket[] = parsed.brackets;
+
+      // Sostituisci le tariffe in una transazione
+      await prisma.$transaction([
+        prisma.shippingOptionRate.deleteMany({ where: { optionId } }),
+        // Salvare conferma l'opzione: da qui in poi il suo costo vale sugli
+        // ordini al posto della tariffa della zona.
+        prisma.shippingOption.update({
+          where: { id: optionId },
+          data: { costType, confirmed: true },
+        }),
+        ...brackets.map((bracket) =>
+          prisma.shippingOptionRate.create({
+            data: {
+              optionId,
+              rangeFrom: bracket.from !== null ? new Decimal(bracket.from) : null,
+              rangeTo: bracket.to !== null ? new Decimal(bracket.to) : null,
+              cost: new Decimal(bracket.cost),
+            },
+          }),
+        ),
+      ]);
+    }
+
+    // Come per le tariffe di zona: ricalcolo adesso, coda oltre il budget.
+    const numbers = await recomputeLogisticsAfterSave(shop.id);
+
+    return risposta('save-option-cost', { success: true, numbers });
   }
 
   return risposta(null, { success: false, error: 'unknown_intent' });
@@ -224,10 +409,20 @@ export default function ShippingPage() {
   const { zones, packaging } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const t = useT();
+  const locale = useLocale();
+
+  const [packagingDialog, setPackagingDialog] = useState<PackagingDialog | null>(null);
+  // L'errore del server sulla riga in modifica: la modale resta aperta e lo mostra.
+  const [packagingServerError, setPackagingServerError] = useState<string | null>(null);
 
   const [editingZone, setEditingZone] = useState<typeof zones[0] | null>(null);
   // L'errore del server sulla zona in modifica: la modale resta aperta e lo mostra.
   const [zoneServerError, setZoneServerError] = useState<string | null>(null);
+
+  const [editingOption, setEditingOption] = useState<{ option: typeof zones[0]['options'][0]; zone: typeof zones[0] } | null>(null);
+  // L'errore del server sull'opzione in modifica: la modale resta aperta e lo mostra.
+  const [optionServerError, setOptionServerError] = useState<string | null>(null);
+
   // Il toast e' quello dell'admin (App Bridge), non il Toast di Polaris: quello
   // vuole un <Frame> attorno alla pagina, e senza butta giu' tutta la pagina
   // proprio nel momento in cui dovrebbe dire che e' andato tutto bene.
@@ -238,8 +433,14 @@ export default function ShippingPage() {
   const intentInCorso =
     fetcher.state !== 'idle' ? (fetcher.formData as FormData | undefined)?.get('intent') : undefined;
   const isSyncing = intentInCorso === 'sync-zones';
-  const isSavingPackaging = intentInCorso === 'save-packaging';
+  const isSavingDefaults = intentInCorso === 'save-packaging-defaults';
+  const isSavingPackagingRow =
+    intentInCorso === 'save-category' ||
+    intentInCorso === 'delete-category' ||
+    intentInCorso === 'save-rule' ||
+    intentInCorso === 'delete-rule';
   const isSavingZone = intentInCorso === 'save-zone-rates';
+  const isSavingOption = intentInCorso === 'save-option-cost';
 
   // Cosa mostrare, deciso dalla risposta (con il suo intento) e non dal form.
   const feedback = fetcher.state === 'idle' ? feedbackFromActionData(fetcher.data, t) : null;
@@ -254,6 +455,18 @@ export default function ShippingPage() {
       setZoneServerError(null);
     } else if (esito.zoneError) {
       setZoneServerError(esito.zoneError);
+    }
+    if (esito.optionSaved) {
+      setEditingOption(null);
+      setOptionServerError(null);
+    } else if (esito.optionError) {
+      setOptionServerError(esito.optionError);
+    }
+    if (esito.packagingSaved) {
+      setPackagingDialog(null);
+      setPackagingServerError(null);
+    } else if (esito.packagingError) {
+      setPackagingServerError(esito.packagingError);
     }
     // `t` resta fuori di proposito: cambiare lingua non e' una risposta nuova,
     // e non deve rimostrare il toast dell'ultima azione.
@@ -294,25 +507,64 @@ export default function ShippingPage() {
     fetcher.submit(formData, { method: 'post' });
   };
 
-  const handlePackagingSave = (data: {
-    categories: PackagingCategory[];
-    rules: FallbackRule[];
-    defaultWeightPerItemKg: string | null;
-    returnCost: string | null;
+  const handleEditOption = (option: typeof zones[0]['options'][0], zone: typeof zones[0]) => {
+    setOptionServerError(null);
+    setEditingOption({ option, zone });
+  };
+
+  const handleOptionModalClose = () => {
+    setOptionServerError(null);
+    setEditingOption(null);
+  };
+
+  const handleOptionModalSave = (data: {
+    costType: OptionCostType;
+    flatCost?: string;
+    linearCost?: string;
+    brackets?: OptionBracket[];
   }) => {
+    if (!editingOption) return;
+
     const formData = new FormData();
-    formData.append('intent', 'save-packaging');
-    formData.append('categories', JSON.stringify(data.categories));
-    formData.append('rules', JSON.stringify(data.rules));
-    if (data.defaultWeightPerItemKg) {
-      formData.append('defaultWeightPerItemKg', data.defaultWeightPerItemKg);
-    }
-    if (data.returnCost) {
-      formData.append('returnCost', data.returnCost);
+    formData.append('intent', 'save-option-cost');
+    formData.append('optionId', editingOption.option.id);
+    formData.append('costType', data.costType);
+
+    if (data.costType === 'flat' && data.flatCost) {
+      formData.append('flatCost', data.flatCost);
+    } else if (data.costType === 'linear' && data.linearCost) {
+      formData.append('linearCost', data.linearCost);
+    } else if ((data.costType === 'weight_brackets' || data.costType === 'value_brackets') && data.brackets) {
+      formData.append('brackets', JSON.stringify(data.brackets));
     }
 
+    // La modale NON si chiude qui: si chiude quando il server conferma, e resta
+    // aperta con il motivo se rifiuta (vedi l'effetto sopra).
+    setOptionServerError(null);
     fetcher.submit(formData, { method: 'post' });
   };
+
+  const openPackagingDialog = (dialog: PackagingDialog) => {
+    setPackagingServerError(null);
+    setPackagingDialog(dialog);
+  };
+
+  const closePackagingDialog = () => {
+    setPackagingServerError(null);
+    setPackagingDialog(null);
+  };
+
+  /** Invia una modifica di riga; la modale si chiude solo quando il server conferma. */
+  const submitPackaging = (fields: Record<string, string>) => {
+    setPackagingServerError(null);
+    fetcher.submit(fields, { method: 'post' });
+  };
+
+  const handleDefaultsSave = (data: { defaultWeightPerItemKg: string; returnCost: string }) => {
+    fetcher.submit({ intent: 'save-packaging-defaults', ...data }, { method: 'post' });
+  };
+
+  const packagingCurrent = { categories: packaging.categories, rules: packaging.fallbackRules };
 
   // Il banner del permesso mancante arriva dalla risposta del fetcher, come
   // l'importazione che lo provoca; resta finche' non arriva un'altra risposta.
@@ -320,6 +572,10 @@ export default function ShippingPage() {
 
   return (
     <Page
+      // A tutta larghezza come la dashboard: zone e categorie sono tabelle, e
+      // nella larghezza stretta dei cataloghi i nomi delle opzioni andavano a
+      // capo.
+      fullWidth
       title={t.shipping.title}
       primaryAction={
         zones.length > 0
@@ -349,21 +605,105 @@ export default function ShippingPage() {
             </EmptyState>
           </Card>
         ) : (
-          <InlineGrid columns={{ xs: 1, md: '2fr 1fr' }} gap="400">
-            <Card padding="0">
-              <ShippingZonesTable zones={zones} onEdit={handleEdit} />
-            </Card>
-            <PackagingCard
-              key={packaging.configKey}
-              initialCategories={packaging.categories}
-              initialRules={packaging.fallbackRules}
-              initialDefaultWeight={packaging.defaultWeightPerItemKg}
-              initialReturnCost={packaging.returnCost}
-              configKey={packaging.configKey}
-              onSave={handlePackagingSave}
-              isSaving={isSavingPackaging}
-            />
-          </InlineGrid>
+          <>
+            {/* Riga 1: Categorie di imballo + Regole per peso */}
+            <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+              <PackagingCategoriesCard
+                categories={packaging.categories}
+                onAdd={() => openPackagingDialog({ kind: 'category', category: null })}
+                onEdit={(category) => openPackagingDialog({ kind: 'category', category })}
+                onDelete={(category) => openPackagingDialog({ kind: 'delete-category', category })}
+              />
+              <PackagingRulesCard
+                rules={packaging.fallbackRules}
+                hasCategories={packaging.categories.length > 0}
+                onAdd={() => openPackagingDialog({ kind: 'rule', index: null })}
+                onEdit={(index) => openPackagingDialog({ kind: 'rule', index })}
+                onDelete={(index) => openPackagingDialog({ kind: 'delete-rule', index })}
+              />
+            </InlineGrid>
+
+            {/* Riga 2: Prezzi di spedizione + Peso di default e costo resi */}
+            <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+              <BlockStack>
+                <Card padding="0">
+                  <ShippingZonesTable zones={zones} onEdit={handleEdit} onEditOption={handleEditOption} />
+                </Card>
+              </BlockStack>
+              <BlockStack>
+                <PackagingDefaultsCard
+                  key={packaging.configKey}
+                  initialDefaultWeight={packaging.defaultWeightPerItemKg}
+                  initialReturnCost={packaging.returnCost}
+                  onSave={handleDefaultsSave}
+                  isSaving={isSavingDefaults}
+                />
+              </BlockStack>
+            </InlineGrid>
+          </>
+        )}
+
+        {packagingDialog?.kind === 'category' && (
+          <CategoryModal
+            key={packagingDialog.category?.name ?? 'nuova'}
+            current={packagingCurrent}
+            category={packagingDialog.category}
+            onClose={closePackagingDialog}
+            onSave={(data) =>
+              submitPackaging({
+                intent: 'save-category',
+                originalName: data.originalName ?? '',
+                name: data.name,
+                cost: data.cost,
+              })
+            }
+            isSaving={isSavingPackagingRow}
+            serverError={packagingServerError}
+          />
+        )}
+
+        {packagingDialog?.kind === 'delete-category' && (
+          <ConfirmDeleteModal
+            title={t.shipping.packaging.categories.deleteTitle(packagingDialog.category.name)}
+            body={t.shipping.packaging.categories.deleteBody}
+            onClose={closePackagingDialog}
+            onConfirm={() => submitPackaging({ intent: 'delete-category', name: packagingDialog.category.name })}
+            isDeleting={isSavingPackagingRow}
+            serverError={packagingServerError}
+          />
+        )}
+
+        {packagingDialog?.kind === 'rule' && (
+          <RuleModal
+            key={packagingDialog.index ?? 'nuova'}
+            current={packagingCurrent}
+            index={packagingDialog.index}
+            onClose={closePackagingDialog}
+            onSave={(data) =>
+              submitPackaging({
+                intent: 'save-rule',
+                index: data.index !== null ? String(data.index) : '',
+                weightMaxKg: data.weightMaxKg,
+                category: data.category,
+              })
+            }
+            isSaving={isSavingPackagingRow}
+            serverError={packagingServerError}
+          />
+        )}
+
+        {packagingDialog?.kind === 'delete-rule' && packaging.fallbackRules[packagingDialog.index] && (
+          <ConfirmDeleteModal
+            title={t.shipping.packaging.rules.deleteTitle}
+            body={t.shipping.packaging.rules.deleteBody(
+              describeRuleWeight(packaging.fallbackRules[packagingDialog.index], t, locale),
+              packaging.fallbackRules[packagingDialog.index].category,
+            )}
+            onClose={closePackagingDialog}
+            onConfirm={() => submitPackaging({ intent: 'delete-rule', index: String(packagingDialog.index) })}
+            isDeleting={isSavingPackagingRow}
+            serverError={packagingServerError}
+          />
         )}
 
         {editingZone && (
@@ -374,6 +714,18 @@ export default function ShippingPage() {
             onSave={handleModalSave}
             isSaving={isSavingZone}
             serverError={zoneServerError}
+          />
+        )}
+
+        {editingOption && (
+          <EditOptionModal
+            key={editingOption.option.id}
+            option={editingOption.option}
+            zone={editingOption.zone}
+            onClose={handleOptionModalClose}
+            onSave={handleOptionModalSave}
+            isSaving={isSavingOption}
+            serverError={optionServerError}
           />
         )}
 

@@ -259,7 +259,7 @@ describe('orderToRows — dati di spedizione e costo logistico', () => {
   // Una configurazione minima: una zona lineare, una scatola, un reso forfait.
   const config: LogisticsConfig = {
     zones: [
-      { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }] },
+      { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }], options: [] },
     ],
     categories: [{ name: 'Scatola', cost: 1.5 }],
     fallbackRules: [{ weightMaxKg: null, category: 'Scatola' }],
@@ -326,5 +326,61 @@ describe('orderToRows — dati di spedizione e costo logistico', () => {
     const rows = orderToRows(order(), SYNCED, config)!;
     expect(rows.order.fulfillment_status).toBeNull();
     expect(rows.order.logistics_cost).toBe(0);
+  });
+});
+
+describe('orderToRows — opzione di spedizione scelta dal cliente', () => {
+  // Una zona con la tariffa generica (2 €/kg) e due opzioni: Express a costo
+  // fisso, Standard a fasce di valore dell'ordine.
+  const config: LogisticsConfig = {
+    zones: [
+      {
+        zoneName: 'Italia',
+        countries: ['IT'],
+        restOfWorld: false,
+        rateType: 'linear',
+        rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }],
+        options: [
+          { name: 'Express', costType: 'flat', confirmed: true, brackets: [{ from: null, to: null, cost: 9 }] },
+          {
+            name: 'Standard',
+            costType: 'value_brackets', confirmed: true,
+            brackets: [
+              { from: null, to: 50, cost: 6 },
+              { from: 50, to: null, cost: 3 },
+            ],
+          },
+        ],
+      },
+    ],
+    categories: [],
+    fallbackRules: [],
+    defaultWeightPerItemKg: null,
+    returnCost: null,
+  };
+
+  const spedito = (over: Partial<ShopifyOrder> = {}) =>
+    order({ fulfillment_status: 'FULFILLED', shipping_country_code: 'IT', total_weight_grams: 1000, ...over });
+
+  it('scrive sull ordine l opzione scelta', () => {
+    expect(orderToRows(spedito({ shipping_method: 'Express' }), SYNCED)!.order.shipping_method).toBe('Express');
+  });
+
+  it('senza opzione dichiarata la colonna resta NULL', () => {
+    expect(orderToRows(spedito(), SYNCED)!.order.shipping_method).toBeNull();
+  });
+
+  it('il costo si prende dall opzione scelta, non dalla tariffa generica', () => {
+    // 9 € fissi invece di 1 kg x 2 €/kg.
+    expect(orderToRows(spedito({ shipping_method: 'Express' }), SYNCED, config)!.order.logistics_cost).toBe(9);
+  });
+
+  it('le fasce di valore leggono il totale dell ordine', () => {
+    expect(
+      orderToRows(spedito({ shipping_method: 'Standard', total_price: '39.90' }), SYNCED, config)!.order.logistics_cost,
+    ).toBe(6);
+    expect(
+      orderToRows(spedito({ shipping_method: 'Standard', total_price: '80.00' }), SYNCED, config)!.order.logistics_cost,
+    ).toBe(3);
   });
 });

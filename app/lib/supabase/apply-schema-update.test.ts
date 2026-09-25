@@ -15,6 +15,9 @@ vi.mock('~/db.server', () => ({
 vi.mock('~/utils/crypto.server', () => ({ decrypt: (v: string) => `dec_${v}` }));
 vi.mock('~/lib/supabase-oauth.server', () => ({ getValidAccessToken: vi.fn() }));
 vi.mock('~/lib/supabase-management.server', () => ({ runQuery: vi.fn() }));
+vi.mock('~/lib/shipping/shipping-method-backfill-enqueue.server', () => ({
+  enqueueShippingMethodBackfill: vi.fn(),
+}));
 
 import {
   applyMerchantSchemaUpdate,
@@ -24,6 +27,7 @@ import {
 import { getValidAccessToken } from '~/lib/supabase-oauth.server';
 import { runQuery } from '~/lib/supabase-management.server';
 import { LATEST_SCHEMA_VERSION } from './merchant-migrations';
+import { enqueueShippingMethodBackfill } from '~/lib/shipping/shipping-method-backfill-enqueue.server';
 
 const shopRow = (configOver: Record<string, unknown> = {}) => ({
   id: 'shop-1',
@@ -118,6 +122,52 @@ describe('applyMerchantSchemaUpdate', () => {
 
     const sql = vi.mocked(runQuery).mock.calls[0][2];
     expect(sql).not.toContain('CREATE TABLE IF NOT EXISTS customers');
+  });
+});
+
+// Lo schema 13 porta `shipping_method` sugli ordini, ma gli ordini gia'
+// salvati restano NULL: e' il momento di chiedere a Shopify la loro opzione.
+describe('recupero dell opzione quando lo schema arriva alla 13', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSchemaUpdateAttempts();
+    findPlanMock.mockResolvedValue({ customersSyncEnabled: true });
+    configUpdate.mockResolvedValue({});
+    vi.mocked(getValidAccessToken).mockResolvedValue('token');
+    vi.mocked(runQuery).mockResolvedValue(undefined as never);
+  });
+
+  it('da 12 a 13 con gli ordini: accoda il recupero', async () => {
+    shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 12 }), scopes: 'read_orders,read_all_orders' });
+
+    expect((await applyMerchantSchemaUpdate('shop-1')).status).toBe('applied');
+    expect(enqueueShippingMethodBackfill).toHaveBeenCalledWith('shop-1');
+  });
+
+  it('senza permesso sugli ordini: niente da recuperare', async () => {
+    shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 12 }), scopes: 'read_products' });
+
+    await applyMerchantSchemaUpdate('shop-1');
+    expect(enqueueShippingMethodBackfill).not.toHaveBeenCalled();
+  });
+
+  it('gia\' alla 13: nessun recupero a ogni apertura della dashboard', async () => {
+    shopFindUnique.mockResolvedValue({
+      ...shopRow({ schemaVersion: LATEST_SCHEMA_VERSION }),
+      scopes: 'read_orders',
+    });
+
+    await applyMerchantSchemaUpdate('shop-1');
+    expect(enqueueShippingMethodBackfill).not.toHaveBeenCalled();
+  });
+
+  it('aggiornamento fallito: la colonna non c\'e\', niente recupero', async () => {
+    shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 12 }), scopes: 'read_orders' });
+    vi.mocked(runQuery).mockRejectedValue(new Error('403'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+
+    expect((await applyMerchantSchemaUpdate('shop-1')).status).toBe('failed');
+    expect(enqueueShippingMethodBackfill).not.toHaveBeenCalled();
   });
 });
 

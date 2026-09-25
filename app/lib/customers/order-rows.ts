@@ -96,6 +96,12 @@ export interface ShopifyOrder {
   /** Il primo reso non annullato ne' rifiutato. */
   returned_at?: string | null;
   packaging_category?: string | null;
+  /**
+   * L'opzione di spedizione scelta dal cliente: il titolo della prima
+   * shipping line. Il costo si prende da quell'opzione quando la zona ne ha
+   * una con lo stesso nome; altrimenti vale la tariffa generica.
+   */
+  shipping_method?: string | null;
 }
 
 export interface OrderRow {
@@ -117,6 +123,7 @@ export interface OrderRow {
   item_count: number;
   returned_at: string | null;
   packaging_category: string | null;
+  shipping_method: string | null;
   /** Spedizione + imballo + rientro, gia' sommati. Zero senza configurazione. */
   logistics_cost: number;
 }
@@ -177,6 +184,8 @@ export function orderToRows(
     item_count,
     returned_at: order.returned_at ?? null,
     packaging_category: order.packaging_category ?? null,
+    shipping_method: order.shipping_method ?? null,
+    total_price: money(order.total_price),
   };
 
   return {
@@ -187,7 +196,6 @@ export function orderToRows(
       customer_first_name: order.customer_first_name,
       customer_last_name: order.customer_last_name,
       currency: order.currency,
-      total_price: money(order.total_price),
       financial_status: order.financial_status,
       cancelled_at: order.cancelled_at,
       placed_at: order.placed_at,

@@ -1,17 +1,17 @@
 // app/lib/shipping/logistics-cost.test.ts
 import { describe, it, expect } from 'vitest';
-import { computeLogisticsCost, findZone, isShipped, resolvePackagingCategory, resolveWeightKg } from './logistics-cost';
+import { computeLogisticsCost, findOption, findZone, isShipped, resolvePackagingCategory, resolveWeightKg } from './logistics-cost';
 import type { LogisticsConfig, OrderLogisticsInput } from './types';
 
 const config: LogisticsConfig = {
   zones: [
-    { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }] },
+    { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }], options: [] },
     { zoneName: 'UE', countries: ['FR', 'DE'], restOfWorld: false, rateType: 'brackets', rates: [
       { weightFromKg: 0, weightToKg: 1, cost: 5 },
       { weightFromKg: 1, weightToKg: 5, cost: 8 },
       { weightFromKg: 5, weightToKg: null, cost: 15 },
-    ] },
-    { zoneName: 'Mondo', countries: [], restOfWorld: true, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 10 }] },
+    ], options: [] },
+    { zoneName: 'Mondo', countries: [], restOfWorld: true, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 10 }], options: [] },
   ],
   categories: [{ name: 'Busta', cost: 1.5 }, { name: 'Box', cost: 3 }],
   fallbackRules: [{ weightMaxKg: 1, category: 'Busta' }, { weightMaxKg: null, category: 'Box' }],
@@ -21,7 +21,7 @@ const config: LogisticsConfig = {
 
 const base: OrderLogisticsInput = {
   fulfillment_status: 'fulfilled', shipping_country_code: 'IT', total_weight_grams: 3000,
-  item_count: 2, returned_at: null, packaging_category: 'Box',
+  item_count: 2, returned_at: null, packaging_category: 'Box', shipping_method: null, total_price: null,
 };
 
 describe('isShipped', () => {
@@ -126,5 +126,163 @@ describe('computeLogisticsCost', () => {
   it('arrotonda al centesimo', () => {
     const c = computeLogisticsCost({ ...base, total_weight_grams: 1234, packaging_category: null }, { ...config, fallbackRules: [] });
     expect(c.shipping).toBe(2.47);
+  });
+});
+
+describe('computeLogisticsCost con opzioni', () => {
+  const zonaConOpzioni = {
+    zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear' as const,
+    rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }],
+    options: [
+      { name: 'Standard', costType: 'flat' as const, confirmed: true, brackets: [{ from: null, to: null, cost: 4.9 }] },
+      { name: 'Express', costType: 'weight_brackets' as const, confirmed: true, brackets: [
+        { from: 0, to: 2, cost: 9 }, { from: 2, to: null, cost: 14 } ] },
+      { name: 'Gratis sopra 50', costType: 'value_brackets' as const, confirmed: true, brackets: [
+        { from: 0, to: 50, cost: 6 }, { from: 50, to: null, cost: 6.5 } ] },
+      { name: 'Corriere', costType: 'linear' as const, confirmed: true, brackets: [{ from: null, to: null, cost: 1.5 }] },
+    ],
+  };
+
+  const configConOpzioni: LogisticsConfig = {
+    ...config,
+    zones: [zonaConOpzioni],
+  };
+
+  it('Standard: costo flat 4.9 anche con peso null', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Standard', total_weight_grams: null },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(4.9);
+  });
+
+  it('express (spazi/maiuscole) 3 kg: fascia peso >=2 → 14', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: ' express ', total_weight_grams: 3000 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(14);
+  });
+
+  it('Gratis sopra 50 con total_price 80: fascia valore >=50 → 6.5', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Gratis sopra 50', total_price: 80 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(6.5);
+  });
+
+  it('Gratis sopra 50 con total_price null: nessuna fascia → 0', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Gratis sopra 50', total_price: null },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(0);
+  });
+
+  it('Corriere 2 kg: linear 1.5 EUR/kg → 3', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Corriere', total_weight_grams: 2000 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(3);
+  });
+
+  it('opzione sconosciuta: ripiego sulla tariffa di zona 3 kg × 2 = 6', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Sconosciuta', total_weight_grams: 3000 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(6);
+  });
+
+  it('shipping_method null: ripiego sulla zona', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: null, total_weight_grams: 3000 },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(6);
+  });
+
+  it('opzione weight_brackets senza peso: 0 (non NaN)', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_method: 'Express', total_weight_grams: null, item_count: null },
+      configConOpzioni
+    );
+    expect(c.shipping).toBe(0);
+  });
+
+  it('ordine non spedito con opzione: 0', () => {
+    const c = computeLogisticsCost(
+      { ...base, fulfillment_status: 'UNFULFILLED', shipping_method: 'Standard' },
+      configConOpzioni
+    );
+    expect(c).toEqual({ shipping: 0, packaging: 0, returns: 0, total: 0 });
+  });
+
+  it('paese null con opzione: 0 (regola 1.1: niente indirizzo, niente spedizione)', () => {
+    const c = computeLogisticsCost(
+      { ...base, shipping_country_code: null, shipping_method: 'Standard' },
+      configConOpzioni
+    );
+    expect(c).toEqual({ shipping: 0, packaging: 0, returns: 0, total: 0 });
+  });
+});
+
+/**
+ * L'import porta le opzioni con costi a zero da compilare. Finche' il merchant
+ * non le salva, un ordine con quell'opzione prende la tariffa della zona:
+ * altrimenti lo zero segnaposto farebbe sembrare gratuita la spedizione.
+ */
+describe('computeLogisticsCost con opzioni non ancora confermate', () => {
+  const zona = (confirmed: boolean) => ({
+    zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear' as const,
+    rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }],
+    options: [{ name: 'Standard', costType: 'flat' as const, confirmed, brackets: [{ from: null, to: null, cost: 0 }] }],
+  });
+  const ordine = { ...base, shipping_method: 'Standard', total_weight_grams: 3000 };
+
+  it('opzione importata e mai salvata: vale la tariffa della zona (3 kg × 2 = 6)', () => {
+    const c = computeLogisticsCost(ordine, { ...config, zones: [zona(false)] });
+    expect(c.shipping).toBe(6);
+  });
+
+  it('dopo il salvataggio vale il costo dell opzione, anche se zero', () => {
+    const c = computeLogisticsCost(ordine, { ...config, zones: [zona(true)] });
+    expect(c.shipping).toBe(0);
+  });
+
+  it('findOption ignora le opzioni non confermate', () => {
+    expect(findOption(zona(false), 'Standard')).toBeNull();
+    expect(findOption(zona(true), 'Standard')?.name).toBe('Standard');
+  });
+});
+
+// La stringa vuota e' la sentinella del recupero dello storico (vedi
+// shipping-method-backfill.server): "controllato, nessuna shipping line". Deve
+// valere esattamente come NULL, cioe' tariffa della zona, anche nel caso
+// patologico di un'opzione confermata dal nome vuoto o di soli spazi.
+describe('shipping_method vuoto: la sentinella del recupero vale come nessuna opzione', () => {
+  const zona = {
+    zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear' as const,
+    rates: [{ weightFromKg: null, weightToKg: null, cost: 2 }],
+    options: [
+      { name: '', costType: 'flat' as const, confirmed: true, brackets: [{ from: null, to: null, cost: 99 }] },
+      { name: '  ', costType: 'flat' as const, confirmed: true, brackets: [{ from: null, to: null, cost: 77 }] },
+    ],
+  };
+  const conZona: LogisticsConfig = { ...config, zones: [zona] };
+
+  it('findOption con stringa vuota o di soli spazi non trova niente', () => {
+    expect(findOption(zona, '')).toBeNull();
+    expect(findOption(zona, '   ')).toBeNull();
+  });
+
+  it('il costo con stringa vuota e\' identico a quello con NULL', () => {
+    const conNull = computeLogisticsCost({ ...base, shipping_method: null }, conZona);
+    const conVuoto = computeLogisticsCost({ ...base, shipping_method: '' }, conZona);
+    expect(conVuoto).toEqual(conNull);
+    // 3 kg x 2 €/kg: la tariffa della zona, non l'opzione dal nome vuoto.
+    expect(conVuoto.shipping).toBe(6);
   });
 });

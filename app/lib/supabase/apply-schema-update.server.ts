@@ -5,11 +5,18 @@ import { runQuery } from '~/lib/supabase-management.server';
 import { validateSupabaseUrl } from '~/utils/supabase-url.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { hasOrdersAccess } from '~/lib/sync/orders-access';
+import { enqueueShippingMethodBackfill } from '~/lib/shipping/shipping-method-backfill-enqueue.server';
 import {
   LATEST_SCHEMA_VERSION,
   buildSchemaUpdateSQL,
   needsSchemaUpdate,
 } from './merchant-migrations';
+
+/**
+ * La versione che porta `shipping_method` sugli ordini. Chi la attraversa ha
+ * ordini salvati senza opzione, e va avviato il recupero da Shopify.
+ */
+const VERSIONE_OPZIONE_SPEDIZIONE = 13;
 
 export type SchemaUpdateStatus =
   /** Non c'era nulla da aggiornare. */
@@ -77,6 +84,21 @@ export async function applyMerchantSchemaUpdate(
   console.log(
     `[schema-update] shop ${shopId}: schema portato alla versione ${LATEST_SCHEMA_VERSION}`,
   );
+
+  // La colonna `shipping_method` esiste da adesso, ma gli ordini gia' salvati
+  // la hanno NULL: le opzioni di spedizione non li raggiungerebbero mai. Il
+  // recupero chiede a Shopify la loro opzione e alla fine ricalcola i costi.
+  // Solo a chi attraversa la 13 e ha gli ordini: agli altri non serve. Non
+  // solleva, e un database appena creato (versione 0) lo chiude subito perche'
+  // non trova ordini da completare.
+  if (
+    config.schemaVersion < VERSIONE_OPZIONE_SPEDIZIONE &&
+    LATEST_SCHEMA_VERSION >= VERSIONE_OPZIONE_SPEDIZIONE &&
+    hasOrdersAccess(shop.scopes)
+  ) {
+    await enqueueShippingMethodBackfill(shopId);
+  }
+
   return { status: 'applied', version: LATEST_SCHEMA_VERSION };
 }
 

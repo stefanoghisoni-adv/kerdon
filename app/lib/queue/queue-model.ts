@@ -33,6 +33,9 @@ export const SYNC_REQUEST_TYPES = [
   // Riscrive `orders.logistics_cost` su tutti gli ordini quando il merchant
   // cambia zone, tariffe o packaging (app/lib/shipping/recompute.server.ts).
   'logistics-recompute',
+  // Chiede a Shopify l'opzione di spedizione degli ordini salvati prima dello
+  // schema 13, che non la conoscono (app/lib/shipping/shipping-method-backfill.server.ts).
+  'shipping-method-backfill',
 ] as const;
 
 export type SyncRequestType = (typeof SYNC_REQUEST_TYPES)[number];
@@ -136,6 +139,9 @@ export const MAX_RUN_MS: Record<SyncRequestType, number> = {
   // Come le sincronizzazioni: si legge e si riscrive tutto lo storico ordini a
   // pagine, e su un negozio grande serve lo stesso margine.
   'logistics-recompute': 270_000,
+  // Stesso passo a tappe del ricalcolo (budget interno di 200 s e
+  // continuazione dal cursore), quindi lo stesso tetto.
+  'shipping-method-backfill': 270_000,
 };
 
 /**

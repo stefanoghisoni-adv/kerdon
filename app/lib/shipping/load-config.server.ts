@@ -1,10 +1,14 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
+import { normalizeOrigin } from './category-origin';
+import { sortRules } from './rule-order';
 import type {
   LogisticsConfig,
   ZoneConfig,
   PackagingCategory,
   FallbackRule,
+  ShippingOptionConfig,
+  OptionCostType,
 } from './types';
 
 export async function loadLogisticsConfig(shopId: string): Promise<LogisticsConfig | null> {
@@ -26,17 +30,15 @@ export async function loadLogisticsConfig(shopId: string): Promise<LogisticsConf
  * con le tariffe illeggibili per un guasto di rete non si deve scrivere niente
  * — altrimenti un singhiozzo del database azzererebbe costi corretti. Quindi:
  * null quando la configurazione manca (anche con le tabelle owner non ancora
- * create, P2021), eccezione per qualunque altro errore.
+ * create, P2021), eccezione per qualunque altro errore. Le sole tabelle delle
+ * opzioni mancanti non contano come "configurazione assente": zone e imballo
+ * si leggono comunque (vedi readZonesWithOptions).
  */
 export async function loadLogisticsConfigStrict(
   shopId: string,
 ): Promise<LogisticsConfig | null> {
   try {
-    // Leggi zone con tariffe
-    const zones = await prisma.shippingZone.findMany({
-      where: { shopId },
-      include: { rates: true },
-    });
+    const zones = await readZonesWithOptions(shopId);
 
     // Leggi packaging config
     const packagingConfig = await prisma.packagingConfig.findUnique({
@@ -59,6 +61,7 @@ export async function loadLogisticsConfigStrict(
         weightToKg: rate.weightTo ? Number(rate.weightTo) : null,
         cost: Number(rate.cost),
       })),
+      options: convertOptions(zone.options),
     }));
 
     // Converti packaging config con validazione difensiva
@@ -84,36 +87,133 @@ export async function loadLogisticsConfigStrict(
   }
 }
 
-/** Valida e filtra le categorie dal JSON, scartando quelle malformate. */
+/**
+ * La tabella o la colonna non c'e' ancora (P2021 / P2022): la finestra fra il
+ * rilascio del codice e la migrazione del DB owner, che si lancia a mano.
+ */
+export function isMissingTableError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    (error.code === 'P2021' || error.code === 'P2022')
+  );
+}
+
+/**
+ * Le zone con tariffe e opzioni; senza opzioni se le loro tabelle mancano.
+ *
+ * Le opzioni arrivano con una migrazione a parte, lanciata a mano dopo il
+ * rilascio. Nel frattempo zone, tariffe e imballo sono dati veri del merchant:
+ * se l'assenza delle opzioni facesse fallire tutta la lettura, la
+ * configurazione risulterebbe "assente" e il ricalcolo scriverebbe zero su
+ * tutti gli ordini. Si rilegge quindi senza opzioni, e ogni ordine prende la
+ * tariffa della zona, come prima delle opzioni. Se manca anche la tabella
+ * delle zone, la seconda lettura fallisce con lo stesso codice e il chiamante
+ * lo tratta come "nessuna configurazione".
+ */
+async function readZonesWithOptions(shopId: string) {
+  try {
+    return await prisma.shippingZone.findMany({
+      where: { shopId },
+      include: {
+        rates: true,
+        options: {
+          include: { rates: true },
+        },
+      },
+    });
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error;
+    const zones = await prisma.shippingZone.findMany({
+      where: { shopId },
+      include: { rates: true },
+    });
+    return zones.map((zone) => ({ ...zone, options: [] }));
+  }
+}
+
+/**
+ * Valida e filtra le categorie dal JSON, scartando quelle malformate.
+ *
+ * L'origine si legge a parte e non scarta mai una categoria: le categorie
+ * salvate prima che esistesse non ce l'hanno, e valgono 'manual'.
+ */
 export function validateCategories(json: unknown): PackagingCategory[] {
   if (!Array.isArray(json)) {
     return [];
   }
 
-  return json.filter((item): item is PackagingCategory => {
-    return (
-      typeof item === 'object' &&
-      item !== null &&
-      typeof (item as any).name === 'string' &&
-      typeof (item as any).cost === 'number'
-    );
-  });
+  return json
+    .filter((item): item is PackagingCategory => {
+      return (
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as any).name === 'string' &&
+        typeof (item as any).cost === 'number'
+      );
+    })
+    .map((item) => ({ name: item.name, cost: item.cost, origin: normalizeOrigin(item.origin) }));
 }
 
-/** Valida e filtra le fallback rules dal JSON, scartando quelle malformate. */
+/**
+ * Valida e filtra le fallback rules dal JSON, scartando quelle malformate, e le
+ * mette in ordine di peso (vedi rule-order): pagina, modifiche e calcolo le
+ * vedono tutti nello stesso ordine.
+ */
 export function validateFallbackRules(json: unknown): FallbackRule[] {
   if (!Array.isArray(json)) {
     return [];
   }
 
-  return json.filter((item): item is FallbackRule => {
+  return sortRules(json.filter((item): item is FallbackRule => {
     return (
       typeof item === 'object' &&
       item !== null &&
       typeof (item as any).category === 'string' &&
       ((item as any).weightMaxKg === null || typeof (item as any).weightMaxKg === 'number')
     );
-  });
+  }));
+}
+
+/**
+ * Converte le opzioni da Prisma a ShippingOptionConfig, scartando quelle con
+ * costType sconosciuto.
+ */
+function convertOptions(
+  options: Array<{
+    name: string;
+    costType: string;
+    confirmed: boolean;
+    rates: Array<{
+      rangeFrom: Prisma.Decimal | null;
+      rangeTo: Prisma.Decimal | null;
+      cost: Prisma.Decimal;
+    }>;
+  }>,
+): ShippingOptionConfig[] {
+  const validTypes: OptionCostType[] = ['flat', 'linear', 'weight_brackets', 'value_brackets'];
+
+  return options
+    .filter((option) => {
+      if (!validTypes.includes(option.costType as OptionCostType)) {
+        console.warn(
+          '[loadLogisticsConfig] costType sconosciuto, opzione scartata:',
+          option.costType,
+          option.name,
+        );
+        return false;
+      }
+      return true;
+    })
+    .map((option) => ({
+      name: option.name,
+      costType: option.costType as OptionCostType,
+      confirmed: option.confirmed === true,
+      brackets: option.rates.map((rate) => ({
+        from: rate.rangeFrom ? Number(rate.rangeFrom) : null,
+        to: rate.rangeTo ? Number(rate.rangeTo) : null,
+        cost: Number(rate.cost),
+      })),
+    }));
 }
 
 /**

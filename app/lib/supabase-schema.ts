@@ -193,6 +193,11 @@ const ORDERS_COLUMNS: Column[] = [
   // dell'app, e il profitto si fa in SQL qui, dove non si possono unire.
   // Si sottrae una volta per ordine, mai una per riga.
   { name: 'logistics_cost', type: 'NUMERIC(10, 2)' },
+  // L'opzione scelta dal cliente al checkout ("Standard", "Express"...), cosi'
+  // come la chiama Shopify. Serve al ricalcolo: quando il merchant cambia il
+  // costo di un'opzione, il costo si riscrive dagli ordini senza richiedere
+  // niente a Shopify.
+  { name: 'shipping_method', type: 'TEXT' },
 ];
 
 const ORDERS_INDEXES = [

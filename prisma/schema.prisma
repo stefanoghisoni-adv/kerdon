@@ -1638,14 +1638,15 @@ model ProductScopeEntry {
 }
 
 model ShippingZone {
-  id          String         @id @default(uuid())
-  shopId      String         @map("shop_id")
-  zoneName    String         @map("zone_name")
+  id          String           @id @default(uuid())
+  shopId      String           @map("shop_id")
+  zoneName    String           @map("zone_name")
   countries   String[]
-  restOfWorld Boolean        @default(false) @map("rest_of_world")
-  rateType    String         @default("linear") @map("rate_type")
-  syncedAt    DateTime       @default(now()) @map("synced_at")
+  restOfWorld Boolean          @default(false) @map("rest_of_world")
+  rateType    String           @default("linear") @map("rate_type")
+  syncedAt    DateTime         @default(now()) @map("synced_at")
   rates       ShippingRate[]
+  options     ShippingOption[]
 
   @@unique([shopId, zoneName])
   @@index([shopId])
@@ -1662,6 +1663,35 @@ model ShippingRate {
 
   @@index([zoneId])
   @@map("shipping_rates")
+}
+
+model ShippingOption {
+  id          String               @id @default(uuid())
+  zoneId      String               @map("zone_id")
+  name        String
+  costType    String               @default("flat") @map("cost_type")
+  shopifyKind String?              @map("shopify_kind")
+  /// false finche' il merchant non salva il costo: fino ad allora vale la tariffa della zona.
+  confirmed   Boolean              @default(false) @map("confirmed")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  zone        ShippingZone         @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  rates       ShippingOptionRate[]
+
+  @@unique([zoneId, name])
+  @@index([zoneId])
+  @@map("shipping_options")
+}
+
+model ShippingOptionRate {
+  id        String         @id @default(uuid())
+  optionId  String         @map("option_id")
+  rangeFrom Decimal?       @map("range_from") @db.Decimal(12, 3)
+  rangeTo   Decimal?       @map("range_to") @db.Decimal(12, 3)
+  cost      Decimal        @db.Decimal(10, 2)
+  option    ShippingOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@index([optionId])
+  @@map("shipping_option_rates")
 }
 
 model PackagingConfig {

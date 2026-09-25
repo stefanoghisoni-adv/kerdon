@@ -86,6 +86,12 @@ describe('numero di versione e cio che promette', () => {
     expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(12);
   });
 
+  it('la 13 porta sugli ordini l opzione di spedizione scelta', () => {
+    // Una colonna aggiunta: senza il numero nuovo la DDL non ripartirebbe sui
+    // database gia' allineati alla 12, e la scrittura dell'ordine fallirebbe.
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(13);
+  });
+
   it('l aggiornamento porta le colonne dell indirizzo del cliente', () => {
     // Sono aggiunte, quindi non hanno un passo esplicito: le porta la DDL
     // idempotente, che pero' viaggia solo se il numero di versione e' salito.

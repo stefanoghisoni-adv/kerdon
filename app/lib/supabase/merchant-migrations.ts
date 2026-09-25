@@ -332,8 +332,14 @@ END $$;
  * riempimento dello storico: restano NULL finche' l'ordine non viene riscritto
  * dalla sincronizzazione o dal ricalcolo. Chi li legge deve trattare NULL come
  * zero: e' il profitto di prima, non un ordine senza profitto.
+ *
+ * La 13 porta sugli ordini `shipping_method`, l'opzione di spedizione scelta
+ * dal cliente: il costo si prende da quell'opzione, non piu' solo dalla zona.
+ * Una colonna aggiunta, quindi di nuovo nessun passo esplicito. Lo storico
+ * resta NULL finche' l'ordine non viene riscritto, e un ordine senza opzione
+ * usa la tariffa generica della zona: il costo di prima, non uno zero.
  */
-export const LATEST_SCHEMA_VERSION = 12;
+export const LATEST_SCHEMA_VERSION = 13;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

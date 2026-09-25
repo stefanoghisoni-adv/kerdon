@@ -367,7 +367,7 @@ describe('applyOrderToMerchant — costo logistico', () => {
       syncedAt: SYNCED,
       logisticsConfig: {
         zones: [
-          { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 3 }] },
+          { zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'linear', rates: [{ weightFromKg: null, weightToKg: null, cost: 3 }], options: [] },
         ],
         categories: [],
         fallbackRules: [],

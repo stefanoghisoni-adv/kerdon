@@ -3,6 +3,19 @@
 **Data**: 2026-09-23  
 **Versione**: 1.1 (revisione vincolante in testa — prevale sul resto del documento)
 
+## Revisione 1.2 — costi per opzione di spedizione (2026-09-24, vincolante)
+
+Prevale su 1.1 dove la contraddice.
+
+1. **Costo per opzione, non solo per zona.** In Shopify ogni zona contiene piu' opzioni di spedizione (method definitions: "Standard", "Express", ...). Kerdon importa le opzioni di ogni zona e il merchant scrive il costo reale di ciascuna. L'ordine dice quale opzione ha scelto il cliente (`shippingLines` → `title`): il costo si prende da quella opzione.
+2. **Tipi di costo di un'opzione:** `flat` (costo fisso per spedizione), `linear` (EUR/kg), `weight_brackets` (fasce di peso), `value_brackets` (fasce di valore dell'ordine). All'import il tipo si propone dal tipo Shopify: Forfettaria → flat; condizioni sul peso → weight_brackets con le stesse soglie; condizioni sull'importo → value_brackets con le stesse soglie; calcolata dal corriere → linear. I costi importati partono a 0: le cifre di Shopify sono cio' che paga il cliente, non il costo. Il merchant puo' cambiare il tipo.
+3. **Opzioni con lo stesso nome** nella stessa zona (fasce create in Shopify come tariffe separate con condizioni diverse) diventano UNA opzione con piu' fasce.
+4. **Abbinamento ordine → opzione:** zona dal paese (regole 1.1), poi opzione per nome, confronto senza maiuscole/minuscole e spazi ai bordi. Nessuna opzione che combacia → si usa la tariffa generica della zona (quella di 1.1), che resta come ripiego. Niente tariffa generica → spedizione 0.
+5. **Valore dell'ordine** per `value_brackets` = `orders.total_price`.
+6. **Re-import:** aggiorna nomi/soglie proposte solo per opzioni nuove; le opzioni gia' presenti conservano tipo e costi scritti dal merchant. Opzioni sparite da Shopify restano (servono agli ordini storici).
+7. **Colonna nuova sugli ordini (schema merchant v13):** `shipping_method TEXT` = `title` della prima shipping line.
+8. Ogni salvataggio e ogni re-import accodano il ricalcolo (`enqueueLogisticsRecompute`).
+
 ## Revisione 1.1 — correzioni dopo la verifica sul codice (2026-09-23)
 
 Queste regole **sostituiscono** le parti del documento che le contraddicono.

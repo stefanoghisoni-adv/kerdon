@@ -10,14 +10,29 @@ import {
 } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
 import type { RateBracket } from '~/lib/shipping/types';
+import type { BracketEditorLabels } from './option-cost';
 
 interface BracketsEditorProps {
   initialBrackets?: RateBracket[];
   onChange: (brackets: RateBracket[]) => void;
+  /**
+   * Etichette, aiuto e passo delle soglie. Senza, quelle delle fasce di peso
+   * della zona. Le opzioni a fasce di valore le passano in valuta: le soglie
+   * sono importi dell'ordine, e un "kg" farebbe scrivere il numero sbagliato.
+   */
+  labels?: BracketEditorLabels;
 }
 
-export function BracketsEditor({ initialBrackets = [], onChange }: BracketsEditorProps) {
+export function BracketsEditor({ initialBrackets = [], onChange, labels }: BracketsEditorProps) {
   const t = useT();
+  const etichette: BracketEditorLabels = labels ?? {
+    from: t.shipping.modal.bracketWeightFrom,
+    to: t.shipping.modal.bracketWeightTo,
+    cost: t.shipping.modal.bracketCost,
+    unlimited: t.shipping.modal.bracketUnlimited,
+    help: t.shipping.modal.bracketsHelp,
+    rangeStep: 0.1,
+  };
   const [brackets, setBrackets] = useState<RateBracket[]>(
     initialBrackets.length > 0
       ? initialBrackets
@@ -71,7 +86,7 @@ export function BracketsEditor({ initialBrackets = [], onChange }: BracketsEdito
   return (
     <BlockStack gap="400">
       <Text as="p" tone="subdued">
-        {t.shipping.modal.bracketsHelp}
+        {etichette.help}
       </Text>
 
       {brackets.map((bracket, index) => (
@@ -79,32 +94,32 @@ export function BracketsEditor({ initialBrackets = [], onChange }: BracketsEdito
           <InlineStack gap="200" align="start" blockAlign="start">
             <Box width="100%">
               <TextField
-                label={t.shipping.modal.bracketWeightFrom}
+                label={etichette.from}
                 type="number"
                 value={bracket.weightFromKg?.toString() ?? '0'}
                 onChange={(value) => handleBracketChange(index, 'weightFromKg', value)}
                 autoComplete="off"
                 min={0}
-                step={0.1}
+                step={etichette.rangeStep}
               />
             </Box>
 
             <Box width="100%">
               <TextField
-                label={t.shipping.modal.bracketWeightTo}
+                label={etichette.to}
                 type="number"
                 value={bracket.weightToKg?.toString() ?? ''}
                 onChange={(value) => handleBracketChange(index, 'weightToKg', value)}
                 disabled={bracket.weightToKg === null}
                 autoComplete="off"
                 min={0}
-                step={0.1}
+                step={etichette.rangeStep}
               />
             </Box>
 
             <Box width="100%">
               <TextField
-                label={t.shipping.modal.bracketCost}
+                label={etichette.cost}
                 type="number"
                 value={bracket.cost.toString()}
                 onChange={(value) => handleBracketChange(index, 'cost', value)}
@@ -124,7 +139,7 @@ export function BracketsEditor({ initialBrackets = [], onChange }: BracketsEdito
           </InlineStack>
 
           <Checkbox
-            label={t.shipping.modal.bracketUnlimited}
+            label={etichette.unlimited}
             checked={bracket.weightToKg === null}
             onChange={(checked) => handleUnlimitedToggle(index, checked)}
           />
