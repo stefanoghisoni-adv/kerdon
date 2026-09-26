@@ -27,7 +27,7 @@ function righe(override: Partial<ShopExportRows> = {}): ShopExportRows {
       isInTrial: false,
       partnerName: null,
       discountIntervals: null,
-      scopes: 'read_products,write_products,read_orders',
+      scopes: 'read_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders,read_shipping,read_returns',
       authorization: 'ENABLED',
       trackingAuthorization: 'ENABLED',
       setupCompletedAt: new Date('2026-01-11T08:00:00.000Z'),
@@ -92,8 +92,16 @@ describe('la copia dei dati del negozio', () => {
     expect(f.negozio.dominio).toBe('kerdon-demo.myshopify.com');
     expect(f.negozio.permessi_concessi).toEqual([
       'read_products',
-      'write_products',
+      'read_inventory',
+      'write_inventory',
+      'read_customers',
+      'write_customers',
+      'read_publications',
+      'read_themes',
       'read_orders',
+      'read_all_orders',
+      'read_shipping',
+      'read_returns',
     ]);
     expect(f.negozio.campo_data_di_nascita).toBe('custom.data_di_nascita');
     expect(f.piano.attuale).toBe('growth');

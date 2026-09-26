@@ -23,7 +23,7 @@ export const AMBIENTE_DI_PROVA: Record<string, string> = {
   SHOPIFY_API_SECRET: 'segreto-di-prova-e2e',
   SHOPIFY_APP_URL: BASE,
   SHOPIFY_SCOPES:
-    'read_products,write_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders',
+    'read_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders,read_shipping,read_returns',
   ENCRYPTION_SECRET: 'chiave-di-cifratura-solo-per-le-prove-e2e',
   SESSION_SECRET: 'sessione-solo-per-le-prove-e2e',
   CRON_SECRET: 'cron-solo-per-le-prove-e2e',

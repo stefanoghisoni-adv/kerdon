@@ -51,7 +51,7 @@ describe('/api/stats/customers', () => {
     uninstalledAt: null,
     authorization: 'ENABLED',
     trackingAuthorization: 'ENABLED',
-    scopes: 'read_products,write_products',
+    scopes: 'read_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders,read_shipping,read_returns',
     isInTrial: false,
     trialEndsAt: null,
     activeChargeId: null,
