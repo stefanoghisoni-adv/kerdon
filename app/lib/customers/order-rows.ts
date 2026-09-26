@@ -30,7 +30,26 @@
 
 import { computeLogisticsCost } from '~/lib/shipping/logistics-cost';
 import { clampLogisticsCost } from '~/lib/shipping/cost-clamp';
+import { LOGISTICS_FACTS_VERSION } from '~/lib/shipping/order-logistics-facts';
 import type { LogisticsConfig } from '~/lib/shipping/types';
+
+/**
+ * Le colonne di spedizione che una lettura di Shopify puo' non essere riuscita
+ * a leggere (campo oscurato, elenco non completo). Vedi order-logistics-facts.
+ */
+export type LogisticsColumn =
+  | 'fulfillment_status'
+  | 'shipping_country_code'
+  | 'package_count'
+  | 'returned_at'
+  | 'shipping_method';
+
+/**
+ * Le colonne che una scrittura lascia com'erano quando un dato di spedizione
+ * non si e' potuto leggere: quelle ignote, piu' il costo (calcolato anche su
+ * di loro) e la versione dei fatti (che dichiarerebbe l'ordine gia' rifatto).
+ */
+export type PreservedOrderColumn = LogisticsColumn | 'logistics_cost' | 'logistics_facts_version';
 
 export interface ShopifyOrderLine {
   id: number | null;
@@ -93,7 +112,7 @@ export interface ShopifyOrder {
   fulfillment_status?: string | null;
   shipping_country_code?: string | null;
   total_weight_grams?: number | null;
-  /** Il primo reso non annullato ne' rifiutato. */
+  /** Il primo reso OPEN o CLOSED (vedi qualifyingReturnAt). */
   returned_at?: string | null;
   packaging_category?: string | null;
   /**
@@ -103,11 +122,18 @@ export interface ShopifyOrder {
    */
   shipping_method?: string | null;
   /**
-   * Le spedizioni partite davvero dell'ordine: un pacco ciascuna. Serve al
-   * costo per pacco; assente vale NULL, e un ordine spedito senza conteggio
-   * paga un pacco (effectivePackageCount).
+   * I pacchi partiti: i tracking distinti di ogni spedizione partita, uno per
+   * spedizione senza tracking (vedi countShippedPackages). Serve al costo per
+   * pacco; assente vale NULL, e un ordine spedito senza conteggio paga un
+   * pacco (effectivePackageCount).
    */
   package_count?: number | null;
+  /**
+   * Le colonne di spedizione che Shopify non ha lasciato leggere. Non si
+   * scrivono: il valore salvato resta, invece di diventare NULL o zero.
+   * Assente o vuoto = tutto letto.
+   */
+  logistics_unknown?: LogisticsColumn[];
 }
 
 export interface OrderRow {
@@ -133,6 +159,12 @@ export interface OrderRow {
   package_count: number | null;
   /** Spedizione + imballo + rientro, gia' sommati. Zero senza configurazione. */
   logistics_cost: number;
+  /**
+   * Con quale algoritmo sono stati ricavati pacchi e reso
+   * (LOGISTICS_FACTS_VERSION). Il recupero dello storico rilegge una volta
+   * gli ordini con una versione piu' vecchia.
+   */
+  logistics_facts_version: number;
 }
 
 export interface OrderLineRow {
@@ -170,7 +202,7 @@ export function orderToRows(
   syncedAt: Date = new Date(),
   /** Le tariffe del negozio. Assenti o `null`: costo logistico zero. */
   logisticsConfig: LogisticsConfig | null = null,
-): { order: OrderRow; lines: OrderLineRow[] } | null {
+): { order: OrderRow; lines: OrderLineRow[]; preserve: PreservedOrderColumn[] } | null {
   if (order.id == null) return null;
 
   const synced_at = syncedAt.toISOString();
@@ -214,7 +246,9 @@ export function orderToRows(
       // NUMERIC(10,2) farebbe fallire l'upsert dell'intero ordine, non solo
       // questa colonna.
       logistics_cost: clampLogisticsCost(computeLogisticsCost(logistics, logisticsConfig).total),
+      logistics_facts_version: LOGISTICS_FACTS_VERSION,
     },
+    preserve: colonneDaPreservare(order.logistics_unknown),
     // Le righe senza id restano fuori per la stessa ragione dell'ordine: non
     // sarebbero riconoscibili, e a ogni corsa se ne aggiungerebbe una copia.
     lines: order.lines
@@ -249,6 +283,40 @@ export function orderToRows(
         };
       }),
   };
+}
+
+function colonneDaPreservare(ignote: LogisticsColumn[] | undefined): PreservedOrderColumn[] {
+  if (!ignote || ignote.length === 0) return [];
+  return [...new Set<PreservedOrderColumn>([...ignote, 'logistics_cost', 'logistics_facts_version'])].sort();
+}
+
+/**
+ * Le righe d'ordine pronte per l'upsert, a gruppi con le stesse colonne.
+ *
+ * PERCHE' A GRUPPI. Un upsert in blocco scrive le stesse colonne per tutte le
+ * righe: una colonna assente da una riga diventerebbe NULL, cioe' proprio la
+ * sovrascrittura che si vuole evitare. Quindi le righe con qualche dato di
+ * spedizione non letto vanno in un upsert a parte, SENZA quelle colonne: su un
+ * ordine gia' salvato restano i valori di prima (e il costo di prima, calcolato
+ * su di loro); su un ordine nuovo restano NULL, e il recupero dello storico lo
+ * ripassera' (versione dei fatti NULL). Il gruppo completo viene per primo.
+ */
+export function orderUpsertBatches(
+  rows: ReadonlyArray<{ order: OrderRow; preserve: readonly PreservedOrderColumn[] }>,
+): Array<Array<Partial<OrderRow>>> {
+  const gruppi = new Map<string, Array<Partial<OrderRow>>>();
+  for (const { order, preserve } of rows) {
+    const chiave = [...preserve].sort().join(',');
+    let riga: Partial<OrderRow> = order;
+    if (preserve.length > 0) {
+      riga = { ...order };
+      for (const colonna of preserve) delete riga[colonna];
+    }
+    const gruppo = gruppi.get(chiave) ?? [];
+    gruppo.push(riga);
+    gruppi.set(chiave, gruppo);
+  }
+  return [...gruppi.entries()].sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b))).map(([, g]) => g);
 }
 
 /**

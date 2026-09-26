@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { orderToRows, type ShopifyOrder } from './order-rows';
+import { orderToRows, orderUpsertBatches, type ShopifyOrder } from './order-rows';
 import type { LogisticsConfig } from '~/lib/shipping/types';
 
 /**
@@ -86,12 +86,16 @@ export async function applyOrderToMerchant(opts: {
 
   // Prima l'ordine, poi le righe: al contrario, se l'ordine fallisse,
   // resterebbero righe che nessuna query saprebbe raggruppare.
-  const { error: orderError } = await opts.supabase
-    .from('orders')
-    .upsert([rows.order], { onConflict: 'shopify_order_id', ignoreDuplicates: false });
+  // Le colonne di spedizione non lette restano fuori dall'upsert: il valore
+  // salvato non si sovrascrive con NULL (vedi orderUpsertBatches).
+  for (const gruppo of orderUpsertBatches([rows])) {
+    const { error: orderError } = await opts.supabase
+      .from('orders')
+      .upsert(gruppo, { onConflict: 'shopify_order_id', ignoreDuplicates: false });
 
-  if (orderError) {
-    throw new OrderWriteError('order', orderError.message);
+    if (orderError) {
+      throw new OrderWriteError('order', orderError.message);
+    }
   }
 
   for (let i = 0; i < rows.lines.length; i += CHUNK) {

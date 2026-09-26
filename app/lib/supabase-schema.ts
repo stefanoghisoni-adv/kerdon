@@ -202,6 +202,10 @@ const ORDERS_COLUMNS: Column[] = [
   // registrato. Serve al costo per pacco, che il merchant sceglie quando paga
   // il corriere a collo e non a peso. NULL = non ancora letto.
   { name: 'package_count', type: 'INTEGER' },
+  // Con quale versione dell'algoritmo sono stati ricavati pacchi e reso
+  // (LOGISTICS_FACTS_VERSION). NULL o piu' vecchia = ricavati con le regole di
+  // prima: il recupero dello storico rilegge quell'ordine una volta.
+  { name: 'logistics_facts_version', type: 'INTEGER' },
 ];
 
 const ORDERS_INDEXES = [

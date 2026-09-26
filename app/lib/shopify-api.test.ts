@@ -903,11 +903,20 @@ describe('ordini: i dati di spedizione', () => {
   it('senza shipping line l opzione resta vuota', async () => {
     (global.fetch as any)
       .mockResolvedValueOnce(ok({ order: orderNode({ shippingLines: { nodes: [] } }) }))
-      .mockResolvedValueOnce(ok({ order: orderNode({ shippingLines: null }) }))
       .mockResolvedValueOnce(ok({ order: orderNode({ shippingLines: { nodes: [{ title: '' }] } }) }));
-    expect((await client().getOrderById(700))?.shipping_method).toBeNull();
-    expect((await client().getOrderById(700))?.shipping_method).toBeNull();
-    expect((await client().getOrderById(700))?.shipping_method).toBeNull();
+    const a = await client().getOrderById(700);
+    const b = await client().getOrderById(700);
+    expect(a?.shipping_method).toBeNull();
+    expect(b?.shipping_method).toBeNull();
+    expect(a?.logistics_unknown).toEqual([]);
+    expect(b?.logistics_unknown).toEqual([]);
+  });
+
+  it('piu\' shipping line: decide la prima', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ order: orderNode({ shippingLines: { nodes: [{ title: 'Express' }, { title: 'Standard' }] } }) }),
+    );
+    expect((await client().getOrderById(700))?.shipping_method).toBe('Express');
   });
 
   it('chiede i campi di spedizione nella stessa query dell ordine', async () => {
@@ -921,7 +930,8 @@ describe('ordini: i dati di spedizione', () => {
       'fulfillments(first: 10) { status trackingInfo { number } }',
       'countryCodeV2',
       'totalWeight',
-      'returns(first: 5)',
+      // Con pageInfo: oltre la prima pagina si continua, non si tronca.
+      'returns(first: 5) { pageInfo { hasNextPage endCursor } nodes { status createdAt } }',
       'key: "packaging_category"',
       'shippingLines(first: 1) { nodes { title } }',
     ]) {
@@ -948,7 +958,10 @@ describe('ordini: i dati di spedizione', () => {
       ok({
         order: orderNode({
           displayFulfillmentStatus: 'RESTOCKED',
-          fulfillments: [{ trackingInfo: [] }, { trackingInfo: [{ number: 'TRK1' }] }],
+          fulfillments: [
+            { status: 'SUCCESS', trackingInfo: [] },
+            { status: 'SUCCESS', trackingInfo: [{ number: 'TRK1' }] },
+          ],
         }),
       }),
     );
@@ -956,39 +969,47 @@ describe('ordini: i dati di spedizione', () => {
     expect(order?.fulfillment_status).toBe('FULFILLED');
   });
 
-  it('i pacchi sono le spedizioni partite davvero', async () => {
+  it('i pacchi sono i tracking distinti delle spedizioni partite davvero', async () => {
     (global.fetch as any).mockResolvedValueOnce(
       ok({
         order: orderNode({
           displayFulfillmentStatus: 'FULFILLED',
           fulfillments: [
-            { status: 'SUCCESS', trackingInfo: [{ number: 'A' }] },
-            { status: 'CANCELLED', trackingInfo: [{ number: 'B' }] },
+            // Multi-collo: tre tracking, uno ripetuto e uno vuoto -> 3 pacchi.
+            { status: 'SUCCESS', trackingInfo: [{ number: 'A' }, { number: 'B' }, { number: 'A' }, { number: '' }, { number: 'C' }] },
+            { status: 'CANCELLED', trackingInfo: [{ number: 'D' }] },
+            { status: 'ERROR', trackingInfo: [] },
+            { status: 'FAILURE', trackingInfo: [] },
+            // Nessun tracking: un pacco.
             { status: 'SUCCESS', trackingInfo: [] },
           ],
         }),
       }),
     );
     const order = await client().getOrderById(700);
-    expect(order?.package_count).toBe(2);
+    expect(order?.package_count).toBe(4);
   });
 
-  it('nessuna spedizione: zero pacchi', async () => {
+  it('nessuna spedizione: zero pacchi; spedizioni nulle: sconosciuti, non zero', async () => {
     (global.fetch as any)
       .mockResolvedValueOnce(ok({ order: orderNode({ fulfillments: [] }) }))
       .mockResolvedValueOnce(ok({ order: orderNode({ fulfillments: null }) }));
     expect((await client().getOrderById(700))?.package_count).toBe(0);
-    expect((await client().getOrderById(700))?.package_count).toBe(0);
+    const oscurato = await client().getOrderById(700);
+    expect(oscurato?.package_count).toBeNull();
+    expect(oscurato?.logistics_unknown).toEqual(expect.arrayContaining(['package_count', 'fulfillment_status']));
   });
 
-  it('un reso annullato o rifiutato non e un pacco rientrato', async () => {
+  it('il reso conta solo se OPEN o CLOSED: REQUESTED, DECLINED e CANCELED no', async () => {
     (global.fetch as any).mockResolvedValueOnce(
       ok({
         order: orderNode({
           returns: {
             nodes: [
+              { status: 'REQUESTED', createdAt: '2026-08-02T00:00:00Z' },
               { status: 'CANCELED', createdAt: '2026-08-03T00:00:00Z' },
               { status: 'DECLINED', createdAt: '2026-08-04T00:00:00Z' },
+              { status: 'CLOSED', createdAt: '2026-08-07T00:00:00Z' },
               { status: 'OPEN', createdAt: '2026-08-05T00:00:00Z' },
             ],
           },
@@ -996,7 +1017,15 @@ describe('ordini: i dati di spedizione', () => {
       }),
     );
     const order = await client().getOrderById(700);
+    // Il primo reso che qualifica, in ordine di tempo.
     expect(order?.returned_at).toBe('2026-08-05T00:00:00Z');
+  });
+
+  it('solo un reso richiesto: nessun rientro', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ order: orderNode({ returns: { nodes: [{ status: 'REQUESTED', createdAt: '2026-08-03T00:00:00Z' }] } }) }),
+    );
+    expect((await client().getOrderById(700))?.returned_at).toBeNull();
   });
 
   it('solo resi annullati: nessun rientro', async () => {
@@ -1009,7 +1038,7 @@ describe('ordini: i dati di spedizione', () => {
 
   it('senza indirizzo, peso o metafield i campi restano vuoti', async () => {
     (global.fetch as any).mockResolvedValueOnce(
-      ok({ order: orderNode({ shippingAddress: null, totalWeight: null, metafield: null, fulfillments: null, returns: null }) }),
+      ok({ order: orderNode({ shippingAddress: null, totalWeight: null, metafield: null }) }),
     );
     const order = await client().getOrderById(700);
     expect(order).toMatchObject({
@@ -1017,6 +1046,131 @@ describe('ordini: i dati di spedizione', () => {
       total_weight_grams: null,
       packaging_category: null,
       returned_at: null,
+      // Ritiro in negozio o digitale: un indirizzo nullo senza tracking e' un dato.
+      logistics_unknown: [],
+    });
+  });
+
+  describe('campi oscurati (200 senza errori, null dove lo schema promette un valore)', () => {
+    it('resi, shipping line e spedizioni nulli: colonne segnate come non lette', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      (global.fetch as any).mockResolvedValueOnce(
+        ok({ order: orderNode({ fulfillments: null, returns: null, shippingLines: null }) }),
+      );
+      const order = await client().getOrderById(700);
+      expect(new Set(order?.logistics_unknown)).toEqual(
+        new Set(['package_count', 'fulfillment_status', 'returned_at', 'shipping_method']),
+      );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('ordine 700'));
+      warn.mockRestore();
+    });
+
+    it('indirizzo nullo su un ordine con un tracking: paese oscurato, non assente', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      (global.fetch as any).mockResolvedValueOnce(
+        ok({
+          order: orderNode({
+            shippingAddress: null,
+            fulfillments: [{ status: 'SUCCESS', trackingInfo: [{ number: 'T1' }] }],
+          }),
+        }),
+      );
+      const order = await client().getOrderById(700);
+      expect(order?.logistics_unknown).toEqual(['shipping_country_code']);
+    });
+
+    it('un 200 con `errors` fallisce: niente da scrivere', async () => {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'X-Shopify-API-Version': '2026-07' }),
+        json: async () => ({
+          data: { order: orderNode({ fulfillments: null }) },
+          errors: [{ message: 'Access denied for returns field.', extensions: { code: 'ACCESS_DENIED' } }],
+        }),
+      });
+      await expect(client().getOrderById(700)).rejects.toThrow('ACCESS_DENIED');
+    });
+  });
+
+  describe('niente troncamenti silenziosi', () => {
+    const spedizioni = (n: number, stato = 'SUCCESS') =>
+      Array.from({ length: n }, (_, i) => ({ status: stato, trackingInfo: [{ number: `T${i}` }] }));
+
+    it('10 spedizioni nella prima lettura: si rileggono tutte col massimo dell API', async () => {
+      (global.fetch as any)
+        .mockResolvedValueOnce(ok({ order: orderNode({ fulfillments: spedizioni(10) }) }))
+        .mockResolvedValueOnce(ok({ node: { fulfillments: spedizioni(14) } }));
+      const order = await client().getOrderById(700);
+      expect(sentBody(1).query).toContain('fulfillments(first: 250) { status trackingInfo { number } }');
+      expect(sentBody(1).variables).toEqual({ id: 'gid://shopify/Order/700' });
+      expect(order?.package_count).toBe(14);
+    });
+
+    it('oltre il tetto dell API (250): avviso con l id dell ordine', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      (global.fetch as any)
+        .mockResolvedValueOnce(ok({ order: orderNode({ fulfillments: spedizioni(10) }) }))
+        .mockResolvedValueOnce(ok({ node: { fulfillments: spedizioni(250) } }));
+      const order = await client().getOrderById(700);
+      expect(order?.package_count).toBe(250);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/gid:\/\/shopify\/Order\/700: 250 spedizioni o piu'/));
+      warn.mockRestore();
+    });
+
+    it('rilettura delle spedizioni fallita: pacchi sconosciuti, non i primi 10', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      (global.fetch as any)
+        .mockResolvedValueOnce(ok({ order: orderNode({ fulfillments: spedizioni(10) }) }))
+        .mockResolvedValueOnce(ok({ node: null }));
+      const order = await client().getOrderById(700);
+      expect(order?.package_count).toBeNull();
+      expect(order?.logistics_unknown).toContain('package_count');
+      warn.mockRestore();
+    });
+
+    it('resi oltre la prima pagina: si continua col cursore', async () => {
+      (global.fetch as any)
+        .mockResolvedValueOnce(
+          ok({
+            order: orderNode({
+              returns: {
+                pageInfo: { hasNextPage: true, endCursor: 'c1' },
+                nodes: Array.from({ length: 5 }, () => ({ status: 'CANCELED', createdAt: '2026-08-03T00:00:00Z' })),
+              },
+            }),
+          }),
+        )
+        .mockResolvedValueOnce(
+          ok({
+            node: {
+              returns: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [{ status: 'CLOSED', createdAt: '2026-08-09T00:00:00Z' }],
+              },
+            },
+          }),
+        );
+      const order = await client().getOrderById(700);
+      expect(sentBody(1).query).toContain('returns(first: $first, after: $after)');
+      expect(sentBody(1).variables).toMatchObject({ id: 'gid://shopify/Order/700', after: 'c1' });
+      expect(order?.returned_at).toBe('2026-08-09T00:00:00Z');
+      expect(order?.logistics_unknown).toEqual([]);
+    });
+
+    it('resi non letti per intero: reso sconosciuto, non il parziale', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      (global.fetch as any)
+        .mockResolvedValueOnce(
+          ok({
+            order: orderNode({
+              returns: { pageInfo: { hasNextPage: true, endCursor: 'c1' }, nodes: [] },
+            }),
+          }),
+        )
+        .mockResolvedValueOnce(ok({ node: null }));
+      const order = await client().getOrderById(700);
+      expect(order?.logistics_unknown).toEqual(['returned_at']);
+      warn.mockRestore();
     });
   });
 });
@@ -1159,16 +1313,25 @@ describe('getOrderShippingFacts', () => {
     global.fetch = vi.fn();
   });
 
-  it('chiede prima shipping line e stato delle spedizioni, con nodes(ids:), per gli id dati', async () => {
+  it('chiede i campi dei fatti logistici con nodes(ids:), per gli id dati, e conta come la lettura dell ordine', async () => {
     (global.fetch as any).mockResolvedValueOnce(
       ok({
         nodes: [
           {
             id: 'gid://shopify/Order/11',
-            shippingLines: { nodes: [{ title: 'Express' }] },
-            fulfillments: [{ status: 'SUCCESS' }, { status: 'CANCELLED' }, { status: 'SUCCESS' }],
+            shippingLines: { nodes: [{ title: 'Express' }, { title: 'Altro' }] },
+            fulfillments: [
+              { status: 'SUCCESS', trackingInfo: [{ number: 'A' }, { number: 'B' }, { number: 'C' }] },
+              { status: 'CANCELLED', trackingInfo: [] },
+            ],
+            returns: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ status: 'OPEN', createdAt: '2026-08-05T00:00:00Z' }] },
           },
-          { id: 'gid://shopify/Order/12', shippingLines: { nodes: [] }, fulfillments: [] },
+          {
+            id: 'gid://shopify/Order/12',
+            shippingLines: { nodes: [] },
+            fulfillments: [],
+            returns: { nodes: [{ status: 'CANCELED', createdAt: '2026-08-05T00:00:00Z' }] },
+          },
         ],
       }),
     );
@@ -1178,20 +1341,22 @@ describe('getOrderShippingFacts', () => {
     const corpo = sentBody();
     expect(corpo.query).toContain('nodes(ids: $ids)');
     expect(corpo.query).toContain('shippingLines(first: 1) { nodes { title } }');
-    expect(corpo.query).toContain('fulfillments(first: 10) { status }');
+    expect(corpo.query).toContain('fulfillments(first: 10) { status trackingInfo { number } }');
+    expect(corpo.query).toContain('returns(first: 5) { pageInfo { hasNextPage endCursor } nodes { status createdAt } }');
     // Niente righe, clienti o importi: il costo della query resta minimo.
     expect(corpo.query).not.toContain('lineItems');
     expect(corpo.variables.ids).toEqual(['gid://shopify/Order/11', 'gid://shopify/Order/12']);
-    expect(fatti.get('11')).toEqual({ method: 'Express', packageCount: 2 });
-    expect(fatti.get('12')).toEqual({ method: '', packageCount: 0 });
+    expect(fatti.get('11')).toEqual({ found: true, method: 'Express', packageCount: 3, returnedAt: '2026-08-05T00:00:00Z', returnsKnown: true });
+    expect(fatti.get('12')).toEqual({ found: true, method: '', packageCount: 0, returnedAt: null, returnsKnown: true });
   });
 
-  it('shipping line assente, titolo vuoto o ordine non piu\' su Shopify: stringa vuota e zero pacchi', async () => {
+  it('campi oscurati: sconosciuti, non zero; ordine non piu\' su Shopify: non trovato', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     (global.fetch as any).mockResolvedValueOnce(
       ok({
         nodes: [
-          { id: 'gid://shopify/Order/1', shippingLines: null, fulfillments: null },
-          { id: 'gid://shopify/Order/2', shippingLines: { nodes: [{ title: null }] } },
+          { id: 'gid://shopify/Order/1', shippingLines: null, fulfillments: null, returns: null },
+          { id: 'gid://shopify/Order/2', shippingLines: { nodes: [{ title: null }] }, fulfillments: [], returns: { nodes: [] } },
           null,
         ],
       }),
@@ -1199,19 +1364,39 @@ describe('getOrderShippingFacts', () => {
 
     const fatti = await client().getOrderShippingFacts(['1', '2', '3']);
 
-    expect(fatti.get('1')).toEqual({ method: '', packageCount: 0 });
-    expect(fatti.get('2')).toEqual({ method: '', packageCount: 0 });
+    expect(fatti.get('1')).toEqual({ found: true, method: null, packageCount: null, returnedAt: null, returnsKnown: false });
+    expect(fatti.get('2')).toEqual({ found: true, method: null, packageCount: 0, returnedAt: null, returnsKnown: true });
     // Il nodo nullo e' l'ordine 3 (stessa posizione): cancellato su Shopify.
-    expect(fatti.get('3')).toEqual({ method: '', packageCount: 0 });
+    expect(fatti.get('3')).toMatchObject({ found: false });
+  });
+
+  it('un ordine del lotto con 10 spedizioni si rilegge da solo', async () => {
+    const dieci = Array.from({ length: 10 }, (_, i) => ({ status: 'SUCCESS', trackingInfo: [{ number: `T${i}` }] }));
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok({ nodes: [{ id: 'gid://shopify/Order/5', shippingLines: { nodes: [] }, fulfillments: dieci, returns: { nodes: [] } }] }),
+      )
+      .mockResolvedValueOnce(ok({ node: { fulfillments: [...dieci, { status: 'SUCCESS', trackingInfo: [] }] } }));
+    const fatti = await client().getOrderShippingFacts(['5']);
+    expect(fatti.get('5')?.packageCount).toBe(11);
   });
 
   it('id oltre 2^53 restano esatti: si confrontano come testo', async () => {
     const grande = '9007199254740993';
     (global.fetch as any).mockResolvedValueOnce(
-      ok({ nodes: [{ id: `gid://shopify/Order/${grande}`, shippingLines: { nodes: [{ title: 'Std' }] }, fulfillments: [{ status: 'SUCCESS' }] }] }),
+      ok({
+        nodes: [
+          {
+            id: `gid://shopify/Order/${grande}`,
+            shippingLines: { nodes: [{ title: 'Std' }] },
+            fulfillments: [{ status: 'SUCCESS', trackingInfo: [] }],
+            returns: { nodes: [] },
+          },
+        ],
+      }),
     );
     const fatti = await client().getOrderShippingFacts([grande]);
-    expect(fatti.get(grande)).toEqual({ method: 'Std', packageCount: 1 });
+    expect(fatti.get(grande)).toMatchObject({ method: 'Std', packageCount: 1 });
   });
 
   it('nessun id: nessuna chiamata', async () => {

@@ -56,7 +56,11 @@ function fakeSupabase(opts: { failOn?: 'orders' | 'order_lines' | 'delete' } = {
       return {
         async upsert(rows: any[]) {
           if (opts.failOn === table) return { error: { message: `permission denied for ${table}` } };
-          for (const row of rows) tables[table].set(row[key(table)], row);
+          // Come ON CONFLICT DO UPDATE: si aggiornano solo le colonne mandate.
+          for (const row of rows) {
+            const k = row[key(table)];
+            tables[table].set(k, { ...(tables[table].get(k) ?? {}), ...row });
+          }
           return { error: null };
         },
         delete() {
@@ -383,5 +387,54 @@ describe('applyOrderToMerchant — costo logistico', () => {
     const db = fakeSupabase();
     await applyOrderToMerchant({ supabase: db.client, order: order(), syncedAt: SYNCED });
     expect(db.tables.orders.get(111).logistics_cost).toBe(0);
+  });
+});
+
+describe('applyOrderToMerchant — dati di spedizione oscurati', () => {
+  const config = {
+    zones: [
+      {
+        zoneName: 'Italia', countries: ['IT'], restOfWorld: false, rateType: 'per_package' as const,
+        rates: [{ weightFromKg: null, weightToKg: null, cost: 5 }], options: [],
+      },
+    ],
+    categories: [], fallbackRules: [], defaultWeightPerItemKg: null, returnCost: 6,
+  };
+  const spedito = (over: Partial<ShopifyOrder> = {}) =>
+    order({ fulfillment_status: 'FULFILLED', shipping_country_code: 'IT', ...over });
+
+  it('i valori buoni salvati restano: niente NULL o zero sopra', async () => {
+    const db = fakeSupabase();
+    await applyOrderToMerchant({
+      supabase: db.client,
+      order: spedito({ package_count: 3, returned_at: '2026-08-05T00:00:00Z', shipping_method: 'Express' }),
+      syncedAt: SYNCED,
+      logisticsConfig: config,
+    });
+    expect(db.tables.orders.get(111)).toMatchObject({ package_count: 3, logistics_cost: 21 });
+
+    // La rilettura torna con spedizioni, resi e shipping line oscurati.
+    await applyOrderToMerchant({
+      supabase: db.client,
+      order: spedito({
+        financial_status: 'refunded',
+        package_count: null,
+        returned_at: null,
+        shipping_method: null,
+        fulfillment_status: null,
+        logistics_unknown: ['package_count', 'fulfillment_status', 'returned_at', 'shipping_method'],
+      }),
+      syncedAt: SYNCED,
+      logisticsConfig: config,
+    });
+
+    expect(db.tables.orders.get(111)).toMatchObject({
+      financial_status: 'refunded',
+      package_count: 3,
+      returned_at: '2026-08-05T00:00:00Z',
+      shipping_method: 'Express',
+      fulfillment_status: 'FULFILLED',
+      logistics_cost: 21,
+    });
   });
 });

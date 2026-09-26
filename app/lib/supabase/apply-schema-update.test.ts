@@ -141,7 +141,7 @@ describe('recupero dell opzione quando lo schema arriva alla 13', () => {
     shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 12 }), scopes: 'read_orders,read_all_orders' });
 
     expect((await applyMerchantSchemaUpdate('shop-1')).status).toBe('applied');
-    // Oggi l'ultima versione e' la 14: chi arriva dalla 12 la attraversa.
+    // Chi arriva dalla 12 attraversa anche la 14 e la 15: seguito da zero.
     expect(enqueueShippingMethodBackfill).toHaveBeenCalledWith('shop-1', { restartIfRunning: true });
   });
 
@@ -202,6 +202,34 @@ describe('recupero dei pacchi quando lo schema arriva alla 14', () => {
 
   it('da 13 a 14 senza permesso sugli ordini: niente da recuperare', async () => {
     shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 13 }), scopes: 'read_products' });
+
+    await applyMerchantSchemaUpdate('shop-1');
+    expect(enqueueShippingMethodBackfill).not.toHaveBeenCalled();
+  });
+});
+
+// Lo schema 15 porta `logistics_facts_version`: pacchi e reso degli ordini gia'
+// salvati sono stati contati con le regole vecchie, e il recupero li rifa'.
+describe('ricalcolo dei fatti logistici quando lo schema arriva alla 15', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSchemaUpdateAttempts();
+    findPlanMock.mockResolvedValue({ customersSyncEnabled: true });
+    configUpdate.mockResolvedValue({});
+    vi.mocked(getValidAccessToken).mockResolvedValue('token');
+    vi.mocked(runQuery).mockResolvedValue(undefined as never);
+  });
+
+  it('da 14 a 15 con gli ordini: accoda il recupero, da zero anche se uno e\' in corso', async () => {
+    shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 14 }), scopes: 'read_orders,read_all_orders' });
+
+    expect((await applyMerchantSchemaUpdate('shop-1')).status).toBe('applied');
+    expect(enqueueShippingMethodBackfill).toHaveBeenCalledTimes(1);
+    expect(enqueueShippingMethodBackfill).toHaveBeenCalledWith('shop-1', { restartIfRunning: true });
+  });
+
+  it('da 14 a 15 senza permesso sugli ordini: niente da rifare', async () => {
+    shopFindUnique.mockResolvedValue({ ...shopRow({ schemaVersion: 14 }), scopes: 'read_products' });
 
     await applyMerchantSchemaUpdate('shop-1');
     expect(enqueueShippingMethodBackfill).not.toHaveBeenCalled();

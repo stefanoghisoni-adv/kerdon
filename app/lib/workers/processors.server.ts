@@ -8,7 +8,7 @@ import { prisma } from '../../db.server';
 import { enrichVariantCosts } from '../stats/inventory-cost.server';
 import { filterEligibleProductRows } from '../eligibility/product-eligibility';
 import { sortByCreatedAtAsc } from '../sync/product-order';
-import { orderToRows } from '../customers/order-rows';
+import { orderToRows, orderUpsertBatches } from '../customers/order-rows';
 import { loadLogisticsConfigForWrite } from '../shipping/load-config.server';
 import type { LogisticsConfig } from '../shipping/types';
 import { deleteStaleLines } from '../customers/order-write.server';
@@ -958,16 +958,19 @@ async function syncOrders(
       // cancellare. Una pagina di ordini scritta dentro un negozio in
       // cancellazione e' un dato che nessuno andra' piu' a togliere.
       await lease?.assertHeld();
-      const orderRows = converted.map((c) => c.rows.order);
-      const { error: ordersError } = await supabase
-        .from('orders')
-        .upsert(orderRows, { onConflict: 'shopify_order_id', ignoreDuplicates: false });
+      // A gruppi: gli ordini con dati di spedizione non letti si scrivono senza
+      // quelle colonne, che restano come erano (vedi orderUpsertBatches).
+      for (const orderRows of orderUpsertBatches(converted.map((c) => c.rows))) {
+        const { error: ordersError } = await supabase
+          .from('orders')
+          .upsert(orderRows, { onConflict: 'shopify_order_id', ignoreDuplicates: false });
 
-      if (ordersError) {
-        // 'order.upsert' e' CRITICO: si lancia, la corsa fallisce e il confine
-        // resta dov'era. Una pagina sono cinquanta ordini, e riscriverli tutti
-        // alla corsa dopo costa meno che tenerne il conto uno per uno.
-        throw new Error(`Supabase order upsert failed: ${ordersError.message}`);
+        if (ordersError) {
+          // 'order.upsert' e' CRITICO: si lancia, la corsa fallisce e il confine
+          // resta dov'era. Una pagina sono cinquanta ordini, e riscriverli tutti
+          // alla corsa dopo costa meno che tenerne il conto uno per uno.
+          throw new Error(`Supabase order upsert failed: ${ordersError.message}`);
+        }
       }
 
       const lineRows = converted.flatMap((c) => c.rows.lines);

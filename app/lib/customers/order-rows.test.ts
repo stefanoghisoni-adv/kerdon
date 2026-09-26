@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { countsAsSale, orderToRows, type ShopifyOrder, type ShopifyOrderLine } from './order-rows';
+import { countsAsSale, orderToRows, orderUpsertBatches, type ShopifyOrder, type ShopifyOrderLine } from './order-rows';
+import { LOGISTICS_FACTS_VERSION } from '~/lib/shipping/order-logistics-facts';
 import type { LogisticsConfig } from '~/lib/shipping/types';
 
 const SYNCED = new Date('2026-08-24T10:00:00Z');
@@ -424,5 +425,50 @@ describe('orderToRows — pacchi spediti', () => {
 
   it('spedito ma zero pacchi registrati: si paga un pacco', () => {
     expect(orderToRows(spedito({ shipping_method: 'Corriere', package_count: 0 }), SYNCED, config)!.order.logistics_cost).toBe(4.9);
+  });
+});
+
+describe('orderToRows — dati di spedizione non letti', () => {
+  it('tutto letto: niente da preservare, e la versione dei fatti corrente', () => {
+    const rows = orderToRows(order({ package_count: 2, logistics_unknown: [] }), SYNCED)!;
+    expect(rows.preserve).toEqual([]);
+    expect(rows.order.logistics_facts_version).toBe(LOGISTICS_FACTS_VERSION);
+  });
+
+  it('colonne non lette: si preservano loro, il costo e la versione', () => {
+    const rows = orderToRows(order({ logistics_unknown: ['returned_at', 'package_count'] }), SYNCED)!;
+    expect(rows.preserve).toEqual(['logistics_cost', 'logistics_facts_version', 'package_count', 'returned_at']);
+  });
+});
+
+describe('orderUpsertBatches', () => {
+  const completo = orderToRows(order({ id: 1, package_count: 2 }), SYNCED)!;
+  const oscurato = orderToRows(order({ id: 2, logistics_unknown: ['package_count', 'fulfillment_status'] }), SYNCED)!;
+  const altro = orderToRows(order({ id: 3, logistics_unknown: ['returned_at'] }), SYNCED)!;
+
+  it('gruppi con le stesse colonne, il completo per primo', () => {
+    const gruppi = orderUpsertBatches([oscurato, completo, altro]);
+    expect(gruppi).toHaveLength(3);
+    expect(gruppi[0].map((r) => r.shopify_order_id)).toEqual([1]);
+    expect(gruppi[0][0]).toHaveProperty('package_count', 2);
+    expect(gruppi[0][0]).toHaveProperty('logistics_cost');
+  });
+
+  it('le colonne non lette non ci sono proprio: un upsert non le tocca', () => {
+    const [, ...resto] = orderUpsertBatches([completo, oscurato, altro]);
+    const riga2 = resto.flat().find((r) => r.shopify_order_id === 2)!;
+    const riga3 = resto.flat().find((r) => r.shopify_order_id === 3)!;
+    for (const c of ['package_count', 'fulfillment_status', 'logistics_cost', 'logistics_facts_version']) {
+      expect(riga2).not.toHaveProperty(c);
+    }
+    // Il resto dell'ordine si scrive come sempre.
+    expect(riga2).toHaveProperty('financial_status', 'paid');
+    expect(riga2).toHaveProperty('returned_at');
+    expect(riga3).not.toHaveProperty('returned_at');
+    expect(riga3).toHaveProperty('package_count');
+  });
+
+  it('senza righe, nessun gruppo', () => {
+    expect(orderUpsertBatches([])).toEqual([]);
   });
 });

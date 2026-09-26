@@ -344,8 +344,16 @@ END $$;
  * esplicito. Lo storico lo completa il recupero da Shopify che
  * l'aggiornamento accoda (apply-schema-update), e intanto un ordine spedito
  * senza conteggio paga un pacco.
+ *
+ * La 15 porta sugli ordini `logistics_facts_version`: con quale algoritmo
+ * sono stati ricavati pacchi e reso. Le regole sono cambiate (pacchi dai
+ * tracking distinti di ogni spedizione, reso solo se OPEN o CLOSED, nessun
+ * troncamento silenzioso), e gli ordini gia' salvati portano i valori delle
+ * regole vecchie. Solo una colonna, quindi nessun passo esplicito: il
+ * ricalcolo dello storico lo fa il recupero da Shopify che l'aggiornamento
+ * accoda (apply-schema-update), una volta per ordine.
  */
-export const LATEST_SCHEMA_VERSION = 14;
+export const LATEST_SCHEMA_VERSION = 15;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {
