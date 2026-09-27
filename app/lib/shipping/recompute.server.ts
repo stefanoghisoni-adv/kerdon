@@ -99,6 +99,11 @@ LIMIT ${RECOMPUTE_PAGE_SIZE};`;
 /**
  * La scrittura di una pagina: un UPDATE solo, con i valori in una VALUES.
  *
+ * Su un ordine anonimizzato da una cancellazione GDPR il paese non c'e' piu',
+ * e il costo ricalcolato perderebbe spedizione e imballo: il trigger
+ * `kerdon_orders_keep_redacted` (supabase-schema) tiene allora il costo
+ * salvato, e questa scrittura su quella riga non cambia niente.
+ *
  * Ogni valore e' passato da `idSicuro` o `costoSicuro` prima di finire nel
  * testo: nient'altro viene interpolato. `IS DISTINCT FROM` evita di riscrivere
  * righe gia' giuste: il risultato e' lo stesso (tutte le righe hanno il costo

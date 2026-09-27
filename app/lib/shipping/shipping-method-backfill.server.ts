@@ -210,6 +210,11 @@ LIMIT ${BACKFILL_PAGE_SIZE};`;
  *   quando TUTTI i fatti sono noti (allFactsKnown): altrimenti l'ordine si
  *   riprova al recupero dopo.
  *
+ * Su un ordine anonimizzato da una cancellazione GDPR (`customer_redacted_at`)
+ * il paese resta vuoto qualunque cosa porti `cc`: lo impone il trigger
+ * `kerdon_orders_keep_redacted` nel database del merchant (supabase-schema),
+ * che vale per ogni scrittura e non solo per questa.
+ *
  * Opzione e paese si riempiono solo se vuoti, in entrambi i regimi: le loro
  * regole non sono cambiate, e un valore salvato non si tocca. Cosi' un
  * ordine nuovo scritto con l'indirizzo oscurato prende il paese appena lo si

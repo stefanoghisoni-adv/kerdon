@@ -26,7 +26,7 @@ tratta nome, email, telefono e indirizzo, che sono campi protetti a sé stanti.
 | Indirizzo email | Chiave con cui il merchant riconosce i propri clienti negli strumenti di marketing collegati al proprio database. |
 | Telefono | Stessa funzione dell'email come chiave di riconoscimento, per le piattaforme che la usano. |
 | Indirizzo (via, città, CAP, regione, paese) | Paese e CAP sono i campi con cui le piattaforme pubblicitarie riconoscono i clienti fra i propri utenti: senza, il pubblico costruito dal merchant risulta più piccolo del reale. |
-| Indirizzo di spedizione dell'ordine — solo il paese | Il paese sceglie la zona e la tariffa di spedizione con cui si calcola il costo logistico dell'ordine, che si sottrae dal profitto per ordine e per cliente. Via, città, CAP e nome del destinatario non vengono chiesti. |
+| Indirizzo di spedizione dell'ordine — solo il paese | Il paese sceglie la zona e la tariffa di spedizione con cui si calcola il costo logistico dell'ordine, che si sottrae dal profitto per ordine e per cliente. Via, città, CAP e nome del destinatario non vengono chiesti né conservati; la notifica di Shopify può contenerli, e viene scartata alla ricezione. |
 | Data di nascita (metafield del cliente) | Le piattaforme pubblicitarie la confrontano nel formato `AAAAMMGG` per riconoscere i clienti. L'app la legge dal metafield indicato dal merchant e, quando il merchant ha il dato e Shopify no, **la riscrive nel metafield del cliente su Shopify**. |
 
 **Va dichiarata anche la scrittura verso Shopify.** Sono due, e sono le uniche:
@@ -86,9 +86,19 @@ cliente. Senza, il profitto risulterebbe più alto del vero.
 progetto Supabase suo, che controlla lui. Nel database di Kerdon resta solo la
 configurazione che il merchant imposta — zone di spedizione, tariffe, costi delle
 opzioni, categorie di imballo, costo di un reso — che non contiene dati dei
-clienti. I webhook dei resi (`returns/approve`, `decline`, `cancel`, `close`,
-`reopen`) e degli ordini lasciano nella posta in arrivo il solo identificativo
-dell'ordine da rileggere, cancellato 7 giorni dopo la chiusura.
+clienti.
+
+**Le notifiche di Shopify.** I webhook degli ordini (`orders/create`,
+`orders/updated`, `refunds/create`, `orders/delete`) e dei resi
+(`returns/approve`, `decline`, `cancel`, `close`, `reopen`) arrivano con il corpo
+intero che Shopify manda: indirizzo di spedizione e di fatturazione completi,
+email, telefono, codici di tracciamento, motivi dei resi. L'app non li chiede e
+non li conserva: il corpo viene scartato alla ricezione, e nella posta in arrivo
+restano i soli identificativi (ordine o reso, cliente, browser degli attributi
+del carrello), cancellati 7 giorni dopo la chiusura. Niente del resto finisce
+nei log — nemmeno in quelli d'errore, che nominano topic e negozio — né nella
+lettera morta. Se manca l'intestazione `X-Shopify-Webhook-Id`, il corpo entra
+in un'impronta SHA-256 che fa da identificativo della consegna: a senso unico.
 
 **Conservazione.** Queste voci vivono sull'ordine: restano quanto l'ordine, per il
 tempo che decide il merchant, e se ne vanno quando l'ordine viene cancellato su
@@ -97,9 +107,12 @@ Shopify (webhook `orders/delete`).
 **Esportazione e cancellazione.** La richiesta di accesso (`customers/data_request`)
 esporta le righe intere degli ordini della persona, quindi tutte le colonne
 qui sopra. La richiesta di cancellazione (`customers/redact`) azzera sugli ordini
-della persona identificativo, nome, cognome e paese di spedizione; le altre voci
-descrivono il pacco e non la persona, e restano sull'ordine ormai anonimo come il
-totale e le righe. `shop/redact` cancella la configurazione del negozio dal
+della persona identificativo, nome, cognome e paese di spedizione, e li marca con
+`customer_redacted_at`: da lì un trigger nel database del merchant
+(`kerdon_orders_keep_redacted`) impedisce a sincronizzazione, webhook, recupero
+dello storico e ricalcolo di rimetterli, e tiene il costo logistico già
+calcolato. Le altre voci descrivono il pacco e non la persona, e restano
+sull'ordine, non più collegato alla persona, come il totale e le righe. `shop/redact` cancella la configurazione del negozio dal
 database di Kerdon, tariffe comprese; il database del merchant resta suo.
 
 ## Le risposte alle domande del modulo
@@ -149,7 +162,12 @@ quando il merchant attiva quella funzione e il visitatore ha dato il consenso.
 decide quanto tenerli. Alla disinstallazione le tabelle e i dati **restano dove
 sono**: cancellarli distruggerebbe il patrimonio informativo del merchant senza
 che lui l'abbia chiesto. L'unica scadenza che l'app applica da sé è sulle righe
-dei browser mai collegati a un cliente, cancellate dopo 90 giorni.
+dei browser mai collegati a un cliente, cancellate dopo 90 giorni. I dati di
+spedizione e logistica degli ordini restano quanto l'ordine e se ne vanno con
+lui (`orders/delete`); la richiesta di accesso li esporta, quella di
+cancellazione azzera il paese e marca l'ordine (`customer_redacted_at`) perché
+non torni. Il corpo delle notifiche di Shopify non si conserva: viene scartato
+alla ricezione.
 
 Sui nostri sistemi restano i conteggi delle sincronizzazioni, il registro degli
 accessi all'interfaccia di lettura (solo esito e stato HTTP, 12 mesi) e le
@@ -180,6 +198,10 @@ scrivere?», che è «no», senza date e senza eccezioni.
 differenza che il revisore trova. Per gli ordini lo controlla
 `order-data-inventory.test.ts`; per clienti e visitatori va ancora fatto a mano.
 
+**Che una modifica sostanziale dell'informativa sia annunciata in app.** La
+sezione 10 lo promette. L'avviso in app non esiste ancora ed è nella lista
+«Prima del lancio» di `CHANGELOG.md`, insieme alla voce per la 1.4.
+
 **Che gli scope dichiarati siano quelli veri.** La fonte di verità è `scopes` in
 `shopify.app.toml`; `SHOPIFY_SCOPES` in `.env.example` e nel README deve ripetere
 quella riga parola per parola. Oggi sono: `read_products`, `read_inventory`,
@@ -205,6 +227,11 @@ rifare se l'inventario cambia.
      (`customer.firstName`, `customer.lastName`).
    - [ ] **Email** — anagrafica dei clienti con consenso.
    - [ ] **Phone** — anagrafica dei clienti con consenso.
+   - Da scrivere nella motivazione di Name, Email, Phone e Address: i webhook
+     degli ordini e dei resi consegnano anche email, telefono e indirizzo
+     completo (spedizione e fatturazione) di **ogni** ordine; l'app non li
+     chiede e non li conserva, il corpo viene scartato alla ricezione e se ne
+     tengono i soli identificativi.
    - [ ] **Address** — due usi, da scrivere tutti e due nella motivazione:
      l'indirizzo predefinito dei clienti con consenso (per i pubblici) e il
      **solo paese** dell'indirizzo di spedizione dell'ordine
@@ -224,9 +251,11 @@ rifare se l'inventario cambia.
 4. **Scope che lo motivano**: `read_orders`, `read_all_orders`, `read_shipping`
    (le zone di spedizione del negozio, per le tariffe), `read_returns` (resi e
    loro webhook).
-5. **Conservazione e cancellazione**: rispondere come nella sezione «Dati di
-   spedizione e logistica degli ordini» qui sopra: nel database del merchant,
-   finché c'è l'ordine; esportati con `customers/data_request`; paese azzerato
-   con `customers/redact`.
+5. **Conservazione e cancellazione**: rispondere con il paragrafo
+   «Conservazione» della sezione «Le risposte alle domande del modulo» qui
+   sopra (il dettaglio per voce è in «Dati di spedizione e logistica degli
+   ordini»): nel database del merchant, finché c'è l'ordine; esportati con
+   `customers/data_request`; paese azzerato e ordine marcato
+   (`customer_redacted_at`) con `customers/redact`.
 6. **Informativa da linkare**: `https://api.kerdon.io/policies/privacy-policy`,
    versione 1.4 del 27-09-2026 o successiva.

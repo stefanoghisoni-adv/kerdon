@@ -86,9 +86,15 @@ from profit and lifetime value per customer:
 | Packaging category | Value of the order metafield `custom.packaging_category` | Merchant's database, `packaging_category` |
 | Logistics cost | Calculated by Kerdon from the items above and the merchant's rates | Merchant's database, `logistics_cost` and `logistics_facts_version` |
 
-Of the shipping address, only the country is requested from Shopify: no street,
-city, postcode or recipient name is read. Of a return, only its status and date
-are read: no reason, no returned items, no customer message. The merchant's
+Of the shipping address, only the country is requested from Shopify: street,
+city, postcode and recipient name are not requested and not stored. Of a return,
+only its status and date are requested: no reason, no returned items, no
+customer message. The order and return notifications Shopify sends (webhooks)
+may contain that data, and more — full shipping and billing address, email,
+telephone, tracking numbers, return reasons: each notification is discarded on
+receipt, keeping only the identifiers of the order, the return, the customer
+and, for visitor recognition, the browser. Nothing of the rest is stored,
+logged or forwarded. The merchant's
 rates — shipping zones, option costs, packaging categories and return cost — are
 configuration kept in Kerdon's database and contain no personal data.
 
@@ -104,7 +110,8 @@ telephone number the person has just given; Kerdon uses them only to search the
 merchant's database and does not retain them.
 
 **Explicit exclusions**: no payment data; no email address, telephone number,
-note or address — other than the shipping country above — is taken from orders;
+note or address — other than the shipping country above — is requested or stored
+from orders;
 no carrier label is bought or read, and no tracking number is stored; no IP
 address; no record of pages visited; no special category of data within the
 meaning of Article 9 GDPR.
@@ -215,9 +222,12 @@ session, **for at most 30 days**; it is deleted when that period expires.
 database, along with the rows of the browsers linked to them. Orders are not
 deleted — they are accounting records the merchant is required to keep (Article
 17(3)(b) and (e) GDPR) — but are stripped of the customer identifier, of the
-customer's first and last name and of the shipping country. The other shipping
-and logistics data describes the parcel rather than the person, and stays on the
-order so that the merchant's costs remain correct.
+customer's first and last name and of the shipping country, and marked with the
+date of the erasure (`customer_redacted_at`); a guard in the merchant's database
+prevents any later write from restoring those fields. The other shipping and
+logistics data describes the parcel rather than the person, and stays on the
+order, with its logistics cost unchanged, so that the merchant's costs remain
+correct.
 
 ## 9. On termination
 

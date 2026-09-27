@@ -105,6 +105,17 @@ describe('numero di versione e cio che promette', () => {
     expect(buildSchemaUpdateSQL(14, true, true)).toContain('ADD COLUMN IF NOT EXISTS logistics_facts_version INTEGER');
   });
 
+  it('la 16 porta la marcatura delle cancellazioni e il suo guardiano', () => {
+    // Senza la versione che sale, colonna e trigger non arriverebbero sui
+    // database gia' collegati, e i dati cancellati potrebbero tornare.
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(16);
+    const sql = buildSchemaUpdateSQL(15, true, true)!;
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS customer_redacted_at TIMESTAMP');
+    expect(sql).toContain('CREATE OR REPLACE TRIGGER kerdon_orders_keep_redacted');
+    // Senza permesso sugli ordini non c'e' la tabella, e nemmeno il trigger.
+    expect(buildSchemaUpdateSQL(15, true, false) ?? '').not.toContain('kerdon_orders_keep_redacted');
+  });
+
   it('l aggiornamento porta le colonne dell indirizzo del cliente', () => {
     // Sono aggiunte, quindi non hanno un passo esplicito: le porta la DDL
     // idempotente, che pero' viaggia solo se il numero di versione e' salito.

@@ -87,8 +87,14 @@ questo, dal profitto e dal valore nel tempo (LTV) di ciascun cliente:
 | Costo logistico | Calcolato da Kerdon a partire dalle voci sopra e dalle tariffe del merchant | Database del merchant, `logistics_cost` e `logistics_facts_version` |
 
 Dell'indirizzo di spedizione si chiede a Shopify il solo paese: via, città, CAP e
-nome del destinatario non vengono letti. Di un reso si leggono soltanto stato e
-data: né il motivo, né gli articoli resi, né messaggi del cliente. Le tariffe del
+nome del destinatario non vengono chiesti né conservati. Di un reso si chiedono
+soltanto stato e data: né il motivo, né gli articoli resi, né messaggi del
+cliente. Le notifiche di ordini e resi che Shopify manda (webhook) possono
+contenere quei dati, e altri — indirizzo di spedizione e di fatturazione
+completi, email, telefono, codici di tracciamento, motivi dei resi: ogni
+notifica viene scartata alla ricezione, e se ne tengono solo gli identificativi
+dell'ordine, del reso, del cliente e, per il riconoscimento dei visitatori, del
+browser. Del resto niente viene conservato, registrato nei log o inoltrato. Le tariffe del
 merchant — zone di spedizione, costi delle opzioni, categorie di imballo e costo
 dei resi — sono configurazione conservata nel database di Kerdon e non
 contengono dati personali.
@@ -106,8 +112,8 @@ numero di telefono lasciato dalla persona; Kerdon li usa per la sola ricerca
 nel database del merchant e non li conserva.
 
 **Esclusioni esplicite**: nessun dato di pagamento; dagli ordini non viene
-prelevato alcun indirizzo email, numero di telefono, nota o indirizzo — salvo il
-paese di spedizione descritto sopra; nessuna etichetta del corriere viene
+chiesto né conservato alcun indirizzo email, numero di telefono, nota o
+indirizzo — salvo il paese di spedizione descritto sopra; nessuna etichetta del corriere viene
 acquistata o letta, e nessun codice di tracciamento viene conservato; nessun
 indirizzo IP; nessuna pagina visitata; nessuna categoria particolare di dati ai
 sensi dell'art. 9 GDPR.
@@ -225,8 +231,11 @@ database del merchant, insieme alle righe dei browser a lui collegati. Gli ordin
 non vengono cancellati — sono scritture contabili che il merchant è tenuto a
 conservare (art. 17(3), lettere b ed e, GDPR) — ma vengono privati
 dell'identificativo del cliente, del suo nome e cognome e del paese di
-spedizione. Gli altri dati di spedizione e logistica descrivono il pacco e non la
-persona, e restano sull'ordine perché i costi del merchant restino corretti.
+spedizione, e marcati con la data della cancellazione (`customer_redacted_at`);
+una guardia nel database del merchant impedisce a qualunque scrittura successiva
+di ripristinare quei campi. Gli altri dati di spedizione e logistica descrivono
+il pacco e non la persona, e restano sull'ordine, con il costo logistico
+invariato, perché i costi del merchant restino corretti.
 
 ## 9. Al termine
 

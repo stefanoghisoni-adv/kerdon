@@ -88,6 +88,9 @@ export async function applyOrderToMerchant(opts: {
   // resterebbero righe che nessuna query saprebbe raggruppare.
   // Le colonne di spedizione non lette restano fuori dall'upsert: il valore
   // salvato non si sovrascrive con NULL (vedi orderUpsertBatches).
+  // Su un ordine gia' anonimizzato da una cancellazione GDPR, cliente, nome e
+  // paese che Shopify rimanda NON rientrano: li scarta il trigger
+  // `kerdon_orders_keep_redacted` nel database del merchant (supabase-schema).
   for (const gruppo of orderUpsertBatches([rows])) {
     const { error: orderError } = await opts.supabase
       .from('orders')

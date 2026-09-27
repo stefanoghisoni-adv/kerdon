@@ -51,7 +51,7 @@ Customers who have not given consent are never copied into your database.
 
 Where you have granted the app access to your orders, it processes: order ID and number, the customer's ID and first and last name, currency, total, financial status, cancellation date, order date, and for each line the product and variant, quantity, unit price paid and line discount.
 
-From **orders** the app deliberately does **not** take addresses (beyond the country, described below), email addresses, phone numbers, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.
+From **orders** the app deliberately does **not** request or store addresses (beyond the country, described below), email addresses, phone numbers, order notes, or payment details. Those are not needed to calculate profit. The notification Shopify sends when an order or a return changes may contain them: it is discarded on receipt, and only the identifiers — of the order, the return, the customer and, for visitor recognition, the browser — are kept.
 
 **Shipping and logistics data.** The app also reads what it needs to work out what each order cost you to ship, to pack and, if it came back, to take back. That logistics cost is subtracted from the order's profit, and from there it flows into profit and lifetime value per customer. Without it, every order would look more profitable than it really was. These are the items, and what happens to each:
 
@@ -72,9 +72,9 @@ From **orders** the app deliberately does **not** take addresses (beyond the cou
 
 Three points are worth stating plainly:
 
-- **The country, not the address.** From the order's shipping address the app asks Shopify for the country code alone. Street, city, postcode and the recipient's name are not read, so they cannot be stored.
-- **Tracking numbers are counted, not kept.** The app reads them while it processes the order, counts the distinct ones, and discards them. No tracking number is written to your database, to ours, or to our logs.
-- **Returns are a status and a date.** The app does not read the reason for a return, the items returned, or any message from the customer.
+- **The country, not the address.** From the order's shipping address the app asks Shopify for the country code alone. Street, city, postcode and the recipient's name are not requested and not stored; the notification Shopify sends may contain them, and it is discarded on receipt.
+- **Tracking numbers are counted, not kept.** The app reads them while it processes the order, counts the distinct ones, and discards them; those that arrive in a notification from Shopify are discarded on receipt. No tracking number is written to your database, to ours, or to our logs.
+- **Returns are a status and a date.** The app does not request or store the reason for a return, the items returned, or any message from the customer; the return notification Shopify sends may contain them, and it is discarded on receipt.
 
 The rates themselves — your shipping zones, the cost of each option, your packaging categories and the cost of a return — are configuration you set in the app, and they are kept in our database. They say nothing about your customers. What is kept about each order is in yours.
 
@@ -176,7 +176,7 @@ Shopify forwards customer privacy requests to us automatically, and the app answ
 
 **Access request** — the app collects from your database what has been written about that person: their customer row, their orders — shipping and logistics data included — and those orders' lines, and the browsers linked to them. The export is prepared and made available to you inside the app, where you download it with your admin session: it is never placed at a public address. **It stays on our systems for at most 30 days**, then deletes itself.
 
-**Erasure request** — the customer's row is permanently deleted from your database, along with the rows of the browsers linked to that person. **Orders are not deleted**: they are accounting records you are required to keep, and deleting them would change your revenue. They are stripped of what leads back to the person — customer identifier, first and last name, and the shipping country, the only item taken from their address — and become indistinguishable from a purchase made without an account. The other logistics data in 3.4 describes the parcel, not the person, and stays on the anonymous order, so that your costs and profit still add up. The action is recorded in your logs.
+**Erasure request** — the customer's row is permanently deleted from your database, along with the rows of the browsers linked to that person. **Orders are not deleted**: they are accounting records you are required to keep, and deleting them would change your revenue. They are stripped of what leads back to the person — customer identifier, first and last name, and the shipping country, the only item taken from their address — and are no longer linked to the person in your database. They are also marked with the date of the erasure (`customer_redacted_at`): from then on, no later update from Shopify can put those details back. The other logistics data in 3.4 describes the parcel, not the person, and stays on the order, and the logistics cost already calculated for it is kept as it is, so that your costs and profit still add up. The action is recorded in your logs.
 
 If a customer contacts you directly, you can also delete their record yourself: it is your database.
 

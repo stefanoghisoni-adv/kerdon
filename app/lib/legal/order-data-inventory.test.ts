@@ -18,8 +18,8 @@ import { join } from 'node:path';
 vi.mock('~/shopify.server', () => ({ unauthenticated: { admin: vi.fn() } }));
 
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
-import { ORDERS_COLUMN_NAMES } from '~/lib/supabase-schema';
-import { ANONYMOUS_ORDER } from '~/lib/gdpr/customer-record.server';
+import { ORDERS_COLUMN_NAMES, ORDER_COLUMNS_CLEARED_ON_ERASURE } from '~/lib/supabase-schema';
+import { ANONYMOUS_ORDER, REDACTED_MARKER } from '~/lib/gdpr/customer-record.server';
 import { FULFILLMENTS_FIRST } from '~/lib/shipping/order-logistics-facts';
 import {
   INVENTARIO_ORDINI,
@@ -83,7 +83,7 @@ function campiFoglia(query: string): string[] {
 
 /** Dal percorso nella query al percorso a partire dall'ordine. */
 function dallOrdine(percorso: string): string | null {
-  for (const radice of ['orders.nodes.', 'order.', 'nodes.', 'node.']) {
+  for (const radice of ['orders.nodes.', 'order.', 'nodes.', 'node.', 'return.order.']) {
     if (percorso.startsWith(radice)) return percorso.slice(radice.length);
   }
   // `orders.pageInfo.*` e' la paginazione dell'elenco, non un campo d'ordine.
@@ -140,6 +140,7 @@ function shopifyFinto(query: string): unknown {
     return ok({ orders: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [ordineLungo()] } });
   }
   if (/query Order\(/.test(query)) return ok({ order: ordineLungo() });
+  if (/query ReturnOrder\(/.test(query)) return ok({ return: { order: { id: 'gid://shopify/Order/4242' } } });
   throw new Error(`query inattesa nel test: ${query.slice(0, 80)}`);
 }
 
@@ -164,10 +165,12 @@ async function campiChiesti(): Promise<string[]> {
   await client.getOrders({ limit: 1 });
   await client.getOrderById(4242);
   await client.getOrderShippingFacts(['4242']);
+  // Il webhook di un reso che non nomina l'ordine: si risale dal reso.
+  await client.getReturnOrderId(99);
 
   // Le strade devono esserci passate tutte, o il confronto sotto e' su meno
   // di quel che l'app chiede davvero.
-  for (const nome of ['Orders(', 'Order(', 'OrderShippingFacts', 'OrderFulfillments', 'DrainConnection']) {
+  for (const nome of ['Orders(', 'Order(', 'OrderShippingFacts', 'OrderFulfillments', 'DrainConnection', 'ReturnOrder(']) {
     expect(query.some((q) => q.includes(`query ${nome}`)), nome).toBe(true);
   }
 
@@ -245,6 +248,13 @@ describe('(b) le colonne di orders e (c) l inventario', () => {
 describe('la cancellazione e l inventario', () => {
   it('azzera esattamente le colonne che l inventario dichiara azzerate', () => {
     expect(Object.keys(ANONYMOUS_ORDER).sort()).toEqual(colonneAzzerateAllaCancellazione().sort());
+    // E il trigger che le tiene vuote nasce dallo stesso elenco.
+    expect([...ORDER_COLUMNS_CLEARED_ON_ERASURE].sort()).toEqual(colonneAzzerateAllaCancellazione().sort());
+  });
+
+  it('la marcatura che scrive e la colonna che l inventario dichiara sono la stessa', () => {
+    const marcatura = INVENTARIO_ORDINI.filter((v) => v.allaCancellazione === 'impostato').flatMap((v) => v.colonne);
+    expect(marcatura).toEqual([REDACTED_MARKER]);
   });
 });
 
@@ -310,6 +320,47 @@ describe('(c) l inventario e i documenti legali', () => {
     },
   );
 
+  it.each(VOCI_LOGISTICHE.map((v) => [v.id, v] as const))(
+    '%s: le tabelle dei DPA e dell HTML nominano la colonna, o dicono che non si conserva',
+    (_id, voce) => {
+      const markdown: Array<[string, string, string, RegExp]> = [
+        ['dpa.md', documenti.en['dpa.md'], voce.etichetta.en, /not stored/i],
+        ['dpa.it.md', documenti.it['dpa.it.md'], voce.etichetta.it, /non (viene )?conservat/i],
+      ];
+      for (const [nome, testo, etichetta, nonConservato] of markdown) {
+        const riga = rigaDiTabella(testo, etichetta);
+        expect(riga, `${nome}: nessuna riga di tabella per «${etichetta}»`).toBeDefined();
+        if (voce.colonne.length === 0) expect(riga, nome).toMatch(nonConservato);
+        for (const colonna of voce.colonne) expect(riga, `${nome}: ${colonna}`).toContain(`\`${colonna}\``);
+      }
+
+      const rigaHtml = html
+        .split('\n')
+        .find((r) => r.trim().startsWith(`<tr><td>${voce.etichetta.en}</td>`));
+      expect(rigaHtml, `privacy-policy.html: nessuna riga per «${voce.etichetta.en}»`).toBeDefined();
+      if (voce.colonne.length === 0) expect(rigaHtml).toMatch(/not stored/i);
+      for (const colonna of voce.colonne) expect(rigaHtml, `html: ${colonna}`).toContain(`<code>${colonna}</code>`);
+    },
+  );
+
+  it('ogni documento dice che il corpo dei webhook si scarta alla ricezione', () => {
+    const attese: Array<[string, string, RegExp]> = [
+      ['privacy-policy.md', documenti.en['privacy-policy.md'], /discarded\s+on\s+receipt/i],
+      ['dpa.md', documenti.en['dpa.md'], /discarded\s+on\s+receipt/i],
+      ['privacy-policy.html', html, /discarded\s+on\s+receipt/i],
+      ['privacy-policy.it.md', documenti.it['privacy-policy.it.md'], /scartat[oa]\s+alla\s+ricezione/i],
+      ['dpa.it.md', documenti.it['dpa.it.md'], /scartat[oa]\s+alla\s+ricezione/i],
+      ['protected-customer-data.md', documenti.it['protected-customer-data.md'], /scartat[oa]\s+alla\s+ricezione/i],
+    ];
+    for (const [nome, testo, regola] of attese) expect(testo, nome).toMatch(regola);
+  });
+
+  it('ogni documento nomina la marcatura della cancellazione', () => {
+    for (const [nome, testo] of Object.entries({ ...documenti.en, ...documenti.it, 'privacy-policy.html': html })) {
+      expect(testo, nome).toContain(REDACTED_MARKER);
+    }
+  });
+
   it('nessun documento nega piu il trattamento dei dati di spedizione', () => {
     const negazioni = [
       /no shipping data/i,
@@ -318,6 +369,12 @@ describe('(c) l inventario e i documenti legali', () => {
       /nessun dato di spedizione/i,
       /non tratta nemmeno \*\*dati di spedizione\*\*/i,
       /dati di spedizione \(nessun corriere/i,
+      // Letti o no, arrivano: il corpo del webhook li porta. Si dice che non
+      // si chiedono e non si conservano, non che non passano.
+      /are not read/i,
+      /non vengono letti/i,
+      /indistinguishable from a purchase/i,
+      /indistinguibil[ei] da un acquisto/i,
     ];
     const tutti = { ...documenti.en, ...documenti.it, 'privacy-policy.html': html };
     for (const [nome, testo] of Object.entries(tutti)) {

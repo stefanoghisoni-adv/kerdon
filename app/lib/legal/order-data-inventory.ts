@@ -19,6 +19,23 @@
 //  - ogni voce logistica deve comparire, con la sua etichetta, nei documenti
 //    legali — informativa (IT, EN, HTML), DPA (IT, EN) e dichiarazione PCD.
 //
+// COSA QUESTO INVENTARIO NON ELENCA, E PERCHE'. I webhook REST degli ordini e
+// dei resi (`orders/create`, `orders/updated`, `refunds/create`,
+// `orders/delete`, `returns/*`) arrivano con il corpo intero che Shopify
+// sceglie di mandare: indirizzo di spedizione e di fatturazione completi,
+// email, telefono, codici di tracciamento, motivi dei resi. Quel corpo NON e'
+// una lettura che l'app chiede, e non si conserva: `receiveShopifyWebhook`
+// verifica la firma, lo legge, e `distillTrigger` (webhooks/trigger.ts) ne
+// tiene i soli identificativi — l'ordine, il reso, il cliente, e
+// l'identificativo del browser negli attributi del carrello (riconoscimento
+// dei visitatori). Il resto si scarta alla ricezione: non finisce in un
+// database, in un log (nemmeno negli errori, che nominano topic e negozio) ne'
+// nella lettera morta, che conserva la stessa riga ridotta. Senza intestazione
+// `X-Shopify-Webhook-Id` il corpo entra in un'impronta SHA-256 che fa da
+// identificativo della consegna: a senso unico, non se ne ricava il contenuto.
+// I documenti lo dicono cosi': "non richiesto e non conservato; la notifica di
+// Shopify puo' contenerlo, e viene scartato alla ricezione".
+//
 // Se il test fallisce dopo una modifica al codice, la correzione non e' il test:
 // e' dichiarare il campo nuovo qui E nei documenti, alzando la versione
 // dell'informativa.
@@ -33,7 +50,9 @@ export type AllaCancellazione =
    */
   | 'resta'
   /** Non viene mai scritto: non c'e' niente da cancellare. */
-  | 'non_conservato';
+  | 'non_conservato'
+  /** Lo scrive la cancellazione stessa: e' la sua marcatura. */
+  | 'impostato';
 
 /**
  * Il tipo di dato protetto secondo Shopify.
@@ -148,6 +167,18 @@ export const INVENTARIO_ORDINI: readonly VoceDatiOrdine[] = [
     colonne: ['id', 'synced_at'],
     pcd: null,
     allaCancellazione: 'resta',
+    logistica: false,
+  },
+
+  {
+    // Scritta dalla cancellazione: da li' il trigger del database del merchant
+    // tiene vuote le colonne `azzerato` contro ogni scrittura successiva.
+    id: 'marcatura_cancellazione',
+    etichetta: { it: 'Marcatura della cancellazione', en: 'Erasure marker' },
+    graphql: [],
+    colonne: ['customer_redacted_at'],
+    pcd: null,
+    allaCancellazione: 'impostato',
     logistica: false,
   },
 
