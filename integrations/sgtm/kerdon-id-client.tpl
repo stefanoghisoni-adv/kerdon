@@ -191,7 +191,7 @@ function writeCommonHeaders() {
   // L'intestazione dell'origine dipende da chi ha chiamato: senza questo un
   // intermediario servirebbe a tutti la copia del primo.
   setResponseHeader('vary', 'Origin');
-  // Senza, il ponte in vetrina non potrebbe leggere `Retry-After` su una
+  // Senza, una pagina del negozio non potrebbe leggere `Retry-After` su una
   // chiamata cross-origin: non e' fra le intestazioni che il browser espone.
   setResponseHeader('access-control-expose-headers', 'Retry-After');
 
@@ -205,19 +205,38 @@ function writeCommonHeaders() {
 /**
  * La risposta, una volta sola.
  *
- * Un Client che non chiama `returnResponse` lascia la vetrina appesa fino al
- * timeout del container, e il ponte non sa distinguere quell'attesa da un
+ * Un Client che non chiama `returnResponse` lascia la chiamata appesa fino al
+ * timeout del container, e chi chiama non sa distinguere quell'attesa da un
  * esito. Ogni ramo passa di qui, e il secondo passaggio non fa niente: un
  * callback che arrivasse due volte non deve poter scrivere una seconda
  * risposta sopra la prima.
+ *
+ * SE LA RISPOSTA STESSA SI ROMPE, se ne tenta un'altra, una volta. Un errore
+ * dentro `setResponseBody` o `returnResponse` lascerebbe `responded` a vero
+ * senza che niente sia partito: nessuno risponderebbe piu'. Si prova allora la
+ * forma piu' povera possibile — solo lo stato, 500 — e poi basta: un secondo
+ * guasto non ha un terzo rimedio.
  */
 let responded = false;
 function respond(status, body) {
   if (responded) return;
   responded = true;
-  setResponseStatus(status);
-  setResponseBody(body);
-  returnResponse();
+  try {
+    setResponseStatus(status);
+    setResponseBody(body);
+    returnResponse();
+  } catch (e) {
+    lastResort();
+  }
+}
+
+function lastResort() {
+  try {
+    setResponseStatus(500);
+    returnResponse();
+  } catch (e) {
+    // Niente altro da tentare.
+  }
 }
 
 /** La risposta "non c'e' niente da darti", nella forma che PostgREST userebbe. */
@@ -356,9 +375,9 @@ function parseShopifyConsent(raw) {
 /**
  * Da dove viene il permesso, e in che ordine si guarda.
  *
- * Prima il parametro: e' quello che il ponte in vetrina ha appena letto dalla
- * Customer Privacy API, quindi il piu' recente. Poi il cookie di Shopify. Ultimo
- * il cookie che il ponte scrive, che e' una copia e vale quanto una copia. Il
+ * Prima il parametro: e' quello che la chiamata porta con se', letto nella
+ * pagina un istante prima, quindi il piu' recente. Poi il cookie di Shopify.
+ * Ultimo `kerdon_consent`, che e' una copia e vale quanto una copia. Il
  * primo che dice qualcosa vince, intero: mettere insieme i pezzi piu'
  * permissivi di fonti diverse e' il modo esatto di costruire un consenso che
  * nessuno ha dato.
@@ -383,8 +402,8 @@ function readConsent() {
  * `secure` perche' un identificativo che segue una persona per un anno non
  * viaggia in chiaro. `sameSite: 'Lax'` e non `None`: qui siamo sul dominio del
  * negozio, e `None` dichiarerebbe di terze parti proprio il cookie che esiste
- * per non esserlo. Niente `httpOnly`: il ponte in vetrina deve poterlo
- * rileggere per attaccare lo stesso identificativo al carrello.
+ * per non esserlo. Niente `httpOnly`: i tag del merchant nella pagina
+ * possono doverlo rileggere.
  */
 function plantCookie(value, maxAge) {
   setCookie(ID_COOKIE, value, {
@@ -397,31 +416,110 @@ function plantCookie(value, maxAge) {
   }, false);
 }
 
-const consent = readConsent();
-const analytics = consent ? consent.a : undefined;
-const marketing = consent ? consent.m : undefined;
-// Servono tutte e due: e' lo stesso identificativo a misurare e ad attribuire.
-const allowed = analytics === true && marketing === true;
-// Un no esplicito: non "non ha ancora risposto", ma "ha detto di no".
-const withdrawn = analytics === false || marketing === false;
+/**
+ * Il permesso, riscritto nella forma compatta che Kerdon legge.
+ *
+ * Si inoltra QUESTO, e non il parametro grezzo: il no che arriva dal cookie di
+ * Shopify non e' nella querystring, e senza riscriverlo Kerdon riceverebbe una
+ * chiamata senza nessun segnale — cioe' non saprebbe che c'e' da cancellare.
+ * Solo le lettere dette: una finalita' su cui il visitatore non si e' espresso
+ * non diventa ne' un si' ne' un no.
+ */
+function compactOf(value) {
+  if (!value) return '';
+  const letters = ['a', 'm', 'p', 's'];
+  let out = 'v1';
+  for (let i = 0; i < letters.length; i++) {
+    const v = value[letters[i]];
+    if (v === true) out = out + '.' + letters[i] + '1';
+    else if (v === false) out = out + '.' + letters[i] + '0';
+  }
+  return out === 'v1' ? '' : out;
+}
 
-writeCommonHeaders();
+/* ---------------------------------------------------------------------------
+ * LA REVOCA IN SOSPESO
+ *
+ * Alla revoca `kerdon_eid` scade subito: il tracciamento cessa nell'istante
+ * del no. Ma se Kerdon non conferma — rete giu', timeout, 503 — l'identificativo
+ * da cancellare sarebbe sparito insieme al cookie, e nessuno potrebbe piu'
+ * chiederne la cancellazione. Resta allora in un SECONDO cookie, `kerdon_rv`,
+ * finche' Kerdon non risponde 2xx:
+ *
+ *  - forma `<permesso compatto>~<identificativo>[~<identificativo>]`, per
+ *    esempio `v1.a0.m0~kerdon_…`: il no da ripresentare e cosa cancellare;
+ *  - `HttpOnly`: nessuno script della pagina lo legge, nessun tag del browser
+ *    lo scambia per un identificativo attivo. Lo legge solo questo Client;
+ *  - serve SOLO a cancellare: non viene mai rimandato come identificativo, non
+ *    finisce in nessuna risposta, e finche' c'e' non si conia niente — nemmeno
+ *    se il visitatore nel frattempo ha concesso di nuovo;
+ *  - a ogni chiamata successiva, con qualunque permesso, si riprova la revoca
+ *    (cancellare non e' tracciare). Al 2xx scade; se nel frattempo il permesso
+ *    c'e', si conia un identificativo NUOVO;
+ *  - dura 30 giorni, poi il browser lo butta: se Kerdon aveva gia' registrato
+ *    la revoca la completa da se'.
+ * ------------------------------------------------------------------------- */
 
-// L'identificativo che questo browser ha gia': prima quello che il ponte ci
-// rimanda, poi il nostro cookie. Il ponte lo passa perche' alla revoca il
-// cookie potrebbe essere gia' sparito, e senza un riferimento non c'e' niente
-// da far dimenticare a Kerdon.
-const fromParam = getRequestQueryParameter(EXISTING_PARAM);
-const existing = isIdentifier(fromParam) ? fromParam : (isIdentifier(cookie(ID_COOKIE)) ? cookie(ID_COOKIE) : '');
+const PENDING_COOKIE = 'kerdon_rv';
+const PENDING_MAX_AGE = 2592000;
+const PENDING_MAX_IDS = 3;
 
-const base = data.kerdonUrl;
-const endpoint = (base.charAt(base.length - 1) === '/' ? base.substring(0, base.length - 1) : base) +
-  '/rest/v1/tracking_id';
+/** La revoca in sospeso letta dal cookie, o `undefined` se non ce n'e' una valida. */
+function readPending() {
+  const raw = cookie(PENDING_COOKIE);
+  if (!raw) return undefined;
+  const parts = raw.split('~');
+  const said = parseCompact(parts[0]);
+  // Il permesso registrato deve essere un no: un valore che dice altro non e'
+  // una revoca, e non si ripresenta a Kerdon come tale.
+  if (!said || !(said.a === false || said.m === false)) return undefined;
+  const ids = [];
+  for (let i = 1; i < parts.length && ids.length < PENDING_MAX_IDS; i++) {
+    if (isIdentifier(parts[i]) && ids.indexOf(parts[i]) < 0) ids.push(parts[i]);
+  }
+  if (!ids.length) return undefined;
+  return { compact: compactOf(said), ids: ids };
+}
 
-function upstreamUrl() {
-  let url = endpoint;
+function writePending(compact, ids) {
+  setCookie(PENDING_COOKIE, compact + '~' + ids.join('~'), {
+    domain: domain,
+    path: '/',
+    'max-age': PENDING_MAX_AGE,
+    secure: true,
+    httpOnly: true,
+    sameSite: 'Lax'
+  }, false);
+}
+
+function clearPending() {
+  setCookie(PENDING_COOKIE, '', {
+    domain: domain,
+    path: '/',
+    'max-age': 0,
+    secure: true,
+    httpOnly: true,
+    sameSite: 'Lax'
+  }, false);
+}
+
+/**
+ * L'indirizzo di Kerdon, controllato. Vuoto se il campo e' vuoto o non in
+ * https: e' un errore di configurazione, e chi chiama risponde comunque — con
+ * la revoca messa da parte se ce n'era una in corso.
+ */
+function endpointUrl() {
+  const base = data.kerdonUrl;
+  if (typeof base !== 'string' || base.indexOf('https://') !== 0 || base.length <= 8) {
+    return '';
+  }
+  return (base.charAt(base.length - 1) === '/' ? base.substring(0, base.length - 1) : base) +
+    '/rest/v1/tracking_id';
+}
+
+function upstreamUrl(compact) {
+  let url = endpointUrl();
   let separator = '?';
-  const compact = getRequestQueryParameter(CONSENT_PARAM);
   if (compact) {
     url = url + separator + CONSENT_PARAM + '=' + encodeUriComponent(compact);
     separator = '&';
@@ -512,19 +610,6 @@ function retryAfterFrom(result) {
   return '60';
 }
 
-/**
- * La revoca non e' stata presa in carico: 503, mai un ok.
- *
- * Il ponte in vetrina tiene da parte l'identificativo finche' non vede un 2xx,
- * e riprova. Un 200 qui gli farebbe buttare l'unico riferimento con cui si puo'
- * ancora chiedere la cancellazione. `Retry-After` quello di Kerdon se c'e',
- * altrimenti un minuto.
- */
-function revokeNotConfirmed(result) {
-  setResponseHeader('retry-after', retryAfterFrom(result));
-  respond(503, JSON.stringify({ error: 'revoke_not_confirmed' }));
-}
-
 /** Un 2xx, e niente altro. */
 function succeeded(result) {
   const status = result ? result.statusCode : 0;
@@ -554,49 +639,111 @@ function identifierFrom(result) {
   return isIdentifier(value) ? value : '';
 }
 
-// NESSUN PERMESSO: si esce di qui, e nel modo giusto per ciascuno dei due casi.
-// Chi non ha ancora risposto non lascia traccia da nessuna parte.
-if (!allowed) {
-  if (!withdrawn) {
-    empty();
-  } else {
-    // Revoca. Il cookie scade comunque e per primo — il tracciamento locale deve
-    // cessare nell'istante del no. Poi si chiede a Kerdon di cancellare la
-    // riga, e la risposta alla vetrina dice com'e' andata davvero: 200 solo se
-    // Kerdon ha risposto 2xx, 503 con `Retry-After` in ogni altro caso — rete
-    // giu', timeout, 429, 5xx, qualunque altro non-2xx. E' il ponte a tenere
-    // l'identificativo da parte e a riprovare: qui non si ricorda niente.
-    plantCookie('', 0);
-    // Senza un identificativo non c'e' niente da far dimenticare: si esce, e il
-    // cookie resta scaduto lo stesso.
-    if (existing) {
-      sendHttpGet(upstreamUrl(), {
-        headers: upstreamHeaders(existing),
-        timeout: 5000
-      }).then((result) => {
-        if (succeeded(result)) {
-          empty();
-        } else {
-          revokeNotConfirmed(result);
-        }
-      }, () => {
-        revokeNotConfirmed(undefined);
-      }).catch(() => {
-        revokeNotConfirmed(undefined);
-      });
-    } else {
-      empty();
+// Lo stato di questa chiamata. Assegnato da `run()`, letto dai rami.
+let consent;
+let allowed = false;
+let pending;
+// La revoca ancora da confermare: `{compact, ids}`. Finche' c'e', ogni uscita
+// che non e' un 2xx di Kerdon la mette da parte in `kerdon_rv`.
+let keep;
+
+/** Se `keep` e' gia' esattamente cio' che il browser ha in `kerdon_rv`. */
+function keepIsPending() {
+  return !!pending && pending.compact === keep.compact && pending.ids.join('~') === keep.ids.join('~');
+}
+
+/**
+ * La revoca non e' stata presa in carico: 503, mai un ok.
+ *
+ * L'identificativo resta in `kerdon_rv`, e la prossima chiamata riprova. Se il
+ * browser aveva gia' quel valore non lo si riscrive: il cookie scade trenta
+ * giorni dopo la PRIMA volta, non dopo l'ultima, e un guasto permanente non lo
+ * tiene in vita per sempre. `Retry-After` quello di Kerdon se c'e', altrimenti
+ * un minuto.
+ *
+ * Ogni passo e' protetto a parte: un cookie che non si riesce a scrivere non
+ * deve impedire la risposta.
+ */
+function revokeNotConfirmed(result) {
+  if (responded) return;
+  if (keep && keep.ids.length && !keepIsPending()) {
+    try {
+      writePending(keep.compact, keep.ids);
+    } catch (e) {
+      // Si risponde lo stesso.
     }
   }
-} else {
-  sendHttpGet(upstreamUrl(), {
-    headers: upstreamHeaders(existing),
+  try {
+    setResponseHeader('retry-after', retryAfterFrom(result));
+  } catch (e) {
+    // Idem.
+  }
+  respond(503, '{"error":"revoke_not_confirmed"}');
+}
+
+/** Il Client e' configurato male: si risponde, e l'anteprima dice cosa manca. */
+function misconfigured() {
+  try {
+    logToConsole('Kerdon: il campo "Indirizzo dell\'API" e\' vuoto o non comincia con https://.');
+  } catch (e) {
+    // Si risponde lo stesso.
+  }
+  respond(500, '{"error":"client_misconfigured"}');
+}
+
+/**
+ * L'ultima rete: qualunque errore non previsto finisce qui, e qui si risponde.
+ * Con una revoca in corso vale come "non confermata" — l'identificativo resta
+ * da parte — altrimenti e' un 500.
+ */
+function settle() {
+  if (responded) return;
+  if (keep) {
+    revokeNotConfirmed(undefined);
+    return;
+  }
+  respond(500, '{"error":"client_error"}');
+}
+
+/**
+ * Chiede a Kerdon di dimenticare gli identificativi in `keep`, uno alla volta.
+ * Al 2xx dell'ultimo, `kerdon_rv` scade (se c'era) e si passa a `done`.
+ */
+function revokeNext(done) {
+  if (!keep.ids.length) {
+    keep = undefined;
+    if (pending) clearPending();
+    done();
+    return;
+  }
+  sendHttpGet(upstreamUrl(keep.compact), {
+    headers: upstreamHeaders(keep.ids[0]),
+    timeout: 5000
+  }).then((result) => {
+    if (!succeeded(result)) {
+      revokeNotConfirmed(result);
+      return;
+    }
+    keep.ids = keep.ids.slice(1);
+    revokeNext(done);
+  }, () => {
+    // Rete giu' o timeout.
+    revokeNotConfirmed(undefined);
+  }).catch(() => {
+    settle();
+  });
+}
+
+/** Con il permesso: l'identificativo, e il cookie che lo porta. */
+function mint(existingId) {
+  sendHttpGet(upstreamUrl(compactOf(consent)), {
+    headers: upstreamHeaders(existingId),
     timeout: 5000
   }).then((result) => {
     const identifier = identifierFrom(result);
     // Nessun identificativo nella risposta e' una risposta: Kerdon ha deciso
     // di non coniare, oppure non ha risposto bene. In tutti e due i casi non si
-    // pianta niente e la vetrina riceve "nessuna riga".
+    // pianta niente e chi chiama riceve "nessuna riga".
     if (!identifier) {
       empty();
       return;
@@ -615,6 +762,90 @@ if (!allowed) {
   }).catch(() => {
     empty();
   });
+}
+
+function run() {
+  writeCommonHeaders();
+
+  consent = readConsent();
+  const analytics = consent ? consent.a : undefined;
+  const marketing = consent ? consent.m : undefined;
+  // Servono tutte e due: e' lo stesso identificativo a misurare e ad attribuire.
+  allowed = analytics === true && marketing === true;
+  // Un no esplicito: non "non ha ancora risposto", ma "ha detto di no".
+  const withdrawn = analytics === false || marketing === false;
+
+  pending = readPending();
+
+  // L'identificativo che questo browser ha gia': prima quello che la chiamata
+  // porta nel parametro, poi il nostro cookie.
+  const fromParam = getRequestQueryParameter(EXISTING_PARAM);
+  const existing = isIdentifier(fromParam) ? fromParam : (isIdentifier(cookie(ID_COOKIE)) ? cookie(ID_COOKIE) : '');
+
+  if (withdrawn) {
+    // Revoca. Il cookie scade comunque e per primo — il tracciamento locale
+    // deve cessare nell'istante del no. Poi si chiede a Kerdon di cancellare,
+    // e la risposta dice com'e' andata davvero: 200 solo se Kerdon ha risposto
+    // 2xx; altrimenti 503, e l'identificativo resta in `kerdon_rv`.
+    plantCookie('', 0);
+    keep = pending
+      ? { compact: pending.compact, ids: pending.ids.slice(0) }
+      : { compact: compactOf(consent), ids: [] };
+    if (existing && keep.ids.indexOf(existing) < 0 && keep.ids.length < PENDING_MAX_IDS) {
+      keep.ids.push(existing);
+    }
+    // Senza un identificativo non c'e' niente da far dimenticare: si esce, e il
+    // cookie resta scaduto lo stesso.
+    if (!keep.ids.length) {
+      keep = undefined;
+      empty();
+      return;
+    }
+    if (!endpointUrl()) {
+      revokeNotConfirmed(undefined);
+      return;
+    }
+    revokeNext(empty);
+    return;
+  }
+
+  // Una revoca rimasta in sospeso si riprova a ogni chiamata, qualunque cosa
+  // dica il permesso adesso: cancellare non e' tracciare. Finche' non e'
+  // confermata non si conia niente e non si riusa niente; confermata, se c'e'
+  // il permesso, si conia un identificativo NUOVO.
+  if (pending) {
+    keep = { compact: pending.compact, ids: pending.ids.slice(0) };
+    if (!endpointUrl()) {
+      revokeNotConfirmed(undefined);
+      return;
+    }
+    revokeNext(() => {
+      if (allowed) mint('');
+      else empty();
+    });
+    return;
+  }
+
+  // NESSUN PERMESSO: chi non ha ancora risposto non lascia traccia da nessuna
+  // parte. Nessuna chiamata, nessun cookie.
+  if (!allowed) {
+    empty();
+    return;
+  }
+
+  if (!endpointUrl()) {
+    misconfigured();
+    return;
+  }
+  mint(existing);
+}
+
+// Ogni strada finisce in una risposta, anche quella che si rompe prima di
+// arrivarci.
+try {
+  run();
+} catch (e) {
+  settle();
 }
 
 ___SERVER_PERMISSIONS___
@@ -794,6 +1025,10 @@ ___SERVER_PERMISSIONS___
               {
                 "type": 1,
                 "string": "_tracking_consent"
+              },
+              {
+                "type": 1,
+                "string": "kerdon_rv"
               }
             ]
           }
@@ -845,6 +1080,53 @@ ___SERVER_PERMISSIONS___
                   {
                     "type": 1,
                     "string": "kerdon_eid"
+                  },
+                  {
+                    "type": 1,
+                    "string": "*"
+                  },
+                  {
+                    "type": 1,
+                    "string": "*"
+                  },
+                  {
+                    "type": 1,
+                    "string": "require_secure"
+                  },
+                  {
+                    "type": 1,
+                    "string": "any"
+                  }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "name"
+                  },
+                  {
+                    "type": 1,
+                    "string": "domain"
+                  },
+                  {
+                    "type": 1,
+                    "string": "path"
+                  },
+                  {
+                    "type": 1,
+                    "string": "secure"
+                  },
+                  {
+                    "type": 1,
+                    "string": "session"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "kerdon_rv"
                   },
                   {
                     "type": 1,
@@ -940,21 +1222,47 @@ ___NOTES___
 
 OGNI RAMO RISPONDE, UNA VOLTA SOLA. Questo e' un Client, non un tag: non ha
 `gtmOnSuccess`/`gtmOnFailure`, e il suo "chiudere" e' `returnResponse()`. Passa
-tutto da `respond()`, che risponde una volta e ignora le successive. Alla
-revoca: 200 solo se Kerdon ha risposto 2xx; rete giu', timeout, 429, 5xx e
-qualunque altro non-2xx diventano 503 con `Retry-After` (quello di Kerdon se in
-sole cifre, altrimenti 60). Con il permesso: nessun identificativo e nessun
-cookie se la risposta non e' 2xx o il corpo non e' JSON valido.
+tutto da `respond()`, che risponde una volta e ignora le successive; se la
+risposta stessa solleva, tenta una sola volta un 500 nudo. Tutto il flusso sta
+dentro un `try` che, su qualunque errore, risponde comunque (503 con la revoca
+messa da parte, se ce n'era una in corso; altrimenti 500). Un "Indirizzo
+dell'API" vuoto o non in https: 500 `client_misconfigured`, nessuna chiamata.
+
+LA REVOCA NON DIPENDE DA NESSUNO SCRIPT IN VETRINA. Al no, `kerdon_eid` scade
+subito e l'identificativo passa in `kerdon_rv` (HttpOnly, 30 giorni, forma
+`<no compatto>~<identificativo>`), che serve solo a cancellare. 200 solo se
+Kerdon ha risposto 2xx, e allora `kerdon_rv` scade; rete giu', timeout, 429,
+5xx e qualunque altro non-2xx diventano 503 con `Retry-After` (quello di Kerdon
+se in sole cifre, altrimenti 60). La chiamata successiva — con qualunque
+permesso — riprova; finche' `kerdon_rv` c'e' non si conia niente. Il permesso
+si inoltra a Kerdon riscritto in forma compatta, anche quando arriva dal cookie
+di Shopify e non dal parametro.
 
 L'intero codice di questo template viene eseguito da
 `app/lib/tracking/sgtm-id-client.test.ts`, con finti delle API del sandbox.
-Resta da provare in anteprima, a mano:
+Il harness NON puo' provare il comportamento del sandbox vero su questi punti:
+`.then(onOk, onErr)` con due argomenti e `.catch` sul Promise di
+`sendHttpGet`; `typeof`; `try`/`catch`; i nomi delle intestazioni di risposta
+in minuscolo (`result.headers['retry-after']`, `x-kerdon-external-id`);
+`JSON.parse` che restituisce `undefined` sul malformato. Da provare in
+anteprima, a mano:
 1. consenso `v1.a0.m0` + `existing_external_id` valido, indirizzo dell'API
    irraggiungibile: risposta 503 con `retry-after` e
-   `access-control-expose-headers`, cookie `kerdon_eid` scaduto;
-2. stessa chiamata con l'API raggiungibile: 200 `[]`;
-3. consenso `v1.a1.m1` con l'API irraggiungibile: 200 `[]`, nessun cookie;
-4. nessun consenso: 200 `[]`, nessuna chiamata in uscita.
+   `access-control-expose-headers`, `kerdon_eid` scaduto, `kerdon_rv` scritto
+   (HttpOnly) — prova che `onErr` del `.then` a due argomenti viene chiamato;
+2. stessa chiamata con l'API raggiungibile: 200 `[]`, `kerdon_rv` scaduto;
+3. con `kerdon_rv` nel browser e NESSUN parametro, API raggiungibile: una
+   chiamata in uscita con `consent=v1.a0.m0` e l'identificativo, 200 `[]`,
+   `kerdon_rv` scaduto;
+4. l'API che risponde 503 con `Retry-After: 30`: la risposta porta
+   `retry-after: 30` (prova i nomi in minuscolo di `result.headers`);
+5. consenso `v1.a1.m1` con l'API irraggiungibile: 200 `[]`, nessun cookie;
+6. consenso `v1.a1.m1` con l'API raggiungibile: l'identificativo arriva, e
+   il cookie `kerdon_eid` viene piantato (prova `typeof` e `JSON.parse`);
+7. nessun consenso: 200 `[]`, nessuna chiamata in uscita;
+8. "Indirizzo dell'API" svuotato (a mano, nell'anteprima): 500
+   `client_misconfigured`, nessuna chiamata — prova `try`/`catch` e il ramo
+   della configurazione.
 
 Le prove di questo template si fanno sul container di anteprima, non qui: cio'
 che va verificato — che senza consenso non nasca nessun cookie, che con il

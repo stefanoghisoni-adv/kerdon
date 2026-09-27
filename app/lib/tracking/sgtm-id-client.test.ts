@@ -54,7 +54,14 @@ type Upstream =
 interface Richiesta {
   query?: Record<string, string>;
   cookies?: Record<string, string>;
-  upstream?: Upstream;
+  /** Una risposta per tutte le chiamate, o una per chiamata, in ordine. */
+  upstream?: Upstream | Upstream[];
+  /** Campi del client da sovrascrivere (es. un indirizzo vuoto). */
+  data?: Record<string, unknown>;
+  /** Quante volte `returnResponse` solleva prima di riuscire. */
+  returnThrows?: number;
+  /** Solleva dentro `setCookie`. */
+  setCookieThrows?: boolean;
 }
 
 async function esegui(r: Richiesta) {
@@ -63,26 +70,47 @@ async function esegui(r: Richiesta) {
     body: '',
     headers: {} as Record<string, string>,
     cookies: [] as { name: string; value: string; maxAge: unknown }[],
+    httpOnly: {} as Record<string, unknown>,
     returned: 0,
+    returnAttempts: 0,
     upstreamCalls: [] as string[],
+    upstreamIds: [] as (string | undefined)[],
+    cookiesRead: [] as string[],
   };
   let pendente: Promise<unknown> = Promise.resolve();
+  let ritorniFalliti = 0;
 
   const api: Record<string, unknown> = {
     claimRequest: () => {},
     getRequestPath: () => '/kerdon/id',
     getRequestQueryParameter: (k: string) => r.query?.[k],
     getRequestHeader: (k: string) => (k === 'origin' ? 'https://www.negozio.it' : undefined),
-    getCookieValues: (k: string) => (r.cookies?.[k] ? [r.cookies[k]] : []),
-    setCookie: (name: string, value: string, opts: Record<string, unknown>) =>
-      esito.cookies.push({ name, value, maxAge: opts['max-age'] }),
+    getCookieValues: (k: string) => {
+      esito.cookiesRead.push(k);
+      return r.cookies?.[k] ? [r.cookies[k]] : [];
+    },
+    setCookie: (name: string, value: string, opts: Record<string, unknown>) => {
+      if (r.setCookieThrows) throw new Error('setCookie rotto');
+      esito.cookies.push({ name, value, maxAge: opts['max-age'] });
+      esito.httpOnly[name] = opts.httpOnly;
+    },
     setResponseBody: (b: string) => (esito.body = b),
     setResponseHeader: (k: string, v: string) => (esito.headers[k.toLowerCase()] = v),
     setResponseStatus: (s: number) => (esito.status = s),
-    returnResponse: () => (esito.returned += 1),
-    sendHttpGet: (url: string) => {
+    returnResponse: () => {
+      esito.returnAttempts += 1;
+      if (ritorniFalliti < (r.returnThrows ?? 0)) {
+        ritorniFalliti += 1;
+        throw new Error('returnResponse rotto');
+      }
+      esito.returned += 1;
+    },
+    sendHttpGet: (url: string, opts: { headers?: Record<string, string> }) => {
+      const n = esito.upstreamCalls.length;
       esito.upstreamCalls.push(url);
-      const u = r.upstream ?? { statusCode: 200, body: '[]' };
+      esito.upstreamIds.push(opts?.headers?.['X-Kerdon-External-Id']);
+      const tutte = r.upstream ?? { statusCode: 200, body: '[]' };
+      const u = Array.isArray(tutte) ? (tutte[n] ?? tutte[tutte.length - 1]) : tutte;
       const p =
         'reject' in u
           ? Promise.reject({ reason: u.reject })
@@ -117,15 +145,33 @@ async function esegui(r: Richiesta) {
     ingestKey: 'kin_prova.segreto',
     storefrontDomain: 'negozio.it',
     cookieMaxAge: '31536000',
+    ...r.data,
   };
 
   new Function('require', 'data', CODICE)(require, data);
-  await pendente;
-  for (let i = 0; i < 5; i++) await new Promise((res) => setTimeout(res, 0));
+  // Le revoche in fila fanno piu' giri: si aspetta finche' le chiamate in
+  // uscita smettono di crescere.
+  for (let giro = 0; giro < 10; giro++) {
+    const prima = esito.upstreamCalls.length;
+    await pendente;
+    for (let i = 0; i < 5; i++) await new Promise((res) => setTimeout(res, 0));
+    if (esito.upstreamCalls.length === prima) break;
+  }
   return { ...esito, richiesti };
 }
 
+/** I cookie del browser dopo la risposta: l'ultimo `setCookie` per nome vince. */
+function barattolo(prima: Record<string, string>, e: { cookies: { name: string; value: string; maxAge: unknown }[] }) {
+  const dopo = { ...prima };
+  for (const c of e.cookies) {
+    if (c.maxAge === 0 || c.value === '') delete dopo[c.name];
+    else dopo[c.name] = c.value;
+  }
+  return dopo;
+}
+
 const REVOCA = { consent: 'v1.a0.m0', existing_external_id: VECCHIO };
+const IN_SOSPESO = `v1.a0.m0~${VECCHIO}`;
 const PERMESSO = { consent: 'v1.a1.m1' };
 
 describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
@@ -145,7 +191,14 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
       expect(e.headers['retry-after']).toMatch(/^\d+$/);
       expect(e.headers['access-control-expose-headers']).toMatch(/retry-after/i);
       // Il cookie scade comunque: il tracciamento cessa nell'istante del no.
-      expect(e.cookies).toEqual([{ name: 'kerdon_eid', value: '', maxAge: 0 }]);
+      // L'identificativo resta solo in `kerdon_rv`, per riprovare.
+      expect(e.cookies).toEqual([
+        { name: 'kerdon_eid', value: '', maxAge: 0 },
+        { name: 'kerdon_rv', value: IN_SOSPESO, maxAge: 2592000 },
+      ]);
+      expect(e.httpOnly.kerdon_rv).toBe(true);
+      expect(e.body).not.toContain(VECCHIO);
+      expect(e.headers['x-kerdon-external-id']).toBeUndefined();
     });
 
     it('timeout: 503', async () => {
@@ -247,6 +300,191 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
       expect(e.upstreamCalls).toHaveLength(0);
       expect(e.returned).toBe(1);
     });
+  });
+
+  describe('la revoca in sospeso, senza nessuno script in vetrina', () => {
+    it('rete giu, poi la visita dopo senza nessun segnale: si riprova e si chiude', async () => {
+      const prima = await esegui({ query: REVOCA, upstream: { reject: 'failed' } });
+      expect(prima.status).toBe(503);
+      const jar = barattolo({ kerdon_eid: VECCHIO }, prima);
+      expect(jar).toEqual({ kerdon_rv: IN_SOSPESO });
+
+      // Visita successiva: nessun parametro, nessun consenso. Il cookie basta.
+      const dopo = await esegui({ cookies: jar, upstream: { statusCode: 200, body: '[]' } });
+      expect(dopo.upstreamCalls).toHaveLength(1);
+      expect(dopo.upstreamIds[0]).toBe(VECCHIO);
+      expect(dopo.upstreamCalls[0]).toContain('consent=v1.a0.m0');
+      expect(dopo.returned).toBe(1);
+      expect(dopo.status).toBe(200);
+      expect(dopo.body).toBe('[]');
+      expect(barattolo(jar, dopo)).toEqual({});
+    });
+
+    it('503 anche alla visita dopo: 503, e il cookie in sospeso non si riscrive', async () => {
+      const e = await esegui({
+        cookies: { kerdon_rv: IN_SOSPESO },
+        upstream: { statusCode: 503, headers: { 'retry-after': '30' } },
+      });
+      expect(e.returned).toBe(1);
+      expect(e.status).toBe(503);
+      expect(e.headers['retry-after']).toBe('30');
+      // Riscriverlo farebbe ripartire i 30 giorni a ogni guasto.
+      expect(e.cookies.filter((c) => c.name === 'kerdon_rv')).toHaveLength(0);
+    });
+
+    it('permesso ridato mentre la revoca e in sospeso: prima si revoca, poi un identificativo NUOVO', async () => {
+      const e = await esegui({
+        query: { consent: 'v1.a1.m1', existing_external_id: VECCHIO },
+        cookies: { kerdon_rv: IN_SOSPESO, kerdon_eid: VECCHIO },
+        upstream: [
+          { statusCode: 200, body: '[]' },
+          { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) },
+        ],
+      });
+      expect(e.upstreamCalls).toHaveLength(2);
+      expect(e.upstreamIds).toEqual([VECCHIO, undefined]);
+      expect(e.upstreamCalls[0]).toContain('consent=v1.a0.m0');
+      expect(e.upstreamCalls[1]).toContain('consent=v1.a1.m1');
+      expect(e.returned).toBe(1);
+      expect(JSON.parse(e.body)).toEqual([{ external_id: NUOVO }]);
+      expect(barattolo({ kerdon_rv: IN_SOSPESO }, e)).toEqual({ kerdon_eid: NUOVO });
+    });
+
+    it('permesso ridato ma revoca ancora non confermata: niente conio, niente riuso', async () => {
+      const e = await esegui({
+        query: { consent: 'v1.a1.m1' },
+        cookies: { kerdon_rv: IN_SOSPESO },
+        upstream: { reject: 'timed_out' },
+      });
+      expect(e.upstreamCalls).toHaveLength(1);
+      expect(e.returned).toBe(1);
+      expect(e.status).toBe(503);
+      expect(e.body).not.toContain(VECCHIO);
+      expect(e.cookies.filter((c) => c.name === 'kerdon_eid')).toHaveLength(0);
+    });
+
+    it('un kerdon_rv che non porta un no, o nessun identificativo valido, non vale', async () => {
+      for (const rotto of [`v1.a1.m1~${VECCHIO}`, 'v1.a0.m0~nonunid', 'spazzatura', `~${VECCHIO}`]) {
+        const e = await esegui({ cookies: { kerdon_rv: rotto } });
+        expect(e.upstreamCalls).toHaveLength(0);
+        expect(e.returned).toBe(1);
+        expect(e.body).toBe('[]');
+      }
+    });
+
+    it('in sospeso piu un nuovo identificativo da revocare: tutti e due, in fila; se il secondo fallisce resta lui', async () => {
+      const e = await esegui({
+        query: { consent: 'v1.a0.m0', existing_external_id: NUOVO },
+        cookies: { kerdon_rv: IN_SOSPESO },
+        upstream: [{ statusCode: 200, body: '[]' }, { statusCode: 500 }],
+      });
+      expect(e.upstreamIds).toEqual([VECCHIO, NUOVO]);
+      expect(e.returned).toBe(1);
+      expect(e.status).toBe(503);
+      expect(barattolo({ kerdon_rv: IN_SOSPESO }, e)).toEqual({ kerdon_rv: `v1.a0.m0~${NUOVO}` });
+    });
+  });
+
+  describe('il permesso letto dal cookie di Shopify si inoltra a Kerdon', () => {
+    it('no dal cookie: la revoca parte con il no nella querystring', async () => {
+      const e = await esegui({
+        cookies: {
+          _tracking_consent: JSON.stringify({ purposes: { a: false, m: false, p: true, s: true } }),
+          kerdon_eid: VECCHIO,
+        },
+        upstream: { statusCode: 200, body: '[]' },
+      });
+      expect(e.upstreamCalls).toHaveLength(1);
+      expect(e.upstreamCalls[0]).toContain('consent=v1.a0.m0.p1.s1');
+      expect(e.upstreamIds[0]).toBe(VECCHIO);
+      expect(e.status).toBe(200);
+    });
+
+    it('si dal cookie: la chiamata porta il si', async () => {
+      const e = await esegui({
+        cookies: { _tracking_consent: JSON.stringify({ purposes: { a: true, m: true } }) },
+        upstream: { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) },
+      });
+      expect(e.upstreamCalls[0]).toContain('consent=v1.a1.m1');
+      expect(JSON.parse(e.body)).toEqual([{ external_id: NUOVO }]);
+    });
+  });
+
+  describe('ogni strada finisce in una risposta, una sola', () => {
+    it('returnResponse che solleva: un secondo tentativo, poi basta', async () => {
+      const casi: Richiesta[] = [
+        {},
+        { query: PERMESSO, upstream: { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) } },
+        { query: REVOCA, upstream: { reject: 'failed' } },
+      ];
+      for (const caso of casi) {
+        const e = await esegui({ ...caso, returnThrows: 1 });
+        expect(e.returnAttempts).toBe(2);
+        expect(e.returned).toBe(1);
+        expect(e.status).toBe(500);
+      }
+      const sempre = await esegui({ query: PERMESSO, returnThrows: 99 });
+      expect(sempre.returnAttempts).toBe(2);
+      expect(sempre.returned).toBe(0);
+    });
+
+    it('indirizzo dell API vuoto, con il permesso: 500, nessuna chiamata', async () => {
+      for (const kerdonUrl of ['', undefined, 'http://api.kerdon.io']) {
+        const e = await esegui({ query: PERMESSO, data: { kerdonUrl } });
+        expect(e.upstreamCalls).toHaveLength(0);
+        expect(e.returned).toBe(1);
+        expect(e.status).toBe(500);
+        expect(e.body).toContain('client_misconfigured');
+      }
+    });
+
+    it('indirizzo dell API vuoto, alla revoca: 503 e l identificativo resta da parte', async () => {
+      const e = await esegui({ query: REVOCA, data: { kerdonUrl: '' } });
+      expect(e.upstreamCalls).toHaveLength(0);
+      expect(e.returned).toBe(1);
+      expect(e.status).toBe(503);
+      expect(barattolo({ kerdon_eid: VECCHIO }, e)).toEqual({ kerdon_rv: IN_SOSPESO });
+    });
+
+    it('errore sincrono prima di sendHttpGet: si risponde lo stesso', async () => {
+      // Una chiave che non e' una stringa fa sollevare la costruzione delle
+      // intestazioni, prima di qualunque chiamata.
+      const permesso = await esegui({ query: PERMESSO, data: { ingestKey: 12345 } });
+      expect(permesso.upstreamCalls).toHaveLength(0);
+      expect(permesso.returned).toBe(1);
+      expect(permesso.status).toBe(500);
+
+      const revoca = await esegui({ query: REVOCA, data: { ingestKey: 12345 } });
+      expect(revoca.upstreamCalls).toHaveLength(0);
+      expect(revoca.returned).toBe(1);
+      expect(revoca.status).toBe(503);
+      expect(barattolo({ kerdon_eid: VECCHIO }, revoca)).toEqual({ kerdon_rv: IN_SOSPESO });
+    });
+
+    it('setCookie che solleva: si risponde lo stesso', async () => {
+      const e = await esegui({ query: REVOCA, setCookieThrows: true });
+      expect(e.returned).toBe(1);
+      expect(e.status).toBeGreaterThanOrEqual(500);
+    });
+  });
+
+  it('ogni cookie letto o scritto e permesso dal template', async () => {
+    const lista = (id: string, chiave: string) =>
+      (PERMESSI.find((p) => p.instance.key.publicId === id)!.instance.param ?? [])
+        .filter((p) => p.key === chiave)
+        .flatMap((p) => (p.value.listItem ?? []) as Array<{ string?: string; mapValue?: Array<{ string?: string }> }>);
+    const leggibili = lista('get_cookies', 'cookieNames').map((v) => v.string);
+    const scrivibili = lista('set_cookies', 'allowedCookies').map((v) => v.mapValue?.[0]?.string);
+
+    const casi = [
+      await esegui({ query: REVOCA, upstream: { reject: 'failed' } }),
+      await esegui({ cookies: { kerdon_rv: IN_SOSPESO }, upstream: { statusCode: 200, body: '[]' } }),
+      await esegui({ query: PERMESSO, upstream: { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) } }),
+    ];
+    for (const e of casi) {
+      for (const nome of e.cookiesRead) expect(leggibili).toContain(nome);
+      for (const c of e.cookies) expect(scrivibili).toContain(c.name);
+    }
   });
 
   it('ogni intestazione scritta e permessa dal template', async () => {
