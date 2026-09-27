@@ -1,7 +1,7 @@
 # Kerdon — Privacy Policy
 
-**Last updated:** 18-09-2026
-**Version:** 1.3
+**Last updated:** 27-09-2026
+**Version:** 1.4
 
 ## 1. Who we are
 
@@ -51,9 +51,34 @@ Customers who have not given consent are never copied into your database.
 
 Where you have granted the app access to your orders, it processes: order ID and number, the customer's ID and first and last name, currency, total, financial status, cancellation date, order date, and for each line the product and variant, quantity, unit price paid and line discount.
 
-From **orders** the app deliberately does **not** take addresses, email addresses, phone numbers, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.
+From **orders** the app deliberately does **not** take addresses (beyond the country, described below), email addresses, phone numbers, order notes, or payment details. Those are not needed to calculate profit, so they are not taken.
 
-Nor does it process **shipping data**: no carrier, no tracking number, no label, no shipping cost. All that remains of delivery is whatever the customer paid at checkout, which is already part of the order total.
+**Shipping and logistics data.** The app also reads what it needs to work out what each order cost you to ship, to pack and, if it came back, to take back. That logistics cost is subtracted from the order's profit, and from there it flows into profit and lifetime value per customer. Without it, every order would look more profitable than it really was. These are the items, and what happens to each:
+
+| Item | What it is, and why it is needed | Where it ends up |
+|---|---|---|
+| Shipping country | The two-letter country code of the order's shipping address. It picks the shipping zone, and so the rate. | Your database, `shipping_country_code` |
+| Whether the order needs shipping | Shopify's flag saying the order has something to deliver. It tells a missing address apart from an order with nothing to send. | Not stored: used while the order is processed |
+| Fulfilment status | Whether the order has left. An order that never left pays no shipping or packaging. | Your database, `fulfillment_status` |
+| Tracking numbers | Read only to count how many separate parcels left, for rates charged per parcel. | Not stored: only the count is kept |
+| Parcel count | The number of parcels that left, worked out from the tracking numbers and fulfilment status. | Your database, `package_count` |
+| Shipping method | The name of the shipping option chosen at checkout ("Standard", "Express"), matched to the cost you set for that option. | Your database, `shipping_method` |
+| Delivery category | Whether that option is a delivery or a pick-up. A pick-up has no address, and needs none. | Not stored: used while the order is processed |
+| Total weight | The order's weight in grams, as Shopify declares it, for rates charged by weight. | Your database, `total_weight_grams` |
+| Item count | The units in the order the customer still has. It estimates the weight when Shopify declares none. | Your database, `item_count` |
+| Returns | The status and creation date of each return on the order. Only an open or closed return counts, and it adds the cost of taking goods back. | Your database, `returned_at` (the date of the first such return) |
+| Packaging category | The value of the order metafield `custom.packaging_category`, where your store uses it, matched to the packaging costs you set. | Your database, `packaging_category` |
+| Logistics cost | Shipping, packaging and return cost for the order, calculated by the app from the items above and your rates. | Your database, `logistics_cost`, with `logistics_facts_version`, which records the version of the rules that produced it |
+
+Three points are worth stating plainly:
+
+- **The country, not the address.** From the order's shipping address the app asks Shopify for the country code alone. Street, city, postcode and the recipient's name are not read, so they cannot be stored.
+- **Tracking numbers are counted, not kept.** The app reads them while it processes the order, counts the distinct ones, and discards them. No tracking number is written to your database, to ours, or to our logs.
+- **Returns are a status and a date.** The app does not read the reason for a return, the items returned, or any message from the customer.
+
+The rates themselves — your shipping zones, the cost of each option, your packaging categories and the cost of a return — are configuration you set in the app, and they are kept in our database. They say nothing about your customers. What is kept about each order is in yours.
+
+These items live on the order and follow it: they are kept for as long as you keep your data, and when an order is deleted in Shopify the app deletes it, and them, from your database. An access request includes them with the person's orders; an erasure request clears the shipping country together with the customer's identifier and name (see section 8).
 
 The customer address described in 3.3 is a different thing: it is the default address on the customer record, for customers who have given marketing consent, and it is not derived from orders.
 
@@ -102,7 +127,7 @@ The app notices in two ways: when a read of your database fails, and through a p
 
 **You can switch it off.** Settings → Database holds a toggle for automatic restarting. With it off, the notice and the button stay where they are: all that changes is that if you do not press it, nobody does.
 
-**Our own database** holds the operational records in section 3.6, along with your store configuration and encrypted credentials. It is hosted in the European Union.
+**Our own database** holds the operational records in section 3.6, along with your store configuration — including the shipping zones, rates, packaging categories and return cost you set — and encrypted credentials. It is hosted in the European Union.
 
 ## 5. Who else is involved
 
@@ -135,7 +160,7 @@ Requests from Shopify are verified by signature before being acted upon.
 
 ## 7. How long data is kept
 
-Data in **your** database is kept for as long as you decide. The app does not delete it on a schedule, with one exception: rows for browsers never linked to a customer are deleted 90 days after they were last seen.
+Data in **your** database is kept for as long as you decide. The app does not delete it on a schedule, with one exception: rows for browsers never linked to a customer are deleted 90 days after they were last seen. The shipping and logistics data in 3.4 is part of the order it describes: it stays as long as the order does, and goes when the order is deleted in Shopify.
 
 **In our own database**: access records for the read interface are kept for 12 months and then deleted; exports prepared for an access request for at most 30 days; repair rows and privacy requests until they close, as described in 3.6. Webhook events delivered by Shopify are deleted 7 days after they complete. A withdrawal of recognition consent is deleted 7 days after it has been applied; where one gets stuck and is never applied, its encrypted content is cleared after 30 days and only the unreadable proof of it remains.
 
@@ -149,9 +174,9 @@ One row survives that erasure, and it is the proof that it happened: it holds a 
 
 Shopify forwards customer privacy requests to us automatically, and the app answers them:
 
-**Access request** — the app collects from your database what has been written about that person: their customer row, their orders and those orders' lines, and the browsers linked to them. The export is prepared and made available to you inside the app, where you download it with your admin session: it is never placed at a public address. **It stays on our systems for at most 30 days**, then deletes itself.
+**Access request** — the app collects from your database what has been written about that person: their customer row, their orders — shipping and logistics data included — and those orders' lines, and the browsers linked to them. The export is prepared and made available to you inside the app, where you download it with your admin session: it is never placed at a public address. **It stays on our systems for at most 30 days**, then deletes itself.
 
-**Erasure request** — the customer's row is permanently deleted from your database, along with the rows of the browsers linked to that person. **Orders are not deleted**: they are accounting records you are required to keep, and deleting them would change your revenue. They are stripped of what leads back to the person — customer identifier, first and last name — and become indistinguishable from a purchase made without an account. The action is recorded in your logs.
+**Erasure request** — the customer's row is permanently deleted from your database, along with the rows of the browsers linked to that person. **Orders are not deleted**: they are accounting records you are required to keep, and deleting them would change your revenue. They are stripped of what leads back to the person — customer identifier, first and last name, and the shipping country, the only item taken from their address — and become indistinguishable from a purchase made without an account. The other logistics data in 3.4 describes the parcel, not the person, and stays on the anonymous order, so that your costs and profit still add up. The action is recorded in your logs.
 
 If a customer contacts you directly, you can also delete their record yourself: it is your database.
 

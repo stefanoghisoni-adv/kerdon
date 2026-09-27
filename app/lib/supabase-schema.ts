@@ -183,6 +183,10 @@ const ORDERS_COLUMNS: Column[] = [
   // Cio' che serve a dire quanto e' costato far arrivare l'ordine e, se e'
   // tornato, farlo rientrare. Il paese e non l'indirizzo: per la tariffa basta
   // la zona, e un dato personale in piu' non serve a nessun conto.
+  //
+  // Tutte dichiarate, una per una, in lib/legal/order-data-inventory: da li'
+  // nascono informativa, DPA e dichiarazione a Shopify. Una colonna nuova qui
+  // va aggiunta anche la', o il test del contratto fallisce.
   { name: 'fulfillment_status', type: 'TEXT' },
   { name: 'shipping_country_code', type: 'TEXT' },
   { name: 'total_weight_grams', type: 'INTEGER' },
@@ -208,6 +212,16 @@ const ORDERS_COLUMNS: Column[] = [
   // prima: il recupero dello storico rilegge quell'ordine una volta.
   { name: 'logistics_facts_version', type: 'INTEGER' },
 ];
+
+/**
+ * I nomi delle colonne degli ordini, in sola lettura.
+ *
+ * Esistono per il contratto con l'inventario dei dati (lib/legal/
+ * order-data-inventory): una colonna aggiunta qui e non dichiarata la' fa
+ * fallire un test, invece di diventare un trattamento che l'informativa non
+ * racconta.
+ */
+export const ORDERS_COLUMN_NAMES: readonly string[] = ORDERS_COLUMNS.map((c) => c.name);
 
 const ORDERS_INDEXES = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_shopify_id ON orders(shopify_order_id);`,
