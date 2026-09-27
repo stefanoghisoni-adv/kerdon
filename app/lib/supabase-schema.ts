@@ -198,10 +198,15 @@ const ORDERS_COLUMNS: Column[] = [
   // costo di un'opzione, il costo si riscrive dagli ordini senza richiedere
   // niente a Shopify.
   { name: 'shipping_method', type: 'TEXT' },
-  // Quanti pacchi sono partiti: le spedizioni partite davvero che Shopify ha
-  // registrato. Serve al costo per pacco, che il merchant sceglie quando paga
+  // Quanti pacchi sono partiti: i tracking distinti di ogni spedizione
+  // (qualunque stato: il tracking fa fede), piu' uno per ogni spedizione
+  // SUCCESS/OPEN/PENDING senza tracking. Serve al costo per pacco, che il merchant sceglie quando paga
   // il corriere a collo e non a peso. NULL = non ancora letto.
   { name: 'package_count', type: 'INTEGER' },
+  // Con quale versione dell'algoritmo sono stati ricavati pacchi e reso
+  // (LOGISTICS_FACTS_VERSION). NULL o piu' vecchia = ricavati con le regole di
+  // prima: il recupero dello storico rilegge quell'ordine una volta.
+  { name: 'logistics_facts_version', type: 'INTEGER' },
 ];
 
 const ORDERS_INDEXES = [

@@ -231,6 +231,30 @@ prova.describe('la posta in arrivo degli webhook', () => {
     expect(righe[0].topic).toBe('refunds/create');
   });
 
+  prova('un reso passa dalla stessa posta in arrivo, firmato, col suo topic', async ({ request }) => {
+    const risposta = await consegna(request, {
+      percorso: '/webhooks/returns',
+      topic: 'returns/cancel',
+      idConsegna: 'consegna-reso',
+      corpo: { id: 9101, admin_graphql_api_id: 'gid://shopify/Return/9101', order: { id: 1001 } },
+    });
+    expect(risposta.status()).toBe(200);
+    const riga = await evento(request, 'consegna-reso');
+    expect(riga?.topic).toBe('returns/cancel');
+  });
+
+  prova('un reso con la firma sbagliata non entra', async ({ request }) => {
+    const risposta = await consegna(request, {
+      percorso: '/webhooks/returns',
+      topic: 'returns/close',
+      idConsegna: 'consegna-reso-falsa',
+      firma: 'firma-falsa',
+      corpo: { id: 9102, order: { id: 1001 } },
+    });
+    expect(risposta.status()).toBe(401);
+    expect(await evento(request, 'consegna-reso-falsa')).toBeUndefined();
+  });
+
   prova('la lavorazione avviene DOPO la risposta, e lascia comunque un esito scritto', async ({
     request,
   }) => {

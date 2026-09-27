@@ -98,6 +98,13 @@ describe('numero di versione e cio che promette', () => {
     expect(buildSchemaUpdateSQL(13, true, true)).toContain('ADD COLUMN IF NOT EXISTS package_count INTEGER');
   });
 
+  it('la 15 porta sugli ordini la versione dei fatti logistici', () => {
+    // La colonna che dice con quali regole sono stati contati pacchi e reso:
+    // il recupero rilegge una volta chi ha le regole vecchie.
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(15);
+    expect(buildSchemaUpdateSQL(14, true, true)).toContain('ADD COLUMN IF NOT EXISTS logistics_facts_version INTEGER');
+  });
+
   it('l aggiornamento porta le colonne dell indirizzo del cliente', () => {
     // Sono aggiunte, quindi non hanno un passo esplicito: le porta la DDL
     // idempotente, che pero' viaggia solo se il numero di versione e' salito.

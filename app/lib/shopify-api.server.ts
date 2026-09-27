@@ -1,5 +1,16 @@
 import { unauthenticated } from '~/shopify.server';
-import { countShippedPackages } from '~/lib/shipping/package-count';
+import {
+  deriveOrderLogisticsFacts,
+  FULFILLMENTS_FIRST,
+  FULFILLMENTS_MAX,
+  LOGISTICS_FACTS_FIELDS,
+  ORDINE_NON_TROVATO,
+  toShippingFacts,
+  type GqlLogisticsNode,
+  type GqlReturnNode,
+  type OrderShippingFacts,
+} from '~/lib/shipping/order-logistics-facts';
+import type { FulfillmentLike } from '~/lib/shipping/package-count';
 import {
   BIRTHDATE_METAFIELD,
   BIRTHDATE_METAFIELD_ACCESS,
@@ -7,7 +18,7 @@ import {
   supportedCapabilities,
   type MetafieldKey,
 } from '~/lib/customers/birthdate-metafield';
-import type { ShopifyOrder, ShopifyOrderLine } from '~/lib/customers/order-rows';
+import type { LogisticsColumn, ShopifyOrder, ShopifyOrderLine } from '~/lib/customers/order-rows';
 
 /**
  * Le capability dei metafield che la versione dell'API in uso conosce.
@@ -240,7 +251,7 @@ interface GqlOrderLineItem {
   totalDiscountSet: { shopMoney: { amount: string } } | null;
 }
 
-interface GqlOrder {
+interface GqlOrder extends GqlLogisticsNode {
   id: string;
   name: string | null;
   createdAt: string | null;
@@ -252,17 +263,12 @@ interface GqlOrder {
   lineItems: GqlConnection<GqlOrderLineItem>;
   // I campi di spedizione. Tutti facoltativi: una risposta che non li porta
   // (un finto nei test, un ordine letto con una query vecchia) non deve
-  // rompere la mappatura, solo lasciare vuote le colonne.
-  displayFulfillmentStatus?: string | null;
-  /** Una lista, non una connessione: `first` e' un argomento, non ci sono `nodes`. */
-  fulfillments?: { status?: string | null; trackingInfo: { number: string | null }[] | null }[] | null;
-  shippingAddress?: { countryCodeV2: string | null } | null;
+  // rompere la mappatura. Stato di evasione, indirizzo, spedizioni, resi e
+  // shipping line (in GqlLogisticsNode) assenti valgono "sconosciuti", non
+  // zero: vedi order-logistics-facts.
   /** UnsignedInt64, in grammi: in JSON arriva come stringa. */
   totalWeight?: string | number | null;
-  returns?: { nodes: { status: string | null; createdAt: string | null }[] | null } | null;
   metafield?: { value: string | null } | null;
-  /** Una connessione (verificato sulla 2026-07): il titolo sta nei `nodes`. */
-  shippingLines?: { nodes: { title: string | null }[] | null } | null;
 }
 
 /**
@@ -278,13 +284,9 @@ function orderNodeFields(lineItemsFirst: number): string {
     id name createdAt updatedAt cancelledAt displayFinancialStatus
     currentTotalPriceSet { shopMoney { amount currencyCode } }
     customer { id firstName lastName }
-    displayFulfillmentStatus
-    fulfillments(first: 10) { status trackingInfo { number } }
-    shippingAddress { countryCodeV2 }
     totalWeight
-    returns(first: 5) { nodes { status createdAt } }
     metafield(namespace: "custom", key: "packaging_category") { value }
-    shippingLines(first: 1) { nodes { title } }
+    ${LOGISTICS_FACTS_FIELDS}
     lineItems(first: ${lineItemsFirst}) {
       pageInfo { hasNextPage endCursor }
       nodes { ${LINE_ITEM_FIELDS} }
@@ -292,20 +294,27 @@ function orderNodeFields(lineItemsFirst: number): string {
   `;
 }
 
-/** Un reso annullato o rifiutato non e' un pacco rientrato. */
-const RESO_NON_AVVENUTO = new Set(['CANCELED', 'DECLINED']);
-
 /**
  * Dai campi di spedizione GraphQL a quelli che si scrivono sull'ordine.
  *
- * Il tracking vince sullo stato: un ordine reso Shopify lo mostra RESTOCKED, ma
- * il pacco all'andata e' partito e il corriere l'ha fatturato. Se non si
- * guardasse il tracking, il reso cancellerebbe il costo dell'andata proprio
- * nell'ordine che e' costato di piu'.
+ * Pacchi, reso e opzione vengono da deriveOrderLogisticsFacts, lo stesso
+ * algoritmo del recupero dello storico (getOrderShippingFacts): vedi li' le
+ * regole, e perche' "sconosciuto" non diventa mai zero.
+ *
+ * Un ordine partito vince sullo stato: un ordine reso Shopify lo mostra
+ * RESTOCKED, ma il pacco all'andata e' partito e il corriere l'ha fatturato.
+ * Partito vuol dire un tracking su una spedizione qualsiasi (il tracking fa
+ * fede, anche su una spedizione poi annullata: il pacco e' arrivato al
+ * corriere) o una spedizione SUCCESS/OPEN/PENDING. Vedi package-count.
  *
  * Il peso viene arrotondato all'intero: Shopify lo dichiara in grammi, e
  * `total_weight_grams` e' INTEGER. Un valore non numerico resta NULL — il costo
  * ripiega sul peso di default per articolo — invece di diventare zero.
+ *
+ * `logistics_unknown` elenca le colonne che non si sono potute leggere: chi
+ * scrive le lascia com'erano (vedi orderToRows). Per il paese la regola e' in
+ * deriveOrderLogisticsFacts: un indirizzo nullo e' oscurato solo su un ordine
+ * che deve viaggiare con una consegna vera.
  */
 function mapOrderLogistics(o: GqlOrder): Pick<
   ShopifyOrder,
@@ -316,32 +325,36 @@ function mapOrderLogistics(o: GqlOrder): Pick<
   | 'packaging_category'
   | 'shipping_method'
   | 'package_count'
+  | 'logistics_unknown'
 > {
-  const tracciato = (o.fulfillments ?? []).some((f) =>
-    (f.trackingInfo ?? []).some((t) => !!t.number),
-  );
+  const fatti = deriveOrderLogisticsFacts(o);
+  const ignote = new Set<LogisticsColumn>();
+  if (fatti.unknown.includes('fulfillments')) {
+    ignote.add('package_count');
+    ignote.add('fulfillment_status');
+  }
+  if (fatti.unknown.includes('fulfillmentStatus')) ignote.add('fulfillment_status');
+  if (fatti.unknown.includes('returns')) ignote.add('returned_at');
+  if (fatti.unknown.includes('shippingLines')) ignote.add('shipping_method');
+  if (fatti.unknown.includes('shippingAddress')) ignote.add('shipping_country_code');
+
+  if (ignote.size > 0) {
+    console.warn(
+      `[shopify-api] ordine ${gidToId(o.id) ?? o.id}: campi di spedizione non leggibili (${[...ignote].join(', ')}), restano quelli salvati`,
+    );
+  }
 
   const peso = o.totalWeight == null ? NaN : Number(o.totalWeight);
 
-  const reso = (o.returns?.nodes ?? []).find(
-    (r) => !RESO_NON_AVVENUTO.has((r.status ?? '').toUpperCase()),
-  );
-
   return {
-    fulfillment_status: tracciato ? 'FULFILLED' : (o.displayFulfillmentStatus ?? null),
-    shipping_country_code: o.shippingAddress?.countryCodeV2 ?? null,
+    fulfillment_status: fatti.fulfillmentStatus,
+    shipping_country_code: fatti.countryCode,
     total_weight_grams: Number.isFinite(peso) ? Math.round(peso) : null,
-    returned_at: reso?.createdAt ?? null,
+    returned_at: fatti.returnedAt,
     packaging_category: o.metafield?.value || null,
-    // La prima riga e basta: un ordine con piu' spedizioni e' raro, e il costo
-    // si abbina a un'opzione sola. Un titolo vuoto non abbina niente, quindi
-    // vale come assente.
-    shipping_method: o.shippingLines?.nodes?.[0]?.title || null,
-    // Un pacco per spedizione partita davvero (vedi package-count); zero se
-    // non ce n'e'. Le prime 10
-    // bastano: un ordine in piu' di dieci pacchi e' fuori dal caso comune, e
-    // contarne dieci sottostima invece di inventare.
-    package_count: countShippedPackages(o.fulfillments),
+    shipping_method: fatti.shippingMethod,
+    package_count: fatti.packageCount,
+    logistics_unknown: [...ignote],
   };
 }
 
@@ -675,7 +688,12 @@ export class ShopifyAPIClient {
           ? 'INTERNAL_SERVER_ERROR'
           : serialized.includes('THROTTLED')
             ? 'THROTTLED'
-            : null,
+            : // Query troppo cara per il tetto per query: rifarla uguale non
+              // cambia niente (retryDelay non la ritenta), la si rifa' piu'
+              // piccola. Il codice serve a chi chiama per riconoscerla.
+              serialized.includes('MAX_COST_EXCEEDED')
+              ? 'MAX_COST_EXCEEDED'
+              : null,
       );
     }
 
@@ -740,7 +758,7 @@ export class ShopifyAPIClient {
   private async drainConnection<TNode>(opts: {
     parentGid: string;
     parentType: 'Product' | 'Order';
-    field: 'variants' | 'images' | 'lineItems';
+    field: 'variants' | 'images' | 'lineItems' | 'returns';
     nodeFields: string;
     after: string | null;
   }): Promise<{ nodes: TNode[]; complete: boolean }> {
@@ -960,55 +978,147 @@ export class ShopifyAPIClient {
   }
 
   /**
-   * Opzione di spedizione e pacchi spediti di ciascun ordine, per id.
+   * Opzione di spedizione, pacchi spediti e reso di ciascun ordine, per id.
    *
    * La query piu' leggera possibile per il recupero dello storico
-   * (shipping-method-backfill): gli ordini salvati prima dello schema 13 non
-   * sanno quale opzione ha scelto il cliente, quelli prima del 14 quanti pacchi
-   * sono partiti, e i due dati si chiedono insieme per non interrogare Shopify
-   * due volte sugli stessi ordini. Niente righe, clienti o importi: con
-   * `nodes(ids:)`, una connessione da un elemento e la sola lista delle
-   * spedizioni (al piu' 10, solo lo stato) il costo richiesto resta sotto i
-   * 15 punti per ordine, quindi un lotto da 50 sta sotto il tetto di 1000.
+   * (shipping-method-backfill): niente righe, clienti o importi, solo i campi
+   * dei fatti logistici (LOGISTICS_FACTS_FIELDS), gli STESSI della query
+   * dell'ordine, e lo stesso algoritmo (deriveOrderLogisticsFacts): lo storico
+   * rifatto qui deve valere quanto un ordine riscritto dalla sincronizzazione.
+   * Il costo per ordine resta sotto i 40 punti (spedizioni al piu' 10 con i
+   * loro tracking, resi al piu' 5, una shipping line): il chiamante manda
+   * lotti da 25, sotto il tetto di 1000 per query.
    *
-   * Titolo vuoto per "nessuna opzione" e zero pacchi per "nessuna spedizione":
-   * shipping line o spedizioni assenti, oppure ordine non piu' su Shopify. Il
-   * chiamante le scrive come sentinelle, cosi' lo stesso ordine non si
-   * richiede a ogni corsa. I pacchi si contano con la stessa funzione della
-   * scrittura dell'ordine (countShippedPackages): contano solo le partite.
+   * Gli ordini che superano la prima pagina (10 spedizioni o piu', piu' di 5
+   * resi) si completano uno per uno, come nella lettura dell'ordine: niente
+   * troncamenti silenziosi.
    *
    * L'abbinamento e' per posizione: `nodes` risponde nello stesso ordine degli
    * id chiesti, con `null` dove l'ordine non c'e', e cosi' un id oltre 2^53
    * non passa mai per un numero.
    */
-  async getOrderShippingFacts(ids: string[]): Promise<Map<string, { method: string; packageCount: number }>> {
-    const fatti = new Map<string, { method: string; packageCount: number }>();
+  async getOrderShippingFacts(ids: string[]): Promise<Map<string, OrderShippingFacts>> {
+    const fatti = new Map<string, OrderShippingFacts>();
     if (ids.length === 0) return fatti;
 
-    const data = await this.graphql<{
-      nodes: ({
-        id: string;
-        shippingLines?: { nodes: { title: string | null }[] | null } | null;
-        fulfillments?: { status: string | null }[] | null;
-      } | null)[];
-    }>(
+    const data = await this.graphql<{ nodes: ((GqlLogisticsNode & { id: string }) | null)[] }>(
       `query OrderShippingFacts($ids: [ID!]!) {
-        nodes(ids: $ids) { ... on Order { id shippingLines(first: 1) { nodes { title } } fulfillments(first: 10) { status } } }
+        nodes(ids: $ids) { ... on Order { id ${LOGISTICS_FACTS_FIELDS} } }
       }`,
       { ids: ids.map((id) => `gid://shopify/Order/${id}`) },
     );
+    const costo = this.ultimoCosto?.requestedQueryCost;
+    console.debug(`[shopify-api] fatti di spedizione per ${ids.length} ordini: costo richiesto ${costo ?? 'n/d'}`);
 
     const nodi = data.nodes ?? [];
-    ids.forEach((id, i) => {
+    for (let i = 0; i < ids.length; i++) {
       const nodo = nodi[i];
-      fatti.set(id, {
-        method: nodo?.shippingLines?.nodes?.[0]?.title || '',
-        packageCount: countShippedPackages(nodo?.fulfillments),
-      });
-    });
+      // Un nodo senza id non e' un ordine (o e' stato oscurato per intero):
+      // come un ordine assente, non si inventa niente.
+      if (!nodo || typeof nodo.id !== 'string') {
+        fatti.set(ids[i], ORDINE_NON_TROVATO);
+        continue;
+      }
+      const completo = await this.completeLogistics(nodo);
+      const derivati = deriveOrderLogisticsFacts(completo);
+      if (derivati.unknown.length > 0) {
+        console.warn(
+          `[shopify-api] ordine ${ids[i]}: fatti di spedizione non leggibili (${derivati.unknown.join(', ')}), restano quelli salvati`,
+        );
+      }
+      fatti.set(ids[i], toShippingFacts(derivati));
+    }
 
-    await this.attendiSerbatoioPer(this.ultimoCosto?.requestedQueryCost);
+    await this.attendiSerbatoioPer(costo);
     return fatti;
+  }
+
+  /**
+   * L'ordine di un reso, per i webhook dei resi la cui busta non lo nomina.
+   * null se il reso non si trova piu'.
+   */
+  async getReturnOrderId(returnId: number): Promise<number | null> {
+    const data = await this.graphql<{ return: { order: { id: string } | null } | null }>(
+      `query ReturnOrder($id: ID!) { return(id: $id) { order { id } } }`,
+      { id: `gid://shopify/Return/${returnId}` },
+    );
+    return gidToId(data.return?.order?.id);
+  }
+
+  /**
+   * Porta a termine spedizioni e resi di un ordine letto con
+   * LOGISTICS_FACTS_FIELDS.
+   *
+   * Spedizioni: la lista non si pagina, quindi un ordine che riempie la prima
+   * lettura (FULFILLMENTS_FIRST) si rilegge da solo col massimo dell'API.
+   * Resi: e' una connessione, si esaurisce con i cursori.
+   *
+   * Un completamento non riuscito non solleva e non tronca: il campo diventa
+   * nullo, cioe' "sconosciuto", e chi scrive lascia il valore salvato.
+   */
+  private async completeLogistics<T extends GqlLogisticsNode & { id: string }>(o: T): Promise<T> {
+    let out = o;
+
+    if (Array.isArray(o.fulfillments) && o.fulfillments.length >= FULFILLMENTS_FIRST) {
+      out = { ...out, fulfillments: await this.allFulfillments(o.id) };
+    }
+
+    const resi = o.returns;
+    if (resi?.pageInfo?.hasNextPage && Array.isArray(resi.nodes)) {
+      const resto = resi.pageInfo.endCursor
+        ? await this.drainConnection<GqlReturnNode>({
+            parentGid: o.id,
+            parentType: 'Order',
+            field: 'returns',
+            nodeFields: 'status createdAt',
+            after: resi.pageInfo.endCursor,
+          })
+        : { nodes: [], complete: false };
+      if (resto.complete) {
+        out = {
+          ...out,
+          returns: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [...resi.nodes, ...resto.nodes] },
+        };
+      } else {
+        console.warn(`[shopify-api] ordine ${o.id}: resi non letti per intero, il reso resta quello salvato`);
+        out = { ...out, returns: null };
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * Tutte le spedizioni di un ordine, fino al massimo che l'API concede
+   * (FULFILLMENTS_MAX). Oltre quel tetto non c'e' modo di leggere: lo si
+   * scrive nei log con l'id, e i pacchi si contano su quelle lette.
+   * null se la lettura non riesce.
+   */
+  private async allFulfillments(gid: string): Promise<FulfillmentLike[] | null> {
+    try {
+      const data = await this.graphql<{ node: { fulfillments?: FulfillmentLike[] | null } | null }>(
+        `query OrderFulfillments($id: ID!) {
+          node(id: $id) { ... on Order { fulfillments(first: ${FULFILLMENTS_MAX}) { status trackingInfo { number } } } }
+        }`,
+        { id: gid },
+      );
+      const lista = data.node?.fulfillments;
+      if (!Array.isArray(lista)) {
+        console.warn(`[shopify-api] ordine ${gid}: spedizioni non rilette, i pacchi restano quelli salvati`);
+        return null;
+      }
+      if (lista.length >= FULFILLMENTS_MAX) {
+        console.warn(
+          `[shopify-api] ordine ${gid}: ${FULFILLMENTS_MAX} spedizioni o piu', il tetto dell'API; pacchi contati sulle prime ${FULFILLMENTS_MAX}`,
+        );
+      }
+      return lista;
+    } catch (error) {
+      console.warn(
+        `[shopify-api] ordine ${gid}: spedizioni non rilette (${error instanceof Error ? error.message.slice(0, 200) : 'errore'}), i pacchi restano quelli salvati`,
+      );
+      return null;
+    }
   }
 
   /**
@@ -1526,7 +1636,10 @@ export class ShopifyAPIClient {
    * cosa che autorizza chi scrive a cancellare per differenza, e va calcolata
    * dove si conosce l'esito della paginazione — non dedotta piu' in la'.
    */
-  private async mapOrderWithAllLines(o: GqlOrder): Promise<ShopifyOrder> {
+  private async mapOrderWithAllLines(ricevuto: GqlOrder): Promise<ShopifyOrder> {
+    // Spedizioni e resi oltre la prima pagina, prima di contare: un ordine
+    // troncato pagherebbe meno pacchi, o nessun reso, senza che nessuno lo sappia.
+    const o = await this.completeLogistics(ricevuto);
     // Un ordine da piu' di cento righe e' raro ma esiste (ingrosso, carrelli
     // composti a mano), e le righe che restassero fuori sarebbero venduto che
     // non entra nel margine: il profitto risulterebbe piu' alto del vero, cioe'

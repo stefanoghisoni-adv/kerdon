@@ -97,6 +97,31 @@ uri = "/webhooks/orders"
 topics = ["refunds/create"]
 uri = "/webhooks/orders"
 
+# I resi cambiano il costo dell'ordine (il rientro si paga solo con un reso
+# OPEN o CLOSED) senza che Shopify prometta di riscrivere l'ordine: un reso
+# annullato restava a costo finche' l'ordine non cambiava per altre ragioni.
+# Tutti allo stesso handler: dicono QUALE ordine rileggere. `returns/request`
+# no: un reso solo richiesto non cambia il costo. Scope: read_returns.
+[[webhooks.subscriptions]]
+topics = ["returns/approve"]
+uri = "/webhooks/returns"
+
+[[webhooks.subscriptions]]
+topics = ["returns/decline"]
+uri = "/webhooks/returns"
+
+[[webhooks.subscriptions]]
+topics = ["returns/cancel"]
+uri = "/webhooks/returns"
+
+[[webhooks.subscriptions]]
+topics = ["returns/close"]
+uri = "/webhooks/returns"
+
+[[webhooks.subscriptions]]
+topics = ["returns/reopen"]
+uri = "/webhooks/returns"
+
 # La cancellazione ha un handler suo: non c'e' niente da rileggere, e dalla
 # ricevuta si prende il solo identificativo per togliere ordine e righe.
 [[webhooks.subscriptions]]

@@ -63,6 +63,14 @@ export const WEBHOOK_TOPICS = [
   'orders/updated',
   'refunds/create',
   'orders/delete',
+  // I resi cambiano il costo dell'ordine (il rientro si paga solo con un reso
+  // OPEN o CLOSED) senza che l'ordine venga per forza riscritto: su ognuno si
+  // rilegge l'ordine. Verificati sulla 2026-07 (WebhookSubscriptionTopic).
+  'returns/approve',
+  'returns/decline',
+  'returns/cancel',
+  'returns/close',
+  'returns/reopen',
 ] as const;
 
 export type WebhookTopic = (typeof WEBHOOK_TOPICS)[number];

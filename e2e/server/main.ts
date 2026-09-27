@@ -61,6 +61,7 @@ const ROTTE: { pattern: RegExp; modulo: string; tipo: 'loader' | 'action'; param
   { pattern: /^\/api\/supabase\/disconnect$/, modulo: '/app/routes/api.supabase.disconnect.tsx', tipo: 'action' },
   { pattern: /^\/api\/plan\/limits$/, modulo: '/app/routes/api.plan.limits.tsx', tipo: 'loader' },
   { pattern: /^\/webhooks\/orders$/, modulo: '/app/routes/webhooks.orders.tsx', tipo: 'action' },
+  { pattern: /^\/webhooks\/returns$/, modulo: '/app/routes/webhooks.returns.tsx', tipo: 'action' },
   { pattern: /^\/webhooks\/app\/uninstalled$/, modulo: '/app/routes/webhooks.app.uninstalled.tsx', tipo: 'action' },
   { pattern: /^\/tracking\/bridge\.js$/, modulo: '/app/routes/tracking.bridge[.]js.tsx', tipo: 'loader' },
   // L'informativa: l'unica pagina di questo host che si legge da fuori, e la

@@ -30,6 +30,17 @@
 //   ordini ritirati in negozio o digitali verrebbero richiesti a ogni corsa.
 //   Per i pacchi la sentinella e' 0 ("controllato, nessuna spedizione"), che
 //   il calcolo gia' legge come un pacco se l'ordine risulta spedito.
+//
+// Con lo schema 15 fa anche da RIDERIVAZIONE: le regole di pacchi e reso sono
+// cambiate (il tracking fa fede: tracking distinti per spedizione, qualunque
+// stato; reso solo se OPEN o CLOSED), e
+// gli ordini salvati prima portano i valori delle regole vecchie. La colonna
+// `logistics_facts_version` dice con quale versione (LOGISTICS_FACTS_VERSION)
+// un ordine e' stato ricavato: NULL o piu' bassa = da rileggere, una volta.
+// Per quegli ordini, e solo per loro, la scrittura SOVRASCRIVE pacchi e reso
+// (anche togliendo un reso che non qualifica piu'), sempre che il dato letto
+// sia noto: un campo oscurato o non completo non tocca il valore salvato, e
+// l'ordine resta con la versione vecchia, da riprovare al recupero dopo.
 
 import { prisma } from '~/db.server';
 import { runQuery, runQueryRows, isSupabaseCredentialDead } from '~/lib/supabase-management.server';
@@ -43,6 +54,12 @@ import { enqueueLogisticsRecompute } from './recompute-enqueue.server';
 import { enqueueShippingMethodBackfillContinuation } from './shipping-method-backfill-enqueue.server';
 import { ID_VALIDO, databaseFermo, idSicuro, tabellaAssente, type RecomputeOutcome } from './recompute.server';
 import { SHIPPED_STATUSES } from './logistics-cost';
+import {
+  LOGISTICS_FACTS_VERSION,
+  ORDINE_NON_TROVATO,
+  allFactsKnown,
+  type OrderShippingFacts,
+} from './order-logistics-facts';
 
 /** Ordini senza opzione letti dal database del merchant per giro. */
 export const BACKFILL_PAGE_SIZE = 250;
@@ -50,14 +67,15 @@ export const BACKFILL_PAGE_SIZE = 250;
 /**
  * Id per query a Shopify.
  *
- * Il costo richiesto di `nodes(ids:)` con una connessione da un elemento e la
- * lista delle spedizioni (al piu' 10, solo lo stato) resta sotto i 15 punti
- * per ordine: 50 ordini sono al massimo ~750 punti, sotto il tetto di 1000 per
- * query e sostenibili anche dal serbatoio del piano base (1000 punti, 50 al
- * secondo). Il client aspetta da solo quando il serbatoio non basta per il
+ * Il costo richiesto di `nodes(ids:)` con i campi dei fatti logistici
+ * (spedizioni al piu' 10 con i loro tracking, resi al piu' 5, una shipping
+ * line) resta sotto i 40 punti per ordine: 25 ordini sono al massimo ~1000
+ * punti, il tetto per query, e sostenibili anche dal serbatoio del piano base
+ * (1000 punti, 50 al secondo). Era 50 quando si chiedeva solo lo stato delle
+ * spedizioni. Il client aspetta da solo quando il serbatoio non basta per il
  * lotto dopo, e lo scrive nei log.
  */
-export const BACKFILL_NODES_BATCH = 50;
+export const BACKFILL_NODES_BATCH = 25;
 
 /** Come il ricalcolo: sotto il tetto del tipo (270 s) con margine. */
 export const BACKFILL_BUDGET_MS = 200_000;
@@ -69,17 +87,13 @@ interface LeaseLike {
   assertHeld(): Promise<void>;
 }
 
-/** Quel che serve di Shopify: titolo della prima shipping line e pacchi, per id. */
+/** Quel che serve di Shopify: i fatti logistici di ciascun ordine, per id. */
 export interface ShippingFactsClient {
-  getOrderShippingFacts(ids: string[]): Promise<Map<string, { method: string; packageCount: number }>>;
+  getOrderShippingFacts(ids: string[]): Promise<Map<string, OrderShippingFacts>>;
 }
 
-/** Il valore di una riga da completare. */
-export interface BackfillValue {
-  id: string;
-  method: string;
-  packageCount: number;
-}
+/** Il valore di una riga da completare o rifare. */
+export type BackfillValue = { id: string } & OrderShippingFacts;
 
 /**
  * Il titolo come espressione SQL che non contiene niente di Shopify.
@@ -102,11 +116,48 @@ function testoSicuro(valore: string): string {
  * I pacchi come letterale intero, oppure un'eccezione: come l'id, nessun
  * numero finisce nell'SQL senza essere verificato.
  */
-function pacchiSicuri(valore: number): string {
+function pacchiSicuri(valore: number | null): string {
+  if (valore === null) return 'NULL::integer';
   if (!Number.isSafeInteger(valore) || valore < 0) {
     throw new Error(`numero di pacchi non valido nel recupero: ${String(valore).slice(0, 40)}`);
   }
   return `${valore}::integer`;
+}
+
+/**
+ * Il titolo, o NULL quando non si e' potuto leggere: NULL lascia la colonna
+ * com'e' (COALESCE), la stringa vuota e' la sentinella "nessuna opzione".
+ */
+function titoloSicuro(valore: string | null): string {
+  return valore === null ? 'NULL::text' : testoSicuro(valore);
+}
+
+/** Un istante ISO 8601 come arriva da Shopify, e nient'altro. */
+const ISTANTE_VALIDO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+
+/** La data del reso come letterale verificato, o NULL. */
+function istanteSicuro(valore: string | null): string {
+  if (valore === null) return 'NULL::timestamp';
+  if (!ISTANTE_VALIDO.test(valore)) {
+    throw new Error(`data del reso non valida nel recupero: ${valore.slice(0, 40)}`);
+  }
+  // Lo stesso cast che fa PostgREST quando la sincronizzazione scrive la
+  // colonna (TIMESTAMP senza fuso): le due strade salvano lo stesso valore.
+  return `'${valore}'::timestamp`;
+}
+
+/** Uno stato di evasione di Shopify (enum: lettere maiuscole e trattini bassi). */
+const STATO_VALIDO = /^[A-Z_]{1,40}$/;
+/** Un codice paese ISO a due lettere (CountryCode), o ZZ per "sconosciuto". */
+const PAESE_VALIDO = /^[A-Z]{2}$/;
+
+/**
+ * Un codice corto di Shopify come letterale, o NULL. Solo se combacia con la
+ * forma attesa: un valore diverso vale come non letto, e nell'SQL non entra.
+ */
+function codiceSicuro(valore: string | null, forma: RegExp): string {
+  if (valore === null || !forma.test(valore)) return 'NULL::text';
+  return `'${valore}'::text`;
 }
 
 /**
@@ -116,6 +167,9 @@ function pacchiSicuri(valore: number): string {
  */
 const SPEDITO_CON_PAESE = `UPPER(fulfillment_status) IN (${SHIPPED_STATUSES.map((s) => `'${s}'`).join(', ')}) AND COALESCE(shipping_country_code, '') <> ''`;
 
+/** Un ordine ricavato con regole piu' vecchie di quelle correnti. */
+const FATTI_VECCHI = `COALESCE(logistics_facts_version, 0) < ${LOGISTICS_FACTS_VERSION}`;
+
 /**
  * La lettura di una pagina di ordini ancora da completare, dopo l'ultimo id visto.
  *
@@ -123,6 +177,10 @@ const SPEDITO_CON_PAESE = `UPPER(fulfillment_status) IN (${SHIPPED_STATUSES.map(
  * spedizione. Un ordine mai spedito o senza paese non la paga, quindi i suoi
  * pacchi non cambierebbero niente: chiederli a Shopify sarebbe solo costo. Se
  * piu' avanti parte, la sincronizzazione lo riscrive con i pacchi.
+ *
+ * Dalla 15 anche ogni ordine con fatti logistici di una versione vecchia:
+ * pacchi e reso si rifanno su tutti, perche' il reso costa anche a un ordine
+ * che il calcolo non conta come spedito.
  */
 export function backfillSelectSQL(dopoId: string | null): string {
   const filtro = dopoId === null ? '' : `\n  AND shopify_order_id > ${idSicuro(dopoId)}`;
@@ -130,7 +188,8 @@ export function backfillSelectSQL(dopoId: string | null): string {
   return `SELECT shopify_order_id::text AS shopify_order_id
 FROM orders
 WHERE (shipping_method IS NULL
-  OR (package_count IS NULL AND ${SPEDITO_CON_PAESE}))${filtro}
+  OR (package_count IS NULL AND ${SPEDITO_CON_PAESE})
+  OR ${FATTI_VECCHI})${filtro}
 ORDER BY shopify_order_id
 LIMIT ${BACKFILL_PAGE_SIZE};`;
 }
@@ -138,23 +197,72 @@ LIMIT ${BACKFILL_PAGE_SIZE};`;
 /**
  * La scrittura di una pagina: un UPDATE solo, con i valori in una VALUES.
  *
- * `COALESCE(colonna, nuovo)` su ciascuna colonna e' la garanzia che il
- * recupero non tocca mai un valore gia' scritto: un ordine letto perche' gli
- * mancavano i pacchi ha gia' la sua opzione, e quella resta; e se la
- * sincronizzazione ha riscritto l'ordine fra la nostra lettura e la nostra
- * scrittura, il suo dato e' piu' fresco del nostro. La condizione sul WHERE
- * evita solo di riscrivere righe gia' complete.
+ * Due regimi, decisi riga per riga dalla versione salvata:
+ *
+ * - Ordine con fatti della versione corrente (li ha scritti la
+ *   sincronizzazione, magari fra la nostra lettura e la nostra scrittura):
+ *   `COALESCE(colonna, nuovo)`, si riempie solo il vuoto e il dato piu' fresco
+ *   vince. Come prima della 15.
+ * - Ordine con fatti vecchi, o mai ricavati per intero (una scrittura con un
+ *   campo oscurato lascia la versione NULL): pacchi, stato di evasione e reso
+ *   si SOVRASCRIVONO con quelli letti ora, reso tolto compreso, ma solo se il
+ *   dato letto e' noto (`p`, `fs` non NULL, `rk` vero). La versione sale solo
+ *   quando TUTTI i fatti sono noti (allFactsKnown): altrimenti l'ordine si
+ *   riprova al recupero dopo.
+ *
+ * Opzione e paese si riempiono solo se vuoti, in entrambi i regimi: le loro
+ * regole non sono cambiate, e un valore salvato non si tocca. Cosi' un
+ * ordine nuovo scritto con l'indirizzo oscurato prende il paese appena lo si
+ * legge.
+ *
+ * Le colonne della VALUES:
+ * - `m`: titolo ('' = nessuna opzione, NULL = non letto);
+ * - `p`: pacchi letti, NULL = non letti o ordine sparito;
+ * - `pf`: con cosa riempire un package_count vuoto (0 per un ordine sparito,
+ *   la sentinella di sempre);
+ * - `r`, `rk`: data del reso e se e' stata letta;
+ * - `fs`: stato di evasione, NULL = non letto;
+ * - `cc`: paese, NULL = non letto o nessun indirizzo (si riempie solo il vuoto);
+ * - `ver`: la versione da scrivere, NULL = non salire.
+ * Un ordine non piu' su Shopify sale di versione (non c'e' altro da sapere)
+ * ma non perde i valori che aveva.
  */
 export function backfillUpdateSQL(valori: BackfillValue[]): string {
-  const tuple = valori.map(
-    (v) => `(${idSicuro(v.id)}::bigint, ${testoSicuro(v.method)}, ${pacchiSicuri(v.packageCount)})`,
-  );
+  const tuple = valori.map((v) => {
+    const versione = !v.found || allFactsKnown(v) ? `${LOGISTICS_FACTS_VERSION}::integer` : 'NULL::integer';
+    const pacchi = v.found ? v.packageCount : null;
+    const riempi = v.found ? v.packageCount : 0;
+    const resoNoto = v.found && v.returnsKnown;
+    const stato = v.found ? v.fulfillmentStatus : null;
+    const paese = v.found && v.countryKnown ? v.countryCode : null;
+    return `(${idSicuro(v.id)}::bigint, ${titoloSicuro(v.found ? v.method : '')}, ${pacchiSicuri(pacchi)}, ${pacchiSicuri(riempi)}, ${istanteSicuro(resoNoto ? v.returnedAt : null)}, ${resoNoto ? 'true' : 'false'}, ${codiceSicuro(stato, STATO_VALIDO)}, ${codiceSicuro(paese, PAESE_VALIDO)}, ${versione})`;
+  });
+  const vecchio = `COALESCE(o.logistics_facts_version, 0) < ${LOGISTICS_FACTS_VERSION}`;
   return `UPDATE orders AS o
 SET shipping_method = COALESCE(o.shipping_method, v.m),
-  package_count = COALESCE(o.package_count, v.p)
-FROM (VALUES ${tuple.join(', ')}) AS v(id, m, p)
+  package_count = CASE WHEN ${vecchio} AND v.p IS NOT NULL THEN v.p ELSE COALESCE(o.package_count, v.pf) END,
+  returned_at = CASE WHEN ${vecchio} AND v.rk THEN v.r ELSE o.returned_at END,
+  fulfillment_status = CASE WHEN ${vecchio} AND v.fs IS NOT NULL THEN v.fs ELSE COALESCE(o.fulfillment_status, v.fs) END,
+  shipping_country_code = COALESCE(o.shipping_country_code, v.cc),
+  logistics_facts_version = CASE WHEN ${vecchio} AND v.ver IS NOT NULL THEN v.ver ELSE o.logistics_facts_version END
+FROM (VALUES ${tuple.join(', ')}) AS v(id, m, p, pf, r, rk, fs, cc, ver)
 WHERE o.shopify_order_id = v.id
-  AND (o.shipping_method IS NULL OR o.package_count IS NULL);`;
+  AND (o.shipping_method IS NULL OR o.package_count IS NULL OR ${vecchio});`;
+}
+
+/** Shopify ha rifiutato la query perche' costa piu' del tetto per query? */
+function costoEccessivo(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const codice = (error as { graphqlCode?: unknown }).graphqlCode;
+  const messaggio = error instanceof Error ? error.message : '';
+  return codice === 'MAX_COST_EXCEEDED' || messaggio.includes('MAX_COST_EXCEEDED');
+}
+
+/** Il costo che Shopify dichiara nel rifiuto, se c'e': solo per il log. */
+function costoRichiesto(error: unknown): string {
+  const messaggio = error instanceof Error ? error.message : '';
+  const trovato = /"cost"\s*:\s*(\d+)/.exec(messaggio) ?? /requestedQueryCost"?\s*:\s*(\d+)/.exec(messaggio);
+  return trovato ? `costo richiesto ${trovato[1]}` : 'costo richiesto n/d';
 }
 
 export interface BackfillContext {
@@ -225,7 +333,7 @@ export async function processShippingMethodBackfill(
     try {
       return await chiamata();
     } catch (error) {
-      // Schema 13 o 14 non ancora applicato: la colonna arrivera', e con lei
+      // Schema 13, 14 o 15 non ancora applicato: la colonna arrivera', e con lei
       // (apply-schema-update) un recupero nuovo. Adesso non c'e' niente da fare.
       if (tabellaAssente(error)) {
         console.warn(`[shipping-method-backfill] colonna o tabella non pronta per il negozio ${shopId}: recupero saltato`);
@@ -252,6 +360,7 @@ export async function processShippingMethodBackfill(
   // Il client di Shopify si procura solo se c'e' davvero qualcosa da chiedere:
   // la maggior parte dei negozi, dopo il primo recupero, non ha ordini NULL.
   let client: ShippingFactsClient | null = ctx.client ?? null;
+  let lottoCorrente = BACKFILL_NODES_BATCH;
   let aggiornati = 0;
   let passaggio: string | null = null;
 
@@ -268,16 +377,29 @@ export async function processShippingMethodBackfill(
       client ??= await ShopifyAPIClient.forShop(shop.shopDomain);
 
       const valori: BackfillValue[] = [];
-      for (let i = 0; i < ids.length; i += BACKFILL_NODES_BATCH) {
+      for (let i = 0; i < ids.length; ) {
         if (ctx.signal?.aborted) throw ctx.signal.reason ?? new Error('recupero interrotto');
-        const lotto = ids.slice(i, i + BACKFILL_NODES_BATCH);
-        const fatti = await client.getOrderShippingFacts(lotto);
-        // Un id che Shopify non ha restituito vale come "nessuna opzione, nessuna
-        // spedizione": e' la stessa risposta di un ordine senza l'una e l'altra.
-        for (const id of lotto) {
-          const fatto = fatti.get(id);
-          valori.push({ id, method: fatto?.method ?? '', packageCount: fatto?.packageCount ?? 0 });
+        const lotto = ids.slice(i, i + lottoCorrente);
+        let fatti: Map<string, OrderShippingFacts>;
+        try {
+          fatti = await client.getOrderShippingFacts(lotto);
+        } catch (error) {
+          // Troppo cara per il tetto per query (ordini con molti resi o
+          // tracking): la stessa domanda piu' piccola, fino a un ordine solo.
+          // Il lotto dimezzato resta per il resto della corsa.
+          if (!costoEccessivo(error) || lotto.length <= 1) throw error;
+          lottoCorrente = Math.max(1, Math.floor(lotto.length / 2));
+          console.debug(
+            `[shipping-method-backfill] negozio ${shopId}: query oltre il costo massimo (${costoRichiesto(error)}), lotto ridotto a ${lottoCorrente}`,
+          );
+          continue;
         }
+        // Un id che Shopify non ha restituito vale come un ordine sparito:
+        // sentinelle dove non c'e' niente, nessun valore salvato toccato.
+        for (const id of lotto) {
+          valori.push({ id, ...(fatti.get(id) ?? ORDINE_NON_TROVATO) });
+        }
+        i += lotto.length;
       }
 
       await ctx.lease?.assertHeld();

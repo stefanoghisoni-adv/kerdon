@@ -24,6 +24,13 @@ const VERSIONE_OPZIONE_SPEDIZIONE = 13;
  */
 const VERSIONE_PACCHI = 14;
 
+/**
+ * La versione che porta `logistics_facts_version`: pacchi e reso ricavati con
+ * le regole nuove. Lo stesso recupero rilegge da Shopify gli ordini scritti
+ * con le regole di prima, una volta.
+ */
+const VERSIONE_FATTI_LOGISTICI = 15;
+
 export type SchemaUpdateStatus =
   /** Non c'era nulla da aggiornare. */
   | 'up_to_date'
@@ -103,14 +110,21 @@ export async function applyMerchantSchemaUpdate(
   // (l'accodamento non ne aggiunge un secondo se uno e' gia' in coda).
   const attraversa = (versione: number) =>
     config.schemaVersion < versione && LATEST_SCHEMA_VERSION >= versione;
+  //
+  // Dalla 15 rilegge anche gli ordini con pacchi e reso ricavati dalle regole
+  // vecchie (logistics_facts_version NULL o piu' bassa).
   if (
-    (attraversa(VERSIONE_OPZIONE_SPEDIZIONE) || attraversa(VERSIONE_PACCHI)) &&
+    (attraversa(VERSIONE_OPZIONE_SPEDIZIONE) ||
+      attraversa(VERSIONE_PACCHI) ||
+      attraversa(VERSIONE_FATTI_LOGISTICI)) &&
     hasOrdersAccess(shop.scopes)
   ) {
-    // Chi attraversa la 14 potrebbe avere un recupero della 13 a meta': quello
+    // Chi attraversa la 14 o la 15 potrebbe avere un recupero a meta': quello
     // riprende dal suo cursore e non torna sugli ordini gia' passati, che
-    // resterebbero senza pacchi. Si accoda allora un seguito da zero.
-    await enqueueShippingMethodBackfill(shopId, { restartIfRunning: attraversa(VERSIONE_PACCHI) });
+    // resterebbero con i valori vecchi. Si accoda allora un seguito da zero.
+    await enqueueShippingMethodBackfill(shopId, {
+      restartIfRunning: attraversa(VERSIONE_PACCHI) || attraversa(VERSIONE_FATTI_LOGISTICI),
+    });
   }
 
   return { status: 'applied', version: LATEST_SCHEMA_VERSION };

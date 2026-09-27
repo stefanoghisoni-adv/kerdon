@@ -70,8 +70,9 @@ export interface OrderLogisticsInput {
   shipping_method: string | null;
   total_price: number | null;
   /**
-   * Quante spedizioni partite davvero Shopify ha registrato per l'ordine: un
-   * pacco ciascuna. NULL sugli ordini scritti prima dello schema 14 e non
+   * I pacchi partiti (countShippedPackages): i tracking distinti di ogni
+   * spedizione, qualunque stato, piu' uno per ogni spedizione
+   * SUCCESS/OPEN/PENDING senza tracking. NULL sugli ordini scritti prima dello schema 14 e non
    * ancora recuperati; il calcolo lo legge con `effectivePackageCount`.
    */
   package_count: number | null;
