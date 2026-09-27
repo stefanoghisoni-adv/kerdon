@@ -14,7 +14,10 @@
 //   nel progetto del merchant
 //     customers     shopify_customer_id + nome, cognome, email, telefono,
 //                   indirizzo, data di nascita → dato personale puro
-//     orders        shopify_customer_id + customer_first_name/last_name
+//     orders        shopify_customer_id + customer_first_name/last_name,
+//                   e shipping_country_code (ricavato dall'indirizzo di
+//                   spedizione). Gli altri dati logistici descrivono il
+//                   pacco, non la persona: vedi ANONYMOUS_ORDER.
 //     order_lines   nessun riferimento alla persona: pendono da
 //                   shopify_order_id, e dentro hanno prodotto, quantita',
 //                   prezzo. Anonimizzato l'ordine, la riga non e' piu'
@@ -102,13 +105,27 @@ export { stepsFailed, failureMessage } from './steps';
 export const ORDERS_TABLE = 'orders';
 export const ORDER_LINES_TABLE = 'order_lines';
 
-// Le colonne degli ordini che riportano alla persona: sono queste tre e
-// basta — indirizzi, email e note negli ordini non li abbiamo mai copiati.
-const ANONYMOUS_ORDER = {
+// Le colonne degli ordini che riportano alla persona: l'identificativo, il nome
+// e il cognome — e il paese di spedizione, che e' l'unico pezzo dell'indirizzo
+// che l'app prende da un ordine. Indirizzi completi, email e note negli ordini
+// non li abbiamo mai copiati.
+//
+// PERCHE' IL PAESE SI' E IL RESTO DEI DATI LOGISTICI NO. Il paese viene
+// dall'indirizzo della persona: e' un suo dato, e una cancellazione lo toglie.
+// Peso, colli, opzione di spedizione, stato di evasione, data del reso,
+// imballo e costo logistico descrivono il pacco e la vendita, non chi l'ha
+// comprata: sull'ordine ormai anonimo restano, come il totale e le righe,
+// perche' sono cio' che fa tornare i conti del merchant.
+//
+// L'elenco e' dichiarato anche in lib/legal/order-data-inventory (le voci
+// `azzerato`), e un test li confronta: una colonna personale nuova sugli ordini
+// non puo' restare fuori da qui senza che il test se ne accorga.
+export const ANONYMOUS_ORDER = {
   shopify_customer_id: null,
   customer_first_name: null,
   customer_last_name: null,
-};
+  shipping_country_code: null,
+} as const;
 
 /**
  * Toglie la persona dal database del merchant.

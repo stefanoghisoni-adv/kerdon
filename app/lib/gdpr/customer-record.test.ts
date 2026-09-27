@@ -178,8 +178,34 @@ describe('cancellazione nel database del merchant', () => {
       shopify_customer_id: null,
       customer_first_name: null,
       customer_last_name: null,
+      shipping_country_code: null,
     });
     expect(step(steps, 'orders')).toMatchObject({ outcome: 'anonymized', rows: 3 });
+  });
+
+  it('dagli ordini toglie anche il paese di spedizione, e lascia i fatti del pacco', async () => {
+    // Il paese viene dall'indirizzo della persona: se ne va con lei. Peso,
+    // colli, opzione, stato di evasione, reso, imballo e costo logistico
+    // descrivono la spedizione e non chi l'ha ricevuta: restano, o il costo
+    // e il profitto del merchant non tornerebbero piu'.
+    const calls: Recorded[] = [];
+    await eraseCustomerFromMerchant(fakeClient({ orders: { error: null, count: 1 } }, calls), 'customers', '4021');
+
+    const valori = calls.find((c) => c.table === 'orders' && c.op === 'update')?.values ?? {};
+    expect(valori).toHaveProperty('shipping_country_code', null);
+    for (const fatto of [
+      'fulfillment_status',
+      'total_weight_grams',
+      'item_count',
+      'returned_at',
+      'packaging_category',
+      'shipping_method',
+      'package_count',
+      'logistics_cost',
+      'logistics_facts_version',
+    ]) {
+      expect(valori).not.toHaveProperty(fatto);
+    }
   });
 
   it('le righe d ordine restano dichiarate, con il perche', async () => {
