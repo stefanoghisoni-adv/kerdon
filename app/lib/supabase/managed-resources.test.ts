@@ -46,6 +46,10 @@ describe('il DDL di eliminazione', () => {
     expect(sql).toBe(
       [
         'BEGIN;',
+        // Il guardiano delle cancellazioni prima delle tabelle: trigger, poi la
+        // sua funzione (vedi ERASURE_GUARD_DROPS).
+        'DROP TRIGGER IF EXISTS kerdon_orders_keep_redacted ON public.orders;',
+        'DROP FUNCTION IF EXISTS public.kerdon_orders_keep_redacted();',
         'DROP TABLE IF EXISTS "public"."order_lines";',
         'DROP TABLE IF EXISTS "public"."orders";',
         'DROP TABLE IF EXISTS "public"."customers";',

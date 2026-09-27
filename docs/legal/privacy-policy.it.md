@@ -1,7 +1,7 @@
 # Kerdon — Informativa sulla privacy
 
-**Ultimo aggiornamento:** 18-09-2026
-**Versione:** 1.3
+**Ultimo aggiornamento:** 27-09-2026
+**Versione:** 1.4
 
 > Traduzione di cortesia. Il testo che vincola le parti è la versione inglese,
 > `privacy-policy.md`; in caso di discrepanza prevale quella.
@@ -54,9 +54,34 @@ I clienti che non hanno prestato il consenso non vengono mai copiati nel tuo dat
 
 Dove hai concesso all'app l'accesso agli ordini, vengono trattati: identificativo e numero d'ordine, identificativo del cliente e suo nome e cognome, valuta, totale, stato del pagamento, data di annullamento, data dell'ordine e, per ogni riga, prodotto e variante, quantità, prezzo unitario pagato e sconto di riga.
 
-Dagli **ordini** l'app deliberatamente **non** preleva indirizzi, indirizzi email, numeri di telefono, note dell'ordine o dati di pagamento. Al calcolo del profitto non servono, quindi non vengono presi.
+Dagli **ordini** l'app deliberatamente **non** chiede né conserva indirizzi (salvo il paese, descritto qui sotto), indirizzi email, numeri di telefono, note dell'ordine o dati di pagamento. Al calcolo del profitto non servono. La notifica che Shopify manda quando un ordine o un reso cambia può contenerli: viene scartata alla ricezione, e se ne tengono solo gli identificativi — dell'ordine, del reso, del cliente e, per il riconoscimento dei visitatori, del browser.
 
-Non tratta nemmeno **dati di spedizione**: nessun corriere, nessun codice di tracciamento, nessuna etichetta, nessun costo di spedizione. Di quel che riguarda la consegna resta soltanto quanto il cliente ha pagato al checkout, che è già dentro il totale dell'ordine.
+**Dati di spedizione e logistica.** L'app legge anche quel che le serve per calcolare quanto ti è costato spedire ogni ordine, imballarlo e, se è tornato indietro, farlo rientrare. Quel costo logistico viene sottratto dal profitto dell'ordine, e da lì entra nel profitto e nel valore nel tempo (LTV) di ciascun cliente. Senza, ogni ordine risulterebbe più redditizio di quanto sia stato davvero. Queste sono le voci, e che fine fa ciascuna:
+
+| Voce | Che cos'è, e perché serve | Dove finisce |
+|---|---|---|
+| Paese di spedizione | Il codice a due lettere del paese dell'indirizzo di spedizione dell'ordine. Sceglie la zona di spedizione, e quindi la tariffa. | Nel tuo database, `shipping_country_code` |
+| Se l'ordine va spedito | L'indicazione di Shopify che l'ordine ha qualcosa da consegnare. Distingue un indirizzo mancante da un ordine che non ha niente da spedire. | Non conservato: usato mentre l'ordine viene elaborato |
+| Stato di evasione | Se l'ordine è partito. Un ordine mai partito non paga né spedizione né imballo. | Nel tuo database, `fulfillment_status` |
+| Codici di tracciamento | Letti solo per contare quanti colli distinti sono partiti, per le tariffe a collo. | Non conservati: resta soltanto il conteggio |
+| Numero di colli | Quanti colli sono partiti, ricavato dai codici di tracciamento e dallo stato delle spedizioni. | Nel tuo database, `package_count` |
+| Opzione di spedizione | Il nome dell'opzione scelta al checkout ("Standard", "Express"), abbinato al costo che hai indicato per quell'opzione. | Nel tuo database, `shipping_method` |
+| Categoria di consegna | Se quell'opzione è una consegna o un ritiro. Un ritiro non ha indirizzo, e non gliene serve uno. | Non conservata: usata mentre l'ordine viene elaborato |
+| Peso totale | Il peso dell'ordine in grammi, come lo dichiara Shopify, per le tariffe a peso. | Nel tuo database, `total_weight_grams` |
+| Numero di articoli | Le unità dell'ordine rimaste al cliente. Servono a stimare il peso quando Shopify non lo dichiara. | Nel tuo database, `item_count` |
+| Resi | Stato e data di creazione di ogni reso dell'ordine. Conta solo un reso aperto o chiuso, e aggiunge il costo del rientro della merce. | Nel tuo database, `returned_at` (la data del primo reso di quel tipo) |
+| Categoria di imballo | Il valore del metafield d'ordine `custom.packaging_category`, dove il negozio lo usa, abbinato ai costi di imballo che hai indicato. | Nel tuo database, `packaging_category` |
+| Costo logistico | Spedizione, imballo e rientro dell'ordine, calcolati dall'app a partire dalle voci qui sopra e dalle tue tariffe. | Nel tuo database, `logistics_cost`, con `logistics_facts_version`, che registra la versione delle regole con cui è stato calcolato |
+
+Tre punti vanno detti in chiaro:
+
+- **Il paese, non l'indirizzo.** Dell'indirizzo di spedizione dell'ordine l'app chiede a Shopify il solo codice del paese. Via, città, CAP e nome del destinatario non vengono chiesti né conservati; la notifica che Shopify manda può contenerli, e viene scartata alla ricezione.
+- **I codici di tracciamento si contano, non si tengono.** L'app li legge mentre elabora l'ordine, conta quelli distinti e li scarta; quelli che arrivano in una notifica di Shopify vengono scartati alla ricezione. Nessun codice di tracciamento viene scritto nel tuo database, nel nostro o nei nostri log.
+- **Un reso è uno stato e una data.** L'app non chiede né conserva il motivo del reso, gli articoli resi o i messaggi del cliente; la notifica di reso che Shopify manda può contenerli, e viene scartata alla ricezione.
+
+Le tariffe — le tue zone di spedizione, il costo di ogni opzione, le categorie di imballo e il costo di un reso — sono configurazione che imposti nell'app, e vengono conservate nel nostro database. Dei tuoi clienti non dicono niente. Ciò che si conserva di ogni ordine sta nel tuo.
+
+Queste voci vivono sull'ordine e ne seguono la sorte: restano per il tempo in cui conservi i tuoi dati, e quando un ordine viene cancellato su Shopify l'app lo cancella dal tuo database, e loro con lui. Una richiesta di accesso le comprende insieme agli ordini della persona; una richiesta di cancellazione azzera il paese di spedizione insieme all'identificativo, al nome e al cognome del cliente (vedi la sezione 8).
 
 L'indirizzo del cliente descritto al punto 3.3 è cosa diversa: è l'indirizzo predefinito dell'anagrafica, di chi ha prestato il consenso al marketing, e non viene ricavato dagli ordini.
 
@@ -105,7 +130,7 @@ L'app se ne accorge in due modi: quando una lettura del tuo database fallisce, e
 
 **Puoi spegnerlo.** In Impostazioni → Database c'è un interruttore per la riattivazione automatica. Spento, l'avviso e il pulsante restano dove sono: cambia solo che, se non premi tu, non preme nessuno.
 
-**Il nostro database** conserva i registri operativi descritti sopra, insieme alla configurazione del negozio e alle credenziali cifrate. È ospitato nell'Unione Europea.
+**Il nostro database** conserva i registri operativi descritti sopra, insieme alla configurazione del negozio — comprese le zone di spedizione, le tariffe, le categorie di imballo e il costo dei resi che imposti — e alle credenziali cifrate. È ospitato nell'Unione Europea.
 
 ## 5. Chi altro è coinvolto
 
@@ -138,7 +163,7 @@ Le richieste provenienti da Shopify sono verificate per firma prima di essere es
 
 ## 7. Per quanto tempo restano i dati
 
-I dati nel **tuo** database restano per il tempo che decidi tu. L'app non li cancella a scadenza, con una sola eccezione: le righe dei browser mai collegati a un cliente, che vengono cancellate dopo 90 giorni dall'ultimo avvistamento.
+I dati nel **tuo** database restano per il tempo che decidi tu. L'app non li cancella a scadenza, con una sola eccezione: le righe dei browser mai collegati a un cliente, che vengono cancellate dopo 90 giorni dall'ultimo avvistamento. I dati di spedizione e logistica del punto 3.4 fanno parte dell'ordine che descrivono: restano finché resta l'ordine, e se ne vanno quando l'ordine viene cancellato su Shopify.
 
 **Nel nostro database**: i registri di accesso all'interfaccia di lettura si conservano 12 mesi, poi vengono cancellati; le esportazioni preparate per una richiesta di accesso al massimo 30 giorni; le righe di riparazione e le richieste privacy fino alla loro chiusura, come descritto al punto 3.6. Gli eventi webhook consegnati da Shopify vengono cancellati 7 giorni dopo essere stati conclusi. Una revoca del consenso al riconoscimento viene cancellata 7 giorni dopo essere stata applicata; se una revoca resta bloccata e non viene mai applicata, il suo contenuto cifrato viene azzerato dopo 30 giorni e resta la sola prova, non leggibile, che una revoca c'era stata.
 
@@ -152,9 +177,9 @@ Di quella cancellazione resta una riga sola, ed è la prova che è avvenuta: con
 
 Shopify ci inoltra automaticamente le richieste privacy dei clienti, e l'app vi dà seguito.
 
-**Richiesta di accesso** — l'app raccoglie dal tuo database ciò che di quella persona è stato scritto: la sua riga fra i clienti, i suoi ordini e le righe di quegli ordini, e i browser collegati a lei. L'esportazione viene preparata e messa a tua disposizione dentro l'app, dove la scarichi con la tua sessione di amministratore: non finisce su nessun indirizzo pubblico. **Resta sui nostri sistemi al massimo 30 giorni**, poi viene cancellata da sola.
+**Richiesta di accesso** — l'app raccoglie dal tuo database ciò che di quella persona è stato scritto: la sua riga fra i clienti, i suoi ordini — dati di spedizione e logistica compresi — e le righe di quegli ordini, e i browser collegati a lei. L'esportazione viene preparata e messa a tua disposizione dentro l'app, dove la scarichi con la tua sessione di amministratore: non finisce su nessun indirizzo pubblico. **Resta sui nostri sistemi al massimo 30 giorni**, poi viene cancellata da sola.
 
-**Richiesta di cancellazione** — la riga del cliente viene eliminata in via definitiva dal tuo database, e con lei le righe dei browser collegati a quella persona. Gli **ordini non vengono cancellati**: sono scritture contabili che sei tenuto a conservare, e cancellarle cambierebbe il tuo fatturato. Vengono privati di ciò che riporta alla persona — identificativo del cliente, nome e cognome — e restano indistinguibili da un acquisto fatto senza account. L'operazione viene registrata nei tuoi log.
+**Richiesta di cancellazione** — la riga del cliente viene eliminata in via definitiva dal tuo database, e con lei le righe dei browser collegati a quella persona. Gli **ordini non vengono cancellati**: sono scritture contabili che sei tenuto a conservare, e cancellarle cambierebbe il tuo fatturato. Vengono privati di ciò che riporta alla persona — identificativo del cliente, nome e cognome, e il paese di spedizione, l'unica voce presa dal suo indirizzo — e non sono più collegati alla persona nel tuo database. Vengono anche marcati con la data della cancellazione (`customer_redacted_at`): da quel momento nessun aggiornamento successivo da Shopify può rimettere dentro quei dati. Gli altri dati logistici del punto 3.4 descrivono il pacco, non la persona, e restano sull'ordine, e il costo logistico già calcolato resta com'era, perché i tuoi costi e il tuo profitto continuino a tornare. L'operazione viene registrata nei tuoi log.
 
 Se un cliente si rivolge direttamente a te, puoi anche cancellarne il record da solo: il database è tuo.
 

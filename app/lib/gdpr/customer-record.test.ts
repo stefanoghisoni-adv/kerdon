@@ -178,8 +178,81 @@ describe('cancellazione nel database del merchant', () => {
       shopify_customer_id: null,
       customer_first_name: null,
       customer_last_name: null,
+      shipping_country_code: null,
+      // La marcatura: e' cio' che impedisce alla prossima sincronizzazione di
+      // rimettere dentro quel che si e' appena tolto.
+      customer_redacted_at: expect.any(String),
     });
     expect(step(steps, 'orders')).toMatchObject({ outcome: 'anonymized', rows: 3 });
+  });
+
+  it('dagli ordini toglie anche il paese di spedizione, e lascia i fatti del pacco', async () => {
+    // Il paese viene dall'indirizzo della persona: se ne va con lei. Peso,
+    // colli, opzione, stato di evasione, reso, imballo e costo logistico
+    // descrivono la spedizione e non chi l'ha ricevuta: restano, o il costo
+    // e il profitto del merchant non tornerebbero piu'.
+    const calls: Recorded[] = [];
+    await eraseCustomerFromMerchant(fakeClient({ orders: { error: null, count: 1 } }, calls), 'customers', '4021');
+
+    const valori = calls.find((c) => c.table === 'orders' && c.op === 'update')?.values ?? {};
+    expect(valori).toHaveProperty('shipping_country_code', null);
+    for (const fatto of [
+      'fulfillment_status',
+      'total_weight_grams',
+      'item_count',
+      'returned_at',
+      'packaging_category',
+      'shipping_method',
+      'package_count',
+      'logistics_cost',
+      'logistics_facts_version',
+    ]) {
+      expect(valori).not.toHaveProperty(fatto);
+    }
+  });
+
+  it('schema del merchant fermo prima della 16: anonimizza lo stesso, e lo dice', async () => {
+    // La colonna della marcatura non c'e' ancora. Rimandare la cancellazione
+    // per questo sarebbe peggio: si toglie la persona e si registra che la
+    // protezione contro la riscrittura manca. E l'errore di colonna NON deve
+    // passare per "tabella assente", che salterebbe tutto.
+    const aggiornamenti: Record<string, unknown>[] = [];
+    const client = {
+      from: (table: string) => ({
+        delete: () => ({ eq: async () => ({ error: null, count: 0 }) }),
+        update: (values: Record<string, unknown>) => ({
+          eq: async () => {
+            if (table !== 'orders') return { error: null, count: 0 };
+            aggiornamenti.push(values);
+            return 'customer_redacted_at' in values
+              ? {
+                  error: { code: 'PGRST204', message: "Could not find the 'customer_redacted_at' column of 'orders' in the schema cache" },
+                  count: null,
+                }
+              : { error: null, count: 2 };
+          },
+        }),
+        select: () => {
+          const vuoto: any = {
+            eq: () => vuoto,
+            in: () => vuoto,
+            gt: () => vuoto,
+            order: () => vuoto,
+            limit: () => vuoto,
+            then: (ok: (v: unknown) => unknown) => Promise.resolve({ data: [], error: null, count: 0 }).then(ok),
+          };
+          return vuoto;
+        },
+      }),
+    } as never;
+
+    const steps = await eraseCustomerFromMerchant(client, 'customers', '4021');
+
+    expect(aggiornamenti).toHaveLength(2);
+    expect(aggiornamenti[1]).not.toHaveProperty('customer_redacted_at');
+    expect(aggiornamenti[1]).toHaveProperty('shipping_country_code', null);
+    expect(step(steps, 'orders')).toMatchObject({ outcome: 'anonymized', rows: 2 });
+    expect(step(steps, 'orders')?.detail).toMatch(/customer_redacted_at/);
   });
 
   it('le righe d ordine restano dichiarate, con il perche', async () => {

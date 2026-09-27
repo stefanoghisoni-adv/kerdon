@@ -223,6 +223,34 @@ describe('lo scaricamento della fotografia', () => {
     expect(stepsFailed(steps)).toBe(false);
   });
 
+  it('gli ordini escono interi, dati di spedizione e logistica compresi', async () => {
+    // L'informativa promette che l'esportazione comprende paese, stato di
+    // evasione, colli, reso, peso, imballo e costo logistico degli ordini.
+    // Escono perche' le righe si riprendono con `*`: se un giorno la lettura
+    // elencasse le colonne a mano, una colonna nuova resterebbe fuori in
+    // silenzio, e questa prova se ne accorge.
+    const logistica = {
+      fulfillment_status: 'FULFILLED',
+      shipping_country_code: 'IT',
+      total_weight_grams: 1200,
+      item_count: 2,
+      returned_at: '2026-08-07T00:00:00Z',
+      packaging_category: 'Scatola M',
+      shipping_method: 'Standard',
+      package_count: 1,
+      logistics_cost: 7.2,
+      logistics_facts_version: 1,
+    };
+    const { client, chiamate } = fakeSupabase(negozio({ orders: [{ ...ordine(0), ...logistica }] }));
+
+    const { snapshot } = await materializeSubject(client, 'customers', '4021');
+    chiamate.length = 0;
+    const { data } = await collectSubjectData(client, 'customers', snapshot!);
+
+    expect(chiamate.find((c) => c.table === 'orders')?.select).toBe('*');
+    expect(data.orders[0]).toMatchObject(logistica);
+  });
+
   it('riprende ogni tabella per la sua chiave primaria', async () => {
     const { client, chiamate } = fakeSupabase(negozio());
 

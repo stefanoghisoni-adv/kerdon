@@ -1,6 +1,6 @@
 # Data Processing Agreement (DPA) — Kerdon
 
-Last updated: 18 September 2026
+Last updated: 27 September 2026
 
 > This agreement is accepted together with the terms of service, when the app is
 > installed.
@@ -48,7 +48,8 @@ is read, written or deleted in order to do it — but it is an automatic action
 on the controller's infrastructure, and it is described in section 6.
 
 Purpose: to let the merchant use its own commercial data to measure the
-profitability of its orders and its customers.
+profitability of its orders and its customers, net of what each order cost to
+ship, pack and, where it was returned, take back.
 
 ## 3. Categories of data and data subjects
 
@@ -66,6 +67,37 @@ and last name, currency, totals, financial status, order date and any
 cancellation date and, for each line, product, variant, quantity, unit price and
 discount.
 
+**Order shipping and logistics data**, processed to calculate each order's
+logistics cost, which is subtracted from the profit of the order and, through it,
+from profit and lifetime value per customer:
+
+| Item | Processing | Where it is kept |
+|---|---|---|
+| Shipping country | Two-letter country code of the order's shipping address; picks the shipping zone and rate | Merchant's database, `shipping_country_code` |
+| Whether the order needs shipping | Shopify's flag, read to interpret a missing address | Not stored |
+| Fulfilment status | Whether the order has left | Merchant's database, `fulfillment_status` |
+| Tracking numbers | Read only to count distinct parcels, then discarded | Not stored, anywhere, including logs |
+| Parcel count | Number of parcels that left | Merchant's database, `package_count` |
+| Shipping method | Name of the shipping option chosen at checkout | Merchant's database, `shipping_method` |
+| Delivery category | Whether that option is a delivery or a pick-up | Not stored |
+| Total weight | Order weight in grams | Merchant's database, `total_weight_grams` |
+| Item count | Units the customer still holds, to estimate weight | Merchant's database, `item_count` |
+| Returns | Status and creation date of each return; only open or closed returns count | Merchant's database, `returned_at` (date only) |
+| Packaging category | Value of the order metafield `custom.packaging_category` | Merchant's database, `packaging_category` |
+| Logistics cost | Calculated by Kerdon from the items above and the merchant's rates | Merchant's database, `logistics_cost` and `logistics_facts_version` |
+
+Of the shipping address, only the country is requested from Shopify: street,
+city, postcode and recipient name are not requested and not stored. Of a return,
+only its status and date are requested: no reason, no returned items, no
+customer message. The order and return notifications Shopify sends (webhooks)
+may contain that data, and more — full shipping and billing address, email,
+telephone, tracking numbers, return reasons: each notification is discarded on
+receipt, keeping only the identifiers of the order, the return, the customer
+and, for visitor recognition, the browser. Nothing of the rest is stored,
+logged or forwarded. The merchant's
+rates — shipping zones, option costs, packaging categories and return cost — are
+configuration kept in Kerdon's database and contain no personal data.
+
 **Visitor recognition data** (only where the merchant enables the feature, and
 only for visitors who have given consent): a pseudonymous browser identifier
 minted by Kerdon, the browser label and the device-type label where the
@@ -77,15 +109,16 @@ write that link, the merchant's endpoint sends Kerdon the email address or
 telephone number the person has just given; Kerdon uses them only to search the
 merchant's database and does not retain them.
 
-**Explicit exclusions**: no payment data; no address, email address, telephone
-number or note is taken from orders; no shipping data — no carrier, tracking
-number, label or shipping cost, since labels are bought outside Shopify and all
-that remains of delivery is what the customer paid at checkout; no IP address; no
-record of pages visited; no special category of data within the meaning of
-Article 9 GDPR.
+**Explicit exclusions**: no payment data; no email address, telephone number,
+note or address — other than the shipping country above — is requested or stored
+from orders;
+no carrier label is bought or read, and no tracking number is stored; no IP
+address; no record of pages visited; no special category of data within the
+meaning of Article 9 GDPR.
 
-The address processed is the default address on the customer record, not a
-shipping or billing address derived from an order. A date of birth is not a
+The address processed in full is the default address on the customer record,
+not a shipping or billing address derived from an order; from an order, only the
+shipping country is taken. A date of birth is not a
 special category within the meaning of Article 9.
 
 **Limit of the processing**: among customers, only the data of those who have
@@ -180,7 +213,7 @@ Kerdon acts on the access and erasure requests it receives through the channels
 Shopify provides.
 
 **Access**: Kerdon collects from the merchant's database the customer's row,
-their orders and those orders' lines, and the rows of the browsers linked to
+their orders — shipping and logistics data included — and those orders' lines, and the rows of the browsers linked to
 them. The resulting export contains personal data and is held on Kerdon's
 systems, where the merchant downloads it inside the app with their own admin
 session, **for at most 30 days**; it is deleted when that period expires.
@@ -188,8 +221,13 @@ session, **for at most 30 days**; it is deleted when that period expires.
 **Erasure**: the customer's row is permanently deleted from the merchant's
 database, along with the rows of the browsers linked to them. Orders are not
 deleted — they are accounting records the merchant is required to keep (Article
-17(3)(b) and (e) GDPR) — but are stripped of the customer identifier and of the
-customer's first and last name.
+17(3)(b) and (e) GDPR) — but are stripped of the customer identifier, of the
+customer's first and last name and of the shipping country, and marked with the
+date of the erasure (`customer_redacted_at`); a guard in the merchant's database
+prevents any later write from restoring those fields. The other shipping and
+logistics data describes the parcel rather than the person, and stays on the
+order, with its logistics cost unchanged, so that the merchant's costs remain
+correct.
 
 ## 9. On termination
 

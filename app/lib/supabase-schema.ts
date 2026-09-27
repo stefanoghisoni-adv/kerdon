@@ -183,6 +183,10 @@ const ORDERS_COLUMNS: Column[] = [
   // Cio' che serve a dire quanto e' costato far arrivare l'ordine e, se e'
   // tornato, farlo rientrare. Il paese e non l'indirizzo: per la tariffa basta
   // la zona, e un dato personale in piu' non serve a nessun conto.
+  //
+  // Tutte dichiarate, una per una, in lib/legal/order-data-inventory: da li'
+  // nascono informativa, DPA e dichiarazione a Shopify. Una colonna nuova qui
+  // va aggiunta anche la', o il test del contratto fallisce.
   { name: 'fulfillment_status', type: 'TEXT' },
   { name: 'shipping_country_code', type: 'TEXT' },
   { name: 'total_weight_grams', type: 'INTEGER' },
@@ -207,7 +211,105 @@ const ORDERS_COLUMNS: Column[] = [
   // (LOGISTICS_FACTS_VERSION). NULL o piu' vecchia = ricavati con le regole di
   // prima: il recupero dello storico rilegge quell'ordine una volta.
   { name: 'logistics_facts_version', type: 'INTEGER' },
+  // Quando una richiesta di cancellazione (customers/redact) ha tolto da
+  // quest'ordine la persona. NULL = mai. Non e' decorativa: su una riga
+  // marcata il trigger qui sotto impedisce a qualunque scrittura successiva —
+  // la sincronizzazione, il webhook orders/updated, il recupero dello storico —
+  // di rimettere dentro cio' che la cancellazione ha tolto.
+  { name: 'customer_redacted_at', type: 'TIMESTAMP' },
 ];
+
+/**
+ * Le colonne che una cancellazione svuota sugli ordini della persona, e che
+ * su una riga marcata (`customer_redacted_at`) restano vuote per sempre.
+ *
+ * Un elenco solo, da cui nascono sia la cancellazione (ANONYMOUS_ORDER in
+ * gdpr/customer-record) sia il trigger qui sotto: se divergessero, una colonna
+ * tolta dalla cancellazione potrebbe tornare con il prossimo aggiornamento.
+ * L'inventario dei dati (legal/order-data-inventory) le dichiara `azzerato`, e
+ * un test confronta i tre.
+ */
+export const ORDER_COLUMNS_CLEARED_ON_ERASURE = [
+  'shopify_customer_id',
+  'customer_first_name',
+  'customer_last_name',
+  // L'unico pezzo dell'indirizzo che l'app prende da un ordine.
+  'shipping_country_code',
+] as const;
+
+/**
+ * Il nome del trigger e della funzione che lo esegue: uno solo, perche' la
+ * cancellazione dei dati del merchant (supabase/managed-resources) deve
+ * togliere esattamente cio' che questa DDL crea.
+ */
+export const ORDERS_ERASURE_GUARD = 'kerdon_orders_keep_redacted';
+
+/**
+ * Il guardiano delle righe cancellate, nel database del merchant.
+ *
+ * PERCHE' UN TRIGGER E NON UN CONTROLLO IN CHI SCRIVE. Chi scrive sugli ordini
+ * e' piu' d'uno — l'upsert della sincronizzazione e dei webhook (PostgREST,
+ * che un "salta queste colonne su queste righe" non lo sa esprimere), il
+ * recupero dello storico (`COALESCE(o.shipping_country_code, v.cc)`), il
+ * ricalcolo dei costi — e domani saranno di piu'. Un controllo in ognuno e'
+ * una promessa che il prossimo scrittore puo' dimenticare; il trigger vale per
+ * tutti, anche per quelli che non esistono ancora, ed e' atomico con la
+ * scrittura stessa.
+ *
+ * COSA FA, solo sulle righe gia' marcate:
+ *  - rimette a NULL le colonne che la cancellazione ha svuotato, qualunque
+ *    valore porti l'aggiornamento;
+ *  - non lascia togliere la marcatura;
+ *  - tiene il costo logistico salvato quando l'aggiornamento arriva senza
+ *    paese: senza paese la spedizione e l'imballo verrebbero ricalcolati a
+ *    zero, e il profitto di quell'ordine salirebbe senza motivo. E' il caso
+ *    del ricalcolo dopo un cambio di tariffe, che su una riga anonimizzata
+ *    lascia quindi il costo com'era.
+ * Su una riga non marcata non fa niente, compresa la cancellazione stessa, che
+ * trova la marcatura ancora vuota.
+ *
+ * CREATE OR REPLACE e non DROP + CREATE: la DDL resta ripetibile (Postgres 14
+ * e successivi, tutti i progetti Supabase) e senza nessun DROP, che in una DDL
+ * applicata ai database dei merchant non deve comparire.
+ *
+ * `search_path` vuoto: la funzione non legge tabelle, e cosi' non puo' essere
+ * dirottata da un oggetto con lo stesso nome in un altro schema.
+ */
+function ordersErasureGuardSQL(): string {
+  const azzera = ORDER_COLUMNS_CLEARED_ON_ERASURE.map((c) => `    NEW.${c} := NULL;`).join('\n');
+  return `
+CREATE OR REPLACE FUNCTION public.${ORDERS_ERASURE_GUARD}()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF OLD.customer_redacted_at IS NOT NULL THEN
+    IF NEW.shipping_country_code IS NULL THEN
+      NEW.logistics_cost := OLD.logistics_cost;
+    END IF;
+${azzera}
+    NEW.customer_redacted_at := OLD.customer_redacted_at;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER ${ORDERS_ERASURE_GUARD}
+  BEFORE UPDATE ON orders
+  FOR EACH ROW EXECUTE FUNCTION public.${ORDERS_ERASURE_GUARD}();
+`;
+}
+
+/**
+ * I nomi delle colonne degli ordini, in sola lettura.
+ *
+ * Esistono per il contratto con l'inventario dei dati (lib/legal/
+ * order-data-inventory): una colonna aggiunta qui e non dichiarata la' fa
+ * fallire un test, invece di diventare un trattamento che l'informativa non
+ * racconta.
+ */
+export const ORDERS_COLUMN_NAMES: readonly string[] = ORDERS_COLUMNS.map((c) => c.name);
 
 const ORDERS_INDEXES = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_shopify_id ON orders(shopify_order_id);`,
@@ -441,6 +543,7 @@ export function buildUsersSchemaSQL(): string {
 export function buildOrdersSchemaSQL(): string {
   return (
     buildTableSQL('orders', ORDERS_COLUMNS, ORDERS_INDEXES) +
+    ordersErasureGuardSQL() +
     buildTableSQL('order_lines', ORDER_LINES_COLUMNS, ORDER_LINES_INDEXES)
   );
 }

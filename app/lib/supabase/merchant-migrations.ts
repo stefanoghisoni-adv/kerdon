@@ -353,8 +353,17 @@ END $$;
  * regole vecchie. Solo una colonna, quindi nessun passo esplicito: il
  * ricalcolo dello storico lo fa il recupero da Shopify che l'aggiornamento
  * accoda (apply-schema-update), una volta per ordine.
+ *
+ * La 16 porta sugli ordini `customer_redacted_at` e il trigger
+ * `kerdon_orders_keep_redacted`: una cancellazione GDPR marca gli ordini della
+ * persona, e da li' nessuna scrittura successiva (sincronizzazione, webhook,
+ * recupero dello storico, ricalcolo) puo' rimettere identificativo, nome,
+ * cognome o paese di spedizione, ne' azzerare il costo logistico di un ordine
+ * rimasto senza paese. Colonna e trigger li porta la DDL, idempotente; nessun
+ * passo esplicito. Gli ordini anonimizzati PRIMA della 16 non si possono
+ * riconoscere (sembrano acquisti senza account) e restano senza marcatura.
  */
-export const LATEST_SCHEMA_VERSION = 15;
+export const LATEST_SCHEMA_VERSION = 16;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

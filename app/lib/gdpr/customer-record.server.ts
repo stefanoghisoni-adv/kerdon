@@ -14,7 +14,10 @@
 //   nel progetto del merchant
 //     customers     shopify_customer_id + nome, cognome, email, telefono,
 //                   indirizzo, data di nascita → dato personale puro
-//     orders        shopify_customer_id + customer_first_name/last_name
+//     orders        shopify_customer_id + customer_first_name/last_name,
+//                   e shipping_country_code (ricavato dall'indirizzo di
+//                   spedizione). Gli altri dati logistici descrivono il
+//                   pacco, non la persona: vedi ANONYMOUS_ORDER.
 //     order_lines   nessun riferimento alla persona: pendono da
 //                   shopify_order_id, e dentro hanno prodotto, quantita',
 //                   prezzo. Anonimizzato l'ordine, la riga non e' piu'
@@ -88,6 +91,7 @@ import { prisma } from '~/db.server';
 import type { GdprStep, QueryError } from './steps';
 import { toStep } from './steps';
 import { eraseBrowsersOfCustomer } from './identity-graph.server';
+import { ORDER_COLUMNS_CLEARED_ON_ERASURE } from '~/lib/supabase-schema';
 
 // Il vocabolario dei passi vive in `steps.ts` — ci arriva anche il grafo delle
 // identita', e tenerlo qui avrebbe chiuso un cerchio fra i due moduli. Si
@@ -102,13 +106,51 @@ export { stepsFailed, failureMessage } from './steps';
 export const ORDERS_TABLE = 'orders';
 export const ORDER_LINES_TABLE = 'order_lines';
 
-// Le colonne degli ordini che riportano alla persona: sono queste tre e
-// basta — indirizzi, email e note negli ordini non li abbiamo mai copiati.
-const ANONYMOUS_ORDER = {
-  shopify_customer_id: null,
-  customer_first_name: null,
-  customer_last_name: null,
-};
+// Le colonne degli ordini che riportano alla persona: l'identificativo, il nome
+// e il cognome — e il paese di spedizione, che e' l'unico pezzo dell'indirizzo
+// che l'app prende da un ordine. Indirizzi completi, email e note negli ordini
+// non li abbiamo mai copiati.
+//
+// PERCHE' IL PAESE SI' E IL RESTO DEI DATI LOGISTICI NO. Il paese viene
+// dall'indirizzo della persona: e' un suo dato, e una cancellazione lo toglie.
+// Peso, colli, opzione di spedizione, stato di evasione, data del reso,
+// imballo e costo logistico descrivono il pacco e la vendita, non chi l'ha
+// comprata: sull'ordine ormai anonimo restano, come il totale e le righe,
+// perche' sono cio' che fa tornare i conti del merchant.
+//
+// L'elenco vive in supabase-schema (ORDER_COLUMNS_CLEARED_ON_ERASURE), da cui
+// nasce anche il trigger che impedisce di riscriverle; l'inventario dei dati
+// (lib/legal/order-data-inventory) le dichiara `azzerato`, e un test li
+// confronta.
+export const ANONYMOUS_ORDER: Readonly<Record<(typeof ORDER_COLUMNS_CLEARED_ON_ERASURE)[number], null>> =
+  Object.fromEntries(ORDER_COLUMNS_CLEARED_ON_ERASURE.map((c) => [c, null])) as Record<
+    (typeof ORDER_COLUMNS_CLEARED_ON_ERASURE)[number],
+    null
+  >;
+
+/**
+ * La colonna che marca un ordine come cancellato. Una volta scritta, il
+ * trigger `kerdon_orders_keep_redacted` nel database del merchant tiene vuote
+ * le colonne qui sopra contro qualunque scrittura successiva.
+ */
+export const REDACTED_MARKER = 'customer_redacted_at';
+
+/**
+ * La marcatura non c'e' perche' lo schema del merchant e' fermo prima della 16.
+ *
+ * Va riconosciuto PRIMA di `isTableMissing`, che su "column ... does not exist"
+ * direbbe "tabella assente" e farebbe saltare l'intera anonimizzazione.
+ * PGRST204 e' il modo in cui l'API REST dice che una colonna non e' nella sua
+ * copia dello schema; 42703 e' l'"undefined_column" di Postgres.
+ */
+function markerMissing(error: QueryError | null | undefined): boolean {
+  if (!error) return false;
+  return (
+    error.code === 'PGRST204' ||
+    error.code === '42703' ||
+    (error.message ?? '').includes(REDACTED_MARKER)
+  );
+}
 
 /**
  * Toglie la persona dal database del merchant.
@@ -137,11 +179,33 @@ export async function eraseCustomerFromMerchant(
   // Gli ordini restano, senza piu' la persona dentro (il perche' e' in cima al
   // file). Si tenta sempre, anche se oggi il negozio non ha piu' il permesso
   // sugli ordini: le righe scritte quando ce l'aveva sono ancora li'.
-  const anonymized = await supabase
+  //
+  // Con la marcatura, perche' i dati tolti non tornino: la sincronizzazione e
+  // il recupero dello storico riscrivono gli ordini da Shopify, e senza di
+  // lei rimetterebbero identificativo, nome e paese alla prima occasione.
+  let anonymized = await supabase
     .from(ORDERS_TABLE)
-    .update(ANONYMOUS_ORDER, { count: 'exact' })
+    .update({ ...ANONYMOUS_ORDER, [REDACTED_MARKER]: new Date().toISOString() }, { count: 'exact' })
     .eq('shopify_customer_id', customerId);
-  steps.push(toStep(ORDERS_TABLE, 'anonymized', anonymized));
+
+  if (markerMissing(anonymized.error)) {
+    // Schema del merchant non ancora alla 16. La cancellazione non si rimanda
+    // per questo — la persona ha diritto a essere tolta adesso — ma si dice
+    // chiaramente che la protezione contro la riscrittura manca: la traccia lo
+    // registra, e lo schema si allinea alla prossima sincronizzazione.
+    anonymized = await supabase
+      .from(ORDERS_TABLE)
+      .update(ANONYMOUS_ORDER, { count: 'exact' })
+      .eq('shopify_customer_id', customerId);
+    const passo = toStep(ORDERS_TABLE, 'anonymized', anonymized);
+    steps.push(
+      passo.outcome === 'anonymized'
+        ? { ...passo, detail: `senza ${REDACTED_MARKER}: schema del database non aggiornato` }
+        : passo,
+    );
+  } else {
+    steps.push(toStep(ORDERS_TABLE, 'anonymized', anonymized));
+  }
 
   // Le righe d'ordine si dichiarano lo stesso, con zero lavoro fatto: chi
   // legge la traccia deve vedere che la tabella e' stata considerata e perche'

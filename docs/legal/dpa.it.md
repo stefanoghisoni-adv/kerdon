@@ -1,6 +1,6 @@
 # Accordo sul trattamento dei dati (DPA) — Kerdon
 
-Ultimo aggiornamento: 18 settembre 2026
+Ultimo aggiornamento: 27 settembre 2026
 
 > Questo accordo si accetta insieme ai termini di servizio, all'installazione
 > dell'app.
@@ -48,7 +48,8 @@ un'azione automatica sull'infrastruttura del titolare, ed è descritta al punto
 6.
 
 Finalità: consentire al merchant di usare i propri dati commerciali per misurare
-la redditività degli ordini e della clientela.
+la redditività degli ordini e della clientela, al netto di quanto ogni ordine è
+costato da spedire, imballare e, se reso, far rientrare.
 
 ## 3. Categorie di dati e di interessati
 
@@ -66,6 +67,38 @@ cliente, nome e cognome del cliente, valuta, totali, stato del pagamento, date d
 emissione e di eventuale annullamento e, per ogni riga, prodotto, variante,
 quantità, prezzo unitario e sconto.
 
+**Dati di spedizione e logistica degli ordini**, trattati per calcolare il costo
+logistico di ogni ordine, che viene sottratto dal profitto dell'ordine e, tramite
+questo, dal profitto e dal valore nel tempo (LTV) di ciascun cliente:
+
+| Voce | Trattamento | Dove viene conservata |
+|---|---|---|
+| Paese di spedizione | Codice a due lettere del paese dell'indirizzo di spedizione; sceglie zona e tariffa | Database del merchant, `shipping_country_code` |
+| Se l'ordine va spedito | Indicazione di Shopify, letta per interpretare un indirizzo mancante | Non conservata |
+| Stato di evasione | Se l'ordine è partito | Database del merchant, `fulfillment_status` |
+| Codici di tracciamento | Letti solo per contare i colli distinti, poi scartati | Non conservati, da nessuna parte, log compresi |
+| Numero di colli | Quanti colli sono partiti | Database del merchant, `package_count` |
+| Opzione di spedizione | Nome dell'opzione scelta al checkout | Database del merchant, `shipping_method` |
+| Categoria di consegna | Se quell'opzione è una consegna o un ritiro | Non conservata |
+| Peso totale | Peso dell'ordine in grammi | Database del merchant, `total_weight_grams` |
+| Numero di articoli | Unità rimaste al cliente, per stimare il peso | Database del merchant, `item_count` |
+| Resi | Stato e data di creazione di ogni reso; contano solo i resi aperti o chiusi | Database del merchant, `returned_at` (solo la data) |
+| Categoria di imballo | Valore del metafield d'ordine `custom.packaging_category` | Database del merchant, `packaging_category` |
+| Costo logistico | Calcolato da Kerdon a partire dalle voci sopra e dalle tariffe del merchant | Database del merchant, `logistics_cost` e `logistics_facts_version` |
+
+Dell'indirizzo di spedizione si chiede a Shopify il solo paese: via, città, CAP e
+nome del destinatario non vengono chiesti né conservati. Di un reso si chiedono
+soltanto stato e data: né il motivo, né gli articoli resi, né messaggi del
+cliente. Le notifiche di ordini e resi che Shopify manda (webhook) possono
+contenere quei dati, e altri — indirizzo di spedizione e di fatturazione
+completi, email, telefono, codici di tracciamento, motivi dei resi: ogni
+notifica viene scartata alla ricezione, e se ne tengono solo gli identificativi
+dell'ordine, del reso, del cliente e, per il riconoscimento dei visitatori, del
+browser. Del resto niente viene conservato, registrato nei log o inoltrato. Le tariffe del
+merchant — zone di spedizione, costi delle opzioni, categorie di imballo e costo
+dei resi — sono configurazione conservata nel database di Kerdon e non
+contengono dati personali.
+
 **Dati di riconoscimento dei visitatori** (solo se il merchant attiva la
 funzione, e solo per i visitatori che hanno prestato il consenso): un
 identificativo pseudonimo del browser coniato da Kerdon, l'etichetta del
@@ -79,15 +112,15 @@ numero di telefono lasciato dalla persona; Kerdon li usa per la sola ricerca
 nel database del merchant e non li conserva.
 
 **Esclusioni esplicite**: nessun dato di pagamento; dagli ordini non viene
-prelevato alcun indirizzo, indirizzo email, numero di telefono o nota; nessun
-dato di spedizione — nessun corriere, codice di tracciamento, etichetta o costo
-di spedizione, poiché le etichette vengono acquistate fuori da Shopify e di quel
-che riguarda la consegna resta solo quanto il cliente ha pagato al checkout;
-nessun indirizzo IP; nessuna pagina visitata; nessuna categoria particolare di
-dati ai sensi dell'art. 9 GDPR.
+chiesto né conservato alcun indirizzo email, numero di telefono, nota o
+indirizzo — salvo il paese di spedizione descritto sopra; nessuna etichetta del corriere viene
+acquistata o letta, e nessun codice di tracciamento viene conservato; nessun
+indirizzo IP; nessuna pagina visitata; nessuna categoria particolare di dati ai
+sensi dell'art. 9 GDPR.
 
-L'indirizzo trattato è quello predefinito dell'anagrafica cliente, non un
-indirizzo di spedizione o fatturazione ricavato da un ordine. La data di nascita
+L'indirizzo trattato per intero è quello predefinito dell'anagrafica cliente, non
+un indirizzo di spedizione o fatturazione ricavato da un ordine; da un ordine si
+prende soltanto il paese di spedizione. La data di nascita
 non costituisce categoria particolare ai sensi dell'art. 9.
 
 **Limite del trattamento**: fra i clienti vengono trattati unicamente i dati di
@@ -187,7 +220,7 @@ Kerdon dà seguito alle richieste di accesso e cancellazione che riceve
 attraverso i canali previsti da Shopify.
 
 **Accesso**: Kerdon raccoglie dal database del merchant la riga del cliente, i
-suoi ordini e le relative righe, e le righe dei browser a lui collegati.
+suoi ordini — dati di spedizione e logistica compresi — e le relative righe, e le righe dei browser a lui collegati.
 L'esportazione così ottenuta contiene dati personali e viene conservata sui
 sistemi di Kerdon, dove il merchant la scarica dentro l'app con la propria
 sessione di amministratore, **per un massimo di 30 giorni**; alla scadenza viene
@@ -197,7 +230,12 @@ cancellata.
 database del merchant, insieme alle righe dei browser a lui collegati. Gli ordini
 non vengono cancellati — sono scritture contabili che il merchant è tenuto a
 conservare (art. 17(3), lettere b ed e, GDPR) — ma vengono privati
-dell'identificativo del cliente e del suo nome e cognome.
+dell'identificativo del cliente, del suo nome e cognome e del paese di
+spedizione, e marcati con la data della cancellazione (`customer_redacted_at`);
+una guardia nel database del merchant impedisce a qualunque scrittura successiva
+di ripristinare quei campi. Gli altri dati di spedizione e logistica descrivono
+il pacco e non la persona, e restano sull'ordine, con il costo logistico
+invariato, perché i costi del merchant restino corretti.
 
 ## 9. Al termine
 
