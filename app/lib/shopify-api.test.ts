@@ -882,6 +882,7 @@ describe('ordini: i dati di spedizione', () => {
     currentTotalPriceSet: { shopMoney: { amount: '50.00', currencyCode: 'EUR' } },
     customer: null,
     displayFulfillmentStatus: 'UNFULFILLED',
+    requiresShipping: true,
     fulfillments: [],
     shippingAddress: { countryCodeV2: 'IT' },
     // UnsignedInt64: in JSON arriva come stringa.
@@ -933,7 +934,8 @@ describe('ordini: i dati di spedizione', () => {
       // Con pageInfo: oltre la prima pagina si continua, non si tronca.
       'returns(first: 5) { pageInfo { hasNextPage endCursor } nodes { status createdAt } }',
       'key: "packaging_category"',
-      'shippingLines(first: 1) { nodes { title } }',
+      'shippingLines(first: 1) { nodes { title deliveryCategory } }',
+      'requiresShipping',
     ]) {
       expect(query).toContain(field);
     }
@@ -969,7 +971,7 @@ describe('ordini: i dati di spedizione', () => {
     expect(order?.fulfillment_status).toBe('FULFILLED');
   });
 
-  it('i pacchi sono i tracking distinti delle spedizioni partite davvero', async () => {
+  it('i pacchi: tracking distinti di ogni spedizione (qualunque stato), uno per le partite senza tracking', async () => {
     (global.fetch as any).mockResolvedValueOnce(
       ok({
         order: orderNode({
@@ -977,17 +979,19 @@ describe('ordini: i dati di spedizione', () => {
           fulfillments: [
             // Multi-collo: tre tracking, uno ripetuto e uno vuoto -> 3 pacchi.
             { status: 'SUCCESS', trackingInfo: [{ number: 'A' }, { number: 'B' }, { number: 'A' }, { number: '' }, { number: 'C' }] },
+            // Annullata ma col tracking: il pacco e' arrivato al corriere, 1.
             { status: 'CANCELLED', trackingInfo: [{ number: 'D' }] },
+            // Senza tracking e non partite: 0.
             { status: 'ERROR', trackingInfo: [] },
             { status: 'FAILURE', trackingInfo: [] },
-            // Nessun tracking: un pacco.
+            // Partita senza tracking: un pacco.
             { status: 'SUCCESS', trackingInfo: [] },
           ],
         }),
       }),
     );
     const order = await client().getOrderById(700);
-    expect(order?.package_count).toBe(4);
+    expect(order?.package_count).toBe(5);
   });
 
   it('nessuna spedizione: zero pacchi; spedizioni nulle: sconosciuti, non zero', async () => {
@@ -1038,7 +1042,7 @@ describe('ordini: i dati di spedizione', () => {
 
   it('senza indirizzo, peso o metafield i campi restano vuoti', async () => {
     (global.fetch as any).mockResolvedValueOnce(
-      ok({ order: orderNode({ shippingAddress: null, totalWeight: null, metafield: null }) }),
+      ok({ order: orderNode({ shippingAddress: null, requiresShipping: false, totalWeight: null, metafield: null }) }),
     );
     const order = await client().getOrderById(700);
     expect(order).toMatchObject({
@@ -1046,7 +1050,7 @@ describe('ordini: i dati di spedizione', () => {
       total_weight_grams: null,
       packaging_category: null,
       returned_at: null,
-      // Ritiro in negozio o digitale: un indirizzo nullo senza tracking e' un dato.
+      // Niente da spedire: un indirizzo nullo e' un dato.
       logistics_unknown: [],
     });
   });
@@ -1065,18 +1069,56 @@ describe('ordini: i dati di spedizione', () => {
       warn.mockRestore();
     });
 
-    it('indirizzo nullo su un ordine con un tracking: paese oscurato, non assente', async () => {
+    it('indirizzo nullo su un ordine da spedire con una consegna vera: paese oscurato, anche senza tracking', async () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
+      (global.fetch as any).mockResolvedValueOnce(
+        ok({ order: orderNode({ shippingAddress: null, requiresShipping: true, fulfillments: [] }) }),
+      );
+      const order = await client().getOrderById(700);
+      expect(order?.logistics_unknown).toEqual(['shipping_country_code']);
+    });
+
+    it('indirizzo nullo con un ritiro in negozio: nessun paese, ma e\' un dato', async () => {
       (global.fetch as any).mockResolvedValueOnce(
         ok({
           order: orderNode({
             shippingAddress: null,
-            fulfillments: [{ status: 'SUCCESS', trackingInfo: [{ number: 'T1' }] }],
+            requiresShipping: true,
+            shippingLines: { nodes: [{ title: 'Ritiro', deliveryCategory: 'pick-up' }] },
           }),
         }),
       );
       const order = await client().getOrderById(700);
-      expect(order?.logistics_unknown).toEqual(['shipping_country_code']);
+      expect(order?.shipping_country_code).toBeNull();
+      expect(order?.logistics_unknown).toEqual([]);
+    });
+
+    it('il tracking fa fede: una spedizione annullata con tracking rende l ordine spedito', async () => {
+      (global.fetch as any).mockResolvedValueOnce(
+        ok({
+          order: orderNode({
+            displayFulfillmentStatus: 'UNFULFILLED',
+            fulfillments: [{ status: 'CANCELLED', trackingInfo: [{ number: 'BRT9' }] }],
+          }),
+        }),
+      );
+      const order = await client().getOrderById(700);
+      expect(order?.fulfillment_status).toBe('FULFILLED');
+      expect(order?.package_count).toBe(1);
+    });
+
+    it('una spedizione annullata senza tracking: nessun pacco, stato di Shopify', async () => {
+      (global.fetch as any).mockResolvedValueOnce(
+        ok({
+          order: orderNode({
+            displayFulfillmentStatus: 'UNFULFILLED',
+            fulfillments: [{ status: 'CANCELLED', trackingInfo: [] }],
+          }),
+        }),
+      );
+      const order = await client().getOrderById(700);
+      expect(order?.fulfillment_status).toBe('UNFULFILLED');
+      expect(order?.package_count).toBe(0);
     });
 
     it('un 200 con `errors` fallisce: niente da scrivere', async () => {
@@ -1319,6 +1361,9 @@ describe('getOrderShippingFacts', () => {
         nodes: [
           {
             id: 'gid://shopify/Order/11',
+            displayFulfillmentStatus: 'FULFILLED',
+            requiresShipping: true,
+            shippingAddress: { countryCodeV2: 'IT' },
             shippingLines: { nodes: [{ title: 'Express' }, { title: 'Altro' }] },
             fulfillments: [
               { status: 'SUCCESS', trackingInfo: [{ number: 'A' }, { number: 'B' }, { number: 'C' }] },
@@ -1328,6 +1373,9 @@ describe('getOrderShippingFacts', () => {
           },
           {
             id: 'gid://shopify/Order/12',
+            displayFulfillmentStatus: 'UNFULFILLED',
+            requiresShipping: false,
+            shippingAddress: null,
             shippingLines: { nodes: [] },
             fulfillments: [],
             returns: { nodes: [{ status: 'CANCELED', createdAt: '2026-08-05T00:00:00Z' }] },
@@ -1340,14 +1388,22 @@ describe('getOrderShippingFacts', () => {
 
     const corpo = sentBody();
     expect(corpo.query).toContain('nodes(ids: $ids)');
-    expect(corpo.query).toContain('shippingLines(first: 1) { nodes { title } }');
+    expect(corpo.query).toContain('shippingLines(first: 1) { nodes { title deliveryCategory } }');
     expect(corpo.query).toContain('fulfillments(first: 10) { status trackingInfo { number } }');
+    expect(corpo.query).toContain('requiresShipping');
+    expect(corpo.query).toContain('shippingAddress { countryCodeV2 }');
     expect(corpo.query).toContain('returns(first: 5) { pageInfo { hasNextPage endCursor } nodes { status createdAt } }');
     // Niente righe, clienti o importi: il costo della query resta minimo.
     expect(corpo.query).not.toContain('lineItems');
     expect(corpo.variables.ids).toEqual(['gid://shopify/Order/11', 'gid://shopify/Order/12']);
-    expect(fatti.get('11')).toEqual({ found: true, method: 'Express', packageCount: 3, returnedAt: '2026-08-05T00:00:00Z', returnsKnown: true });
-    expect(fatti.get('12')).toEqual({ found: true, method: '', packageCount: 0, returnedAt: null, returnsKnown: true });
+    expect(fatti.get('11')).toEqual({
+      found: true, method: 'Express', packageCount: 3, returnedAt: '2026-08-05T00:00:00Z', returnsKnown: true,
+      fulfillmentStatus: 'FULFILLED', countryCode: 'IT', countryKnown: true,
+    });
+    expect(fatti.get('12')).toEqual({
+      found: true, method: '', packageCount: 0, returnedAt: null, returnsKnown: true,
+      fulfillmentStatus: 'UNFULFILLED', countryCode: null, countryKnown: true,
+    });
   });
 
   it('campi oscurati: sconosciuti, non zero; ordine non piu\' su Shopify: non trovato', async () => {
@@ -1364,8 +1420,11 @@ describe('getOrderShippingFacts', () => {
 
     const fatti = await client().getOrderShippingFacts(['1', '2', '3']);
 
-    expect(fatti.get('1')).toEqual({ found: true, method: null, packageCount: null, returnedAt: null, returnsKnown: false });
-    expect(fatti.get('2')).toEqual({ found: true, method: null, packageCount: 0, returnedAt: null, returnsKnown: true });
+    expect(fatti.get('1')).toMatchObject({
+      found: true, method: null, packageCount: null, returnedAt: null, returnsKnown: false,
+      fulfillmentStatus: null, countryKnown: false,
+    });
+    expect(fatti.get('2')).toMatchObject({ found: true, method: null, packageCount: 0, returnedAt: null, returnsKnown: true });
     // Il nodo nullo e' l'ordine 3 (stessa posizione): cancellato su Shopify.
     expect(fatti.get('3')).toMatchObject({ found: false });
   });
@@ -1397,6 +1456,20 @@ describe('getOrderShippingFacts', () => {
     );
     const fatti = await client().getOrderShippingFacts([grande]);
     expect(fatti.get(grande)).toMatchObject({ method: 'Std', packageCount: 1 });
+  });
+
+  it('query oltre il costo massimo: errore riconoscibile, non ritentato uguale', async () => {
+    (global.fetch as any).mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'X-Shopify-API-Version': '2026-07' }),
+      json: async () => ({
+        errors: [{ message: 'Query cost is 1600', extensions: { code: 'MAX_COST_EXCEEDED', cost: 1600, maxCost: 1000 } }],
+      }),
+    });
+    const errore = await client().getOrderShippingFacts(['1']).catch((e) => e);
+    expect(errore).toBeInstanceOf(ShopifyRequestError);
+    expect(errore.graphqlCode).toBe('MAX_COST_EXCEEDED');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('nessun id: nessuna chiamata', async () => {

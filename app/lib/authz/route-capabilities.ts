@@ -322,6 +322,7 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
   'webhooks.products.create': { guard: 'open', reason: WEBHOOK },
   'webhooks.products.delete': { guard: 'open', reason: WEBHOOK },
   'webhooks.products.update': { guard: 'open', reason: WEBHOOK },
+  'webhooks.returns': { guard: 'open', reason: WEBHOOK },
 };
 
 /**

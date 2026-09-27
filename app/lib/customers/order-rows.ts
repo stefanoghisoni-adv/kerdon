@@ -122,8 +122,9 @@ export interface ShopifyOrder {
    */
   shipping_method?: string | null;
   /**
-   * I pacchi partiti: i tracking distinti di ogni spedizione partita, uno per
-   * spedizione senza tracking (vedi countShippedPackages). Serve al costo per
+   * I pacchi partiti: i tracking distinti di ogni spedizione, qualunque stato
+   * (il tracking fa fede), piu' uno per ogni spedizione SUCCESS/OPEN/PENDING
+   * senza tracking (vedi countShippedPackages). Serve al costo per
    * pacco; assente vale NULL, e un ordine spedito senza conteggio paga un
    * pacco (effectivePackageCount).
    */

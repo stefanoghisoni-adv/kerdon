@@ -35,7 +35,7 @@ import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ClaimedWebhookEvent } from './inbox.server';
 import type { WebhookOutcome } from './inbox-model';
-import { readOrderTrigger, type OrderTrigger } from './trigger';
+import { readOrderTrigger, readReturnId, type OrderTrigger } from './trigger';
 
 /** Com'e' finita, in una forma sola per tutti e tre i canali. */
 interface OrderWebhookOutcome {
@@ -475,4 +475,62 @@ export async function handleOrderDelete(
     `[webhook orders/delete] ${JSON.stringify({ shop: shopDomain, order: orderId, status: 'completed' })}`,
   );
   return 'done';
+}
+
+/**
+ * Un reso approvato, rifiutato, annullato, chiuso o riaperto.
+ *
+ * Il reso cambia il costo dell'ordine (il rientro si paga solo con un reso
+ * OPEN o CLOSED, vedi qualifyingReturnAt) ma Shopify non promette di toccare
+ * `updated_at` dell'ordine: senza questi topic un reso annullato restava a
+ * costo finche' l'ordine non cambiava per altre ragioni. Il lavoro e' quello
+ * degli ordini, e passa di li': si rilegge l'ordine e lo si riscrive, con la
+ * stessa posta in arrivo, la stessa policy e gli stessi ritentativi.
+ *
+ * Se la busta non nominava l'ordine, lo si ricava dal reso con una lettura.
+ */
+export async function handleReturnEvent(
+  event: ClaimedWebhookEvent,
+  now: Date = new Date(),
+): Promise<WebhookOutcome> {
+  if (readOrderTrigger(event.payload)) return handleOrderUpsert(event, now);
+
+  const returnId = readReturnId(event.payload);
+  if (returnId === null) {
+    await saveOrderWebhookOutcome(null, {
+      shopDomain: event.shopDomain,
+      orderId: null,
+      outcome: 'skipped',
+      detail: 'payload del reso senza id ordine ne reso',
+    });
+    return 'dead_letter';
+  }
+
+  const shop = await prisma.shop.findUnique({ where: { shopDomain: event.shopDomain } });
+  if (!shop) {
+    await saveOrderWebhookOutcome(null, {
+      shopDomain: event.shopDomain,
+      orderId: null,
+      outcome: 'skipped',
+      detail: ORDER_SKIP_DETAIL.unknown_shop,
+    });
+    return 'done';
+  }
+
+  const client = await ShopifyAPIClient.forShop(shop.shopDomain);
+  const orderId = await client.getReturnOrderId(returnId);
+  if (orderId === null) {
+    await saveOrderWebhookOutcome(shop.id, {
+      shopDomain: event.shopDomain,
+      orderId: null,
+      outcome: 'skipped',
+      detail: `reso ${returnId} non piu leggibile su Shopify`,
+    });
+    return 'done';
+  }
+
+  return handleOrderUpsert(
+    { ...event, payload: { orderId, customerId: null, externalId: null } satisfies OrderTrigger },
+    now,
+  );
 }

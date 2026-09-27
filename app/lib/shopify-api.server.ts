@@ -263,11 +263,9 @@ interface GqlOrder extends GqlLogisticsNode {
   lineItems: GqlConnection<GqlOrderLineItem>;
   // I campi di spedizione. Tutti facoltativi: una risposta che non li porta
   // (un finto nei test, un ordine letto con una query vecchia) non deve
-  // rompere la mappatura. Spedizioni, resi e shipping line (in
-  // GqlLogisticsNode) assenti valgono "sconosciuti", non zero: vedi
-  // order-logistics-facts.
-  displayFulfillmentStatus?: string | null;
-  shippingAddress?: { countryCodeV2: string | null } | null;
+  // rompere la mappatura. Stato di evasione, indirizzo, spedizioni, resi e
+  // shipping line (in GqlLogisticsNode) assenti valgono "sconosciuti", non
+  // zero: vedi order-logistics-facts.
   /** UnsignedInt64, in grammi: in JSON arriva come stringa. */
   totalWeight?: string | number | null;
   metafield?: { value: string | null } | null;
@@ -286,8 +284,6 @@ function orderNodeFields(lineItemsFirst: number): string {
     id name createdAt updatedAt cancelledAt displayFinancialStatus
     currentTotalPriceSet { shopMoney { amount currencyCode } }
     customer { id firstName lastName }
-    displayFulfillmentStatus
-    shippingAddress { countryCodeV2 }
     totalWeight
     metafield(namespace: "custom", key: "packaging_category") { value }
     ${LOGISTICS_FACTS_FIELDS}
@@ -305,21 +301,20 @@ function orderNodeFields(lineItemsFirst: number): string {
  * algoritmo del recupero dello storico (getOrderShippingFacts): vedi li' le
  * regole, e perche' "sconosciuto" non diventa mai zero.
  *
- * Il tracking vince sullo stato: un ordine reso Shopify lo mostra RESTOCKED, ma
- * il pacco all'andata e' partito e il corriere l'ha fatturato. Se non si
- * guardasse il tracking, il reso cancellerebbe il costo dell'andata proprio
- * nell'ordine che e' costato di piu'.
+ * Un ordine partito vince sullo stato: un ordine reso Shopify lo mostra
+ * RESTOCKED, ma il pacco all'andata e' partito e il corriere l'ha fatturato.
+ * Partito vuol dire un tracking su una spedizione qualsiasi (il tracking fa
+ * fede, anche su una spedizione poi annullata: il pacco e' arrivato al
+ * corriere) o una spedizione SUCCESS/OPEN/PENDING. Vedi package-count.
  *
  * Il peso viene arrotondato all'intero: Shopify lo dichiara in grammi, e
  * `total_weight_grams` e' INTEGER. Un valore non numerico resta NULL — il costo
  * ripiega sul peso di default per articolo — invece di diventare zero.
  *
  * `logistics_unknown` elenca le colonne che non si sono potute leggere: chi
- * scrive le lascia com'erano (vedi orderToRows). Il paese e' fra queste solo in
- * un caso che non ammette dubbi: indirizzo nullo su un ordine con un tracking.
- * Un indirizzo nullo da solo e' un dato vero (ritiro in negozio, digitale);
- * accanto a un pacco tracciato vuol dire che l'indirizzo e' stato oscurato
- * (Protected Customer Data), e scrivere NULL azzererebbe la spedizione.
+ * scrive le lascia com'erano (vedi orderToRows). Per il paese la regola e' in
+ * deriveOrderLogisticsFacts: un indirizzo nullo e' oscurato solo su un ordine
+ * che deve viaggiare con una consegna vera.
  */
 function mapOrderLogistics(o: GqlOrder): Pick<
   ShopifyOrder,
@@ -338,9 +333,10 @@ function mapOrderLogistics(o: GqlOrder): Pick<
     ignote.add('package_count');
     ignote.add('fulfillment_status');
   }
+  if (fatti.unknown.includes('fulfillmentStatus')) ignote.add('fulfillment_status');
   if (fatti.unknown.includes('returns')) ignote.add('returned_at');
   if (fatti.unknown.includes('shippingLines')) ignote.add('shipping_method');
-  if (o.shippingAddress == null && fatti.tracked === true) ignote.add('shipping_country_code');
+  if (fatti.unknown.includes('shippingAddress')) ignote.add('shipping_country_code');
 
   if (ignote.size > 0) {
     console.warn(
@@ -351,8 +347,8 @@ function mapOrderLogistics(o: GqlOrder): Pick<
   const peso = o.totalWeight == null ? NaN : Number(o.totalWeight);
 
   return {
-    fulfillment_status: fatti.tracked ? 'FULFILLED' : (o.displayFulfillmentStatus ?? null),
-    shipping_country_code: o.shippingAddress?.countryCodeV2 ?? null,
+    fulfillment_status: fatti.fulfillmentStatus,
+    shipping_country_code: fatti.countryCode,
     total_weight_grams: Number.isFinite(peso) ? Math.round(peso) : null,
     returned_at: fatti.returnedAt,
     packaging_category: o.metafield?.value || null,
@@ -692,7 +688,12 @@ export class ShopifyAPIClient {
           ? 'INTERNAL_SERVER_ERROR'
           : serialized.includes('THROTTLED')
             ? 'THROTTLED'
-            : null,
+            : // Query troppo cara per il tetto per query: rifarla uguale non
+              // cambia niente (retryDelay non la ritenta), la si rifa' piu'
+              // piccola. Il codice serve a chi chiama per riconoscerla.
+              serialized.includes('MAX_COST_EXCEEDED')
+              ? 'MAX_COST_EXCEEDED'
+              : null,
       );
     }
 
@@ -1007,6 +1008,7 @@ export class ShopifyAPIClient {
       { ids: ids.map((id) => `gid://shopify/Order/${id}`) },
     );
     const costo = this.ultimoCosto?.requestedQueryCost;
+    console.debug(`[shopify-api] fatti di spedizione per ${ids.length} ordini: costo richiesto ${costo ?? 'n/d'}`);
 
     const nodi = data.nodes ?? [];
     for (let i = 0; i < ids.length; i++) {
@@ -1029,6 +1031,18 @@ export class ShopifyAPIClient {
 
     await this.attendiSerbatoioPer(costo);
     return fatti;
+  }
+
+  /**
+   * L'ordine di un reso, per i webhook dei resi la cui busta non lo nomina.
+   * null se il reso non si trova piu'.
+   */
+  async getReturnOrderId(returnId: number): Promise<number | null> {
+    const data = await this.graphql<{ return: { order: { id: string } | null } | null }>(
+      `query ReturnOrder($id: ID!) { return(id: $id) { order { id } } }`,
+      { id: `gid://shopify/Return/${returnId}` },
+    );
+    return gidToId(data.return?.order?.id);
   }
 
   /**

@@ -124,6 +124,27 @@ describe('cosa si conserva di un ordine', () => {
     expect(conservato).not.toContain('anna@esempio.it');
   });
 
+  it('un reso nomina l ordine, non se stesso', () => {
+    expect(WORK_KIND_BY_TOPIC['returns/cancel']).toBe('order.return');
+    expect(distillTrigger('returns/cancel', { id: 9101, order: { id: 5001 } })).toEqual({
+      orderId: 5001,
+      customerId: null,
+      externalId: null,
+    });
+    // Solo il gid dell'ordine: basta quello.
+    expect(
+      distillTrigger('returns/close', { id: 9101, order: { admin_graphql_api_id: 'gid://shopify/Order/5002' } }),
+    ).toMatchObject({ orderId: 5002 });
+  });
+
+  it('un reso senza l ordine conserva il reso, da cui ricavarlo; senza nemmeno quello, niente', () => {
+    expect(distillTrigger('returns/approve', { id: 9101 })).toEqual({ returnId: 9101 });
+    expect(distillTrigger('returns/approve', { admin_graphql_api_id: 'gid://shopify/Return/9102' })).toEqual({
+      returnId: 9102,
+    });
+    expect(distillTrigger('returns/approve', { status: 'open' })).toBeNull();
+  });
+
   it('un rimborso nomina l ordine, non se stesso', () => {
     // La busta di `refunds/create` porta l'id del RIMBORSO in cima e quello
     // dell'ordine in `order_id`: prendere il primo vorrebbe dire rileggere un

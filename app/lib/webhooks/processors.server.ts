@@ -23,7 +23,7 @@ import { handleAppUninstalled } from './handle-uninstall.server';
 import { handleSubscriptionUpdate } from './handle-subscription-update.server';
 import { handleProductUpsert, handleProductDelete } from './handle-product.server';
 import { handleCustomerUpsert, handleCustomerDelete } from './handle-customer.server';
-import { handleOrderUpsert, handleOrderDelete } from './handle-order.server';
+import { handleOrderUpsert, handleOrderDelete, handleReturnEvent } from './handle-order.server';
 
 export const WEBHOOK_PROCESSORS: Record<WebhookTopic, WebhookProcessor> = {
   'app/uninstalled': handleAppUninstalled,
@@ -38,4 +38,10 @@ export const WEBHOOK_PROCESSORS: Record<WebhookTopic, WebhookProcessor> = {
   'orders/updated': handleOrderUpsert,
   'refunds/create': handleOrderUpsert,
   'orders/delete': handleOrderDelete,
+  // I resi: stesso lavoro degli ordini, l'ordine si rilegge e si riscrive.
+  'returns/approve': handleReturnEvent,
+  'returns/decline': handleReturnEvent,
+  'returns/cancel': handleReturnEvent,
+  'returns/close': handleReturnEvent,
+  'returns/reopen': handleReturnEvent,
 };

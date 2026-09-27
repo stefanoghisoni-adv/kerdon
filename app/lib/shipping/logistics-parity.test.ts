@@ -56,12 +56,15 @@ const nodo = (over: Record<string, unknown> = {}) => ({
   currentTotalPriceSet: { shopMoney: { amount: '120.00', currencyCode: 'EUR' } },
   customer: null,
   displayFulfillmentStatus: 'FULFILLED',
+  requiresShipping: true,
   shippingAddress: { countryCodeV2: 'IT' },
   totalWeight: '3000',
   metafield: { value: 'Scatola M' },
   fulfillments: [
     { status: 'SUCCESS', trackingInfo: [{ number: 'BRT1' }, { number: 'BRT2' }, { number: 'BRT3' }, { number: 'BRT1' }] },
-    { status: 'CANCELLED', trackingInfo: [{ number: 'BRT9' }] },
+    // Annullata prima di prendere un tracking: nessun pacco. (Con un tracking
+    // conterebbe: il tracking fa fede, vedi package-count.)
+    { status: 'CANCELLED', trackingInfo: [] },
   ],
   returns: {
     pageInfo: { hasNextPage: false, endCursor: null },
@@ -173,5 +176,25 @@ describe('parita\' fra sincronizzazione, recupero e ricalcolo', () => {
     expect(dopo.order.logistics_cost).toBe(14.7);
     // Il ricalcolo sulla riga salvata dopo l'annullamento: niente rientro.
     expect(computeLogisticsCost(storedOrderToLogisticsInput(salvata(dopo)), CONFIG).total).toBe(14.7);
+  });
+
+  it('il tracking fa fede allo stesso modo in tutte le strade: annullata con BRT9 = spedito, un pacco', async () => {
+    const soloAnnullata = nodo({
+      displayFulfillmentStatus: 'UNFULFILLED',
+      fulfillments: [{ status: 'CANCELLED', trackingInfo: [{ number: 'BRT9' }] }],
+      returns: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+    });
+    (global.fetch as any)
+      .mockResolvedValueOnce(ok({ order: soloAnnullata }))
+      .mockResolvedValueOnce(ok({ nodes: [soloAnnullata] }));
+
+    const scritto = orderToRows((await client().getOrderById(4242))!, new Date(), CONFIG)!;
+    const fatti = (await client().getOrderShippingFacts(['4242'])).get('4242')!;
+
+    expect(scritto.order).toMatchObject({ fulfillment_status: 'FULFILLED', package_count: 1 });
+    expect(fatti).toMatchObject({ fulfillmentStatus: 'FULFILLED', packageCount: 1 });
+    // 1 x 4,50 + 1,20 di scatola, nessun reso.
+    expect(scritto.order.logistics_cost).toBe(5.7);
+    expect(computeLogisticsCost(storedOrderToLogisticsInput(salvata(scritto)), CONFIG).total).toBe(5.7);
   });
 });

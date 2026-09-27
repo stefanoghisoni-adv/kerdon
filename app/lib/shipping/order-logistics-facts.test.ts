@@ -13,6 +13,9 @@ import {
 } from './order-logistics-facts';
 
 const base = {
+  displayFulfillmentStatus: 'UNFULFILLED',
+  requiresShipping: true,
+  shippingAddress: { countryCodeV2: 'IT' },
   fulfillments: [],
   returns: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
   shippingLines: { nodes: [{ title: 'Express' }] },
@@ -61,7 +64,9 @@ describe('deriveOrderLogisticsFacts', () => {
     });
     expect(fatti).toEqual({
       packageCount: 3,
-      tracked: true,
+      shipped: true,
+      fulfillmentStatus: 'FULFILLED',
+      countryCode: 'IT',
       returnedAt: '2026-08-10T00:00:00Z',
       shippingMethod: 'Express',
       unknown: [],
@@ -81,17 +86,87 @@ describe('deriveOrderLogisticsFacts', () => {
     expect(deriveOrderLogisticsFacts({ ...base, shippingLines: { nodes: [{ title: '' }] } })).toMatchObject({ shippingMethod: null, unknown: [] });
   });
 
-  it('il tracking di una spedizione annullata vale ancora come "partito" per lo stato, come prima', () => {
-    const fatti = deriveOrderLogisticsFacts({ ...base, fulfillments: [{ status: 'CANCELLED', trackingInfo: [{ number: 'X' }] }] });
-    expect(fatti.tracked).toBe(true);
+  it('il tracking fa fede: CANCELLED con tracking BRT9 e\' spedito, un pacco', () => {
+    const fatti = deriveOrderLogisticsFacts({
+      ...base,
+      displayFulfillmentStatus: 'UNFULFILLED',
+      fulfillments: [{ status: 'CANCELLED', trackingInfo: [{ number: 'BRT9' }] }],
+    });
+    expect(fatti.shipped).toBe(true);
+    expect(fatti.packageCount).toBe(1);
+    expect(fatti.fulfillmentStatus).toBe('FULFILLED');
+  });
+
+  it('CANCELLED senza tracking: zero pacchi, e da solo non rende spedito l ordine', () => {
+    const fatti = deriveOrderLogisticsFacts({
+      ...base,
+      displayFulfillmentStatus: 'UNFULFILLED',
+      fulfillments: [{ status: 'CANCELLED', trackingInfo: [] }],
+    });
+    expect(fatti.shipped).toBe(false);
     expect(fatti.packageCount).toBe(0);
+    expect(fatti.fulfillmentStatus).toBe('UNFULFILLED');
+  });
+
+  it('ERROR con due tracking distinti: due pacchi', () => {
+    const fatti = deriveOrderLogisticsFacts({
+      ...base,
+      fulfillments: [{ status: 'ERROR', trackingInfo: [{ number: 'X' }, { number: 'Y' }] }],
+    });
+    expect(fatti.packageCount).toBe(2);
+    expect(fatti.shipped).toBe(true);
+  });
+
+  it('spedito vince sullo stato di Shopify (reso, RESTOCKED)', () => {
+    const fatti = deriveOrderLogisticsFacts({
+      ...base,
+      displayFulfillmentStatus: 'RESTOCKED',
+      fulfillments: [{ status: 'SUCCESS', trackingInfo: [] }],
+    });
+    expect(fatti.fulfillmentStatus).toBe('FULFILLED');
+  });
+
+  describe('il paese: nullo da solo non e\' oscurato', () => {
+    const senzaIndirizzo = { ...base, shippingAddress: null };
+
+    it('niente da spedire: nessun paese, dato noto', () => {
+      const f = deriveOrderLogisticsFacts({ ...senzaIndirizzo, requiresShipping: false });
+      expect(f.countryCode).toBeNull();
+      expect(f.unknown).toEqual([]);
+    });
+
+    it('da spedire, con una consegna vera e senza indirizzo: oscurato, anche senza tracking', () => {
+      const f = deriveOrderLogisticsFacts({
+        ...senzaIndirizzo,
+        shippingLines: { nodes: [{ title: 'Express', deliveryCategory: 'shipping' }] },
+      });
+      expect(f.unknown).toEqual(['shippingAddress']);
+    });
+
+    it('da spedire ma ritiro in negozio, o vendita in cassa senza shipping line: nessun paese, dato noto', () => {
+      expect(
+        deriveOrderLogisticsFacts({
+          ...senzaIndirizzo,
+          shippingLines: { nodes: [{ title: 'Ritiro', deliveryCategory: 'pick-up' }] },
+        }).unknown,
+      ).toEqual([]);
+      expect(deriveOrderLogisticsFacts({ ...senzaIndirizzo, shippingLines: { nodes: [] } }).unknown).toEqual([]);
+    });
+
+    it('requiresShipping nullo, o shipping line illeggibili: non si decide', () => {
+      expect(deriveOrderLogisticsFacts({ ...senzaIndirizzo, requiresShipping: null }).unknown).toEqual(['shippingAddress']);
+      expect(deriveOrderLogisticsFacts({ ...senzaIndirizzo, shippingLines: null }).unknown).toEqual([
+        'shippingLines',
+        'shippingAddress',
+      ]);
+    });
   });
 
   describe('campi oscurati o assenti: sconosciuti, mai zero', () => {
     it('spedizioni nulle (la lista e\' non nulla nello schema): pacchi e tracking sconosciuti', () => {
       const fatti = deriveOrderLogisticsFacts({ ...base, fulfillments: null });
       expect(fatti.packageCount).toBeNull();
-      expect(fatti.tracked).toBeNull();
+      expect(fatti.shipped).toBeNull();
       expect(fatti.unknown).toEqual(['fulfillments']);
     });
 
@@ -124,8 +199,12 @@ describe('deriveOrderLogisticsFacts', () => {
       expect(deriveOrderLogisticsFacts({ ...base, shippingLines: { nodes: [{ title: null }] } }).unknown).toEqual(['shippingLines']);
     });
 
+    it('stato di evasione nullo senza un tracking che decida: sconosciuto', () => {
+      expect(deriveOrderLogisticsFacts({ ...base, displayFulfillmentStatus: null }).unknown).toEqual(['fulfillmentStatus']);
+    });
+
     it('campi assenti del tutto (query che non li chiede): sconosciuti', () => {
-      expect(deriveOrderLogisticsFacts({}).unknown).toEqual(['fulfillments', 'returns', 'shippingLines']);
+      expect(deriveOrderLogisticsFacts({}).unknown).toEqual(['fulfillments', 'returns', 'shippingLines', 'shippingAddress']);
     });
   });
 });
@@ -136,6 +215,9 @@ describe('la query dei fatti logistici', () => {
     expect(LOGISTICS_FACTS_FIELDS).toContain(
       `returns(first: ${RETURNS_FIRST}) { pageInfo { hasNextPage endCursor } nodes { status createdAt } }`,
     );
-    expect(LOGISTICS_FACTS_FIELDS).toContain('shippingLines(first: 1) { nodes { title } }');
+    expect(LOGISTICS_FACTS_FIELDS).toContain('shippingLines(first: 1) { nodes { title deliveryCategory } }');
+    for (const campo of ['displayFulfillmentStatus', 'requiresShipping', 'shippingAddress { countryCodeV2 }']) {
+      expect(LOGISTICS_FACTS_FIELDS).toContain(campo);
+    }
   });
 });

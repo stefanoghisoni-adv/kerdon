@@ -346,8 +346,9 @@ END $$;
  * senza conteggio paga un pacco.
  *
  * La 15 porta sugli ordini `logistics_facts_version`: con quale algoritmo
- * sono stati ricavati pacchi e reso. Le regole sono cambiate (pacchi dai
- * tracking distinti di ogni spedizione, reso solo se OPEN o CLOSED, nessun
+ * sono stati ricavati pacchi e reso. Le regole sono cambiate (il tracking fa
+ * fede: pacchi dai tracking distinti di ogni spedizione, qualunque stato;
+ * reso solo se OPEN o CLOSED; nessun
  * troncamento silenzioso), e gli ordini gia' salvati portano i valori delle
  * regole vecchie. Solo una colonna, quindi nessun passo esplicito: il
  * ricalcolo dello storico lo fa il recupero da Shopify che l'aggiornamento

@@ -24,10 +24,18 @@
 // - `shippingLines` (ShippingLineConnection!) o i suoi `nodes` nulli, o un
 //   titolo (String!) nullo: opzione sconosciuta. Una stringa vuota invece e'
 //   un dato: nessuna opzione.
+// - `displayFulfillmentStatus` (non nullo) mancante, quando le spedizioni non
+//   dicono gia' che l'ordine e' partito: stato di evasione sconosciuto.
+// - `shippingAddress` e' nullabile per davvero (ritiro in negozio, cassa,
+//   digitale), quindi nullo da solo non dice niente. Diventa "sconosciuto"
+//   solo quando l'ordine dichiara di dover viaggiare (`requiresShipping`,
+//   Boolean!) e ha una shipping line che non e' un ritiro: li' un indirizzo
+//   ci deve essere, e se manca e' oscurato (Protected Customer Data).
+//   `requiresShipping` nullo e' anch'esso oscurato: sconosciuto.
 // Un errore GraphQL vero (`errors` nella risposta) non arriva fin qui: il
 // client solleva, e non si scrive niente.
 
-import { countShippedPackages, type FulfillmentLike } from './package-count';
+import { countShippedPackages, orderShipped, type FulfillmentLike } from './package-count';
 
 /**
  * Spedizioni chieste nella query d'elenco e nel lotto del recupero.
@@ -53,16 +61,26 @@ export const RETURNS_FIRST = 5;
  * il recupero dello storico rilegge una volta sola gli ordini scritti con una
  * versione precedente (o senza versione).
  *
- * 1: pacchi dai tracking distinti per spedizione, reso solo se OPEN o CLOSED
- *    (data del primo), nessun troncamento silenzioso.
+ * 1: il tracking fa fede (tracking distinti per spedizione, qualunque stato;
+ *    senza tracking un pacco solo se SUCCESS/OPEN/PENDING), reso solo se OPEN
+ *    o CLOSED (data del primo), nessun troncamento silenzioso.
  */
 export const LOGISTICS_FACTS_VERSION = 1;
 
 /** I campi GraphQL che servono ai fatti, uguali per ogni strada. */
 export const LOGISTICS_FACTS_FIELDS = `
+    displayFulfillmentStatus
+    requiresShipping
+    shippingAddress { countryCodeV2 }
     fulfillments(first: ${FULFILLMENTS_FIRST}) { status trackingInfo { number } }
     returns(first: ${RETURNS_FIRST}) { pageInfo { hasNextPage endCursor } nodes { status createdAt } }
-    shippingLines(first: 1) { nodes { title } }`;
+    shippingLines(first: 1) { nodes { title deliveryCategory } }`;
+
+/**
+ * La categoria di consegna di un ritiro (ShippingLine.deliveryCategory). Un
+ * ordine da ritirare non ha indirizzo di spedizione, e non per oscuramento.
+ */
+const RITIRO = 'pick-up';
 
 export interface GqlReturnNode {
   status: string | null;
@@ -76,16 +94,36 @@ export interface GqlLogisticsNode {
     pageInfo?: { hasNextPage: boolean; endCursor: string | null } | null;
     nodes: ReadonlyArray<GqlReturnNode> | null;
   } | null;
-  shippingLines?: { nodes: ReadonlyArray<{ title: string | null }> | null } | null;
+  shippingLines?: {
+    nodes: ReadonlyArray<{ title: string | null; deliveryCategory?: string | null }> | null;
+  } | null;
+  displayFulfillmentStatus?: string | null;
+  requiresShipping?: boolean | null;
+  shippingAddress?: { countryCodeV2: string | null } | null;
 }
 
-export type LogisticsFactField = 'fulfillments' | 'returns' | 'shippingLines';
+export type LogisticsFactField =
+  | 'fulfillments'
+  | 'fulfillmentStatus'
+  | 'returns'
+  | 'shippingLines'
+  | 'shippingAddress';
 
 export interface OrderLogisticsFacts {
   /** Pacchi partiti; null = sconosciuto. */
   packageCount: number | null;
-  /** Almeno un numero di tracking su una spedizione qualsiasi; null = sconosciuto. */
-  tracked: boolean | null;
+  /**
+   * L'ordine e' partito (orderShipped): una spedizione con un tracking,
+   * qualunque stato, o una SUCCESS/OPEN/PENDING. null = sconosciuto.
+   */
+  shipped: boolean | null;
+  /**
+   * Lo stato di evasione da scrivere: 'FULFILLED' se l'ordine e' partito,
+   * altrimenti quello che mostra Shopify. null se sconosciuto (vedi `unknown`).
+   */
+  fulfillmentStatus: string | null;
+  /** Il paese di spedizione; null se non c'e' (o se sconosciuto: vedi `unknown`). */
+  countryCode: string | null;
   /** Data del primo reso OPEN o CLOSED, null se non ce n'e' (o se sconosciuto: vedi `unknown`). */
   returnedAt: string | null;
   /** Titolo della prima shipping line, null se non c'e' (o se sconosciuto: vedi `unknown`). */
@@ -137,12 +175,24 @@ export function deriveOrderLogisticsFacts(o: GqlLogisticsNode): OrderLogisticsFa
   const unknown: LogisticsFactField[] = [];
 
   let packageCount: number | null = null;
-  let tracked: boolean | null = null;
+  let shipped: boolean | null = null;
   if (spedizioniLeggibili(o.fulfillments)) {
     packageCount = countShippedPackages(o.fulfillments);
-    tracked = o.fulfillments.some((f) => (f?.trackingInfo ?? []).some((t) => !!t?.number?.trim()));
+    shipped = orderShipped(o.fulfillments);
   } else {
     unknown.push('fulfillments');
+  }
+
+  // Partito vince sullo stato di Shopify: un ordine reso torna RESTOCKED, ma
+  // il pacco all'andata e' partito e il corriere l'ha fatturato. Lo stesso per
+  // una spedizione annullata dopo aver preso il tracking (il tracking fa fede:
+  // vedi package-count). Se non e' partito vale lo stato di Shopify.
+  let fulfillmentStatus: string | null = null;
+  if (shipped === true) {
+    fulfillmentStatus = 'FULFILLED';
+  } else if (shipped === false) {
+    if (typeof o.displayFulfillmentStatus === 'string') fulfillmentStatus = o.displayFulfillmentStatus;
+    else unknown.push('fulfillmentStatus');
   }
 
   let returnedAt: string | null = null;
@@ -159,7 +209,8 @@ export function deriveOrderLogisticsFacts(o: GqlLogisticsNode): OrderLogisticsFa
 
   let shippingMethod: string | null = null;
   const righe = o.shippingLines?.nodes;
-  if (!Array.isArray(righe) || (righe.length > 0 && typeof righe[0]?.title !== 'string')) {
+  const righeLette = Array.isArray(righe) && !(righe.length > 0 && typeof righe[0]?.title !== 'string');
+  if (!righeLette) {
     unknown.push('shippingLines');
   } else {
     // La prima riga decide: il costo si abbina a un'opzione sola, e un ordine
@@ -168,7 +219,23 @@ export function deriveOrderLogisticsFacts(o: GqlLogisticsNode): OrderLogisticsFa
     shippingMethod = righe[0]?.title || null;
   }
 
-  return { packageCount, tracked, returnedAt, shippingMethod, unknown };
+  let countryCode: string | null = null;
+  if (o.shippingAddress != null) {
+    countryCode = o.shippingAddress.countryCodeV2 ?? null;
+  } else if (o.requiresShipping === false) {
+    // Niente da spedire (digitale, servizi): l'indirizzo manca davvero.
+  } else if (o.requiresShipping !== true || !righeLette) {
+    // Non si sa se l'ordine deve viaggiare, o come: non si decide.
+    unknown.push('shippingAddress');
+  } else {
+    // Deve viaggiare. Senza shipping line (vendita in cassa) o con un ritiro
+    // l'indirizzo non c'e' per davvero; con una consegna vera deve esserci.
+    const prima = righe![0];
+    const senzaIndirizzo = !prima || prima.deliveryCategory === RITIRO;
+    if (!senzaIndirizzo) unknown.push('shippingAddress');
+  }
+
+  return { packageCount, shipped, fulfillmentStatus, countryCode, returnedAt, shippingMethod, unknown };
 }
 
 /**
@@ -178,6 +245,8 @@ export function deriveOrderLogisticsFacts(o: GqlLogisticsNode): OrderLogisticsFa
  * - `method`: '' = nessuna opzione (sentinella), null = sconosciuta.
  * - `packageCount`: null = sconosciuto.
  * - `returnedAt` vale solo con `returnsKnown`.
+ * - `fulfillmentStatus`: null = sconosciuto (lo schema lo dichiara non nullo).
+ * - `countryCode` vale solo con `countryKnown` (null = nessun indirizzo).
  */
 export interface OrderShippingFacts {
   found: boolean;
@@ -185,6 +254,9 @@ export interface OrderShippingFacts {
   packageCount: number | null;
   returnedAt: string | null;
   returnsKnown: boolean;
+  fulfillmentStatus: string | null;
+  countryCode: string | null;
+  countryKnown: boolean;
 }
 
 export const ORDINE_NON_TROVATO: OrderShippingFacts = {
@@ -193,15 +265,34 @@ export const ORDINE_NON_TROVATO: OrderShippingFacts = {
   packageCount: null,
   returnedAt: null,
   returnsKnown: false,
+  fulfillmentStatus: null,
+  countryCode: null,
+  countryKnown: false,
 };
+
+/** Tutti i fatti letti: l'ordine si puo' dichiarare rifatto con la versione corrente. */
+export function allFactsKnown(f: OrderShippingFacts): boolean {
+  return (
+    f.found &&
+    f.method !== null &&
+    f.packageCount !== null &&
+    f.returnsKnown &&
+    f.fulfillmentStatus !== null &&
+    f.countryKnown
+  );
+}
 
 /** Dai fatti derivati alla forma del recupero. */
 export function toShippingFacts(f: OrderLogisticsFacts): OrderShippingFacts {
+  const ignoto = (c: LogisticsFactField) => f.unknown.includes(c);
   return {
     found: true,
-    method: f.unknown.includes('shippingLines') ? null : (f.shippingMethod ?? ''),
-    packageCount: f.unknown.includes('fulfillments') ? null : f.packageCount,
-    returnedAt: f.unknown.includes('returns') ? null : f.returnedAt,
-    returnsKnown: !f.unknown.includes('returns'),
+    method: ignoto('shippingLines') ? null : (f.shippingMethod ?? ''),
+    packageCount: ignoto('fulfillments') ? null : f.packageCount,
+    returnedAt: ignoto('returns') ? null : f.returnedAt,
+    returnsKnown: !ignoto('returns'),
+    fulfillmentStatus: ignoto('fulfillments') || ignoto('fulfillmentStatus') ? null : f.fulfillmentStatus,
+    countryCode: ignoto('shippingAddress') ? null : f.countryCode,
+    countryKnown: !ignoto('shippingAddress'),
   };
 }

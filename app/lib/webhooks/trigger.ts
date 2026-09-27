@@ -60,7 +60,8 @@ export type WebhookWorkKind =
   | 'customer.upsert'
   | 'customer.delete'
   | 'order.upsert'
-  | 'order.delete';
+  | 'order.delete'
+  | 'order.return';
 
 export const WORK_KIND_BY_TOPIC: Record<WebhookTopic, WebhookWorkKind> = {
   'app/uninstalled': 'admin',
@@ -75,6 +76,11 @@ export const WORK_KIND_BY_TOPIC: Record<WebhookTopic, WebhookWorkKind> = {
   'orders/updated': 'order.upsert',
   'refunds/create': 'order.upsert',
   'orders/delete': 'order.delete',
+  'returns/approve': 'order.return',
+  'returns/decline': 'order.return',
+  'returns/cancel': 'order.return',
+  'returns/close': 'order.return',
+  'returns/reopen': 'order.return',
 };
 
 /** Vero per i topic che parlano di una risorsa del negozio, non del negozio. */
@@ -99,6 +105,19 @@ export interface OrderTrigger {
   customerId: number | null;
   /** Il browser che ha riempito il carrello, quando il negozio lo pianta. */
   externalId: string | null;
+}
+
+/**
+ * Quel che resta di una consegna sui resi: l'ordine da rileggere, oppure, se
+ * la busta non lo nomina, il reso da cui ricavarlo.
+ */
+export type ReturnTrigger = OrderTrigger | { returnId: number };
+
+/** L'id numerico da un gid (`gid://shopify/Order/123`). */
+function idDaGid(value: unknown, tipo: string): number | null {
+  if (typeof value !== 'string') return null;
+  const m = new RegExp(`^gid://shopify/${tipo}/(\\d+)$`).exec(value);
+  return m ? toId(m[1]) : null;
 }
 
 /** Gli id REST sono numeri, ma un payload puo' darli come stringa: si accetta. */
@@ -144,6 +163,19 @@ export function distillTrigger(topic: WebhookTopic, payload: unknown): unknown {
     return customerId === null ? null : ({ customerId } satisfies CustomerTrigger);
   }
 
+  if (kind === 'order.return') {
+    // La busta di un reso porta l'id del RESO in cima e l'ordine in `order`:
+    // prendere il primo vorrebbe dire rileggere un ordine che non esiste. Se
+    // l'ordine non c'e', si conserva il reso e l'ordine si ricava rileggendolo.
+    const ordineDelReso = asRecord(corpo.order);
+    const orderId = toId(ordineDelReso?.id) ?? idDaGid(ordineDelReso?.admin_graphql_api_id, 'Order');
+    if (orderId !== null) {
+      return { orderId, customerId: null, externalId: null } satisfies OrderTrigger;
+    }
+    const returnId = toId(corpo.id) ?? idDaGid(corpo.admin_graphql_api_id, 'Return');
+    return returnId === null ? null : { returnId };
+  }
+
   const ordine = corpo as WebhookOrderPayload;
   const orderId = orderIdFromReceipt(ordine);
   if (orderId === null) return null;
@@ -179,6 +211,11 @@ export function readCustomerTrigger(payload: unknown): CustomerTrigger | null {
   const corpo = asRecord(payload);
   const customerId = toId(corpo?.customerId);
   return customerId === null ? null : { customerId };
+}
+
+/** Il reso da cui ricavare l'ordine, quando la busta non lo nominava. */
+export function readReturnId(payload: unknown): number | null {
+  return toId(asRecord(payload)?.returnId);
 }
 
 export function readOrderTrigger(payload: unknown): OrderTrigger | null {
