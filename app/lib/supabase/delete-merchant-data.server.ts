@@ -28,9 +28,13 @@ import { InvalidIdentifierError } from './identifiers';
 import {
   buildDropTransactionSQL,
   buildExistenceCheckSQL,
+  buildGuardDropSQL,
+  buildGuardExistenceSQL,
   qualifiedName,
+  remainingGuard,
   remainingResources,
   type ExistingTableRow,
+  type GuardRow,
   type ManagedResource,
 } from './managed-resources';
 import { ownedResources } from './managed-resources.server';
@@ -152,6 +156,12 @@ async function runDeletion(
     console.warn(
       `[delete-merchant-data] shop ${shopId}: nessuna risorsa registrata come nostra sul progetto ${ref}`,
     );
+    // Nessuna tabella nostra, ma il guardiano delle cancellazioni si': la DDL
+    // lo mette anche sulla `orders` che il merchant aveva gia'. Quello si
+    // toglie — ha un nome nostro, e nessuna tabella del merchant cade con lui.
+    // Senza ripiegare sull'esito: fallire qui non deve trattenere uno
+    // scollegamento che per il resto non ha niente da fare.
+    await dropGuardOnly(shopId, ref, lease);
     return { status: 'nothing_owned', attempted: [], remaining: [], retryable: false };
   }
 
@@ -265,6 +275,23 @@ async function runDeletion(
     );
   }
 
+  // E il guardiano delle cancellazioni, tolto nella stessa transazione: il
+  // registro conosce solo tabelle, e un trigger rimasto sulla `orders` del
+  // merchant — o una funzione nostra rimasta nel suo schema — e' qualcosa di
+  // nostro che non se ne e' andato.
+  let guard: GuardRow[];
+  try {
+    guard = await runQueryRows<GuardRow>(token, ref, buildGuardExistenceSQL());
+  } catch (err) {
+    return fail(
+      `verifica del trigger non riuscita: ${err instanceof Error ? err.message : 'errore sconosciuto'}`,
+      attempted,
+    );
+  }
+  if (guard.length > 0) {
+    return fail(`eliminazione incompleta: ${remainingGuard(guard).join(', ')}`, remainingGuard(guard));
+  }
+
   // Solo adesso si revoca. Prima di questa riga il merchant ha ancora tutto
   // quello che serve a riprovare; dopo, non serve piu' a niente.
   await prisma.supabaseOAuthToken.deleteMany({ where: { shopId } });
@@ -294,4 +321,26 @@ async function runDeletion(
   await clearDatabasePauseState(shopId);
 
   return { status: 'completed', attempted, remaining: [], retryable: false };
+}
+
+/**
+ * Il solo guardiano delle cancellazioni, quando di tabelle nostre non ce n'e'.
+ * Best effort e dichiarato nei log: vedi il chiamante.
+ */
+async function dropGuardOnly(shopId: string, ref: string, lease?: ShopLease): Promise<void> {
+  try {
+    const token = await getValidAccessToken(shopId);
+    await lease?.assertHeld();
+    await runQuery(token, ref, buildGuardDropSQL());
+    const rimasti = await runQueryRows<GuardRow>(token, ref, buildGuardExistenceSQL());
+    if (rimasti.length > 0) {
+      console.error(
+        `[delete-merchant-data] shop ${shopId}: trigger non tolto (${remainingGuard(rimasti).join(', ')})`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[delete-merchant-data] shop ${shopId}: trigger non tolto: ${err instanceof Error ? err.message : 'errore sconosciuto'}`,
+    );
+  }
 }

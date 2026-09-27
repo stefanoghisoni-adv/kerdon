@@ -183,7 +183,8 @@ describe('installazione completa', () => {
 
     await deleteMerchantData('shop-1');
 
-    expect(order).toEqual(['verifica', 'token via', 'config via']);
+    // Due verifiche: le tabelle, poi il trigger e la funzione del guardiano.
+    expect(order).toEqual(['verifica', 'verifica', 'token via', 'config via']);
   });
 
   it('a fine corsa lo stato e completed e la cache e stata svuotata', async () => {
@@ -229,17 +230,30 @@ describe('cosa NON e nostro non si tocca', () => {
     });
   });
 
-  it('registro vuoto: non si elimina niente e non si inventa niente', async () => {
+  it('registro vuoto: nessuna tabella si tocca, si toglie solo il nostro trigger', async () => {
     // La lettura conservativa. Eliminare "quello che di solito creiamo" su un
     // database dove non risulta che l'abbiamo creato noi e' l'errore da cui
-    // tutto questo nasce.
+    // tutto questo nasce. Il guardiano delle cancellazioni pero' e' nostro per
+    // nome, e la DDL lo mette anche sulla `orders` del merchant: quello va via.
     resourceFindMany.mockResolvedValue([]);
 
     const result = await deleteMerchantData('shop-1');
 
     expect(result.status).toBe('nothing_owned');
-    expect(runQuery).not.toHaveBeenCalled();
+    expect(runQuery).toHaveBeenCalledTimes(1);
+    expect(dropSQL()).not.toContain('DROP TABLE');
+    expect(dropSQL()).toContain('DROP TRIGGER IF EXISTS kerdon_orders_keep_redacted ON public.orders;');
+    expect(dropSQL()).toContain('DROP FUNCTION IF EXISTS public.kerdon_orders_keep_redacted();');
     expect(configUpdate).not.toHaveBeenCalled();
+  });
+
+  it('registro vuoto e trigger che non si toglie: lo scollegamento non si ferma', async () => {
+    resourceFindMany.mockResolvedValue([]);
+    runQuery.mockRejectedValueOnce(new Error('Management API giu'));
+
+    const result = await deleteMerchantData('shop-1');
+
+    expect(result.status).toBe('nothing_owned');
   });
 });
 
@@ -294,6 +308,34 @@ describe('quando qualcosa va storto', () => {
     expect(result.remaining).toEqual(['"public"."orders"']);
     expect(tokenDeleteMany).not.toHaveBeenCalled();
     expect(configDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('trigger o funzione ancora vivi dopo il COMMIT: non e un successo', async () => {
+    // Il registro conosce solo tabelle: la verifica del guardiano e' a parte,
+    // e senza di lei un trigger nostro resterebbe sulla `orders` del merchant
+    // con l'app che dichiara di aver tolto tutto.
+    runQueryRows
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ kind: 'trigger', name: 'kerdon_orders_keep_redacted' }]);
+
+    const result = await deleteMerchantData('shop-1');
+
+    expect(result.status).toBe('failed');
+    expect(result.error).toMatch(/kerdon_orders_keep_redacted/);
+    expect(tokenDeleteMany).not.toHaveBeenCalled();
+    expect(configDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('il trigger si toglie anche quando orders era del merchant', async () => {
+    // createdByKerdon = false su orders: la tabella resta, il nostro trigger no.
+    resourceFindMany.mockResolvedValue(ownedRows(['users', 'order_lines']));
+
+    const result = await deleteMerchantData('shop-1');
+
+    expect(result.status).toBe('completed');
+    expect(dropSQL()).not.toContain('"orders"');
+    expect(dropSQL()).toContain('DROP TRIGGER IF EXISTS kerdon_orders_keep_redacted ON public.orders;');
+    expect(dropSQL()).toContain('DROP FUNCTION IF EXISTS public.kerdon_orders_keep_redacted();');
   });
 
   it('verifica irraggiungibile: non sapere non e sapere di si', async () => {

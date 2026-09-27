@@ -238,6 +238,13 @@ export const ORDER_COLUMNS_CLEARED_ON_ERASURE = [
 ] as const;
 
 /**
+ * Il nome del trigger e della funzione che lo esegue: uno solo, perche' la
+ * cancellazione dei dati del merchant (supabase/managed-resources) deve
+ * togliere esattamente cio' che questa DDL crea.
+ */
+export const ORDERS_ERASURE_GUARD = 'kerdon_orders_keep_redacted';
+
+/**
  * Il guardiano delle righe cancellate, nel database del merchant.
  *
  * PERCHE' UN TRIGGER E NON UN CONTROLLO IN CHI SCRIVE. Chi scrive sugli ordini
@@ -271,7 +278,7 @@ export const ORDER_COLUMNS_CLEARED_ON_ERASURE = [
 function ordersErasureGuardSQL(): string {
   const azzera = ORDER_COLUMNS_CLEARED_ON_ERASURE.map((c) => `    NEW.${c} := NULL;`).join('\n');
   return `
-CREATE OR REPLACE FUNCTION public.kerdon_orders_keep_redacted()
+CREATE OR REPLACE FUNCTION public.${ORDERS_ERASURE_GUARD}()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = ''
@@ -288,9 +295,9 @@ ${azzera}
 END;
 $$;
 
-CREATE OR REPLACE TRIGGER kerdon_orders_keep_redacted
+CREATE OR REPLACE TRIGGER ${ORDERS_ERASURE_GUARD}
   BEFORE UPDATE ON orders
-  FOR EACH ROW EXECUTE FUNCTION public.kerdon_orders_keep_redacted();
+  FOR EACH ROW EXECUTE FUNCTION public.${ORDERS_ERASURE_GUARD}();
 `;
 }
 

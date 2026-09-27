@@ -7,7 +7,7 @@
 // di un DROP si possano provare senza avere davanti un progetto Supabase vero.
 // Chi esegue sta in `delete-merchant-data.server`.
 
-import { MERCHANT_TABLE_NAMES } from '~/lib/supabase-schema';
+import { MERCHANT_TABLE_NAMES, ORDERS_ERASURE_GUARD } from '~/lib/supabase-schema';
 import { quoteLiteral, quoteQualifiedName } from './identifiers';
 
 /** Per ora l'app crea solo tabelle. Viste e funzioni avrebbero un altro ordine. */
@@ -80,7 +80,67 @@ export function buildDropTransactionSQL(resources: readonly ManagedResource[]): 
   if (ordered.length === 0) return '';
 
   const drops = ordered.map((r) => `DROP TABLE IF EXISTS ${qualifiedName(r)};`);
-  return ['BEGIN;', ...drops, 'COMMIT;'].join('\n');
+  return ['BEGIN;', ...ERASURE_GUARD_DROPS, ...drops, 'COMMIT;'].join('\n');
+}
+
+/**
+ * Il guardiano delle cancellazioni GDPR — trigger su `orders` e funzione che
+ * lo esegue (supabase-schema, ORDERS_ERASURE_GUARD) — tolto insieme ai dati.
+ *
+ * PERCHE' QUI E NON NEL REGISTRO DELLE RISORSE. Il registro esiste per una
+ * domanda sola: "questa TABELLA l'abbiamo creata noi o c'era gia'?", e la
+ * risposta si fissa al primo collegamento guardando cosa esisteva. Per il
+ * guardiano la domanda non si pone: ha un nome nostro, lo crea soltanto la
+ * nostra DDL, e sta anche sulla tabella `orders` di un merchant che quella
+ * tabella l'aveva gia' (createdByKerdon = false). Registrarlo vorrebbe dire
+ * un secondo tipo di risorsa con un suo ordine e una sua verifica, e righe da
+ * aggiungere a posteriori per ogni negozio gia' collegato — senza le quali
+ * proprio quei negozi resterebbero col trigger. Toglierlo sempre, per nome,
+ * copre tutti.
+ *
+ * L'ORDINE conta: prima il trigger, poi la funzione (una funzione usata da un
+ * trigger non si toglie senza CASCADE, e CASCADE qui non si usa mai), e tutti
+ * e due prima delle tabelle. `IF EXISTS` anche sulla tabella del trigger:
+ * se `orders` non c'e' — mai creata, o gia' tolta a mano — Postgres avvisa e
+ * prosegue invece di annullare l'intera transazione.
+ */
+export const ERASURE_GUARD_DROPS: readonly string[] = [
+  `DROP TRIGGER IF EXISTS ${ORDERS_ERASURE_GUARD} ON public.orders;`,
+  `DROP FUNCTION IF EXISTS public.${ORDERS_ERASURE_GUARD}();`,
+];
+
+/**
+ * Il solo guardiano, quando di tabelle nostre non ce n'e' nessuna: la DDL lo
+ * crea anche su una `orders` del merchant, e scollegarsi non deve lasciare un
+ * nostro trigger a lavorare sulla sua tabella.
+ */
+export function buildGuardDropSQL(): string {
+  return ['BEGIN;', ...ERASURE_GUARD_DROPS, 'COMMIT;'].join('\n');
+}
+
+/**
+ * La verifica del guardiano, dopo il COMMIT: una riga per ogni pezzo ancora
+ * vivo. Vuoto = tolto. Si cerca il trigger su qualunque tabella, non solo su
+ * `public.orders`: un trigger rimasto altrove sarebbe comunque nostro.
+ */
+export function buildGuardExistenceSQL(): string {
+  const nome = quoteLiteral(ORDERS_ERASURE_GUARD);
+  return `SELECT 'function' AS kind, p.proname::text AS name FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public' AND p.proname = ${nome}
+UNION ALL
+SELECT 'trigger' AS kind, t.tgname::text AS name FROM pg_trigger t
+WHERE t.tgname = ${nome} AND NOT t.tgisinternal;`;
+}
+
+export interface GuardRow {
+  kind?: unknown;
+  name?: unknown;
+}
+
+/** I pezzi del guardiano che la verifica ha trovato ancora vivi, per il messaggio d'errore. */
+export function remainingGuard(rows: readonly GuardRow[]): string[] {
+  return rows.map((r) => `${String(r.kind ?? '?')} ${String(r.name ?? ORDERS_ERASURE_GUARD)}`);
 }
 
 /**
