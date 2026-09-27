@@ -43,6 +43,7 @@ import {
   type ForgetResult,
 } from './revocation-model';
 import { openSubject } from './revocation-subject.server';
+import { revokeTrackingIdentity } from './revoke-tracking.server';
 
 const ORA = new Date('2026-09-05T12:00:00.000Z');
 const VISITATORE = 'corew_1700000000000_abcdefghijklmnopqrstuvwxyz012345';
@@ -425,5 +426,67 @@ describe('le potature', () => {
 
     expect((await pruneRevocations(ORA)).subjectsPurged).toBe(0);
     expect(righe[0].subjectCipher).not.toBeNull();
+  });
+});
+
+// La vetrina ritenta la revoca finche' non vede un 2xx. Perche' quei tentativi
+// convergano, la stessa revoca chiesta due, tre, dieci volte deve rispondere
+// sempre "ok, presa in carico" — mai un segnale di ritentativo che la
+// ripetizione stessa ha provocato.
+describe('la revoca ripetuta converge', () => {
+  const chiedi = (runner: RevocationRunner, over: Record<string, unknown> = {}) =>
+    revokeTrackingIdentity({ shopId: 'negozio-1', externalId: VISITATORE, ...over }, runner);
+
+  it('la seconda revoca dello stesso identificativo e un ok, e non rifa niente', async () => {
+    const runner = vi.fn(riesce);
+    const prima = await chiedi(runner);
+    const seconda = await chiedi(runner);
+    const terza = await chiedi(runner);
+
+    expect(prima).toEqual({ outcome: 'applied', retriable: false });
+    expect(seconda).toEqual({ outcome: 'already_done', retriable: false });
+    expect(terza).toEqual({ outcome: 'already_done', retriable: false });
+    expect(runner).toHaveBeenCalledTimes(1);
+    expect(righe).toHaveLength(1);
+  });
+
+  it('un identificativo sconosciuto: niente da cancellare, ma la risposta e ok', async () => {
+    const nienteDaFare: RevocationRunner = async () => ({
+      outcome: 'forgotten',
+      steps: [
+        { step: 'customer_unlink', outcome: 'skipped' },
+        { step: 'merge_pointers', outcome: 'skipped' },
+        { step: 'user_delete', outcome: 'skipped' },
+      ],
+    });
+    const altro = 'kerdon_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+
+    expect(await chiedi(nienteDaFare, { externalId: altro })).toEqual({
+      outcome: 'applied',
+      retriable: false,
+    });
+    expect(await chiedi(nienteDaFare, { externalId: altro })).toEqual({
+      outcome: 'already_done',
+      retriable: false,
+    });
+  });
+
+  it('un primo tentativo fallito non rende la ripetizione un errore', async () => {
+    const primo = await chiedi(fallisce('user_delete'));
+    expect(primo).toEqual({ outcome: 'recorded', retriable: false });
+
+    // La vetrina richiama (per un 503 del container, per esempio): stessa riga.
+    // Il lease del primo tentativo e' ancora valido, quindi il secondo trova la
+    // riga non ancora dovuta e non la riprende: resta comunque un ok.
+    const secondo = await chiedi(riesce);
+    expect(secondo.retriable).toBe(false);
+    expect(righe).toHaveLength(1);
+  });
+
+  it('due revoche simultanee dello stesso identificativo: una riga, due ok', async () => {
+    const [a, b] = await Promise.all([chiedi(riesce), chiedi(riesce)]);
+    expect(a.retriable).toBe(false);
+    expect(b.retriable).toBe(false);
+    expect(righe).toHaveLength(1);
   });
 });

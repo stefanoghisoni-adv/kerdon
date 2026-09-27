@@ -363,6 +363,35 @@ describe('/rest/v1/tracking_id — consenso del visitatore', () => {
     expect(JSON.parse(await res.text())).toEqual([]);
   });
 
+  // La vetrina ritenta la revoca finche' non vede un 2xx: la stessa revoca
+  // ripetuta deve rispondere 200 ogni volta, altrimenti i ritentativi non
+  // convergono mai.
+  it('revoca ripetuta di un identificativo gia revocato: 200 ogni volta, mai l identificativo', async () => {
+    const existing = 'kerdon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    evaluateVisitorConsent.mockReturnValue({
+      consent: { analytics: 'denied', marketing: 'denied', preferences: 'unknown', saleOfData: 'unknown' },
+      source: 'query',
+      allowed: false,
+      withdrawn: true,
+    });
+    revokeTrackingIdentity.mockResolvedValueOnce({ outcome: 'applied', retriable: false });
+    revokeTrackingIdentity.mockResolvedValue({ outcome: 'already_done', retriable: false });
+
+    for (let i = 0; i < 3; i++) {
+      const res = await call(
+        { apikey: 'buono' },
+        `?consent=v1.a0.m0&existing_external_id=${existing}`,
+      );
+      expect(res.status).toBe(200);
+      expect(JSON.parse(await res.text())).toEqual([]);
+      expect(res.headers.get('Set-Cookie')).toContain('Max-Age=0');
+      expect(res.headers.get('Set-Cookie')).not.toContain(existing);
+      expect(res.headers.get('X-Kerdon-External-Id')).toBeNull();
+    }
+    expect(revokeTrackingIdentity).toHaveBeenCalledTimes(3);
+    expect(recordUserSeen).not.toHaveBeenCalled();
+  });
+
   it('segnale assente (unknown) vale come no, non come si', async () => {
     // Il permesso non si presume mai: assenza di segnale = nessun consenso.
     evaluateVisitorConsent.mockReturnValue({

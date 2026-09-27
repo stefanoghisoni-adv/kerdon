@@ -191,6 +191,9 @@ function writeCommonHeaders() {
   // L'intestazione dell'origine dipende da chi ha chiamato: senza questo un
   // intermediario servirebbe a tutti la copia del primo.
   setResponseHeader('vary', 'Origin');
+  // Senza, il ponte in vetrina non potrebbe leggere `Retry-After` su una
+  // chiamata cross-origin: non e' fra le intestazioni che il browser espone.
+  setResponseHeader('access-control-expose-headers', 'Retry-After');
 
   const origin = allowedOrigin();
   if (origin) {
@@ -199,11 +202,27 @@ function writeCommonHeaders() {
   }
 }
 
+/**
+ * La risposta, una volta sola.
+ *
+ * Un Client che non chiama `returnResponse` lascia la vetrina appesa fino al
+ * timeout del container, e il ponte non sa distinguere quell'attesa da un
+ * esito. Ogni ramo passa di qui, e il secondo passaggio non fa niente: un
+ * callback che arrivasse due volte non deve poter scrivere una seconda
+ * risposta sopra la prima.
+ */
+let responded = false;
+function respond(status, body) {
+  if (responded) return;
+  responded = true;
+  setResponseStatus(status);
+  setResponseBody(body);
+  returnResponse();
+}
+
 /** La risposta "non c'e' niente da darti", nella forma che PostgREST userebbe. */
 function empty() {
-  setResponseStatus(200);
-  setResponseBody('[]');
-  returnResponse();
+  respond(200, '[]');
 }
 
 function isDigits(text) {
@@ -302,8 +321,10 @@ function parseCompact(raw) {
 function parseShopifyConsent(raw) {
   if (!raw) return undefined;
 
+  // Il sandbox restituisce `undefined` su un testo malformato: un cookie rotto
+  // vale come silenzio, cioe' come no.
   const payload = JSON.parse(raw);
-  if (!payload) return undefined;
+  if (!payload || typeof payload !== 'object') return undefined;
 
   const purposes = payload.purposes;
   const cmp = payload.con ? payload.con.CMP : undefined;
@@ -483,16 +504,53 @@ function upstreamHeaders(existing) {
 
 // INVIO:FINE
 
-/** L'identificativo dentro la risposta di Kerdon: header o corpo. */
+/** Solo cifre: un `Retry-After` in secondi, l'unica forma che si inoltra. */
+function retryAfterFrom(result) {
+  const headers = result && result.headers ? result.headers : {};
+  const value = headers['retry-after'];
+  if (value && isDigits('' + value)) return '' + value;
+  return '60';
+}
+
+/**
+ * La revoca non e' stata presa in carico: 503, mai un ok.
+ *
+ * Il ponte in vetrina tiene da parte l'identificativo finche' non vede un 2xx,
+ * e riprova. Un 200 qui gli farebbe buttare l'unico riferimento con cui si puo'
+ * ancora chiedere la cancellazione. `Retry-After` quello di Kerdon se c'e',
+ * altrimenti un minuto.
+ */
+function revokeNotConfirmed(result) {
+  setResponseHeader('retry-after', retryAfterFrom(result));
+  respond(503, JSON.stringify({ error: 'revoke_not_confirmed' }));
+}
+
+/** Un 2xx, e niente altro. */
+function succeeded(result) {
+  const status = result ? result.statusCode : 0;
+  return status >= 200 && status < 300;
+}
+
+/**
+ * L'identificativo dentro la risposta di Kerdon: header o corpo.
+ *
+ * Solo da una risposta 2xx, e con il corpo trattato come ostile: `JSON.parse`
+ * del sandbox su un testo malformato restituisce `undefined`, e da li' in giu'
+ * ogni livello si controlla prima di scenderci.
+ */
 function identifierFrom(result) {
+  if (!succeeded(result)) return '';
+
   const headers = result.headers || {};
   const fromHeader = headers['x-kerdon-external-id'] || headers['x-corew-external-id'];
   if (isIdentifier(fromHeader)) return fromHeader;
 
+  if (typeof result.body !== 'string' || !result.body) return '';
   const body = JSON.parse(result.body);
-  if (!body) return '';
+  if (!body || typeof body !== 'object') return '';
   const row = body.length ? body[0] : body;
-  const value = row ? row.external_id : '';
+  if (!row || typeof row !== 'object') return '';
+  const value = row.external_id;
   return isIdentifier(value) ? value : '';
 }
 
@@ -503,9 +561,11 @@ if (!allowed) {
     empty();
   } else {
     // Revoca. Il cookie scade comunque e per primo — il tracciamento locale deve
-    // cessare nell'istante del no — e a Kerdon si dice di dimenticare, cosi'
-    // sparisce anche la riga. Se quella chiamata non riesce, il cookie resta
-    // comunque scaduto: si perde una cancellazione, non si continua a raccogliere.
+    // cessare nell'istante del no. Poi si chiede a Kerdon di cancellare la
+    // riga, e la risposta alla vetrina dice com'e' andata davvero: 200 solo se
+    // Kerdon ha risposto 2xx, 503 con `Retry-After` in ogni altro caso — rete
+    // giu', timeout, 429, 5xx, qualunque altro non-2xx. E' il ponte a tenere
+    // l'identificativo da parte e a riprovare: qui non si ricorda niente.
     plantCookie('', 0);
     // Senza un identificativo non c'e' niente da far dimenticare: si esce, e il
     // cookie resta scaduto lo stesso.
@@ -513,8 +573,16 @@ if (!allowed) {
       sendHttpGet(upstreamUrl(), {
         headers: upstreamHeaders(existing),
         timeout: 5000
-      }).then(() => {
-        empty();
+      }).then((result) => {
+        if (succeeded(result)) {
+          empty();
+        } else {
+          revokeNotConfirmed(result);
+        }
+      }, () => {
+        revokeNotConfirmed(undefined);
+      }).catch(() => {
+        revokeNotConfirmed(undefined);
       });
     } else {
       empty();
@@ -527,7 +595,8 @@ if (!allowed) {
   }).then((result) => {
     const identifier = identifierFrom(result);
     // Nessun identificativo nella risposta e' una risposta: Kerdon ha deciso
-    // di non coniare. Non e' un errore e non si insiste.
+    // di non coniare, oppure non ha risposto bene. In tutti e due i casi non si
+    // pianta niente e la vetrina riceve "nessuna riga".
     if (!identifier) {
       empty();
       return;
@@ -539,12 +608,14 @@ if (!allowed) {
     // dopo la prima volta, che sarebbe il contrario di riconoscere chi torna.
     plantCookie(identifier, data.cookieMaxAge);
 
-    setResponseStatus(200);
-    setResponseBody(JSON.stringify([{ external_id: identifier }]));
-    returnResponse();
+    respond(200, JSON.stringify([{ external_id: identifier }]));
+  }, () => {
+    // Rete giu' o timeout: nessun identificativo, nessun cookie.
+    empty();
+  }).catch(() => {
+    empty();
   });
 }
-
 
 ___SERVER_PERMISSIONS___
 
@@ -652,6 +723,14 @@ ___SERVER_PERMISSIONS___
               {
                 "type": 1,
                 "string": "X-Kerdon-External-Id"
+              },
+              {
+                "type": 1,
+                "string": "access-control-expose-headers"
+              },
+              {
+                "type": 1,
+                "string": "retry-after"
               }
             ]
           }
@@ -858,6 +937,24 @@ scenarios: []
 
 
 ___NOTES___
+
+OGNI RAMO RISPONDE, UNA VOLTA SOLA. Questo e' un Client, non un tag: non ha
+`gtmOnSuccess`/`gtmOnFailure`, e il suo "chiudere" e' `returnResponse()`. Passa
+tutto da `respond()`, che risponde una volta e ignora le successive. Alla
+revoca: 200 solo se Kerdon ha risposto 2xx; rete giu', timeout, 429, 5xx e
+qualunque altro non-2xx diventano 503 con `Retry-After` (quello di Kerdon se in
+sole cifre, altrimenti 60). Con il permesso: nessun identificativo e nessun
+cookie se la risposta non e' 2xx o il corpo non e' JSON valido.
+
+L'intero codice di questo template viene eseguito da
+`app/lib/tracking/sgtm-id-client.test.ts`, con finti delle API del sandbox.
+Resta da provare in anteprima, a mano:
+1. consenso `v1.a0.m0` + `existing_external_id` valido, indirizzo dell'API
+   irraggiungibile: risposta 503 con `retry-after` e
+   `access-control-expose-headers`, cookie `kerdon_eid` scaduto;
+2. stessa chiamata con l'API raggiungibile: 200 `[]`;
+3. consenso `v1.a1.m1` con l'API irraggiungibile: 200 `[]`, nessun cookie;
+4. nessun consenso: 200 `[]`, nessuna chiamata in uscita.
 
 Le prove di questo template si fanno sul container di anteprima, non qui: cio'
 che va verificato — che senza consenso non nasca nessun cookie, che con il

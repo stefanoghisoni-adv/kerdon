@@ -63,10 +63,40 @@ Non contiene nessuna credenziale e non scrive il cookie dell'identificativo: lo
 scrive l'endpoint, con `Set-Cookie`, che e' l'unico posto da cui si ottengono
 `Secure` e una durata che il browser rispetti.
 
-Alla revoca chiama l'endpoint per far disfare, toglie il cookie dal browser e
-svuota l'attributo del carrello — e **non guarda** la risposta di quella
-chiamata: un endpoint che rispondesse comunque con un identificativo lo
-rimetterebbe addosso a chi ha appena detto di no.
+Alla revoca toglie **subito** il cookie dal browser e svuota l'attributo del
+carrello: da quell'istante l'identificativo non va piu' in analisi ne' in
+attribuzione. Dall'eventuale risposta **non legge mai** un identificativo: un
+endpoint che ne restituisse uno lo rimetterebbe addosso a chi ha appena detto
+di no. Ne legge solo lo **stato**, perche' la cancellazione sul server deve
+arrivare in fondo.
+
+**La revoca in sospeso ("lapide").** L'identificativo da cancellare si mette da
+parte in `localStorage`, sotto la chiave `kerdon_rv` — non in un cookie, cosi'
+non viaggia con nessuna richiesta e nessun tag lo scambia per un
+identificativo attivo. Serve solo a cancellare: non si rimanda mai
+all'endpoint per coniare, non va sul dataLayer ne' sul carrello.
+
+- l'endpoint si richiama finche' non risponde **2xx**: errori di rete, `408`,
+  `429`, `500`, `502`, `503`, `504` si ritentano nella pagina con attesa
+  crescente (2s, 4s, 8s, 16s; al massimo 5 tentativi), rispettando
+  `Retry-After` (secondi o data). Un'attesa oltre i 5 minuti, o gli altri
+  non-2xx, si rimandano al **caricamento successivo**, che non parte prima
+  dell'istante indicato da `Retry-After`;
+- lo svuotamento del carrello si riprova a ogni caricamento finche'
+  `/cart/update.js` non risponde 2xx;
+- **finche' la lapide c'e' non si conia e non si riusa nessun identificativo**,
+  nemmeno se nel frattempo il visitatore concede di nuovo; alla conferma, se il
+  permesso c'e', se ne conia uno **nuovo**;
+- dopo **30 giorni** senza conferma si rinuncia e la lapide si cancella. Se il
+  server aveva gia' registrato la revoca la completa da solo; se non l'aveva
+  mai ricevuta, la riga resta fino alla potatura dei visitatori anonimi. Senza
+  `localStorage` (navigazione privata, archiviazione bloccata) la lapide vive
+  solo nella pagina, e Safari puo' cancellare lo storage scritto da script dopo
+  7 giorni senza visite.
+
+Perche' la vetrina possa leggere `Retry-After` su una chiamata cross-origin,
+l'endpoint deve esporlo (`Access-Control-Expose-Headers: Retry-After`): il
+template sGTM lo fa.
 
 ### Dove sta Kerdon nella catena
 
@@ -294,8 +324,11 @@ Il container non deve **mai** dichiarare un consenso che il visitatore non ha
 dato: sarebbe registrarlo al posto suo. La verifica lo controlla.
 
 Alla revoca il cookie scade e la riga sparisce dal database. Le due meta' della
-revoca sono queste, e la prima avviene comunque: se la seconda non riesce, si
-perde una cancellazione a valle, non si continua a raccogliere.
+revoca sono queste, e la prima avviene comunque. La seconda non si perde: se
+Kerdon non conferma, l'endpoint risponde `503` con `Retry-After` (mai `200`) e
+il ponte in vetrina riprova con l'identificativo messo da parte. La revoca su
+Kerdon e' idempotente: ripetere quella di un identificativo gia' revocato, o
+mai visto, risponde `200`.
 
 ## Sulla durata: un massimo tecnico, non una garanzia
 

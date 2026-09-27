@@ -94,6 +94,9 @@ function run(storefront: Storefront) {
     fetch: vi.fn((url: string, init: RequestInit = {}) => {
       fetches.push({ url, init });
       return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
         json: () => Promise.resolve([{ external_id: ID }]),
       });
     }),

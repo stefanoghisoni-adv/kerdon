@@ -22,6 +22,7 @@
 import { expect, test as prova } from './support/prova';
 import { CONSENT_COOKIE } from '~/lib/tracking/consent';
 import { EXTERNAL_ID_COOKIE } from '~/lib/tracking/external-id';
+import { REVOCATION_STORAGE_KEY } from '~/lib/tracking/consent-bridge';
 
 const ENDPOINT = 'https://vetrina-inventata.test/eid';
 const IDENTIFICATIVO = 'eid-di-prova-0001';
@@ -225,5 +226,113 @@ prova.describe('il ponte del consenso in vetrina', () => {
     expect(chiamate).toHaveLength(0);
     expect(carrello).toHaveLength(0);
     expect(await page.evaluate(() => window.eventi('kerdon_identity').length)).toBe(0);
+  });
+
+  // La revoca che sopravvive a una rete che cade. Il browser perde il cookie
+  // subito, ma tiene da parte l'identificativo (la "lapide", in localStorage)
+  // finche' l'endpoint non conferma con un 2xx — anche attraverso un
+  // ricaricamento della pagina, in cui il visitatore non dice piu' niente.
+  prova('revoca con la rete giu: si riprova al ricaricamento, e la lapide sparisce alla conferma', async ({
+    page,
+    context,
+  }) => {
+    const chiamate: string[] = [];
+    const carrello: Record<string, string>[] = [];
+    let reteGiu = true;
+    let carrelloGiu = true;
+
+    await page.route(`${ENDPOINT}*`, async (route) => {
+      chiamate.push(route.request().url());
+      if (reteGiu) {
+        await route.abort('failed');
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    });
+    await page.route('**/cart/update.js', async (route) => {
+      carrello.push((route.request().postDataJSON() as { attributes: Record<string, string> }).attributes);
+      if (carrelloGiu) {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await context.addCookies([
+      { name: EXTERNAL_ID_COOKIE, value: IDENTIFICATIVO, domain: '127.0.0.1', path: '/' },
+    ]);
+    await page.goto('/e2e/harness/vetrina.html');
+    await page.evaluate(() => window.dichiara({ analytics: 'no', marketing: 'no' }));
+
+    // Subito: il cookie non c'e' piu', l'identificativo non e' andato in analisi.
+    await expect.poll(() => chiamate.length).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => cookie(page, EXTERNAL_ID_COOKIE)).toBe(null);
+    expect(JSON.stringify(await page.evaluate(() => window.dataLayer))).not.toContain(IDENTIFICATIVO);
+
+    // La lapide c'e', con l'identificativo da cancellare.
+    const chiave = REVOCATION_STORAGE_KEY;
+    await expect
+      .poll(() => page.evaluate((k) => localStorage.getItem(k), chiave))
+      .toContain(IDENTIFICATIVO);
+    await expect.poll(() => carrello.length).toBe(1);
+
+    // La rete torna, e il visitatore passa a un'altra pagina senza dire niente.
+    reteGiu = false;
+    carrelloGiu = false;
+    const primaDelRicaricamento = chiamate.length;
+    await page.reload();
+
+    await expect.poll(() => chiamate.length).toBeGreaterThan(primaDelRicaricamento);
+    const ultima = new URL(chiamate[chiamate.length - 1]);
+    expect(ultima.searchParams.get('existing_external_id')).toBe(IDENTIFICATIVO);
+    expect(ultima.searchParams.get('consent')).toBe('v1.a0.m0');
+
+    // Il carrello si riprova, e alla fine non resta niente da parte.
+    await expect.poll(() => carrello.length).toBe(2);
+    expect(carrello[1].kerdon_eid).toBe('');
+    await expect
+      .poll(() => page.evaluate((k) => localStorage.getItem(k), chiave))
+      .toBeNull();
+    expect(await page.evaluate(() => window.eventi('kerdon_identity').length)).toBe(0);
+  });
+
+  prova('503 con Retry-After: si aspetta e poi si conferma', async ({ page, context }) => {
+    const istanti: number[] = [];
+
+    await page.route(`${ENDPOINT}*`, async (route) => {
+      istanti.push(Date.now());
+      const origine = route.request().headers()['origin'] ?? '*';
+      const cors = {
+        'access-control-allow-origin': origine,
+        'access-control-allow-credentials': 'true',
+        'access-control-expose-headers': 'Retry-After',
+      };
+      if (istanti.length === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          headers: { ...cors, 'retry-after': '1' },
+          body: '{"error":"revoke_not_confirmed"}',
+        });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: cors, body: '[]' });
+    });
+    await page.route('**/cart/update.js', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+    );
+
+    await context.addCookies([
+      { name: EXTERNAL_ID_COOKIE, value: IDENTIFICATIVO, domain: '127.0.0.1', path: '/' },
+    ]);
+    await page.goto('/e2e/harness/vetrina.html');
+    await page.evaluate(() => window.dichiara({ analytics: 'no', marketing: 'no' }));
+
+    await expect.poll(() => istanti.length, { timeout: 5_000 }).toBe(2);
+    expect(istanti[1] - istanti[0]).toBeGreaterThanOrEqual(900);
+    const chiave = REVOCATION_STORAGE_KEY;
+    await expect
+      .poll(() => page.evaluate((k) => localStorage.getItem(k), chiave))
+      .toBeNull();
   });
 });
