@@ -71,9 +71,27 @@ hai incollato la chiave sbagliata — ed è quasi sempre quello il motivo per cu
    **Verifica installazione**.
 
 Niente va aggiunto al tema del negozio. La chiamata dalle pagine all'endpoint la
-predispone chi cura il tracciamento, e deve partire a ogni pagina, anche senza
-consenso: il client non conia e non pianta niente senza consenso, ma è quella
-chiamata a portare il no e a far partire la revoca.
+predispone chi cura il tracciamento, e deve partire **a ogni pagina vista, anche
+quando il visitatore rifiuta o ritira il consenso**: il client non conia e non
+pianta niente senza consenso, ma è quella chiamata a portare il no e a far
+partire la revoca.
+
+L'identificativo che il client considera è **solo quello del cookie
+`kerdon_eid`**: il parametro `existing_external_id` vale solo se coincide con il
+cookie, altrimenti si ignora.
+
+## Il legame con l'ordine
+
+Due strade, a scelta di chi cura il tracciamento:
+
+- **attributo del carrello `_kerdon_external_id`**: i tag delle pagine copiano
+  il valore del cookie `kerdon_eid` (non è `HttpOnly`) nell'attributo, per
+  esempio con `POST /cart/update.js` e
+  `{"attributes": {"_kerdon_external_id": "<valore>"}}`. Il webhook degli ordini
+  lo legge e lega il browser al cliente. `_corew_external_id` è letto ancora
+  come ripiego, ma non va più usato;
+- **`POST /rest/v1/identify`** dal container, con la chiave di invio: corpo JSON
+  con `external_id`, `email` e/o `phone` e il permesso del visitatore.
 
 ## Se la revoca non arriva a Kerdon
 

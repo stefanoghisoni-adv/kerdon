@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ANONYMOUS_USER_RETENTION_DAYS,
   EXTERNAL_ID_CART_ATTRIBUTE,
+  LEGACY_EXTERNAL_ID_CART_ATTRIBUTE,
   MAX_TRAIT_LENGTH,
   anonymousUserCutoff,
   externalIdFromNoteAttributes,
@@ -43,6 +44,40 @@ describe('externalIdFromNoteAttributes', () => {
     // di nessuna riga.
     for (const value of ['', '   ', 'pippo', 'corew_abc_xyz', VECCHIO.slice(0, -1)]) {
       expect(externalIdFromNoteAttributes([{ name: EXTERNAL_ID_CART_ATTRIBUTE, value }])).toBeNull();
+    }
+  });
+
+  it('il nome canonico e _kerdon_external_id', () => {
+    expect(EXTERNAL_ID_CART_ATTRIBUTE).toBe('_kerdon_external_id');
+    expect(externalIdFromNoteAttributes([{ name: '_kerdon_external_id', value: VECCHIO }])).toBe(VECCHIO);
+  });
+
+  it('il nome di prima (_corew_external_id) si legge ancora, come ripiego', () => {
+    expect(LEGACY_EXTERNAL_ID_CART_ATTRIBUTE).toBe('_corew_external_id');
+    expect(externalIdFromNoteAttributes([{ name: '_corew_external_id', value: VECCHIO }])).toBe(VECCHIO);
+  });
+
+  it('con tutti e due vince il nome nuovo, anche se viene dopo', () => {
+    expect(
+      externalIdFromNoteAttributes([
+        { name: '_corew_external_id', value: VECCHIO },
+        { name: '_kerdon_external_id', value: RECENTE },
+      ]),
+    ).toBe(RECENTE);
+  });
+
+  it('nome nuovo malformato e vecchio ben formato: il vecchio fa da ripiego', () => {
+    expect(
+      externalIdFromNoteAttributes([
+        { name: '_kerdon_external_id', value: 'pippo' },
+        { name: '_corew_external_id', value: VECCHIO },
+      ]),
+    ).toBe(VECCHIO);
+  });
+
+  it('i nomi senza underscore o quello del cookie non valgono', () => {
+    for (const name of ['kerdon_eid', 'kerdon_external_id', 'corew_external_id']) {
+      expect(externalIdFromNoteAttributes([{ name, value: VECCHIO }])).toBeNull();
     }
   });
 

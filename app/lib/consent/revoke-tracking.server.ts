@@ -23,6 +23,7 @@
 // e in nessuno dei due casi si rimette il cookie.
 
 import {
+  hasRevocation,
   processRevocation,
   recordRevocation,
   type RevocationRunner,
@@ -90,4 +91,32 @@ export async function revokeTrackingIdentity(
   return esito === 'done'
     ? { outcome: 'applied', retriable: false }
     : { outcome: 'recorded', retriable: false };
+}
+
+/**
+ * Se l'identificativo di un browser e' stato revocato, e quindi non va mai piu'
+ * riusato.
+ *
+ * Nel dubbio si': se il database owner non risponde, un identificativo nuovo
+ * costa un visitatore contato due volte; riusarne uno revocato costa un
+ * tracciamento che la persona aveva chiesto di fermare.
+ */
+export async function isTrackingIdentityRevoked(params: {
+  shopId: string;
+  externalId: string;
+}): Promise<boolean> {
+  try {
+    return await hasRevocation({
+      shopId: params.shopId,
+      scope: 'tracking_identity',
+      externalId: params.externalId,
+      shopifyCustomerId: null,
+    });
+  } catch (error) {
+    console.error(
+      '[revoche] controllo della revoca non riuscito:',
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+    return true;
+  }
 }

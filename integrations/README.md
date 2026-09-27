@@ -36,6 +36,13 @@ strumenti che usa gia'. Deve partire a ogni pagina, anche senza consenso: senza
 consenso il modello non conia e non pianta niente, ma e' quella chiamata a
 portare il no e a far partire la revoca.
 
+**Il legame con l'ordine.** I tag delle pagine copiano il valore del cookie
+`kerdon_eid` nell'attributo del carrello **`_kerdon_external_id`** (privato,
+per via dell'underscore), che il webhook degli ordini legge; oppure, al momento
+dell'acquisto, il container manda l'identificativo con email e/o telefono a
+`POST /rest/v1/identify` con la chiave di invio. Dettagli in
+[`docs/tracking-integration.md`](../docs/tracking-integration.md).
+
 ## Le credenziali sono due, e non e' burocrazia
 
 | Chiave | A cosa serve | Dove va |

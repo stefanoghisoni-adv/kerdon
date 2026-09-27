@@ -90,22 +90,53 @@ e quindi a far partire la revoca.
 5. **L'endpoint del negozio pianta il cookie**, dal proprio dominio, con il
    valore ricevuto. E' un cookie first-party: nessun browser lo tratta da
    estraneo.
-6. A chi mandarlo — dataLayer, carrello, piattaforme — lo decidono i tag del
-   merchant.
+6. A chi mandarlo — dataLayer, piattaforme — lo decidono i tag del merchant.
+   Per il legame con l'ordine vedi "Il legame con l'ordine" qui sotto.
 
 ### Visite successive
 
 1. La pagina chiama di nuovo l'endpoint del negozio; il cookie first-party
    viaggia con la chiamata.
-2. L'endpoint lo passa all'app in uno di questi due modi:
-   - header `X-CoreW-External-Id: corew_...` — la via normale;
-   - parametro di query `existing_external_id=corew_...` — dove l'header non si
-     puo' aggiungere, cosa che certi template di tag non permettono.
+2. Il template lo legge **dal cookie `kerdon_eid`** e lo passa all'app
+   nell'header `X-Kerdon-External-Id`.
 3. L'app **restituisce lo stesso identificativo**, senza coniarne uno nuovo.
+
+**Il cookie e' l'unica fonte.** Il template accetta il parametro
+`existing_external_id` solo quando e' identico al cookie `kerdon_eid` che la
+chiamata porta; altrimenti lo ignora. Un valore arrivato da fuori senza il
+cookie non e' di quel browser: puo' essere un identificativo gia' revocato,
+rimasto in un dataLayer o in un tag, e riusarlo ricucirebbe la persona di prima
+della revoca a quella di dopo. Per la stessa ragione **l'app non riusa mai un
+identificativo revocato**: se ne arriva uno — da header, parametro o cookie — ne
+conia uno nuovo.
 
 Se il valore che arriva non ha la forma giusta viene trattato come assente e se
 ne conia uno buono: e' anche cio' che impedisce a qualcuno di farsi assegnare un
 identificativo scelto da lui.
+
+## Il legame con l'ordine
+
+L'identificativo diventa utile quando si lega a un ordine. Le strade sono due, e
+le monta chi cura il tracciamento:
+
+1. **L'attributo del carrello `_kerdon_external_id`.** I tag delle pagine
+   copiano il valore del cookie `kerdon_eid` (non e' `HttpOnly`, si legge dalla
+   pagina) nell'attributo del carrello `_kerdon_external_id`, per esempio con
+   `POST /cart/update.js` e `{"attributes": {"_kerdon_external_id": "<valore>"}}`.
+   L'underscore lo rende privato: Shopify non lo mostra al cliente. Il webhook
+   degli ordini lo legge da `note_attributes` e lega il browser al cliente
+   dell'ordine. Il nome `_corew_external_id` (di prima del cambio di marchio) si
+   legge ancora come ripiego; se ci sono tutti e due vince quello nuovo. Un
+   valore che non ha la forma di un identificativo viene scartato.
+2. **`POST /rest/v1/identify`**, dal container e con la chiave di invio
+   (ambito `ingest:links`), al momento dell'acquisto o quando il visitatore
+   lascia un contatto. Corpo JSON piatto: `external_id` (il valore del cookie),
+   `email` e/o `phone`, e il permesso del visitatore. Se dietro quel contatto
+   c'e' un cliente del negozio, browser e cliente si legano. Senza permesso non
+   si lega niente; con un no esplicito si avvia la revoca.
+
+Il cookie e l'attributo si scrivono solo con il consenso: senza, `kerdon_eid`
+non esiste e non c'e' niente da copiare.
 
 ## Cosa deve fare l'endpoint del negozio
 
@@ -113,7 +144,7 @@ identificativo scelto da lui.
 |---|---|
 | Chiamare | `GET <indirizzo dell'API>/rest/v1/tracking_id` |
 | Autenticarsi | la credenziale di **invio**: firmata dove si puo' (vedi sotto), altrimenti presentata intera in `apikey`. Il token di lettura qui non vale |
-| Inoltrare | il permesso del visitatore, e `X-CoreW-External-Id` con il valore del cookie first-party quando c'e' |
+| Inoltrare | il permesso del visitatore, e `X-Kerdon-External-Id` con il valore del cookie first-party quando c'e' (solo dal cookie, mai da un parametro che non coincide) |
 | Leggere | l'header `X-CoreW-External-Id` della risposta |
 | Piantare | il cookie `kerdon_eid` **dal proprio dominio**, con `Secure`, `Path=/`, un `SameSite` dichiarato e una durata |
 | Non fare | niente, quando non arriva nessun segnale di permesso |

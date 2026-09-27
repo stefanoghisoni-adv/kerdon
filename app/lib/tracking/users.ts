@@ -33,7 +33,17 @@ export const USERS_TABLE = 'users';
  * Arriva nel corpo del webhook dentro `note_attributes`, che e' il nome REST
  * della stessa cosa.
  */
-export const EXTERNAL_ID_CART_ATTRIBUTE = '_corew_external_id';
+export const EXTERNAL_ID_CART_ATTRIBUTE = '_kerdon_external_id';
+
+/**
+ * Il nome di prima del cambio di marchio (CoreWard → Kerdon).
+ *
+ * Si legge ancora, solo come ripiego: un tag del merchant configurato prima del
+ * cambio scrive questo nome, e ignorarlo spezzerebbe il legame ordine →
+ * browser senza nessun errore che lo dica. Se nello stesso ordine ci sono tutti
+ * e due, vince quello nuovo. Nessuno deve piu' scriverlo.
+ */
+export const LEGACY_EXTERNAL_ID_CART_ATTRIBUTE = '_corew_external_id';
 
 /** Un attributo di carrello com'e' scritto nel corpo del webhook. */
 export interface NoteAttribute {
@@ -59,13 +69,16 @@ export function externalIdFromNoteAttributes(
 ): string | null {
   if (!Array.isArray(attributes)) return null;
 
-  for (const attribute of attributes) {
-    if (attribute?.name !== EXTERNAL_ID_CART_ATTRIBUTE) continue;
-    const value = typeof attribute.value === 'string' ? attribute.value.trim() : '';
-    return isExternalId(value) ? value : null;
-  }
+  const read = (name: string): string | null => {
+    for (const attribute of attributes) {
+      if (attribute?.name !== name) continue;
+      const value = typeof attribute.value === 'string' ? attribute.value.trim() : '';
+      return isExternalId(value) ? value : null;
+    }
+    return null;
+  };
 
-  return null;
+  return read(EXTERNAL_ID_CART_ATTRIBUTE) ?? read(LEGACY_EXTERNAL_ID_CART_ATTRIBUTE);
 }
 
 /**

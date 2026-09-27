@@ -35,7 +35,11 @@ vi.mock('~/lib/supabase/ensure-users-table.server', () => ({
 const revokeTrackingIdentity = vi.fn<
   (...args: never[]) => Promise<import('~/lib/consent/revoke-tracking.server').RevokeResult>
 >(async () => ({ outcome: 'applied', retriable: false }));
-vi.mock('~/lib/consent/revoke-tracking.server', () => ({ revokeTrackingIdentity }));
+const isTrackingIdentityRevoked = vi.fn(async (..._args: never[]) => false);
+vi.mock('~/lib/consent/revoke-tracking.server', () => ({
+  revokeTrackingIdentity,
+  isTrackingIdentityRevoked,
+}));
 
 
 // Il permesso del visitatore: default = concesso, i test lo modificano.
@@ -86,6 +90,8 @@ beforeEach(() => {
   forgetVisitor.mockClear();
   revokeTrackingIdentity.mockClear();
   revokeTrackingIdentity.mockResolvedValue({ outcome: 'applied', retriable: false });
+  isTrackingIdentityRevoked.mockReset();
+  isTrackingIdentityRevoked.mockResolvedValue(false);
   evaluateVisitorConsent.mockReset();
   // Di default: consenso completo, i test lo cambiano dove serve.
   evaluateVisitorConsent.mockReturnValue({
@@ -149,6 +155,29 @@ describe('/rest/v1/tracking_id', () => {
     expect(row.external_id).toBe(gia);
     // Rimandarlo identico a ogni pagina sarebbe peso che non cambia niente.
     expect(res.headers.get('Set-Cookie')).toBeNull();
+  });
+
+  it('un identificativo revocato non si riusa: se ne conia uno nuovo', async () => {
+    const revocato = 'kerdon_abcdefghijklmnopqrstuvwxyz012345';
+    isTrackingIdentityRevoked.mockResolvedValue(true);
+    for (const [headers, search] of [
+      [{ apikey: 'buono' }, `?existing_external_id=${revocato}`],
+      [{ apikey: 'buono', 'X-Kerdon-External-Id': revocato }, ''],
+      [{ apikey: 'buono', Cookie: `kerdon_eid=${revocato}` }, ''],
+    ] as const) {
+      const res = await call({ ...headers }, search);
+      const [row] = JSON.parse(await res.text());
+      expect(row.external_id).not.toBe(revocato);
+      expect(row.external_id).toMatch(/^kerdon_/);
+      expect(res.headers.get('Set-Cookie')).toContain(row.external_id);
+    }
+    expect(isTrackingIdentityRevoked).toHaveBeenCalledWith({ shopId: ingestCtx.shopId, externalId: revocato });
+    expect(finish).toHaveBeenLastCalledWith('minted');
+  });
+
+  it('senza identificativo in arrivo non si interroga il registro delle revoche', async () => {
+    await call({ apikey: 'buono' });
+    expect(isTrackingIdentityRevoked).not.toHaveBeenCalled();
   });
 
   it('non si mette in cache: due browser non devono ricevere lo stesso', async () => {

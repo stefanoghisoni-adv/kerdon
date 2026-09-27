@@ -30,6 +30,7 @@ vi.mock('~/lib/tracking/users.server', () => ({ forgetVisitor: vi.fn() }));
 import {
   MAX_REVOCATION_ATTEMPTS,
   drainRevocations,
+  hasRevocation,
   listDeadRevocations,
   processRevocation,
   pruneRevocations,
@@ -488,5 +489,17 @@ describe('la revoca ripetuta converge', () => {
     expect(a.retriable).toBe(false);
     expect(b.retriable).toBe(false);
     expect(righe).toHaveLength(1);
+  });
+});
+
+describe('hasRevocation', () => {
+  it('trova una revoca presa in carico per impronta, e solo per quel negozio', async () => {
+    const soggetto = 'kerdon_hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh';
+    const req = { shopId: 'negozio-h', scope: 'tracking_identity' as const, externalId: soggetto };
+    expect(await hasRevocation(req)).toBe(false);
+    await recordRevocation(req);
+    expect(await hasRevocation(req)).toBe(true);
+    expect(await hasRevocation({ ...req, shopId: 'altro-negozio' })).toBe(false);
+    expect(await hasRevocation({ ...req, externalId: 'kerdon_iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii' })).toBe(false);
   });
 });

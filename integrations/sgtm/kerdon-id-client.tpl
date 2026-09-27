@@ -148,7 +148,6 @@ const LEGACY_CONSENT_COOKIE = 'corew_consent';
 const SHOPIFY_CONSENT_COOKIE = '_tracking_consent';
 const ID_HEADER = 'X-Kerdon-External-Id';
 const CONSENT_PARAM = 'consent';
-const EXISTING_PARAM = 'existing_external_id';
 
 // Solo le chiamate al percorso configurato: tutto il resto e' di qualcun altro,
 // e un Client che rivendica quel che non e' suo spegne gli altri del container.
@@ -777,10 +776,16 @@ function run() {
 
   pending = readPending();
 
-  // L'identificativo che questo browser ha gia': prima quello che la chiamata
-  // porta nel parametro, poi il nostro cookie.
-  const fromParam = getRequestQueryParameter(EXISTING_PARAM);
-  const existing = isIdentifier(fromParam) ? fromParam : (isIdentifier(cookie(ID_COOKIE)) ? cookie(ID_COOKIE) : '');
+  // L'identificativo che questo browser ha gia': quello del nostro cookie, e
+  // nient'altro. Il parametro `existing_external_id` vale SOLO se e' identico
+  // al cookie: un valore che arriva da fuori senza il cookie che lo porta non
+  // e' di questo browser — puo' essere un identificativo gia' revocato, rimasto
+  // in un dataLayer o in un tag, e riusarlo ricucirebbe la persona di prima
+  // della revoca a quella di dopo. In quel caso si ignora: con il permesso si
+  // riusa il cookie o se ne conia uno nuovo, alla revoca non si cancella niente
+  // che il browser non porti.
+  // Detto altrimenti: conta il cookie, e il parametro al massimo lo conferma.
+  const existing = isIdentifier(cookie(ID_COOKIE)) ? cookie(ID_COOKIE) : '';
 
   if (withdrawn) {
     // Revoca. Il cookie scade comunque e per primo — il tracciamento locale
@@ -1228,7 +1233,13 @@ dentro un `try` che, su qualunque errore, risponde comunque (503 con la revoca
 messa da parte, se ce n'era una in corso; altrimenti 500). Un "Indirizzo
 dell'API" vuoto o non in https: 500 `client_misconfigured`, nessuna chiamata.
 
-LA REVOCA NON DIPENDE DA NESSUNO SCRIPT IN VETRINA. Al no, `kerdon_eid` scade
+CHI FA PARTIRE LA REVOCA. Il tag di chi cura il tracciamento deve chiamare
+questo endpoint A OGNI PAGINA VISTA, ANCHE QUANDO IL CONSENSO E' RIFIUTATO O
+RITIRATO: e' quella chiamata, con il no nel cookie `_tracking_consent` o nel
+parametro `consent`, a far partire la revoca. Senza consenso qui non si conia e
+non si pianta niente; un tag che parte solo con il consenso non porta mai il no.
+
+LA REVOCA E' RITENTABILE DA QUI. Al no, `kerdon_eid` scade
 subito e l'identificativo passa in `kerdon_rv` (HttpOnly, 30 giorni, forma
 `<no compatto>~<identificativo>`), che serve solo a cancellare. 200 solo se
 Kerdon ha risposto 2xx, e allora `kerdon_rv` scade; rete giu', timeout, 429,
@@ -1238,6 +1249,17 @@ permesso — riprova; finche' `kerdon_rv` c'e' non si conia niente. Il permesso
 si inoltra a Kerdon riscritto in forma compatta, anche quando arriva dal cookie
 di Shopify e non dal parametro.
 
+L'IDENTIFICATIVO E' SOLO QUELLO DEL COOKIE `kerdon_eid`. Il parametro
+`existing_external_id` vale solo se coincide con il cookie, altrimenti si
+ignora: un identificativo gia' revocato che torna da un parametro non si riusa
+(e il server, comunque, non riusa mai un identificativo revocato).
+
+IL LEGAME CON L'ORDINE non passa di qui. I tag delle pagine copiano il valore
+del cookie `kerdon_eid` (non HttpOnly) nell'attributo del carrello
+`_kerdon_external_id`, che il webhook degli ordini legge; in alternativa il
+container manda `external_id` con email e/o telefono a `POST /rest/v1/identify`
+con la chiave di invio.
+
 L'intero codice di questo template viene eseguito da
 `app/lib/tracking/sgtm-id-client.test.ts`, con finti delle API del sandbox.
 Il harness NON puo' provare il comportamento del sandbox vero su questi punti:
@@ -1246,7 +1268,7 @@ Il harness NON puo' provare il comportamento del sandbox vero su questi punti:
 in minuscolo (`result.headers['retry-after']`, `x-kerdon-external-id`);
 `JSON.parse` che restituisce `undefined` sul malformato. Da provare in
 anteprima, a mano:
-1. consenso `v1.a0.m0` + `existing_external_id` valido, indirizzo dell'API
+1. consenso `v1.a0.m0` + cookie `kerdon_eid` valido, indirizzo dell'API
    irraggiungibile: risposta 503 con `retry-after` e
    `access-control-expose-headers`, `kerdon_eid` scaduto, `kerdon_rv` scritto
    (HttpOnly) — prova che `onErr` del `.then` a due argomenti viene chiamato;

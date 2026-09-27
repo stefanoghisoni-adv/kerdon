@@ -105,7 +105,7 @@ describe('cosa si conserva di un ordine', () => {
     total_price: '119.80',
     line_items: [{ id: 9001, quantity: 2, price: '49.90' }],
     customer: { id: 77, first_name: 'Anna', email: 'anna@esempio.it' },
-    note_attributes: [{ name: '_corew_external_id', value: VISITATORE }],
+    note_attributes: [{ name: '_kerdon_external_id', value: VISITATORE }],
   };
 
   it("l'ordine, il cliente e il browser: i tre pezzi che servono", () => {
@@ -162,10 +162,27 @@ describe('cosa si conserva di un ordine', () => {
     });
   });
 
+  it('il nome di prima del cambio di marchio vale ancora, come ripiego', () => {
+    const conservato = distillTrigger('orders/create', {
+      ...ricevuta,
+      note_attributes: [{ name: '_corew_external_id', value: VISITATORE }],
+    });
+    expect(conservato).toMatchObject({ externalId: VISITATORE });
+  });
+
+  it('senza attributo: ordine e cliente si, nessun browser', () => {
+    const { note_attributes: _tolto, ...senza } = ricevuta;
+    expect(distillTrigger('orders/create', senza)).toEqual({
+      orderId: 5001,
+      customerId: 77,
+      externalId: null,
+    });
+  });
+
   it('un valore inventato negli attributi del carrello non passa', () => {
     const conservato = distillTrigger('orders/create', {
       ...ricevuta,
-      note_attributes: [{ name: '_corew_external_id', value: '../../etc/passwd' }],
+      note_attributes: [{ name: '_kerdon_external_id', value: '../../etc/passwd' }],
     });
 
     expect(conservato).toMatchObject({ externalId: null });

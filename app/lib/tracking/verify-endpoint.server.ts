@@ -182,13 +182,13 @@ export async function verifyTrackingEndpoint({
   }
   checks.push(ok('https'));
 
-  const call = (params: Record<string, string>) =>
+  const call = (params: Record<string, string>, cookie?: string) =>
     fetchImpl(callUrl(endpoint, params), {
       // Manuale: un 301 verso lo stesso indirizzo in https sembra innocuo, ma
       // fa perdere per strada gli header e i `Set-Cookie` a chi lo segue, e in
       // vetrina si traduce in un identificativo che non arriva mai.
       redirect: 'manual',
-      headers: { Accept: 'application/json' },
+      headers: cookie ? { Accept: 'application/json', Cookie: cookie } : { Accept: 'application/json' },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
 
@@ -242,10 +242,16 @@ export async function verifyTrackingEndpoint({
   // La revoca: si dichiara il no e si rimanda l'identificativo di prima, che e'
   // esattamente cio' che fa l'endpoint quando il visitatore cambia idea.
   try {
-    const withdrawn = await call({
-      [CONSENT_QUERY_PARAM]: CONSENT_WITHDRAWN,
-      [EXISTING_EXTERNAL_ID_PARAM]: identifier,
-    });
+    // Il cookie oltre al parametro: il template sGTM riconosce come "di questo
+    // browser" solo l'identificativo che arriva nel cookie, e un parametro da
+    // solo non lo fa cancellare.
+    const withdrawn = await call(
+      {
+        [CONSENT_QUERY_PARAM]: CONSENT_WITHDRAWN,
+        [EXISTING_EXTERNAL_ID_PARAM]: identifier,
+      },
+      identifier ? `${EXTERNAL_ID_COOKIE}=${identifier}` : undefined,
+    );
     const stillThere = await identifierIn(withdrawn);
     const cookie = parseSetCookie(setCookies(withdrawn), EXTERNAL_ID_COOKIE);
 

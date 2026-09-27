@@ -170,14 +170,15 @@ function barattolo(prima: Record<string, string>, e: { cookies: { name: string; 
   return dopo;
 }
 
-const REVOCA = { consent: 'v1.a0.m0', existing_external_id: VECCHIO };
+// La revoca come arriva davvero: il no, e il cookie del browser che la porta.
+const REVOCA: Richiesta = { query: { consent: 'v1.a0.m0' }, cookies: { kerdon_eid: VECCHIO } };
 const IN_SOSPESO = `v1.a0.m0~${VECCHIO}`;
 const PERMESSO = { consent: 'v1.a1.m1' };
 
 describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
   describe('alla revoca', () => {
     it('upstream 200: 200, cookie scaduto', async () => {
-      const e = await esegui({ query: REVOCA, upstream: { statusCode: 200, body: '[]' } });
+      const e = await esegui({ ...REVOCA, upstream: { statusCode: 200, body: '[]' } });
       expect(e.returned).toBe(1);
       expect(e.status).toBe(200);
       expect(e.body).toBe('[]');
@@ -185,7 +186,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
     });
 
     it('rete giu: 503 con Retry-After leggibile dalla vetrina', async () => {
-      const e = await esegui({ query: REVOCA, upstream: { reject: 'failed' } });
+      const e = await esegui({ ...REVOCA, upstream: { reject: 'failed' } });
       expect(e.returned).toBe(1);
       expect(e.status).toBe(503);
       expect(e.headers['retry-after']).toMatch(/^\d+$/);
@@ -202,14 +203,14 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
     });
 
     it('timeout: 503', async () => {
-      const e = await esegui({ query: REVOCA, upstream: { reject: 'timed_out' } });
+      const e = await esegui({ ...REVOCA, upstream: { reject: 'timed_out' } });
       expect(e.returned).toBe(1);
       expect(e.status).toBe(503);
     });
 
     it('upstream 503 con Retry-After: lo si inoltra', async () => {
       const e = await esegui({
-        query: REVOCA,
+        ...REVOCA,
         upstream: { statusCode: 503, headers: { 'retry-after': '120' }, body: '{"error":"x"}' },
       });
       expect(e.returned).toBe(1);
@@ -219,7 +220,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
 
     it('upstream 500 o 429: 503, mai un ok', async () => {
       for (const statusCode of [500, 429, 401]) {
-        const e = await esegui({ query: REVOCA, upstream: { statusCode, body: 'non json' } });
+        const e = await esegui({ ...REVOCA, upstream: { statusCode, body: 'non json' } });
         expect(e.returned).toBe(1);
         expect(e.status).toBe(503);
       }
@@ -227,7 +228,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
 
     it('un Retry-After malformato non passa', async () => {
       const e = await esegui({
-        query: REVOCA,
+        ...REVOCA,
         upstream: { statusCode: 503, headers: { 'retry-after': '1; rm -rf' } },
       });
       expect(e.headers['retry-after']).toMatch(/^\d+$/);
@@ -304,7 +305,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
 
   describe('la revoca in sospeso, senza nessuno script in vetrina', () => {
     it('rete giu, poi la visita dopo senza nessun segnale: si riprova e si chiude', async () => {
-      const prima = await esegui({ query: REVOCA, upstream: { reject: 'failed' } });
+      const prima = await esegui({ ...REVOCA, upstream: { reject: 'failed' } });
       expect(prima.status).toBe(503);
       const jar = barattolo({ kerdon_eid: VECCHIO }, prima);
       expect(jar).toEqual({ kerdon_rv: IN_SOSPESO });
@@ -374,14 +375,59 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
 
     it('in sospeso piu un nuovo identificativo da revocare: tutti e due, in fila; se il secondo fallisce resta lui', async () => {
       const e = await esegui({
-        query: { consent: 'v1.a0.m0', existing_external_id: NUOVO },
-        cookies: { kerdon_rv: IN_SOSPESO },
+        query: { consent: 'v1.a0.m0' },
+        cookies: { kerdon_rv: IN_SOSPESO, kerdon_eid: NUOVO },
         upstream: [{ statusCode: 200, body: '[]' }, { statusCode: 500 }],
       });
       expect(e.upstreamIds).toEqual([VECCHIO, NUOVO]);
       expect(e.returned).toBe(1);
       expect(e.status).toBe(503);
       expect(barattolo({ kerdon_rv: IN_SOSPESO }, e)).toEqual({ kerdon_rv: `v1.a0.m0~${NUOVO}` });
+    });
+  });
+
+  describe('existing_external_id vale solo se e il cookie del browser', () => {
+    it('dopo una revoca confermata, permesso ridato con il vecchio id nel parametro e nessun cookie: id NUOVO', async () => {
+      const revoca = await esegui({ ...REVOCA, upstream: { statusCode: 200, body: '[]' } });
+      expect(revoca.status).toBe(200);
+      const jar = barattolo({ kerdon_eid: VECCHIO }, revoca);
+      expect(jar).toEqual({});
+
+      const dopo = await esegui({
+        query: { consent: 'v1.a1.m1', existing_external_id: VECCHIO },
+        cookies: jar,
+        upstream: { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) },
+      });
+      expect(dopo.upstreamCalls).toHaveLength(1);
+      // Nessun identificativo mandato a Kerdon: si chiede di coniarne uno.
+      expect(dopo.upstreamIds).toEqual([undefined]);
+      expect(JSON.parse(dopo.body)).toEqual([{ external_id: NUOVO }]);
+      expect(barattolo(jar, dopo)).toEqual({ kerdon_eid: NUOVO });
+    });
+
+    it('parametro diverso dal cookie: vale il cookie', async () => {
+      const e = await esegui({
+        query: { consent: 'v1.a1.m1', existing_external_id: VECCHIO },
+        cookies: { kerdon_eid: NUOVO },
+        upstream: { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) },
+      });
+      expect(e.upstreamIds).toEqual([NUOVO]);
+    });
+
+    it('parametro uguale al cookie: si riusa', async () => {
+      const e = await esegui({
+        query: { consent: 'v1.a1.m1', existing_external_id: NUOVO },
+        cookies: { kerdon_eid: NUOVO },
+        upstream: { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) },
+      });
+      expect(e.upstreamIds).toEqual([NUOVO]);
+    });
+
+    it('alla revoca, un id nel solo parametro non si cancella: non e di questo browser', async () => {
+      const e = await esegui({ query: { consent: 'v1.a0.m0', existing_external_id: VECCHIO } });
+      expect(e.upstreamCalls).toHaveLength(0);
+      expect(e.returned).toBe(1);
+      expect(e.status).toBe(200);
     });
   });
 
@@ -415,7 +461,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
       const casi: Richiesta[] = [
         {},
         { query: PERMESSO, upstream: { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) } },
-        { query: REVOCA, upstream: { reject: 'failed' } },
+        { ...REVOCA, upstream: { reject: 'failed' } },
       ];
       for (const caso of casi) {
         const e = await esegui({ ...caso, returnThrows: 1 });
@@ -439,7 +485,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
     });
 
     it('indirizzo dell API vuoto, alla revoca: 503 e l identificativo resta da parte', async () => {
-      const e = await esegui({ query: REVOCA, data: { kerdonUrl: '' } });
+      const e = await esegui({ ...REVOCA, data: { kerdonUrl: '' } });
       expect(e.upstreamCalls).toHaveLength(0);
       expect(e.returned).toBe(1);
       expect(e.status).toBe(503);
@@ -454,7 +500,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
       expect(permesso.returned).toBe(1);
       expect(permesso.status).toBe(500);
 
-      const revoca = await esegui({ query: REVOCA, data: { ingestKey: 12345 } });
+      const revoca = await esegui({ ...REVOCA, data: { ingestKey: 12345 } });
       expect(revoca.upstreamCalls).toHaveLength(0);
       expect(revoca.returned).toBe(1);
       expect(revoca.status).toBe(503);
@@ -462,7 +508,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
     });
 
     it('setCookie che solleva: si risponde lo stesso', async () => {
-      const e = await esegui({ query: REVOCA, setCookieThrows: true });
+      const e = await esegui({ ...REVOCA, setCookieThrows: true });
       expect(e.returned).toBe(1);
       expect(e.status).toBeGreaterThanOrEqual(500);
     });
@@ -477,7 +523,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
     const scrivibili = lista('set_cookies', 'allowedCookies').map((v) => v.mapValue?.[0]?.string);
 
     const casi = [
-      await esegui({ query: REVOCA, upstream: { reject: 'failed' } }),
+      await esegui({ ...REVOCA, upstream: { reject: 'failed' } }),
       await esegui({ cookies: { kerdon_rv: IN_SOSPESO }, upstream: { statusCode: 200, body: '[]' } }),
       await esegui({ query: PERMESSO, upstream: { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) } }),
     ];
@@ -495,7 +541,7 @@ describe('il Client sGTM: ogni ramo risponde, una volta sola', () => {
       .flatMap((p) => (p.value.listItem ?? []).map((v) => (v.string ?? '').toLowerCase()));
 
     const casi = [
-      await esegui({ query: REVOCA, upstream: { reject: 'failed' } }),
+      await esegui({ ...REVOCA, upstream: { reject: 'failed' } }),
       await esegui({ query: PERMESSO, upstream: { statusCode: 200, body: JSON.stringify([{ external_id: NUOVO }]) } }),
     ];
     for (const e of casi) {

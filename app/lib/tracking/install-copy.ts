@@ -72,6 +72,8 @@ const it: InstallCopy = {
       "Nel container server-side, apri Modelli → Modelli client → Nuovo, e importa il file kerdon-id-client.tpl.",
       "Crea un client con quel modello e compila i campi: il percorso su cui rispondere (/kerdon/id), l’indirizzo dell’app, la chiave di invio — quella intera, che comincia con kin_ — e il dominio del tuo negozio.",
       "Pubblica il container.",
+      "Chi cura il tuo tracciamento deve far chiamare quell’indirizzo a ogni pagina vista, anche quando il visitatore rifiuta o ritira il consenso: è quella chiamata a far valere subito la sua scelta.",
+      "Per collegare gli ordini ai visitatori, i tag delle pagine copiano il valore del cookie kerdon_eid nell’attributo del carrello _kerdon_external_id, oppure lo inviano a Kerdon al momento dell’acquisto.",
       "Scrivi qui sotto l’indirizzo su cui il tuo dominio inoltra la chiamata al client, salva e premi Verifica installazione.",
     ],
   },
@@ -138,7 +140,7 @@ const it: InstallCopy = {
 const en: InstallCopy = {
   title: "Installation",
   intro:
-    "Tracking is completed by a piece that lives on your store's own domain: it receives the call from your pages, talks to Kerdon, and writes the recognition into the visitor's browser. Choose how to install it.",
+    "Tracking is completed in your server-side container: it receives the call from your pages, talks to Kerdon and writes the recognition into the visitor's browser. Kerdon is the last link in the chain and does not replace what you already have in front of it.",
   installLabel: "Installation",
   choose: "Choose how to install",
   paths: {
@@ -153,6 +155,8 @@ const en: InstallCopy = {
       "In your server-side container, open Templates → Client Templates → New, and import the kerdon-id-client.tpl file.",
       "Create a client from that template and fill in the fields: the path it answers on (/kerdon/id), the app address, the sending key — the whole key, the one starting with kin_ — and your store's domain.",
       "Publish the container.",
+      "Whoever manages your tracking must have that address called on every page view, including when the visitor declines or withdraws consent: that call is what makes their choice take effect.",
+      "To link orders to visitors, your page tags copy the value of the kerdon_eid cookie into the _kerdon_external_id cart attribute, or send it to Kerdon at purchase.",
       "Enter below the address on your domain that forwards the call to the client, save, and press Verify installation.",
     ],
   },
