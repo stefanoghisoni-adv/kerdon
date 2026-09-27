@@ -186,7 +186,8 @@ export function externalIdCookie(value: string): string {
  * container server-side, il `Set-Cookie` lo consuma lui e al browser non arriva
  * mai: li' l'identificativo sta in un cookie first-party sul dominio del
  * negozio, che non e' nostro e che noi non possiamo toccare. In quel caso a
- * toglierlo e' il ponte in vetrina, che sta dalla parte giusta del confine.
+ * toglierlo e' il container stesso (il template sGTM lo fa scadere alla
+ * revoca), che sta dalla parte giusta del confine.
  * Quello che possiamo garantire da qui, in tutti e due i casi, e' che non se ne
  * conii un altro e che quello che c'era sparisca dal database.
  */

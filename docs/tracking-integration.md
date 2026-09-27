@@ -4,9 +4,10 @@ Questo documento descrive **l'unico trasporto supportato** per l'identificativo
 con cui l'app riconosce chi torna sul negozio. Non e' una fra piu' opzioni: e'
 quella che funziona, e le altre sono state provate e scartate.
 
-Quello che cambia da merchant a merchant e' **come** si installa l'endpoint che
-lo regge: due strade, tutte e due nel prodotto, con un asset versionato per
-ciascuna sotto [`integrations/`](../integrations/).
+L'app **non installa niente nel tema** del negozio, e non l'ha mai avuto come
+obiettivo: nessuno script in vetrina, nessuna riga in `theme.liquid`. L'unico
+asset che Kerdon pubblica per il lato negozio e' il modello del container
+server-side, in [`integrations/sgtm/`](../integrations/sgtm/).
 
 ## In una riga
 
@@ -27,9 +28,7 @@ vivere li'.
 **Non c'e' CORS sulle rotte dei dati, ed e' voluto.** Le rotte `/rest/v1/` non
 dichiarano nessun `Access-Control-Allow-Origin` e non rispondono a `OPTIONS`:
 una chiamata dalla vetrina fallirebbe il controllo preliminare del browser prima
-ancora di partire. L'unica rotta pubblica che si lascia includere da qualunque
-dominio e' `/tracking/bridge.js`, che e' uno script identico per tutti e non
-contiene nessun dato e nessuna credenziale.
+ancora di partire.
 
 **Il token finirebbe in chiaro.** Una chiamata dalla pagina dovrebbe portarsi
 dietro il token di lettura del negozio, che diventerebbe leggibile da chiunque
@@ -37,68 +36,9 @@ apra gli strumenti di sviluppo. Quel token vive dove deve vivere: nella pagina
 Impostazioni dell'app, dietro sessione amministratore, da dove il merchant lo
 copia dentro il proprio container o Worker.
 
-## Le due meta'
+## La catena
 
-### In vetrina: `/tracking/bridge.js`
-
-Uno script solo, uguale per tutti i negozi e per tutte e due le strade di
-installazione. Il codice sta in
-[`app/lib/tracking/consent-bridge.ts`](../app/lib/tracking/consent-bridge.ts) ed
-e' servito dalla rotta `tracking.bridge[.]js`.
-
-```html
-<script src="https://api.kerdon.io/tracking/bridge.js"
-        data-kerdon-endpoint="https://negozio.it/kerdon/id" async></script>
-```
-
-Fa tre cose, in quest'ordine:
-
-1. legge dalla Customer Privacy API di Shopify cosa ha risposto il visitatore;
-2. **solo se il permesso c'e'**, chiama l'endpoint first-party del negozio —
-   mai noi — e ne riceve l'identificativo;
-3. attacca quell'identificativo all'attributo `kerdon_eid` del carrello, cosi'
-   risale nell'ordine.
-
-Non contiene nessuna credenziale e non scrive il cookie dell'identificativo: lo
-scrive l'endpoint, con `Set-Cookie`, che e' l'unico posto da cui si ottengono
-`Secure` e una durata che il browser rispetti.
-
-Alla revoca toglie **subito** il cookie dal browser e svuota l'attributo del
-carrello: da quell'istante l'identificativo non va piu' in analisi ne' in
-attribuzione. Dall'eventuale risposta **non legge mai** un identificativo: un
-endpoint che ne restituisse uno lo rimetterebbe addosso a chi ha appena detto
-di no. Ne legge solo lo **stato**, perche' la cancellazione sul server deve
-arrivare in fondo.
-
-**La revoca in sospeso ("lapide").** L'identificativo da cancellare si mette da
-parte in `localStorage`, sotto la chiave `kerdon_rv` — non in un cookie, cosi'
-non viaggia con nessuna richiesta e nessun tag lo scambia per un
-identificativo attivo. Serve solo a cancellare: non si rimanda mai
-all'endpoint per coniare, non va sul dataLayer ne' sul carrello.
-
-- l'endpoint si richiama finche' non risponde **2xx**: errori di rete, `408`,
-  `429`, `500`, `502`, `503`, `504` si ritentano nella pagina con attesa
-  crescente (2s, 4s, 8s, 16s; al massimo 5 tentativi), rispettando
-  `Retry-After` (secondi o data). Un'attesa oltre i 5 minuti, o gli altri
-  non-2xx, si rimandano al **caricamento successivo**, che non parte prima
-  dell'istante indicato da `Retry-After`;
-- lo svuotamento del carrello si riprova a ogni caricamento finche'
-  `/cart/update.js` non risponde 2xx;
-- **finche' la lapide c'e' non si conia e non si riusa nessun identificativo**,
-  nemmeno se nel frattempo il visitatore concede di nuovo; alla conferma, se il
-  permesso c'e', se ne conia uno **nuovo**;
-- dopo **30 giorni** senza conferma si rinuncia e la lapide si cancella. Se il
-  server aveva gia' registrato la revoca la completa da solo; se non l'aveva
-  mai ricevuta, la riga resta fino alla potatura dei visitatori anonimi. Senza
-  `localStorage` (navigazione privata, archiviazione bloccata) la lapide vive
-  solo nella pagina, e Safari puo' cancellare lo storage scritto da script dopo
-  7 giorni senza visite.
-
-Perche' la vetrina possa leggere `Retry-After` su una chiamata cross-origin,
-l'endpoint deve esporlo (`Access-Control-Expose-Headers: Retry-After`): il
-template sGTM lo fa.
-
-### Dove sta Kerdon nella catena
+### Dove sta Kerdon
 
 La catena del tracciamento server-side e' **in fila, non a bivio**:
 
@@ -121,30 +61,42 @@ il container parlando direttamente con noi, e non deve esistere: sarebbe il
 merchant a perderci, perche' quel pezzo davanti e' proprio cio' che gli evita di
 essere bloccato.
 
-In tutti e due gli asset **l'indirizzo dell'API e' un parametro** e non una
-costante scritta nel codice: `KERDON_URL` nel Worker, "Indirizzo dell'API" nel
-template. Quando l'indirizzo cambia si modifica il valore e si ripubblica.
+**L'indirizzo dell'API e' un parametro** del template ("Indirizzo dell'API") e
+non una costante scritta nel codice: quando l'indirizzo cambia si modifica il
+valore e si ripubblica.
+
+### Chi fa partire la chiamata
+
+La chiamata dalla pagina all'endpoint del negozio la predispone chi cura il
+tracciamento del merchant, con gli strumenti che usa gia' (il tag manager web,
+il proprio Worker). Deve partire **a ogni pagina, anche senza consenso**: senza
+consenso il template non conia niente e non pianta niente, ma e' proprio quella
+chiamata a portare il no — letto dal cookie `_tracking_consent` di Shopify, che
+viaggia da se' verso il dominio del negozio, oppure dal parametro `consent` —
+e quindi a far partire la revoca.
 
 ## Il giro completo
 
 ### Prima visita
 
 1. Il visitatore apre una pagina del negozio e risponde al banner.
-2. Il ponte legge il permesso e chiama **l'endpoint del negozio** (es.
-   `https://negozio.it/kerdon/id`), non noi.
-3. Quell'endpoint chiama l'app con il token di lettura, **senza**
+2. La pagina chiama **l'endpoint del negozio** (es.
+   `https://negozio.it/kerdon/id`), non noi; il container riceve la chiamata e
+   legge il permesso.
+3. Il container chiama l'app con la chiave di invio, **senza**
    identificativo: non ne ha ancora uno.
 4. L'app ne conia uno e lo restituisce nell'header `X-CoreW-External-Id` (e nel
    corpo, come `external_id`).
 5. **L'endpoint del negozio pianta il cookie**, dal proprio dominio, con il
    valore ricevuto. E' un cookie first-party: nessun browser lo tratta da
    estraneo.
-6. Il ponte attacca lo stesso valore al carrello.
+6. A chi mandarlo — dataLayer, carrello, piattaforme — lo decidono i tag del
+   merchant.
 
 ### Visite successive
 
-1. Il ponte chiama di nuovo l'endpoint del negozio, passando il valore letto dal
-   cookie first-party.
+1. La pagina chiama di nuovo l'endpoint del negozio; il cookie first-party
+   viaggia con la chiamata.
 2. L'endpoint lo passa all'app in uno di questi due modi:
    - header `X-CoreW-External-Id: corew_...` — la via normale;
    - parametro di query `existing_external_id=corew_...` — dove l'header non si
@@ -290,8 +242,8 @@ segna completata**: la card mostra "Da verificare". Cambiare strada o indirizzo
 annulla una verifica precedente — una verifica e' una frase su una
 configurazione precisa, non un bollino sul negozio.
 
-`HttpOnly` non e' richiesto ed e' voluto: il ponte deve poter rileggere il
-cookie per attaccare lo stesso identificativo al carrello.
+`HttpOnly` non e' richiesto ed e' voluto: i tag del merchant nella pagina
+possono doverlo rileggere.
 
 ## Cosa viene scritto, e dove
 
@@ -304,7 +256,11 @@ persona.
 
 Non e' un dato anonimo, e non va chiamato cosi': l'identificativo vive nel browser
 di una persona e, dal collegamento in poi, dice quali dispositivi usa e quando li
-ha usati. Le righe mai collegate a un cliente si cancellano dopo 90 giorni.
+ha usati. La pulizia automatica lato server riguarda **solo le righe anonime**:
+quelle mai collegate a un cliente (`shopify_customer_id` vuoto) si cancellano
+90 giorni dopo l'ultimo avvistamento (`pruneAnonymousUsers`). **Le righe
+collegate a un cliente non vengono potate**: restano finche' non arriva una
+revoca o la disinstallazione (vedi "Limiti noti").
 Il testo per gli interessati sta in `docs/legal/privacy-policy.it.md`, punto 3.5.
 
 ## Il consenso viene prima
@@ -314,8 +270,8 @@ non porta nessun identificativo e non viene scritta nessuna riga. Servono
 `analytics` e `marketing` insieme — e' lo stesso identificativo a misurare e ad
 attribuire, e non se ne conia mezzo.
 
-**L'assenza di segnale vale come no**, in tutti e tre i punti del giro: nel
-ponte, nell'endpoint e nell'app. Nessun valore di ripiego, nessuna regola per
+**L'assenza di segnale vale come no**, in tutti e due i punti del giro:
+nell'endpoint del negozio e nell'app. Nessun valore di ripiego, nessuna regola per
 paese scritta da noi: se il negozio non e' in una configurazione che richiede il
 consenso, e' Shopify a dire che le finalita' sono permesse, e quel "permesso" si
 legge come qualunque altro.
@@ -323,12 +279,39 @@ legge come qualunque altro.
 Il container non deve **mai** dichiarare un consenso che il visitatore non ha
 dato: sarebbe registrarlo al posto suo. La verifica lo controlla.
 
+### La revoca, e perche' non si perde
+
 Alla revoca il cookie scade e la riga sparisce dal database. Le due meta' della
-revoca sono queste, e la prima avviene comunque. La seconda non si perde: se
-Kerdon non conferma, l'endpoint risponde `503` con `Retry-After` (mai `200`) e
-il ponte in vetrina riprova con l'identificativo messo da parte. La revoca su
-Kerdon e' idempotente: ripetere quella di un identificativo gia' revocato, o
-mai visto, risponde `200`.
+revoca sono queste, e la prima avviene comunque: `kerdon_eid` scade nella
+risposta alla prima chiamata che porta il no.
+
+La seconda non si perde, e non ha bisogno di nessuno script in vetrina:
+
+- l'identificativo passa in un secondo cookie, `kerdon_rv` (`HttpOnly`,
+  `Secure`, 30 giorni), nella forma `<no compatto>~<identificativo>`. Serve
+  **solo** a cancellare: non e' mai restituito come identificativo, e nessuno
+  script della pagina lo legge;
+- se Kerdon conferma (2xx) il template risponde `200 []` e `kerdon_rv` scade;
+- se non conferma — rete giu', timeout, `429`, `5xx`, qualunque non-2xx, o il
+  client configurato male — risponde `503` con `Retry-After` (mai `200`) e
+  `kerdon_rv` resta;
+- **la chiamata successiva, con qualunque permesso**, ripresenta a Kerdon il no
+  registrato e l'identificativo. Finche' `kerdon_rv` c'e' non si conia e non si
+  riusa niente; alla conferma, se il permesso c'e', se ne conia uno **nuovo**;
+- `kerdon_rv` non si riscrive a ogni tentativo fallito: scade 30 giorni dopo la
+  prima volta. Se nel frattempo Kerdon aveva registrato la revoca la completa da
+  se'; se non l'aveva mai ricevuta, la riga resta fino alla potatura dei
+  visitatori anonimi (solo se anonima, vedi sopra).
+
+Sul server la revoca e' durevole appena registrata: il 2xx dice che la riga di
+revoca e' scritta, e il drenaggio la porta a termine anche se il primo tentativo
+non riesce. E' anche idempotente: ripetere quella di un identificativo gia'
+revocato, o mai visto, risponde `200`. Kerdon risponde `503` solo quando non
+riesce a scrivere la riga di revoca.
+
+Chi mette un proprio Worker davanti al container deve lasciar passare i cookie
+del negozio verso il container e i `Set-Cookie` di ritorno, e non trasformare un
+`503` in un `200`.
 
 ## Sulla durata: un massimo tecnico, non una garanzia
 
@@ -366,3 +349,21 @@ un identificativo e piantano un cookie. A chi mandarlo, e se mandarlo, lo decide
 il merchant nei propri tag: quella decisione deve stare dove avviene il fatto.
 Cosa ha risposto il visitatore sulla condivisione con terzi glielo diciamo
 nell'header `X-CoreW-Sale-Of-Data`.
+
+## Limiti noti e cose da fare
+
+- **Righe collegate a un cliente: nessuna potatura automatica.**
+  `pruneAnonymousUsers` cancella solo le righe con `shopify_customer_id` vuoto,
+  90 giorni dopo l'ultimo avvistamento. Una riga collegata a un cliente resta
+  finche' non arriva una revoca o la disinstallazione. Da fare: decidere una
+  durata massima anche per queste righe e aggiungerla alla potatura, e
+  verificare che la cancellazione di un cliente (`customers/redact`) le
+  raggiunga.
+- **Tra il no e la chiamata successiva.** Senza script in vetrina, `kerdon_eid`
+  scade alla prima chiamata all'endpoint che porta il no, non nell'istante del
+  clic sul banner. I tag del merchant che lo leggono nella pagina devono
+  guardare il consenso da se'.
+- **La revoca riparte solo se la pagina richiama l'endpoint.** Se chi cura il
+  tracciamento fa partire la chiamata solo con il consenso, il no non arriva
+  mai al container: la chiamata va fatta a ogni pagina (vedi "Chi fa partire la
+  chiamata").

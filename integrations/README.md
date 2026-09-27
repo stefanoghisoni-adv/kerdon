@@ -27,20 +27,14 @@ riesce solo perche' il dominio e' di prima parte.
 l'identificativo, e non sostituisce nessuno dei pezzi che stanno davanti.
 
 
-## Le due meta'
+## Niente nel tema
 
-**In vetrina** — lo script servito da Kerdon a
-`/tracking/bridge.js`. Legge cosa ha risposto il visitatore al banner, e **solo
-se il permesso c'e'** chiama l'endpoint del negozio, poi attacca al carrello
-l'identificativo che riceve. Non contiene nessuna chiave.
-
-```html
-<script src="https://api.kerdon.io/tracking/bridge.js"
-        data-kerdon-endpoint="https://negozio.it/kerdon/id" async></script>
-```
-
-**Sul dominio del negozio** — il Worker o il Client di GTM. Questo pezzo ha le
-credenziali, e per questo non sta nel browser.
+Kerdon **non installa codice nel tema** del negozio, e non lo chiede: nessuno
+script in vetrina, nessuna riga in `theme.liquid`. La chiamata dalla pagina
+all'endpoint del negozio la predispone chi cura il tracciamento, con gli
+strumenti che usa gia'. Deve partire a ogni pagina, anche senza consenso: senza
+consenso il modello non conia e non pianta niente, ma e' quella chiamata a
+portare il no e a far partire la revoca.
 
 ## Le credenziali sono due, e non e' burocrazia
 
@@ -80,24 +74,27 @@ e il log del server lo chiama per nome invece di confonderlo con una chiamata
 senza credenziale — perche' incollare l'una al posto dell'altra e' l'errore piu'
 probabile di tutta la configurazione.
 
-## Le regole che nessuna delle due versioni puo' rompere
+## Le regole che il modello non puo' rompere
 
 1. **L'assenza di segnale e' un no.** Nessun valore di ripiego, nessuna regola
    per paese: se non arriva niente che dica cosa ha risposto il visitatore, non
    si chiama nessuno, non si conia niente, non si pianta nessun cookie.
 2. **Nessuna chiave nel browser.** La chiave sta nel Worker o nel container, mai
-   in una pagina: lo script servito alla vetrina non ne contiene nessuna.
+   in una pagina.
 3. **Il cookie e' first-party.** Sul dominio da cui si vede la vetrina, con
    `Secure`, `Path=/`, un `SameSite` dichiarato e una durata.
-4. **La revoca disfa.** Al no esplicito il cookie scade e la riga sparisce.
+4. **La revoca disfa, e non si perde.** Al no esplicito il cookie scade e la
+   riga sparisce. Se Kerdon non conferma, l'identificativo resta in un cookie
+   di servizio (`kerdon_rv`, solo per cancellare) e la chiamata successiva
+   riprova.
 5. **Niente integrazioni dirette.** Questi asset restituiscono un identificativo
    e piantano un cookie. A chi mandarlo lo decide il merchant nei propri tag.
 
 ## L'indirizzo dell'API e' un parametro
 
-In tutti e due gli asset l'indirizzo di Kerdon si configura (`KERDON_URL` nel
-Worker, "Indirizzo dell'API" nel template) e non e' scritto nel codice: quando
-cambia si modifica il valore e si ripubblica, senza rifare l'asset.
+L'indirizzo di Kerdon si configura ("Indirizzo dell'API" nel template) e non e'
+scritto nel codice: quando cambia si modifica il valore e si ripubblica, senza
+rifare il modello.
 
 ## Prima di dire che funziona
 

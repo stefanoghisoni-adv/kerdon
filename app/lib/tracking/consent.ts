@@ -100,7 +100,8 @@ export const LEGACY_CONSENT_HEADER = 'X-CoreW-Consent';
 export const SHOPIFY_CONSENT_COOKIE = '_tracking_consent';
 
 /**
- * Il cookie che il ponte in vetrina scrive sul dominio del negozio.
+ * Una copia del permesso sul dominio del negozio, se chi cura il tracciamento
+ * ne scrive una.
  *
  * Contiene la forma compatta qui sotto, e nient'altro: e' la copia leggibile
  * del permesso, quella che un container puo' mappare in una variabile e
@@ -173,7 +174,7 @@ export function parseCompactConsent(raw: string | null | undefined): VisitorCons
   return seen ? consent : null;
 }
 
-/** Scrive la forma compatta. La usa il ponte in vetrina, e i test. */
+/** Scrive la forma compatta. La usano i test, e chi costruisce una chiamata. */
 export function compactConsent(consent: VisitorConsent): string {
   const letters = Object.entries(PURPOSE_LETTERS)
     .filter(([, purpose]) => consent[purpose] !== 'unknown')

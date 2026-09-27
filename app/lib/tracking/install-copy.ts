@@ -31,7 +31,6 @@ export interface InstallCopy {
   paths: Record<InstallPath, string>;
   pathHelp: Record<InstallPath, string>;
   steps: Record<InstallPath, string[]>;
-  snippetLabel: string;
   endpointLabel: string;
   endpointHelp: string;
   endpointPlaceholder: Record<InstallPath, string>;
@@ -73,11 +72,9 @@ const it: InstallCopy = {
       "Nel container server-side, apri Modelli → Modelli client → Nuovo, e importa il file kerdon-id-client.tpl.",
       "Crea un client con quel modello e compila i campi: il percorso su cui rispondere (/kerdon/id), l’indirizzo dell’app, la chiave di invio — quella intera, che comincia con kin_ — e il dominio del tuo negozio.",
       "Pubblica il container.",
-      "Aggiungi alle pagine del negozio lo script qui sotto, nel tema prima di </head> oppure come tag personalizzato.",
-      "Torna qui e premi Verifica installazione.",
+      "Scrivi qui sotto l’indirizzo su cui il tuo dominio inoltra la chiamata al client, salva e premi Verifica installazione.",
     ],
   },
-  snippetLabel: "Da aggiungere alle pagine del negozio",
   endpointLabel: "Indirizzo dell’endpoint sul tuo dominio",
   endpointHelp:
     "L’indirizzo a cui le pagine del negozio chiedono il riconoscimento. Deve stare sul dominio da cui si vede il negozio, ed essere in https: è questo che permette al riconoscimento di durare.",
@@ -156,11 +153,9 @@ const en: InstallCopy = {
       "In your server-side container, open Templates → Client Templates → New, and import the kerdon-id-client.tpl file.",
       "Create a client from that template and fill in the fields: the path it answers on (/kerdon/id), the app address, the sending key — the whole key, the one starting with kin_ — and your store's domain.",
       "Publish the container.",
-      "Add the snippet below to your store pages, in the theme before </head> or as a custom tag.",
-      "Come back here and press Verify installation.",
+      "Enter below the address on your domain that forwards the call to the client, save, and press Verify installation.",
     ],
   },
-  snippetLabel: "Add this to your store pages",
   endpointLabel: "Endpoint address on your domain",
   endpointHelp:
     "The address your store pages ask for recognition. It has to sit on the domain your store is served from, and be https: that is what lets the recognition last.",
@@ -227,17 +222,3 @@ export function installCopy(locale: Locale): InstallCopy {
   return COPY[locale] ?? COPY.it;
 }
 
-/**
- * Il pezzo da incollare nelle pagine del negozio.
- *
- * Costruito e non scritto a mano nei testi perche' porta dentro l'indirizzo che
- * il merchant ha appena scritto: un esempio da riadattare si sbaglia, uno gia'
- * giusto si copia. L'indirizzo dell'app arriva da fuori — non e' una costante
- * di questo file — cosi' il giorno in cui cambia non c'e' niente da riscrivere
- * qui.
- */
-export function bridgeSnippet(appUrl: string, endpoint: string | null): string {
-  const base = appUrl.replace(/\/+$/, '');
-  const target = endpoint ?? 'https://negozio.it/kerdon/id';
-  return `<script src="${base}/tracking/bridge.js"\n        data-kerdon-endpoint="${target}" async></script>`;
-}

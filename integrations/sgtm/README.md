@@ -66,15 +66,23 @@ hai incollato la chiave sbagliata — ed è quasi sempre quello il motivo per cu
 
 4. **Pubblica il container.**
 
-5. **Aggiungi lo script alla vetrina**, nel tema (`theme.liquid`, prima di
-   `</head>`) o come tag personalizzato del tag manager web:
+5. **Scrivi in Kerdon l'indirizzo** su cui il dominio del negozio inoltra la
+   chiamata al client (per esempio `https://negozio.it/kerdon/id`) e premi
+   **Verifica installazione**.
 
-   ```html
-   <script src="https://api.kerdon.io/tracking/bridge.js"
-           data-kerdon-endpoint="https://sgtm.negozio.it/kerdon/id" async></script>
-   ```
+Niente va aggiunto al tema del negozio. La chiamata dalle pagine all'endpoint la
+predispone chi cura il tracciamento, e deve partire a ogni pagina, anche senza
+consenso: il client non conia e non pianta niente senza consenso, ma è quella
+chiamata a portare il no e a far partire la revoca.
 
-6. **Verifica**, dall'app: Impostazioni → Verifica installazione.
+## Se la revoca non arriva a Kerdon
+
+Al no, `kerdon_eid` scade subito. Se Kerdon non conferma la cancellazione, il
+client risponde `503` con `Retry-After` e tiene l'identificativo in un cookie di
+servizio, `kerdon_rv` (`HttpOnly`, 30 giorni), che serve solo a cancellare: la
+chiamata successiva riprova, e finché non va a buon fine non si conia niente.
+Un Worker davanti al container deve lasciar passare i cookie e i `Set-Cookie`, e
+non trasformare un `503` in un `200`.
 
 ## Perché il sottodominio deve essere del negozio
 

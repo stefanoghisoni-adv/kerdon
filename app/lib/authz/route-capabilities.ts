@@ -279,12 +279,6 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
       'Ritorno di OAuth da Supabase: si identifica dallo stato firmato che ha ' +
       'emesso l’app, non da una sessione.',
   },
-  'tracking.bridge[.]js': {
-    guard: 'open',
-    reason:
-      'File statico servito alla vetrina. Non contiene dati: il permesso lo ' +
-      'chiedono le rotte che lo script poi interroga.',
-  },
   'policies.privacy-policy': {
     guard: 'open',
     reason:
