@@ -66,6 +66,8 @@ puntano al database di Test):
 
 Quale indirizzo: vedi "La connessione" piu' sotto. In breve, da Supabase
 **Connect → Session pooler** (porta **5432**), non "Transaction pooler" (6543).
+Il pannello mostra l'indirizzo con `[YOUR-PASSWORD]` al posto della password:
+va sostituito con la password del database (vedi "La password del database").
 
 ### Passo 1 — il backup, e controllare che ci sia davvero
 
@@ -73,7 +75,24 @@ Prima di `linea-di-base` e di `applica`, sempre. Per `verifica` non serve: non
 scrive niente.
 
 Il backup che si puo' controllare e' una copia scaricata sul proprio computer.
-Da Terminale, nella cartella dove si vogliono tenere le copie:
+Servono `pg_dump` e `pg_restore`. Si controlla con `pg_dump --version`; se il
+Terminale risponde "command not found", si installano una volta sola:
+
+```bash
+brew install libpq
+# Apple Silicon (M1/M2/M3...):
+echo 'export PATH="/opt/homebrew/opt/libpq/bin:$PATH"' >> ~/.zshrc
+# Mac Intel:
+echo 'export PATH="/usr/local/opt/libpq/bin:$PATH"' >> ~/.zshrc
+# poi chiudere e riaprire il Terminale
+```
+
+La versione di `pg_dump` deve essere **uguale o piu' recente** di quella del
+server (Supabase: **Settings → Infrastructure**, voce Postgres; oggi 15 o 17):
+un `pg_dump` piu' vecchio si rifiuta con "server version mismatch". `libpq` di
+Homebrew e' sempre l'ultima, quindi va bene.
+
+Poi, da Terminale, nella cartella dove si vogliono tenere le copie:
 
 ```bash
 # Incollare l'indirizzo quando lo chiede (Session pooler, senza ?schema=public).
@@ -186,7 +205,11 @@ Solo se `02-stato-prima.log` dell'ultimo `verifica` dice
 2. Backup (passo 1) — fatto **adesso**, non quello di ieri.
 3. Database `test`, azione `applica`, spunta backup. Approvare: e' il momento
    in cui si decide davvero. Prima di cliccare, riguardare l'elenco delle
-   migrazioni in attesa.
+   migrazioni in attesa, e **il ramo**: la pagina del run lo mostra accanto al
+   nome del workflow (e `00-intestazione.log` riporta il commit). Gli
+   environment non sono limitati a `main`, quindi chiunque possa lanciare il
+   workflow puo' farlo da un ramo qualsiasi, con le migrazioni di quel ramo:
+   approvare solo se e' `main`, o il ramo della PR che ci si aspetta.
 4. Il run applica le migrazioni (`06-applica.log`) e subito dopo ricontrolla
    tutto sul database migrato.
 
@@ -257,6 +280,19 @@ Prisma vuole `?schema=public`; `psql` quel parametro non lo conosce e rifiuta
 l'intero indirizzo con `invalid URI query parameter: schema`. Se la password
 contiene caratteri come `@`, `/` o `#` va scritta codificata (`%40`, `%2F`,
 `%23`).
+
+### La password del database
+
+Supabase non la mostra mai dopo averla creata: nel pannello **Connect** al suo
+posto c'e' `[YOUR-PASSWORD]`. Se non la si ha salvata (per esempio in un
+gestore di password), si reimposta da **Project Settings → Database →
+Database password → Reset database password**.
+
+Reimpostarla ha una conseguenza: tutto quello che usa la vecchia smette di
+collegarsi. Prima di farlo, controllare dove compare — tipicamente
+`DATABASE_URL` nelle variabili d'ambiente di Vercel (Live e Test), un `.env`
+locale, i segreti degli environment GitHub — e aggiornarli subito dopo,
+rilanciando un deploy su Vercel. Per Live, farlo in un momento tranquillo.
 
 ## La prima volta: la deriva
 
@@ -413,8 +449,9 @@ Tre regole, e sono quelle che hanno gia' fatto danni quando sono state saltate:
 
 `npx vitest run` e la CI. Il job `migrations` costruisce un Postgres vuoto,
 applica tutta la catena, verifica che il risultato sia lo schema dichiarato e
-ricontrolla dati iniziali, RLS e chiavi esterne; poi prova la linea di base su
-un database costruito con lo script, e confronta i due database fra loro
+ricontrolla dati iniziali, RLS e chiavi esterne; poi prova la linea di base e
+`applica` su un database fermo alla linea di base (costruito da `0_init`), e
+confronta un database costruito con lo script con quello delle migrazioni
 (`prisma/percorsi-uguali.ts`): lo script e le migrazioni devono arrivare allo
 stesso risultato. Se passa li', passa in produzione.
 
