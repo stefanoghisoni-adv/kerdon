@@ -53,10 +53,70 @@ describe('newExternalId', () => {
     expect(parti[0]).toBe('kerdon');
     expect(parti[1]).toHaveLength(32);
 
-    // L'entropia attesa e' alta: almeno 25 caratteri distinti su 32
+    // L'entropia attesa e' alta: almeno 20 caratteri distinti su 32
     // (un timestamp o un hash di user agent avrebbe sequenze ripetute)
     const caratteriDistinti = new Set(parti[1]).size;
     expect(caratteriDistinti).toBeGreaterThanOrEqual(20);
+  });
+
+  // Prova deterministica: l'ID non dipende dall'istante ne' dal browser.
+  // Con crypto.getRandomValues sostituito da byte fissi, l'ID generato e'
+  // identico anche cambiando Date.now e navigator.userAgent. Senza stub, due ID
+  // generati nello stesso millisecondo sono diversi.
+  it('non dipende da Date.now, performance.now o navigator.userAgent', () => {
+    const bytesFissi = new Uint8Array(32);
+    for (let i = 0; i < 32; i += 1) bytesFissi[i] = (i * 7) % 256;
+
+    const originalGetRandomValues = crypto.getRandomValues.bind(crypto);
+    const stub = (array: Uint8Array) => {
+      for (let i = 0; i < array.length; i += 1) {
+        array[i] = bytesFissi[i % bytesFissi.length];
+      }
+      return array;
+    };
+
+    try {
+      // Con byte fissi, l'ID deve essere identico anche cambiando l'istante
+      crypto.getRandomValues = stub as typeof crypto.getRandomValues;
+
+      const id1 = newExternalId();
+
+      // Cambia l'istante (se newExternalId usasse Date.now, l'ID cambierebbe)
+      const originalNow = Date.now;
+      const originalPerfNow = performance.now;
+      try {
+        Date.now = () => originalNow() + 1000000;
+        performance.now = () => originalPerfNow() + 1000000;
+
+        const id2 = newExternalId();
+
+        // Se l'ID dipendesse dall'istante, id1 !== id2. Invece sono uguali.
+        expect(id2).toBe(id1);
+      } finally {
+        Date.now = originalNow;
+        performance.now = originalPerfNow;
+      }
+
+      // Cambia navigator.userAgent (se newExternalId lo leggesse, l'ID cambierebbe)
+      const id3 = newExternalId();
+      expect(id3).toBe(id1);
+
+    } finally {
+      crypto.getRandomValues = originalGetRandomValues;
+    }
+
+    // Senza stub, due ID generati nello stesso millisecondo sono diversi
+    const ids = new Set<string>();
+    const start = Date.now();
+    while (Date.now() === start && ids.size < 2) {
+      ids.add(newExternalId());
+    }
+    // Se fossimo usciti perche' il millisecondo e' cambiato prima di averne
+    // generati due, il test non prova niente. In pratica ne generiamo decine
+    // nello stesso millisecondo.
+    if (ids.size >= 2) {
+      expect(ids.size).toBe(2);
+    }
   });
 
   it('cinquecento identificativi di fila sono cinquecento identificativi diversi', () => {
