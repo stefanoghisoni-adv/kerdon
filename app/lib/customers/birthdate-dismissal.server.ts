@@ -4,9 +4,10 @@
 //
 // PERCHE' NON PIU' NEL BROWSER. Ci stava, e non ha retto due volte per due
 // ragioni diverse. La prima e' che `localStorage` appartiene all'indirizzo da
-// cui la pagina arriva: quando l'app e' passata da `api.coreward.app` a
-// `api.kerdon.io` la memoria di cio' che era stato chiuso e' rimasta
-// sull'altro dominio, e l'avviso e' tornato su. La seconda e' strutturale:
+// cui la pagina arriva: quando l'app e' passata da `api.coreward.app` (il
+// dominio precedente) a `api.kerdon.io`, la memoria di cio' che era stato
+// chiuso e' rimasta sull'altro dominio, e l'avviso e' tornato su. La seconda
+// e' strutturale:
 // dentro l'admin l'app vive in un iframe di un'altra origine, quindi quello e'
 // storage di terze parti — Safari lo blocca, Chrome lo partiziona. Il commento
 // che c'era diceva che un avviso che ricompare e' "il male minore": in un'app

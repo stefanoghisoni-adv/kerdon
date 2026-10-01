@@ -17,6 +17,8 @@ import {
   userSeenRow,
 } from './users';
 
+// Test fixtures: usano `corew_` (formato precedente) per verificare la retrocompatibilita'.
+// Nuovi ID sono coniati con `kerdon_`, ma i vecchi restano validi.
 const VECCHIO = 'corew_1700000000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const RECENTE = 'corew_1750000000000_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const TERZO = 'corew_1760000000000_cccccccccccccccccccccccccccccccc';

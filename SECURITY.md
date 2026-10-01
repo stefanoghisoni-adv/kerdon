@@ -164,6 +164,28 @@ npm run build && grep -o 'v3_singleFetch[^,}]*' build/server/assets/server-build
 
 Poi si aggiornano le tabelle qui sopra e la data in cima.
 
+## Secret scanning e push protection
+
+GitHub offre **secret scanning** (rilevamento di credenziali nei commit) e **push
+protection** (blocco di push contenenti segreti). Per repository **privati**,
+queste funzionalita' richiedono **GitHub Advanced Security**, disponibile con:
+
+- GitHub Enterprise Cloud (piano a pagamento per organizzazioni)
+- GitHub Enterprise Server
+- Non e' disponibile su repository privati in piani Free o Team
+
+Per repository **pubblici**, secret scanning e' sempre gratuito.
+
+**Come abilitarle** (se il piano lo consente):
+
+1. Andare su Settings → Security → Code security
+2. Abilitare **Secret scanning** (rileva credenziali gia' nel repository)
+3. Abilitare **Push protection** (blocca push contenenti nuove credenziali)
+
+Per il repository Kerdon (privato su piano Free), queste protezioni non sono
+disponibili. La scansione avviene manualmente con `gitleaks` (vedi `.gitleaks.toml`
+per le allowlist di test fixtures).
+
 ## Segnalare una vulnerabilita'
 
 Scrivere a Stefano Ghisoni (owner del repository) invece di aprire una issue

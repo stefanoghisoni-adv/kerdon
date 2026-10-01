@@ -1,7 +1,7 @@
 {
   "name": "kerdon",
   "version": "1.0.0",
-  "description": "CoreWard - Shopify app for syncing products and customers to merchant Supabase databases",
+  "description": "Kerdon - Shopify app for syncing products and customers to merchant Supabase databases",
   "private": true,
   "type": "module",
   "scripts": {

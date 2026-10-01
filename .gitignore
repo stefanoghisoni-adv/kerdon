@@ -32,3 +32,11 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
+
+# graphify-out: artefatti generati dall'analisi del grafo del codice
+graphify-out/
+
+# Piani e specifiche interni non destinati al pubblico
+docs/superpowers/plans/
+docs/superpowers/specs/
+docs/plans/

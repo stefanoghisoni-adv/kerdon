@@ -47,9 +47,9 @@ import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
  * costringerebbe a un percorso diverso — cioe' a sapere che questa non e' una
  * tabella vera, che e' proprio cio' che gli stiamo risparmiando.
  *
- * L'header `X-CoreW-External-Id` resta su ogni risposta, qui e sul proxy: chi
- * ha un container che sa leggere gli header continua a poterlo fare, e non
- * costa niente tenerlo.
+ * L'header `X-Kerdon-External-Id` (e `X-CoreW-External-Id` per compatibilita')
+ * resta su ogni risposta, qui e sul proxy: chi ha un container che sa leggere
+ * gli header continua a poterlo fare, e non costa niente tenerlo.
  *
  * NON e' una ricerca. Non interroga nessuna tabella e non guarda i clienti:
  * risponde alla sola domanda "come si chiama questo browser", che e' l'unica a
