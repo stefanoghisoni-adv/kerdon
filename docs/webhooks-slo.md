@@ -8,24 +8,38 @@ Questo documento definisce i tempi attesi per l'elaborazione dei webhook ricevut
 
 Su Vercel, quando la funzione serverless riceve un webhook:
 
-1. **Ricevuta immediata** (< 500ms): il webhook viene verificato, la ricevuta viene scritta nel database owner e Shopify riceve il 200 OK
-2. **Elaborazione immediata** (1-5 secondi): l'elaborazione inizia subito dopo l'ack e continua grazie a `waitUntil` di `@vercel/functions`, che tiene viva la funzione finché l'elaborazione non termina
-3. **Risultato**: l'ordine/rimborso appare nel database del merchant entro pochi secondi dalla vendita
-
-**Tempo atteso normale**: 1-5 secondi dall'evento alla sincronizzazione completata.
+1. **Ricevuta immediata**: il webhook viene verificato, la ricevuta viene scritta nel database owner e Shopify riceve il 200 OK (obiettivo: p95 < `WEBHOOK_RESPONSE_TARGET_MS` = 1s, limite duro: < `WEBHOOK_RESPONSE_HARD_LIMIT_MS` = 5s)
+2. **Elaborazione immediata**: l'elaborazione inizia subito dopo l'ack e continua grazie a `waitUntil` di `@vercel/functions`, che tiene viva la funzione finché l'elaborazione non termina
+3. **Risultato**: l'ordine/rimborso appare nel database del merchant entro pochi secondi dalla vendita (tempo stimato: pochi secondi, variabile in base al carico di Shopify API e database merchant)
 
 ### Scenario di fallback (terminazione anticipata o errore)
 
 Se Vercel termina la funzione prima che l'elaborazione finisca, o se l'elaborazione fallisce per un errore transitorio (rete, database non disponibile):
 
 1. **Terminazione prima dell'elaborazione**: la ricevuta resta `queued` con `nextAttemptAt` immediato
-2. **Terminazione durante l'elaborazione** (claim già avvenuto): la riga resta `processing` con `startedAt` vecchio; dopo 5 minuti (WEBHOOK_STALE_MS) il cron la riporta a `queued` e la rilavorala
-3. **Errore transitorio**: la riga torna `queued` con `nextAttemptAt` distanziato secondo backoff esponenziale (1min, 2min, 5min, 15min, 30min per i primi 5 tentativi)
+2. **Terminazione durante l'elaborazione** (claim già avvenuto): la riga resta `processing` con `startedAt` vecchio; dopo `WEBHOOK_STALE_MS` = 5 minuti il cron la riporta a `queued` e la rilavorala
+3. **Errore transitorio**: la riga torna `queued` con `nextAttemptAt` distanziato secondo backoff esponenziale
 4. Il cron di drenaggio (`/api/cron/sync`) la recupera quando `nextAttemptAt` è scaduto
 
-**Obiettivo tipico**: recupero entro 30 minuti (cron GitHub Actions ogni */30 min, best-effort)  
-**Limite rigido**: entro 24 ore (Vercel Cron giornaliero `0 3 * * *` UTC, garantito dalla piattaforma)  
-**Eventi falliti**: dopo 5 tentativi (circa 50 minuti di backoff cumulativo), lo stato diventa `dead_letter` e viene segnalato
+**Backoff esponenziale** (`nextWebhookAttemptAt`, inbox-model.ts):
+- Formula: `WEBHOOK_BACKOFF_BASE_MS` (1 min) × 2^(attempts-1), tetto `WEBHOOK_BACKOFF_MAX_MS` (30 min)
+- Tentativo 1 fallisce → attesa 1 min
+- Tentativo 2 fallisce → attesa 2 min
+- Tentativo 3 fallisce → attesa 4 min
+- Tentativo 4 fallisce → attesa 8 min
+- Tentativo 5 fallisce → `dead_letter` (nessuna 5ª attesa, `MAX_WEBHOOK_ATTEMPTS` = 5)
+- Backoff cumulativo: 1+2+4+8 = 15 minuti
+
+**Cron schedules**:
+- GitHub Actions: `*/30 * * * *` (ogni 30 minuti, best-effort)
+- Vercel Cron: `0 3 * * *` (giornaliero alle 3am UTC, garantito dalla piattaforma)
+
+**Tempi di recupero**:
+- **Primo tentativo fallito**: recupero al prossimo cron (obiettivo ~30min con GitHub Actions, limite rigido 24h se solo Vercel Cron)
+- **Tentativi successivi**: backoff + cron successivo
+  - Con GitHub Actions (ogni 30min): ogni retry aspetta backoff + ~0-30min → ~2 ore totali per 4 retry
+  - Solo Vercel Cron (giornaliero): ogni retry aspetta backoff + ~0-24h → fino a ~4 giorni per 4 retry
+- **Eventi esauriti**: dopo `MAX_WEBHOOK_ATTEMPTS` = 5 tentativi falliti (15 min di backoff + attese cron), lo stato diventa `dead_letter` e viene segnalato
 
 ### Eventi operativi coperti
 

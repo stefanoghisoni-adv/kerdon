@@ -118,6 +118,12 @@ describe('receiveShopifyWebhook con waitUntil', () => {
     const arg = mockWaitUntil.mock.calls[0][0];
     expect(arg).toBeInstanceOf(Promise);
 
+    // Verifica che sia la promise con .catch (quella che gestisce gli errori)
+    // Non e' la promise raw di processWebhookEvent, ma quella wrappata dal .catch
+    expect(processWebhookEvent).toHaveBeenCalledTimes(1);
+    const rawPromise = processWebhookEvent.mock.results[0].value;
+    expect(arg).not.toBe(rawPromise); // diversa: arg e' rawPromise.catch(...)
+
     await settleWebhookWork();
   });
 
