@@ -64,9 +64,15 @@ export type Resolver = (hostname: string) => Promise<ResolvedAddress[]>;
 export interface TransportRequest {
   /** L'indirizzo con il nome: e' il nome che va nell'Host e nel TLS. */
   url: URL;
-  /** L'IP gia' verificato: e' qui, e solo qui, che ci si collega. */
+  /** L'IP verificato preferito (IPv4 se c'e'): quello per la forma a indirizzo singolo. */
   address: string;
   family: 4 | 6;
+  /**
+   * Tutti gli IP verificati del nome, e solo quelli: e' fra questi, e solo
+   * fra questi, che ci si collega. Tutti perche' con un nome a doppio stack
+   * Node deve poter ripiegare sull'IPv4 quando l'IPv6 non esce.
+   */
+  addresses: ResolvedAddress[];
   headers: Record<string, string>;
   signal: AbortSignal;
 }
@@ -115,25 +121,49 @@ export const systemResolver: Resolver = async (hostname) => {
   return found.map(({ address, family }) => ({ address, family: family === 6 ? 6 : 4 }));
 };
 
+/** Il preferito fra gli indirizzi verificati: l'IPv4, che esce da ogni runtime. */
+function preferred(addresses: ResolvedAddress[]): ResolvedAddress {
+  return addresses.find((a) => a.family === 4) ?? addresses[0];
+}
+
 /**
- * Un `lookup` che non chiede niente a nessuno: risponde con l'indirizzo gia'
- * verificato, qualunque nome gli si passi.
+ * Un `lookup` che non chiede niente a nessuno: risponde con gli indirizzi gia'
+ * verificati, qualunque nome gli si passi.
  *
  * E' cio' che chiude la porta al rebinding: Node, collegandosi, chiede a questa
- * funzione dove andare invece che al DNS. Risponde nelle due forme che Node usa
- * — un indirizzo solo, o la lista quando chiede `all` per provare le famiglie in
- * parallelo — sempre con lo stesso valore.
+ * funzione dove andare invece che al DNS. Risponde nelle due forme che Node usa.
+ * Con `all` — e' come Node prova le famiglie una dopo l'altra (Happy Eyeballs)
+ * — li da' tutti: un endpoint a doppio stack su un runtime senza IPv6 in uscita
+ * deve arrivare sull'IPv4, non risultare spento. Nella forma singola da' quello
+ * della famiglia chiesta, o l'IPv4 se non ne e' chiesta nessuna. Mai, in
+ * nessuna delle due, un indirizzo che non sia nella lista.
  */
-export function pinnedLookup(address: string, family: 4 | 6): LookupFunction {
+export function pinnedLookup(addresses: ResolvedAddress[]): LookupFunction {
+  if (addresses.length === 0) throw new Error('pinnedLookup senza indirizzi');
   return ((_hostname: string, options: unknown, callback?: unknown) => {
     const cb = (typeof options === 'function' ? options : callback) as (
       err: NodeJS.ErrnoException | null,
       address: string | Array<{ address: string; family: number }>,
       family?: number,
     ) => void;
-    const all = typeof options === 'object' && options !== null && (options as { all?: boolean }).all;
-    if (all) cb(null, [{ address, family }]);
-    else cb(null, address, family);
+    const opts = (typeof options === 'object' && options !== null ? options : {}) as {
+      all?: boolean;
+      family?: number | string;
+    };
+    const wanted = opts.family === 4 || opts.family === 'IPv4' ? 4 : opts.family === 6 || opts.family === 'IPv6' ? 6 : 0;
+    const pool = wanted ? addresses.filter((a) => a.family === wanted) : addresses;
+
+    if (pool.length === 0) {
+      const err: NodeJS.ErrnoException = new Error('nessun indirizzo verificato per questa famiglia');
+      err.code = 'ENOTFOUND';
+      cb(err, opts.all ? [] : '');
+      return;
+    }
+    if (opts.all) cb(null, pool.map(({ address, family }) => ({ address, family })));
+    else {
+      const pick = preferred(pool);
+      cb(null, pick.address, pick.family);
+    }
   }) as LookupFunction;
 }
 
@@ -144,7 +174,7 @@ export function pinnedLookup(address: string, family: 4 | 6): LookupFunction {
  * stata aperta verso un altro indirizzo per lo stesso nome; qui ogni chiamata
  * apre la sua, verso l'IP che le e' stato dato.
  */
-export const httpsTransport: Transport = ({ url, address, family, headers, signal }) =>
+export const httpsTransport: Transport = ({ url, addresses, headers, signal }) =>
   new Promise<Response>((resolve, reject) => {
     const host = url.hostname.replace(/^\[|\]$/g, '');
     const req = https.request(
@@ -154,7 +184,11 @@ export const httpsTransport: Transport = ({ url, address, family, headers, signa
         path: `${url.pathname}${url.search}`,
         method: 'GET',
         headers,
-        lookup: pinnedLookup(address, family),
+        lookup: pinnedLookup(addresses),
+        // Esplicito, anche se e' il default di Node: e' cio' che fa provare
+        // l'IPv4 quando l'IPv6 non risponde. Arriva fino a `net.connect`, ma i
+        // tipi di `https.request` non lo elencano.
+        ...({ autoSelectFamily: true } as object),
         agent: false,
         signal,
       },
@@ -205,13 +239,13 @@ async function addressesFor(
   url: URL,
   resolve: Resolver,
   signal: AbortSignal,
-): Promise<ResolvedAddress> {
+): Promise<ResolvedAddress[]> {
   const host = url.hostname.replace(/^\[|\]$/g, '');
 
   // Un IP scritto nell'indirizzo non si risolve: si giudica e basta.
   if (isIpLiteral(host)) {
     if (!isGlobalAddress(host)) throw new SafeFetchError('blocked_address');
-    return { address: host, family: host.includes(':') ? 6 : 4 };
+    return [{ address: host, family: host.includes(':') ? 6 : 4 }];
   }
 
   let found: ResolvedAddress[];
@@ -225,7 +259,7 @@ async function addressesFor(
   if (!found.every(({ address }) => isGlobalAddress(address))) {
     throw new SafeFetchError('blocked_address');
   }
-  return found[0];
+  return found;
 }
 
 /** Il corpo, letto fino al tetto e non un byte di piu'. */
@@ -285,6 +319,11 @@ export async function safeFetch(input: string, options: SafeFetchOptions = {}): 
   if (!Object.keys(headers).some((k) => k.toLowerCase() === 'user-agent')) {
     headers['User-Agent'] = USER_AGENT;
   }
+  // Corpo non compresso: qui non si decomprime, e un corpo compresso
+  // arriverebbe come byte illeggibili invece che come JSON.
+  if (!Object.keys(headers).some((k) => k.toLowerCase() === 'accept-encoding')) {
+    headers['Accept-Encoding'] = 'identity';
+  }
 
   try {
     // Le risposte sono al massimo i rimandi permessi piu' quella finale.
@@ -292,11 +331,12 @@ export async function safeFetch(input: string, options: SafeFetchOptions = {}): 
       const problem = urlProblem(url);
       if (problem) throw new SafeFetchError(problem);
 
-      const { address, family } = await addressesFor(url, resolve, signal);
+      const addresses = await addressesFor(url, resolve, signal);
+      const { address, family } = preferred(addresses);
 
       let response: Response;
       try {
-        response = await untilAborted(transport({ url, address, family, headers, signal }), signal);
+        response = await untilAborted(transport({ url, address, family, addresses, headers, signal }), signal);
       } catch (err) {
         if (signal.aborted || err instanceof SafeFetchError) throw err;
         throw new SafeFetchError('network', { cause: err });

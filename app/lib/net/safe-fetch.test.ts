@@ -174,19 +174,38 @@ describe('safeFetch — rebinding', () => {
     expect(transport.mock.calls.map((c) => c[0].address)).toEqual([PUBLIC_V4]);
   });
 
-  it('pinnedLookup restituisce sempre l indirizzo verificato, qualunque nome gli si chieda', async () => {
-    const lookup = pinnedLookup(PUBLIC_V4, 4);
-    const single = await new Promise<[string, number]>((resolve, reject) =>
-      lookup('negozio.it', {}, (err, address, family) =>
-        err ? reject(err) : resolve([address as string, family as number]),
-      ),
-    );
-    expect(single).toEqual([PUBLIC_V4, 4]);
+  it('pinnedLookup restituisce sempre gli indirizzi verificati, qualunque nome gli si chieda', async () => {
+    const verified = [
+      { address: PUBLIC_V6, family: 6 as const },
+      { address: PUBLIC_V4, family: 4 as const },
+    ];
+    const lookup = pinnedLookup(verified);
+    const single = (options: object) =>
+      new Promise<[string, number]>((resolve, reject) =>
+        lookup('negozio.it', options, (err, address, family) =>
+          err ? reject(err) : resolve([address as string, family as number]),
+        ),
+      );
 
+    // La forma singola preferisce l'IPv4: e' quello che esce da ogni runtime.
+    expect(await single({})).toEqual([PUBLIC_V4, 4]);
+    expect(await single({ family: 6 })).toEqual([PUBLIC_V6, 6]);
+    expect(await single({ family: 4 })).toEqual([PUBLIC_V4, 4]);
+
+    // La forma `all` li da' tutti — e solo quelli — cosi' Node puo' ripiegare
+    // sull'altra famiglia se la prima non risponde.
     const all = await new Promise<unknown>((resolve, reject) =>
       lookup('altro.it', { all: true }, (err, addresses) => (err ? reject(err) : resolve(addresses))),
     );
-    expect(all).toEqual([{ address: PUBLIC_V4, family: 4 }]);
+    expect(all).toEqual(verified);
+  });
+
+  it('il trasporto riceve tutti gli indirizzi verificati, con l IPv4 come preferito', async () => {
+    const transport = fakeTransport();
+    await safeFetch('https://negozio.it/x', { resolve: resolveTo(PUBLIC_V6, PUBLIC_V4), transport });
+    const [request] = transport.mock.calls[0];
+    expect(request.addresses.map((a) => a.address)).toEqual([PUBLIC_V6, PUBLIC_V4]);
+    expect(request).toMatchObject({ address: PUBLIC_V4, family: 4 });
   });
 
   // La prova dal vero, senza uscire dalla macchina: un nome che nessun DNS
@@ -210,6 +229,7 @@ describe('safeFetch — rebinding', () => {
           url: new URL(`https://endpoint-di-prova.example:${port}/kerdon/id`),
           address: '127.0.0.1',
           family: 4,
+          addresses: [{ address: '127.0.0.1', family: 4 }],
           headers: {},
           signal: AbortSignal.timeout(5000),
         }),
@@ -220,6 +240,53 @@ describe('safeFetch — rebinding', () => {
 
     expect(received).toHaveLength(1);
     expect(received[0].toString('latin1')).toContain('endpoint-di-prova.example');
+  });
+});
+
+describe('safeFetch — doppio stack', () => {
+  // Un endpoint con AAAA e A, su un runtime senza IPv6 in uscita (comune nel
+  // serverless): l'IPv6 non risponde, e la connessione deve arrivare lo stesso
+  // sull'IPv4 verificato invece di dirsi irraggiungibile. `100::1` sta nel
+  // prefisso di scarto: da nessuna macchina porta da nessuna parte.
+  it('con l IPv6 irraggiungibile ripiega sull IPv4 verificato', async () => {
+    const received: Buffer[] = [];
+    const server = net.createServer((socket) => {
+      socket.once('data', (chunk) => {
+        received.push(chunk);
+        socket.destroy();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as net.AddressInfo;
+
+    try {
+      await expect(
+        httpsTransport({
+          url: new URL(`https://doppio-stack.example:${port}/kerdon/id`),
+          address: '100::1',
+          family: 6,
+          addresses: [
+            { address: '100::1', family: 6 },
+            { address: '127.0.0.1', family: 4 },
+          ],
+          headers: {},
+          signal: AbortSignal.timeout(5000),
+        }),
+      ).rejects.toThrow();
+    } finally {
+      server.close();
+    }
+
+    expect(received).toHaveLength(1);
+    expect(received[0].toString('latin1')).toContain('doppio-stack.example');
+  });
+});
+
+describe('safeFetch — intestazioni', () => {
+  it('chiede il corpo non compresso, che e quello che sa leggere', async () => {
+    const transport = fakeTransport();
+    await safeFetch('https://negozio.it/x', { resolve: resolveTo(PUBLIC_V4), transport });
+    expect(transport.mock.calls[0][0].headers['Accept-Encoding']).toBe('identity');
   });
 });
 

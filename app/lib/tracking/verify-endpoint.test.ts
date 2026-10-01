@@ -129,6 +129,17 @@ describe('verifyTrackingEndpoint', () => {
       expect(reasonOf(result.checks, 'endpoint_url')).toBe('endpoint_is_shopify');
     });
 
+    // Il punto finale e' lo stesso nome scritto per esteso: non deve bastare
+    // a scavalcare i controlli sul nome.
+    it('il punto finale non scavalca i controlli sul nome', async () => {
+      const transport = goodEndpoint();
+      const shopify = await run(transport, 'https://negozio.myshopify.com./kerdon/id');
+      expect(reasonOf(shopify.checks, 'endpoint_url')).toBe('endpoint_is_shopify');
+      const app = await run(transport, 'https://api.kerdon.io./kerdon/id');
+      expect(reasonOf(app.checks, 'endpoint_url')).toBe('endpoint_is_app');
+      expect(transport).not.toHaveBeenCalled();
+    });
+
     it('rifiuta un dominio diverso da quello della vetrina', async () => {
       const result = await run(goodEndpoint(), 'https://tracking.altro.it/id', 'www.negozio.it');
       expect(reasonOf(result.checks, 'endpoint_url')).toBe('endpoint_not_first_party');

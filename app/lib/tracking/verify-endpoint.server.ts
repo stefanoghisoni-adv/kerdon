@@ -219,7 +219,9 @@ export async function verifyTrackingEndpoint({
     return rest('not_run');
   }
 
-  const host = url.hostname.toLowerCase();
+  // Senza il punto finale: `negozio.myshopify.com.` e' lo stesso nome, e non
+  // deve passare i controlli che il nome senza punto non passa.
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
   if (!isPublicName(host)) {
     checks.push(fail('endpoint_url', 'endpoint_not_public'));
     return rest('not_run');
@@ -227,7 +229,7 @@ export async function verifyTrackingEndpoint({
   // Il nostro dominio non e' first-party per nessun negozio: un endpoint che
   // punta qui rimette il cookie esattamente dove i browser lo cancellano, che e'
   // il problema da cui tutto questo giro nasce.
-  if (host === appHost.toLowerCase()) {
+  if (host === appHost.toLowerCase().replace(/\.$/, '')) {
     checks.push(fail('endpoint_url', 'endpoint_is_app'));
     return rest('not_run');
   }
