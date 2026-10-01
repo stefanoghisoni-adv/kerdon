@@ -2,57 +2,86 @@
   "_commento": [
     "Le vulnerabilita' che la CI ha il permesso di NON bloccare, per ora.",
     "",
-    "Ogni voce deve dire tre cose: quale pacchetto, PERCHE' si accetta il",
-    "rischio, ed entro quando si smette di accettarlo. Una scadenza passata",
-    "fa fallire il controllo tanto quanto una vulnerabilita' nuova: e' l'unico",
-    "modo perche' questa lista non diventi il posto dove i problemi vanno a",
-    "morire di vecchiaia.",
+    "Ogni voce deve dire: quale pacchetto, quali advisory ESATTI accetta (ID",
+    "GHSA presi da `npm audit --json`, risalendo la catena 'via'), PERCHE' si",
+    "accetta il rischio, con quale PROVA di mitigazione, CHI ne risponde, ed",
+    "entro quando si smette di accettarlo. Una scadenza passata fa fallire il",
+    "controllo tanto quanto una vulnerabilita' nuova: e' l'unico modo perche'",
+    "questa lista non diventi il posto dove i problemi vanno a morire di",
+    "vecchiaia. Un advisory che raggiunge il pacchetto senza essere elencato",
+    "qui blocca: l'eccezione e' stata scritta per un altro rischio.",
     "",
-    "'motivo' non e' una formalita': se non si riesce a scriverlo, la",
-    "vulnerabilita' non va accettata."
+    "'motivo' e 'mitigazione' non sono formalita': se non si riesce a",
+    "scriverli, la vulnerabilita' non va accettata. La correzione di tutte le",
+    "voci e' la migrazione a React Router 7: docs/migrazione-react-router-7.md.",
+    "",
+    "Prova verificata il 2026-10-01 su main 63b1f63 (dettagli in SECURITY.md):",
+    "`npm run build`, poi `grep -o 'v3_singleFetch[^,}]*' build/server/assets/server-build-*.js`",
+    "restituisce `v3_singleFetch\": false`."
   ],
 
   "eccezioni": [
     {
+      "pacchetto": "turbo-stream",
+      "advisory": ["GHSA-rxv8-25v2-qmq8"],
+      "avviso": "turbo-stream <3.0.0 (high) — DoS via input riflesso nel single fetch",
+      "motivo": "La radice della catena Remix 2: turbo-stream@2.4.1 e' l'ultima 2.x e la correzione esiste solo nella 3, che cambia il formato di codifica fra server e client. Forzarla con un override romperebbe ogni navigazione, quindi non si fa. Si chiude con la migrazione a React Router 7.",
+      "mitigazione": "L'advisory riguarda solo Remix 2.9+ CON single fetch attivo. vite.config.ts non dichiara alcun future flag e il build lo conferma: server-build-*.js contiene `v3_singleFetch\": false`. In @remix-run/server-runtime/dist/server.js ogni chiamata a encodeViaTurboStream (righe 144-160, 316, 383, 437) sta dietro `_build.future.v3_singleFetch`, e le richieste `.data` vengono servite in single fetch solo con quel flag. Il modulo viene caricato, ma il codice vulnerabile non viene eseguito.",
+      "owner": "Stefano Ghisoni",
+      "scadenza": "2026-12-31"
+    },
+    {
       "pacchetto": "@remix-run/server-runtime",
-      "avviso": "GHSA turbo-stream <3.0.0 — DoS via input riflesso nel single fetch",
-      "motivo": "Remix 2.17.5 e' l'ultima versione della linea 2, che non riceve piu' correzioni: la catena turbo-stream@2.4.1 non ha un aggiornamento in nessun punto del grafo. Forzare turbo-stream@3 con un override cambia il formato di codifica dei dati fra server e client e romperebbe ogni navigazione. La correzione vera e' la migrazione a React Router 7, che e' un lavoro a se'. Nel frattempo il percorso vulnerabile non e' costruito: il single fetch non e' attivo (nessun future flag in vite.config.ts) e turbo-stream non compare nel bundle server (build/server/assets/server-build-*.js).",
+      "advisory": ["GHSA-rxv8-25v2-qmq8"],
+      "avviso": "high per via di turbo-stream <3.0.0",
+      "motivo": "Remix 2.17.5 e' l'ultima versione della linea 2, che non riceve piu' correzioni: la catena turbo-stream@2.4.1 non ha un aggiornamento in nessun punto del grafo. La correzione e' la migrazione a React Router 7.",
+      "mitigazione": "E' il pacchetto che chiama turbo-stream: tutte le chiamate stanno dietro `_build.future.v3_singleFetch`, che nel build di produzione vale false (vedi la voce turbo-stream).",
+      "owner": "Stefano Ghisoni",
       "scadenza": "2026-12-31"
     },
     {
       "pacchetto": "@remix-run/node",
-      "avviso": "dipende da @remix-run/server-runtime vulnerabile",
-      "motivo": "Stessa catena di @remix-run/server-runtime: e' la stessa vulnerabilita' contata di nuovo sul pacchetto che la contiene. Si chiude con la migrazione a React Router 7.",
+      "advisory": ["GHSA-rxv8-25v2-qmq8"],
+      "avviso": "high per via di @remix-run/server-runtime",
+      "motivo": "Stessa catena di @remix-run/server-runtime: e' lo stesso advisory contato di nuovo sul pacchetto che la contiene. Si chiude con la migrazione a React Router 7.",
+      "mitigazione": "Nessun percorso proprio verso turbo-stream: passa da @remix-run/server-runtime, dove il single fetch e' spento (v3_singleFetch false nel build).",
+      "owner": "Stefano Ghisoni",
       "scadenza": "2026-12-31"
     },
     {
       "pacchetto": "@remix-run/react",
-      "avviso": "turbo-stream + react-router 6.30.4 (open redirect, deserializeErrors)",
-      "motivo": "react-router@6.30.4 e' l'ultima della linea 6 e le correzioni stanno solo in react-router 7, che sotto Remix 2 non e' installabile: la linea 7 cambia identita' del pacchetto. Si chiude con la migrazione a React Router 7.",
+      "advisory": ["GHSA-rxv8-25v2-qmq8", "GHSA-wrjc-x8rr-h8h6", "GHSA-337j-9hxr-rhxg", "GHSA-jjmj-jmhj-qwj2"],
+      "avviso": "high per turbo-stream; in piu' react-router 6.30.4 (moderate: open redirect con backslash, deserializeErrors) e react-router-dom 6.30.4 (moderate: open redirect verso XSS)",
+      "motivo": "react-router@6.30.4 e' l'ultima della linea 6 e le correzioni stanno solo in react-router >=7.18.0, che sotto Remix 2 non e' installabile: la linea 7 cambia identita' del pacchetto. Si chiude con la migrazione a React Router 7.",
+      "mitigazione": "turbo-stream: nel bundle client decodifica solo le risposte single fetch, che il server non produce (v3_singleFetch false). Open redirect (GHSA-wrjc-x8rr-h8h6, GHSA-jjmj-jmhj-qwj2): ogni <Link to>, navigate() e redirect() dell'app usa un percorso fisso scritto nel codice (unico caso dinamico: navigate('/products/issues?' + query) in app/routes/products.issues.tsx, che cambia solo la query); nessun percorso arriva da input esterno. deserializeErrors (GHSA-337j-9hxr-rhxg): serve codice applicativo che lasci all'attaccante riscrivere gli errori catturati in SSR; gli ErrorBoundary dell'app (root.tsx, useRouteError) non lo fanno.",
+      "owner": "Stefano Ghisoni",
       "scadenza": "2026-12-31"
     },
     {
       "pacchetto": "@remix-run/serve",
-      "avviso": "dipende da @remix-run/express e @remix-run/node vulnerabili",
-      "motivo": "Stessa catena Remix 2. In piu' su Vercel questo pacchetto non serve la produzione — l'handler lo costruisce il preset 'remix' — quindi il server express che porta con se' non e' in esecuzione da nessuna parte. Resta perche' `npm start` lo usa in locale.",
+      "advisory": ["GHSA-rxv8-25v2-qmq8"],
+      "avviso": "high per via di @remix-run/express e @remix-run/node",
+      "motivo": "Stessa catena Remix 2. Resta perche' `npm start` lo usa in locale.",
+      "mitigazione": "Su Vercel non serve la produzione: l'handler lo costruisce il preset del framework 'remix' (vercel.json), quindi il server express che porta con se' non e' in esecuzione da nessuna parte. Anche in locale il single fetch e' spento.",
+      "owner": "Stefano Ghisoni",
       "scadenza": "2026-12-31"
     },
     {
       "pacchetto": "@remix-run/express",
-      "avviso": "dipende da @remix-run/node vulnerabile",
-      "motivo": "Stessa catena Remix 2, e come @remix-run/serve non e' in esecuzione in produzione.",
-      "scadenza": "2026-12-31"
-    },
-    {
-      "pacchetto": "turbo-stream",
-      "avviso": "GHSA-... DoS via input riflesso nel single fetch",
-      "motivo": "La radice della catena Remix 2. Nessuna versione 2.x corretta esiste; turbo-stream@3 non e' compatibile con Remix 2. Prova di non raggiungibilita' del percorso server: `grep -c turbo-stream build/server/assets/server-build-*.js` restituisce 0 dopo `npm run build`.",
+      "advisory": ["GHSA-rxv8-25v2-qmq8"],
+      "avviso": "high per via di @remix-run/node",
+      "motivo": "Stessa catena Remix 2, portata da @remix-run/serve.",
+      "mitigazione": "Come @remix-run/serve: non e' in esecuzione in produzione, e il single fetch e' spento.",
+      "owner": "Stefano Ghisoni",
       "scadenza": "2026-12-31"
     },
     {
       "pacchetto": "@shopify/shopify-app-remix",
-      "avviso": "dipende da @remix-run/server-runtime vulnerabile",
-      "motivo": "La stessa catena Remix 2, ereditata. La versione 5.0.1 dipende anch'essa da @remix-run/server-runtime ^2.17.5, quindi aggiornarla non toglie l'avviso: non e' una correzione travestita da aggiornamento.",
+      "advisory": ["GHSA-rxv8-25v2-qmq8"],
+      "avviso": "high per via di @remix-run/server-runtime",
+      "motivo": "La stessa catena Remix 2, ereditata. Anche l'ultima versione (6.0.1) dipende da @remix-run/server-runtime ^2.17.5, quindi aggiornarla non toglie l'avviso: non e' una correzione travestita da aggiornamento. La sostituta e' @shopify/shopify-app-react-router, parte della migrazione.",
+      "mitigazione": "Il pacchetto non usa turbo-stream ne' il single fetch (nessuna occorrenza di 'turbo-stream' o 'singleFetch' in dist/): eredita solo la dipendenza, il cui percorso vulnerabile e' spento.",
+      "owner": "Stefano Ghisoni",
       "scadenza": "2026-12-31"
     }
   ]
