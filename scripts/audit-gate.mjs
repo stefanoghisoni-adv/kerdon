@@ -19,11 +19,16 @@
 // Le eccezioni stanno in audit-exceptions.json, e ognuna ha una scadenza. Una
 // scadenza passata fa fallire il controllo: senza quella regola la lista delle
 // eccezioni diventa il posto dove i problemi smettono di essere guardati.
+// Ognuna nomina anche gli advisory esatti (ID GHSA) che accetta, la prova di
+// mitigazione e un owner: un advisory nuovo che entra nella stessa catena non
+// passa sotto un'eccezione scritta per un altro. Le regole stanno in
+// audit-gate-regole.mjs, provate da audit-gate.test.ts.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { validaEccezioni, valuta } from "./audit-gate-regole.mjs";
 
 const qui = path.dirname(fileURLToPath(import.meta.url));
 const radice = path.resolve(qui, "..");
@@ -56,38 +61,24 @@ const eccezioni = JSON.parse(
 
 const oggi = new Date().toISOString().slice(0, 10);
 
-const perPacchetto = new Map(eccezioni.map((e) => [e.pacchetto, e]));
-const scadute = eccezioni.filter((e) => e.scadenza < oggi);
-const usate = new Set();
+// Prima la forma del file: un'eccezione senza advisory, owner o prova di
+// mitigazione non e' un rischio accettato da qualcuno, e' un buco nel cancello.
+const erroriDiForma = validaEccezioni(eccezioni);
+if (erroriDiForma.length) {
+  console.error("scripts/audit-exceptions.json scritto male:");
+  for (const e of erroriDiForma) console.error(`  - ${e}`);
+  process.exit(1);
+}
 
 const grafoCompleto = audit(false);
 const grafoProduzione = audit(true);
 
-const gravita = (v) => v.severity;
-const elenca = (rapporto, filtro) =>
-  Object.entries(rapporto.vulnerabilities ?? {})
-    .filter(([, v]) => filtro(v))
-    .map(([nome, v]) => ({ nome, gravita: gravita(v) }));
-
-// Regola 1: critiche ovunque. Regola 2: alte e critiche in produzione.
-const critiche = elenca(grafoCompleto, (v) => v.severity === "critical");
-const alteProduzione = elenca(
+const { bloccanti, coperte, scadute, inutili, advisoryInEccesso } = valuta({
+  grafoCompleto,
   grafoProduzione,
-  (v) => v.severity === "high" || v.severity === "critical",
-);
-
-const bloccanti = [];
-const coperte = [];
-
-for (const voce of [...critiche, ...alteProduzione]) {
-  const eccezione = perPacchetto.get(voce.nome);
-  if (eccezione && eccezione.scadenza >= oggi) {
-    usate.add(voce.nome);
-    coperte.push({ ...voce, scadenza: eccezione.scadenza });
-  } else {
-    bloccanti.push(voce);
-  }
-}
+  eccezioni,
+  oggi,
+});
 
 const riassunto = (r) => {
   const m = r.metadata.vulnerabilities;
@@ -100,8 +91,8 @@ console.log("");
 
 if (coperte.length) {
   console.log("Coperte da un'eccezione ancora valida:");
-  for (const c of new Map(coperte.map((c) => [c.nome, c])).values()) {
-    console.log(`  - ${c.nome} (${c.gravita}) — scade il ${c.scadenza}`);
+  for (const c of coperte) {
+    console.log(`  - ${c.nome} (${c.gravita}) — ${c.advisory.join(", ")} — scade il ${c.scadenza}`);
   }
   console.log("");
 }
@@ -120,21 +111,29 @@ if (scadute.length) {
 
 if (bloccanti.length) {
   console.error("Vulnerabilita' che bloccano:");
-  for (const b of new Map(bloccanti.map((b) => [b.nome, b])).values()) {
-    console.error(`  - ${b.nome} (${b.gravita})`);
+  for (const b of bloccanti) {
+    console.error(`  - ${b.nome} (${b.gravita}) — ${b.motivo}`);
   }
   console.error("");
-  console.error("Correggerle, oppure aggiungere un'eccezione motivata e con una");
-  console.error("scadenza in scripts/audit-exceptions.json.");
+  console.error("Correggerle, oppure aggiungere (o aggiornare) un'eccezione in");
+  console.error("scripts/audit-exceptions.json che nomini ogni advisory, con");
+  console.error("mitigazione, owner e scadenza.");
   esito = 1;
 }
 
 // Un'eccezione che non copre piu' niente e' rumore: prima o poi qualcuno la
 // legge e crede che il problema ci sia ancora. Non blocca, ma si fa notare.
-const inutili = eccezioni.filter((e) => !usate.has(e.pacchetto) && e.scadenza >= oggi);
 if (inutili.length) {
   console.log("Eccezioni che non servono piu' (la vulnerabilita' non c'e' piu'):");
   for (const e of inutili) console.log(`  - ${e.pacchetto} — si puo' togliere`);
+  console.log("");
+}
+
+if (advisoryInEccesso.length) {
+  console.log("Advisory nominati che non raggiungono piu' il pacchetto:");
+  for (const a of advisoryInEccesso) {
+    console.log(`  - ${a.pacchetto}: ${a.advisory.join(", ")} — si possono togliere`);
+  }
   console.log("");
 }
 
