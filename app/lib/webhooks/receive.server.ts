@@ -37,6 +37,7 @@
 // vorrebbe dire rifiutare un evento gia' accettato.
 
 import { json } from '@remix-run/node';
+import { waitUntil } from '@vercel/functions';
 import { verifyWebhook } from '~/lib/webhooks/verify.server';
 import { deliveryId } from './delivery-id.server';
 import { processWebhookEvent, recordWebhookReceipt } from './inbox.server';
@@ -144,13 +145,33 @@ export function topicFromHeader<T extends WebhookTopic>(
 }
 
 /**
+ * Opzioni per la ricezione: waitUntil e' iniettabile per i test.
+ *
+ * Di default usa `waitUntil` da `@vercel/functions`, che fuori da Vercel
+ * (dev, test, worker) e' una no-op e non solleva. I test possono passare
+ * un mock per verificare che venga chiamata.
+ */
+export interface ReceiveOptions {
+  waitUntil?: typeof waitUntil;
+}
+
+/**
  * Riceve una consegna: la scrive, risponde, e poi si mette al lavoro.
  *
  * Il topic e' un parametro e non si legge dall'header, ed e' voluto: lo dichiara
  * la rotta, che e' l'unica a saperlo per certo. Fidarsi di `X-Shopify-Topic`
  * vorrebbe dire lasciar scegliere al mittente quale processore far girare.
+ *
+ * `options.waitUntil`: di default usa `waitUntil` da `@vercel/functions`. Su
+ * Vercel dice al runtime di tenere viva la funzione finche' l'elaborazione non
+ * finisce. Fuori da Vercel (dev, test, worker) e' una no-op che non solleva.
+ * I test possono passare un mock.
  */
-export async function receiveShopifyWebhook(request: Request, topic: WebhookTopic) {
+export async function receiveShopifyWebhook(
+  request: Request,
+  topic: WebhookTopic,
+  options: ReceiveOptions = {},
+) {
   const body = await readWebhookBody(request);
   if (body === null) {
     // Prima del parse e prima della firma: non si spende un HMAC su un corpo
@@ -208,14 +229,24 @@ export async function receiveShopifyWebhook(request: Request, topic: WebhookTopi
   // prima puo' aver scritto la ricevuta e poi essere morta: la presa dentro
   // `processWebhookEvent` rende innocuo il caso in cui invece stia ancora
   // lavorando, o abbia gia' finito.
-  avvia(
-    processWebhookEvent(eventId, WEBHOOK_PROCESSORS).catch((error) => {
-      console.error(
-        `[webhook-inbox] ${topic}: evento ${eventId} ricevuto ma non lavorato subito: ` +
-          `${error instanceof Error ? error.message : 'errore sconosciuto'}`,
-      );
-    }),
-  );
+  //
+  // SU VERCEL SERVERLESS, WAITUNTIL E' LA DIFFERENZA CHE CONTA. Senza, il
+  // runtime puo' terminare la funzione subito dopo il 200, prima che
+  // l'elaborazione finisca. Con waitUntil, il runtime sa che quella promise
+  // deve finire prima della terminazione. Non e' un await — la richiesta non
+  // aspetta — e' un registro presso il runtime. Fuori da Vercel (dev, test,
+  // worker) waitUntil da @vercel/functions e' una no-op che non solleva, e il
+  // lavoro avviato resta tracciato in `inVolo` per i test e per l'arresto
+  // ordinato.
+  const lavoro = processWebhookEvent(eventId, WEBHOOK_PROCESSORS).catch((error) => {
+    console.error(
+      `[webhook-inbox] ${topic}: evento ${eventId} ricevuto ma non lavorato subito: ` +
+        `${error instanceof Error ? error.message : 'errore sconosciuto'}`,
+    );
+  });
+
+  avvia(lavoro);
+  (options.waitUntil ?? waitUntil)(lavoro);
 
   return json({ ok: true, duplicate }, { status: 200 });
 }

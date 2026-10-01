@@ -76,6 +76,8 @@ function applica(riga: FakeWebhookRow, data: Record<string, unknown>): void {
 export interface FakeWebhookStore {
   /** Le righe, per poterle guardare e manomettere dal test. */
   righe: FakeWebhookRow[];
+  /** Se true, create solleva invece di scrivere (per testare il 500). */
+  shouldFailCreate?: boolean;
   reset(): void;
   create(args: { data: Record<string, unknown> }): Promise<{ id: string }>;
   findUnique(args: { where: Record<string, unknown> }): Promise<FakeWebhookRow | null>;
@@ -97,14 +99,17 @@ export interface FakeWebhookStore {
 export function creaFakeWebhookStore(): FakeWebhookStore {
   const righe: FakeWebhookRow[] = [];
   let contatore = 0;
-
-  return {
+  const store: FakeWebhookStore = {
     righe,
     reset() {
       righe.length = 0;
       contatore = 0;
     },
     async create({ data }) {
+      // Forzatura di un errore di scrittura, per testare il 500.
+      if (store.shouldFailCreate) {
+        throw new Error('Scrittura forzata a fallire dal test');
+      }
       if (righe.some((r) => r.webhookId === data.webhookId)) {
         // Quello che Prisma lancia quando l'indice unico rifiuta la riga: e' il
         // caso su cui poggia tutta la deduplica, quindi il finto deve saperlo
@@ -153,4 +158,5 @@ export function creaFakeWebhookStore(): FakeWebhookStore {
       return { count: colpite.length };
     },
   };
+  return store;
 }
