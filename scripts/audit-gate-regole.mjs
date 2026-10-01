@@ -116,7 +116,6 @@ export function valuta({ grafoCompleto, grafoProduzione, eccezioni, oggi }) {
 
   const bloccanti = new Map();
   const coperte = new Map();
-  const usate = new Set();
   const advisoryVisti = new Map(); // pacchetto -> advisory reali che lo raggiungono
 
   for (const voce of [...critiche, ...alteProduzione]) {
@@ -140,7 +139,6 @@ export function valuta({ grafoCompleto, grafoProduzione, eccezioni, oggi }) {
       });
       continue;
     }
-    usate.add(voce.nome);
     if (!bloccanti.has(voce.nome)) {
       coperte.set(voce.nome, { nome: voce.nome, gravita: voce.gravita, scadenza: eccezione.scadenza, advisory: reali });
     }
@@ -148,7 +146,9 @@ export function valuta({ grafoCompleto, grafoProduzione, eccezioni, oggi }) {
   // Se lo stesso pacchetto e' bloccato da una delle due regole, non e' coperto.
   for (const nome of bloccanti.keys()) coperte.delete(nome);
 
-  const inutili = eccezioni.filter((e) => !usate.has(e.pacchetto) && e.scadenza >= oggi);
+  // "Inutile" vuol dire che il pacchetto non e' piu' fra le vulnerabilita' che
+  // contano, non che l'eccezione e' incompleta: quella blocca gia' sopra.
+  const inutili = eccezioni.filter((e) => !advisoryVisti.has(e.pacchetto) && e.scadenza >= oggi);
 
   // Advisory nominati che non raggiungono piu' il pacchetto: non bloccano, ma
   // un'eccezione che accetta un rischio che non c'e' piu' va ripulita.

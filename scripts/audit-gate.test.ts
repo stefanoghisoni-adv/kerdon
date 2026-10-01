@@ -118,6 +118,8 @@ describe('valuta', () => {
         motivo: `advisory non nominati nell'eccezione: ${RR_REDIRECT}`,
       },
     ]);
+    // Incompleta non vuol dire inutile: il pacchetto e' ancora vulnerabile.
+    expect(esito.inutili).toEqual([]);
   });
 
   it('blocca un pacchetto senza eccezione e uno con eccezione scaduta', () => {
