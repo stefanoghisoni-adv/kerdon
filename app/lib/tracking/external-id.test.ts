@@ -40,6 +40,25 @@ describe('newExternalId', () => {
     expect(random).toMatch(/^[A-Za-z0-9]+$/);
   });
 
+  // Un identificativo deve identificare e nient'altro: non porta informazioni sul
+  // browser, sul dispositivo o sul momento. Se lo facesse, quelle informazioni
+  // viaggierebbero ovunque l'identificativo andasse, leggibili da chiunque,
+  // senza che il merchant potesse cancellarle.
+  it('non contiene dati di browser, dispositivo o timestamp', () => {
+    const id = newExternalId();
+    const parti = id.split('_');
+
+    // Solo due parti: prefisso + 32 caratteri casuali
+    expect(parti).toHaveLength(2);
+    expect(parti[0]).toBe('kerdon');
+    expect(parti[1]).toHaveLength(32);
+
+    // L'entropia attesa e' alta: almeno 25 caratteri distinti su 32
+    // (un timestamp o un hash di user agent avrebbe sequenze ripetute)
+    const caratteriDistinti = new Set(parti[1]).size;
+    expect(caratteriDistinti).toBeGreaterThanOrEqual(20);
+  });
+
   it('cinquecento identificativi di fila sono cinquecento identificativi diversi', () => {
     const ids = new Set(Array.from({ length: 500 }, () => newExternalId()));
     expect(ids.size).toBe(500);
