@@ -268,6 +268,10 @@ jobs:
       PSQL_ADMIN: postgresql://ci:ci@localhost:5432/postgres
       BASE_DATABASE_URL: postgresql://ci:ci@localhost:5432/kerdon_linea?schema=public
       BASE_PSQL_URL: postgresql://ci:ci@localhost:5432/kerdon_linea
+      # Il database di appoggio su cui Prisma rigioca le migrazioni per la
+      # prova di struttura della linea di base e per la fase `pre` del
+      # cancello sulla deriva. Prisma lo svuota: e' un database a parte.
+      SHADOW_DATABASE_URL: postgresql://ci:ci@localhost:5432/kerdon_appoggio?schema=public
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -310,9 +314,14 @@ jobs:
         run: |
           set -o pipefail
           psql "$PSQL_ADMIN" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE kerdon_linea'
+          psql "$PSQL_ADMIN" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE kerdon_appoggio'
           psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/owner-bootstrap.sql
 
           npx tsx prisma/linea-di-base.ts --marca
+
+          # La fase `pre` del workflow di produzione, a registro appena scritto:
+          # il database corrisponde alle migrazioni registrate.
+          npx tsx prisma/expected-drift.ts --fase=pre
 
           # Le migrazioni scritte DOPO la linea di base lo strumento non le
           # marca mai: in produzione le applica `migrate deploy`. Questo

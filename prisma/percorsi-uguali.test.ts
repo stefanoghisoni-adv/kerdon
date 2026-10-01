@@ -25,7 +25,7 @@ describe('la differenza nota fra i due percorsi', () => {
   it('e\' la stessa colonna della deriva da risolvere, vista dall\'altro lato', () => {
     // Quando la migrazione che toglie la colonna ci sara', vanno via entrambe.
     const colonna = (riga: string) => /"supabase_configs"\s.*"([a-z_]+)"/.exec(riga)?.[1];
-    expect(DIFFERENZA_NOTA.map(colonna)).toEqual(DERIVA_DA_RISOLVERE.map(colonna));
+    expect(new Set(DIFFERENZA_NOTA.map(colonna))).toEqual(new Set(DERIVA_DA_RISOLVERE.map(colonna)));
   });
 
   it('si riconosce anche con gli spazi che mette Prisma', () => {
@@ -37,7 +37,7 @@ ALTER TABLE "public"."supabase_configs" ADD COLUMN     "supabase_db_password" TE
 
   it('qualsiasi altra differenza di struttura passa come inattesa', () => {
     const script = 'ALTER TABLE "public"."shops" DROP COLUMN "locale";';
-    expect(strutturaInattesa(script)).toEqual([script]);
+    expect(strutturaInattesa(script)).toEqual(['ALTER TABLE "shops" DROP COLUMN "locale";']);
   });
 });
 

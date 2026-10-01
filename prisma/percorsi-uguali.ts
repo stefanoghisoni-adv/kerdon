@@ -32,7 +32,8 @@ import { istruzioni } from './expected-drift';
  * lato opposto: va via insieme a quella, con la migrazione che la toglie.
  */
 export const DIFFERENZA_NOTA = [
-  'ALTER TABLE "public"."supabase_configs" ADD COLUMN "supabase_db_password" TEXT;',
+  // Senza `"public".`: istruzioni() lo toglie, come fa con tutto il resto.
+  'ALTER TABLE "supabase_configs" ADD COLUMN "supabase_db_password" TEXT;',
 ];
 
 /**

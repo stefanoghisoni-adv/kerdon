@@ -12,8 +12,10 @@ import {
   eseguiProve,
   leggiRegistro,
   provateDa,
+  statoRegistro,
   type Esegui,
 } from './linea-di-base';
+import { controllaAppoggio, migrazioniDiRiferimento } from './registro';
 
 /**
  * La linea di base marca come applicato solo cio' che si dimostra presente, e
@@ -148,6 +150,25 @@ describe('decidi', () => {
     expect(d.daMarcare).toEqual([]);
   });
 
+  it('linea di base fatta sul listino A: il resto e\' in attesa, e va bene', () => {
+    const finoAllaGuardia = FINO_ALLA_BASE.filter((n) => n <= GUARDIA);
+    const d = decidi(CARTELLE, senza(PRICING_ALIGNMENT, LISTINO_NUOVO), {
+      concluse: finoAllaGuardia,
+      fallite: [],
+    });
+    expect(d.fermati).toBeNull();
+    expect(d.giaStabilita).toBe(true);
+    expect(d.inAttesa[0]).toBe(PRICING_ALIGNMENT);
+  });
+
+  it('registro fermo prima di cio\' che non puo\' mancare, e niente da riprendere: ci si ferma', () => {
+    // Le prove non dimostrano piu' quello che il registro non ha: `migrate
+    // deploy` rigiocherebbe migrazioni di mesi fa su un database di oggi.
+    const d = decidi(CARTELLE, new Set(), { concluse: FINO_ALLA_BASE.slice(0, 5), fallite: [] });
+    expect(d.giaStabilita).toBe(false);
+    expect(d.fermati).toMatch(new RegExp(FINO_ALLA_BASE[5]));
+  });
+
   it('linea di base interrotta a meta\': si riprende da dove era arrivata', () => {
     const fatte = FINO_ALLA_BASE.slice(0, 10);
     const d = decidi(CARTELLE, tutte, { concluse: fatte, fallite: [] });
@@ -156,10 +177,29 @@ describe('decidi', () => {
     expect(d.daMarcare).toEqual(FINO_ALLA_BASE.slice(10));
   });
 
-  it('un registro con dei buchi non e\' una linea di base interrotta', () => {
+  it('un registro con dei buchi ferma tutto, e dice quali', () => {
     const d = decidi(CARTELLE, tutte, { concluse: [FINO_ALLA_BASE[3]], fallite: [] });
-    expect(d.giaStabilita).toBe(true);
+    expect(d.giaStabilita).toBe(false);
+    expect(d.fermati).toMatch(/buchi/);
+    expect(d.inAttesa).toEqual(FINO_ALLA_BASE.slice(0, 3));
     expect(d.daMarcare).toEqual([]);
+  });
+
+  it('il buco che conta: 20260923 assente con 20260926 registrata', () => {
+    // `migrate deploy` la rigiocherebbe sopra il listino finale e riscriverebbe
+    // i limiti di Core con quelli del vecchio Core da 29 euro.
+    const d = decidi(CARTELLE, tutte, {
+      concluse: FINO_ALLA_BASE.filter((n) => n !== PRICING_ALIGNMENT),
+      fallite: [],
+    });
+    expect(d.giaStabilita).toBe(false);
+    expect(d.fermati).toMatch(new RegExp(PRICING_ALIGNMENT));
+    expect(d.inAttesa).toEqual([PRICING_ALIGNMENT]);
+  });
+
+  it('una migrazione registrata che nel repository non c\'e\' ferma tutto', () => {
+    const d = decidi(CARTELLE, tutte, { concluse: [...FINO_ALLA_BASE, '29990101000000_dal_futuro'], fallite: [] });
+    expect(d.fermati).toMatch(/dal_futuro/);
   });
 });
 
@@ -254,5 +294,27 @@ describe('le prove su un Postgres vero (PGlite)', () => {
       fallite: ['20260714165105_add_connection_verified_at'],
     });
     await db.close();
+  });
+});
+
+describe('il riferimento della fase pre e il database di appoggio', () => {
+  it('senza registro: le migrazioni fino alla linea di base, non oltre', () => {
+    const conUnaNuova = [...CARTELLE, '29990101000000_colonna_nuova'];
+    expect(migrazioniDiRiferimento(conUnaNuova, null)).toEqual(FINO_ALLA_BASE);
+    expect(migrazioniDiRiferimento(conUnaNuova, { concluse: [], fallite: [] })).toEqual(FINO_ALLA_BASE);
+  });
+
+  it('con il registro: solo le registrate, quindi una migrazione in attesa non e\' deriva', () => {
+    const conUnaNuova = [...CARTELLE, '29990101000000_colonna_nuova'];
+    const registro = { concluse: FINO_ALLA_BASE, fallite: [] };
+    expect(migrazioniDiRiferimento(conUnaNuova, registro)).toEqual(FINO_ALLA_BASE);
+    expect(statoRegistro(conUnaNuova, registro).buchi).toEqual([]);
+  });
+
+  it('il database di appoggio deve essere locale: Prisma lo svuota', () => {
+    expect(controllaAppoggio('postgresql://ci:ci@localhost:5432/ombra')).toContain('localhost');
+    expect(controllaAppoggio('postgresql://ci:ci@127.0.0.1:5432/ombra')).toContain('127.0.0.1');
+    expect(() => controllaAppoggio('postgresql://postgres:x@db.abcdefgh.supabase.co:5432/postgres')).toThrow(/localhost/);
+    expect(() => controllaAppoggio(undefined)).toThrow(/SHADOW_DATABASE_URL/);
   });
 });

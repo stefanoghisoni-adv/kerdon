@@ -34,6 +34,23 @@ describe('istruzioni', () => {
     expect(istruzioni(suPiuRighe)).toEqual([DERIVA_VOLUTA[0]]);
   });
 
+  it('ignora il prefisso "public". che Prisma mette solo in alcuni confronti', () => {
+    // Fra database e migrazioni (fase pre) Prisma qualifica le tabelle, fra
+    // database e schema no: senza normalizzare, la deriva nota non sarebbe
+    // piu' riconosciuta in fase pre.
+    const qualificata = 'ALTER TABLE "public"."plans" DROP COLUMN "max_orders";';
+    expect(istruzioni(qualificata)).toEqual(['ALTER TABLE "plans" DROP COLUMN "max_orders";']);
+    expect(derivaInattesa(qualificata, 'pre')).toEqual([]);
+  });
+
+  it('la colonna morta supabase_db_password e\' tollerata nei due versi', () => {
+    // Contro le migrazioni (fase pre) un database nato dallo script non la ha:
+    // il diff la vorrebbe aggiungere. Non e' un motivo per fermarsi.
+    const daAggiungere = 'ALTER TABLE "public"."supabase_configs" ADD COLUMN     "supabase_db_password" TEXT;';
+    expect(derivaInattesa(daAggiungere, 'pre')).toEqual([]);
+    expect(derivaInattesa('ALTER TABLE "public"."supabase_configs" ADD COLUMN "altra" TEXT;', 'pre')).toHaveLength(1);
+  });
+
   it('non si fa ingannare da un punto e virgola dentro un commento', () => {
     expect(istruzioni('-- prima; poi\nSELECT 1;')).toEqual(['SELECT 1;']);
   });

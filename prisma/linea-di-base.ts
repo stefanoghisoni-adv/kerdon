@@ -22,11 +22,13 @@
  *
  *   - `struttura`: tutto quello che fa e' struttura (tabelle, colonne, indici,
  *     chiavi esterne, tipi) piu' l'attivazione di RLS. La prova e' il confronto
- *     del database con `schema.prisma` (lo stesso di expected-drift.ts, fase
- *     `pre`) piu' RLS su ogni tabella e le due chiavi esterne sul nome del piano.
- *     Vale perche' la CI dimostra a ogni commit che la catena delle migrazioni
- *     arriva esattamente a `schema.prisma` (job `migrations`): un database
- *     uguale a `schema.prisma` contiene l'effetto di ognuna.
+ *     del database con lo schema a cui portano le migrazioni fino a
+ *     ULTIMA_DELLA_LINEA_DI_BASE, rigiocate da Prisma su un database di
+ *     appoggio (SHADOW_DATABASE_URL, locale), piu' RLS su ogni tabella e le due
+ *     chiavi esterne sul nome del piano. Non contro `schema.prisma`: quello
+ *     contiene anche le migrazioni scritte dopo la linea di base, che la
+ *     produzione non ha ancora, e con la prima di esse la prova non sarebbe
+ *     mai piu' passata.
  *   - `sql`: la migrazione tocca anche i DATI (il listino, il partner iniziale,
  *     i giorni di prova), che il confronto con lo schema non vede. La prova e'
  *     una domanda al database sullo stato che la migrazione lascia.
@@ -48,23 +50,35 @@
  *   npx tsx prisma/linea-di-base.ts --marca   # scrive nel registro le provate
  *   npx tsx prisma/linea-di-base.ts --deve-esserci  # fallisce se la linea di base manca
  *
- * Vuole DATABASE_URL (per Prisma, con `?schema=public`) e PSQL_URL (lo stesso
- * database, senza `schema=`). Si esegue dal workflow
+ * Vuole DATABASE_URL (per Prisma, con `?schema=public`), PSQL_URL (lo stesso
+ * database, senza `schema=`) e SHADOW_DATABASE_URL (un Postgres vuoto e locale
+ * di appoggio, che Prisma svuota). Si esegue dal workflow
  * `.github/workflows/migrate-production.yml` (azione `verifica` per il
  * resoconto, `linea-di-base` per scrivere): docs/database-migrations.md.
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { derivaInattesa, derivaVolutaMancante, diff } from './expected-drift';
+import { derivaInattesa } from './expected-drift';
+import {
+  ULTIMA_DELLA_LINEA_DI_BASE,
+  cartelleMigrazioni,
+  diffVersoMigrazioni,
+  leggiRegistro,
+  psql,
+  type Esegui,
+  type Registro,
+} from './registro';
 
-/**
- * L'ultima migrazione che la linea di base puo' marcare. Quelle scritte dopo
- * non sono mai passate a mano: le applica solo `migrate deploy`, quindi non
- * c'e' niente da dichiarare e nessuna prova da scrivere.
- */
-export const ULTIMA_DELLA_LINEA_DI_BASE = '20260926000000_plans_basic_growth_scale_core';
+// L'ultima migrazione marcabile, le cartelle e il registro stanno in
+// registro.ts perche' li usa anche expected-drift.ts; qui si ripubblicano per
+// chi legge questo file come punto d'ingresso.
+export {
+  ULTIMA_DELLA_LINEA_DI_BASE,
+  cartelleMigrazioni,
+  leggiRegistro,
+  type Esegui,
+  type Registro,
+} from './registro';
 
 /**
  * Da qui in poi una migrazione puo' legittimamente mancare in produzione: e' il
@@ -262,42 +276,6 @@ export const RLS_E_CHIAVI_SQL = `(
   AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shops_last_synced_plan_fkey')
 )`;
 
-/**
- * Una domanda al database che risponde con una sola parola. Iniettata, cosi' i
- * test la fanno a PGlite e lo script a psql.
- */
-export type Esegui = (sql: string) => Promise<string>;
-
-/** Cosa c'e' nel registro di Prisma. `null`: il registro non esiste. */
-export interface Registro {
-  concluse: string[];
-  /** Iniziate e mai concluse, e non annullate: un `migrate deploy` interrotto. */
-  fallite: string[];
-}
-
-export async function leggiRegistro(esegui: Esegui): Promise<Registro | null> {
-  const esiste = await esegui(
-    `SELECT CASE WHEN to_regclass('public._prisma_migrations') IS NULL THEN 'no' ELSE 'si' END`,
-  );
-  if (esiste.trim() !== 'si') return null;
-
-  const elenco = async (condizione: string) =>
-    (
-      await esegui(
-        `SELECT coalesce(string_agg("migration_name", ',' ORDER BY "migration_name"), '')
-           FROM "_prisma_migrations" WHERE ${condizione}`,
-      )
-    )
-      .trim()
-      .split(',')
-      .filter((nome) => nome.length > 0);
-
-  return {
-    concluse: await elenco(`"finished_at" IS NOT NULL AND "rolled_back_at" IS NULL`),
-    fallite: await elenco(`"finished_at" IS NULL AND "rolled_back_at" IS NULL`),
-  };
-}
-
 /** L'esito di ogni prova `sql`: vera, falsa, o un errore (che non e' una prova). */
 export async function eseguiProve(
   esegui: Esegui,
@@ -331,6 +309,26 @@ export interface Decisione {
   giaStabilita: boolean;
 }
 
+export interface StatoRegistro {
+  /** Le cartelle registrate, nell'ordine delle cartelle. */
+  registrate: string[];
+  /** Non registrate, ma con una successiva registrata. */
+  buchi: string[];
+  /** Registrate, ma senza cartella nel repository. */
+  sconosciute: string[];
+}
+
+export function statoRegistro(cartelle: string[], registro: Registro | null): StatoRegistro {
+  const concluse = new Set(registro?.concluse ?? []);
+  const registrate = cartelle.filter((nome) => concluse.has(nome));
+  const ultima = registrate.at(-1);
+  return {
+    registrate,
+    buchi: ultima ? cartelle.filter((nome) => nome < ultima && !concluse.has(nome)) : [],
+    sconosciute: [...concluse].filter((nome) => !cartelle.includes(nome)),
+  };
+}
+
 /**
  * La decisione, senza toccare niente: dalle cartelle, dalle prove e dal
  * registro, cosa si marca e cosa resta in attesa.
@@ -352,31 +350,66 @@ export function decidi(
     };
   }
 
+  // Il registro deve essere un tratto iniziale delle cartelle, senza buchi:
+  // `migrate resolve` scrive in ordine e `migrate deploy` applica in ordine,
+  // quindi qualunque altra forma vuol dire che qualcuno ha scritto o cancellato
+  // righe a mano. Un buco non e' innocuo: `migrate deploy` lo rigiocherebbe
+  // sopra lo stato delle migrazioni successive, gia' registrate — per esempio
+  // 20260923 sopra il listino finale di 20260926, che riscrive i limiti di Core.
+  const stato = statoRegistro(cartelle, registro);
+  if (stato.sconosciute.length > 0) {
+    return {
+      ...vuota,
+      giaStabilita: false,
+      fermati:
+        `nel registro ci sono migrazioni che nel repository non esistono (${stato.sconosciute.join(', ')}). ` +
+        'Il codice da cui si lancia e\' piu\' vecchio del database, o il registro e\' stato scritto a mano.',
+    };
+  }
+  if (stato.buchi.length > 0) {
+    return {
+      ...vuota,
+      inAttesa: stato.buchi,
+      giaStabilita: false,
+      fermati:
+        `il registro ha dei buchi: ${stato.buchi.join(', ')} non risulta applicata, ma una successiva si'. ` +
+        '`migrate deploy` la rigiocherebbe sopra lo stato delle successive. Non si marca e non si applica ' +
+        'niente: serve una decisione, caso per caso.',
+    };
+  }
+
   // Il tratto iniziale provato.
   const prefisso: string[] = [];
   for (const nome of cartelle) {
     if (nome > ULTIMA_DELLA_LINEA_DI_BASE || !provate.has(nome)) break;
     prefisso.push(nome);
   }
-  const inAttesa = cartelle.slice(prefisso.length);
 
-  const registrate = new Set(registro?.concluse ?? []);
-
-  // Un registro che non e' vuoto vuol dire linea di base gia' fatta, con una
-  // sola eccezione: una linea di base interrotta a meta'. `migrate resolve` le
-  // scrive una alla volta e in ordine, quindi un'interruzione lascia nel
-  // registro esattamente le prime k cartelle, con k minore del tratto provato:
-  // in quel caso si riprende da dove si era arrivati. In ogni altro caso — il
-  // registro contiene il tratto per intero, o c'e' gia' passato un
-  // `migrate deploy` — il registro va avanti da solo e qui non c'e' niente da
-  // fare.
-  if (registrate.size > 0) {
-    const k = registrate.size;
-    const interrotta =
-      k < prefisso.length && cartelle.slice(0, k).every((nome) => registrate.has(nome));
-    if (!interrotta) return { ...vuota, giaStabilita: true, fermati: null };
+  // Un registro senza buchi con k righe contiene esattamente le prime k
+  // cartelle. Se k e' minore del tratto provato, e' una linea di base
+  // interrotta a meta': si riprende da dove era arrivata. Altrimenti la linea
+  // di base c'e' gia', e quello che manca lo applica `migrate deploy` — purche'
+  // sia fra cio' che puo' mancare.
+  const k = stato.registrate.length;
+  const registrate = new Set(stato.registrate);
+  if (k > 0 && k >= prefisso.length) {
+    const inAttesa = cartelle.slice(k);
+    const nonPreviste = inAttesa.filter((nome) => nome < PRIMA_CHE_PUO_MANCARE);
+    if (nonPreviste.length > 0) {
+      return {
+        ...vuota,
+        inAttesa,
+        giaStabilita: false,
+        fermati:
+          `la linea di base si e' fermata prima di ${nonPreviste[0]}, che non e' fra quelle che possono ` +
+          `mancare (da ${PRIMA_CHE_PUO_MANCARE} in poi) e che il database non dimostra di avere. ` +
+          'Non si marca e non si applica niente: serve una decisione.',
+      };
+    }
+    return { ...vuota, inAttesa, giaStabilita: true, fermati: null };
   }
 
+  const inAttesa = cartelle.slice(prefisso.length);
   const nonPreviste = inAttesa.filter((nome) => nome < PRIMA_CHE_PUO_MANCARE);
   if (nonPreviste.length > 0) {
     return {
@@ -398,13 +431,6 @@ export function decidi(
   };
 }
 
-/** Le cartelle di migrazione, nell'ordine in cui Prisma le applica. */
-export function cartelleMigrazioni(radice = resolve(process.cwd(), 'prisma/migrations')): string[] {
-  return readdirSync(radice)
-    .filter((nome) => statSync(resolve(radice, nome)).isDirectory())
-    .sort();
-}
-
 /**
  * Dalle prove alla lista delle provate. Le `struttura` valgono tutte insieme:
  * o il database e' quello di `schema.prisma` con RLS e chiavi esterne, o
@@ -421,14 +447,6 @@ export function provateDa(
     }
   }
   return provate;
-}
-
-function psql(url: string): Esegui {
-  return async (sql) =>
-    execFileSync('psql', [url, '-X', '-A', '-t', '-q', '-v', 'ON_ERROR_STOP=1', '-c', sql], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
 }
 
 async function principale(): Promise<void> {
@@ -448,27 +466,53 @@ async function principale(): Promise<void> {
       : `Registro delle migrazioni: ${registro.concluse.length} concluse, ${registro.fallite.length} fallite.`,
   );
 
-  // La prova di struttura: lo stesso confronto di expected-drift.ts in fase
-  // `pre`, piu' RLS e le chiavi esterne sul nome del piano.
-  const script = diff({ url: databaseUrl });
+  const cartelle = cartelleMigrazioni();
+
+  // Linea di base completa e registro senza buchi: non c'e' niente da provare,
+  // e la prova di struttura qui sotto confronterebbe un database ormai andato
+  // avanti con lo schema della linea di base.
+  const stato = statoRegistro(cartelle, registro);
+  const baseCompleta = cartelle
+    .filter((nome) => nome <= ULTIMA_DELLA_LINEA_DI_BASE)
+    .every((nome) => stato.registrate.includes(nome));
+  if (
+    registro &&
+    registro.fallite.length === 0 &&
+    stato.buchi.length === 0 &&
+    stato.sconosciute.length === 0 &&
+    baseCompleta
+  ) {
+    console.log('');
+    console.log('La linea di base c\'e\' gia\': niente da marcare.');
+    if (marca) await attivaRlsSulRegistro(esegui);
+    return;
+  }
+
+  // La prova di struttura: il database contro lo schema a cui portano le
+  // migrazioni FINO ALLA LINEA DI BASE, rigiocate su un database di appoggio —
+  // non contro `schema.prisma`, che contiene anche le migrazioni scritte dopo
+  // e che la produzione, prima di `applica`, per definizione non ha. Piu' RLS
+  // su ogni tabella e le due chiavi esterne sul nome del piano.
+  const script = diffVersoMigrazioni(
+    databaseUrl,
+    cartelle.filter((nome) => nome <= ULTIMA_DELLA_LINEA_DI_BASE),
+    process.env.SHADOW_DATABASE_URL,
+  );
   const inattesa = derivaInattesa(script, 'pre');
-  const fkMancanti = derivaVolutaMancante(script);
   const rlsEChiavi = (await esegui(`SELECT CASE WHEN ${RLS_E_CHIAVI_SQL} THEN 'si' ELSE 'no' END`)).trim() === 'si';
-  const strutturaOk = inattesa.length === 0 && fkMancanti.length === 0 && rlsEChiavi;
+  const strutturaOk = inattesa.length === 0 && rlsEChiavi;
 
   console.log('');
   console.log(
     strutturaOk
-      ? 'Struttura: il database corrisponde a schema.prisma, RLS ovunque, chiavi esterne sul piano presenti.'
+      ? `Struttura: il database corrisponde alle migrazioni fino a ${ULTIMA_DELLA_LINEA_DI_BASE}, RLS ovunque, chiavi esterne sul piano presenti.`
       : 'Struttura: NON corrisponde (deriva inattesa, RLS mancante o chiavi esterne sul piano assenti).',
   );
   for (const riga of inattesa) console.log(`  deriva: ${riga}`);
-  if (fkMancanti.length > 0) console.log('  mancano le chiavi esterne sul nome del piano');
   if (!rlsEChiavi) console.log('  RLS spenta su almeno una tabella, o chiavi esterne sul piano assenti');
 
   const esitiSql = await eseguiProve(esegui);
   const provate = provateDa(strutturaOk, esitiSql);
-  const cartelle = cartelleMigrazioni();
 
   console.log('');
   console.log('Migrazione per migrazione:');
@@ -491,16 +535,18 @@ async function principale(): Promise<void> {
   console.log('');
   if (decisione.giaStabilita) {
     console.log('La linea di base c\'e\' gia\': niente da marcare.');
+    for (const nome of decisione.inAttesa) console.log(`  in attesa, la applichera' "applica": ${nome}`);
+    if (marca) await attivaRlsSulRegistro(esegui);
     return;
+  }
+  if (decisione.fermati) {
+    console.error(`FERMATI: ${decisione.fermati}`);
+    process.exit(1);
   }
   // Con `applica`: senza linea di base `migrate deploy` si fermerebbe comunque
   // (P3005), ma con un messaggio che parla di schema non vuoto. Meglio dirlo qui.
   if (process.argv.includes('--deve-esserci')) {
     console.error('FERMATI: la linea di base non c\'e\' ancora. Prima l\'azione "linea-di-base".');
-    process.exit(1);
-  }
-  if (decisione.fermati) {
-    console.error(`FERMATI: ${decisione.fermati}`);
     process.exit(1);
   }
 
@@ -524,12 +570,20 @@ async function principale(): Promise<void> {
     execFileSync('npx', ['prisma', 'migrate', 'resolve', '--applied', nome], { stdio: 'inherit' });
   }
 
-  // Il registro l'ha appena creato Prisma, e lo crea senza RLS. Su Supabase una
-  // tabella di `public` senza RLS e' leggibile E SCRIVIBILE con la chiave
-  // pubblica del progetto: chiunque potrebbe dichiarare applicata una
-  // migrazione mai eseguita. Sul percorso delle migrazioni ci pensa
-  // 20260904120000_row_level_security_everywhere, che gira dopo che il registro
-  // esiste; qui quella migrazione viene marcata, non eseguita.
+  await attivaRlsSulRegistro(esegui);
+}
+
+/**
+ * Il registro lo crea Prisma, e lo crea senza RLS. Su Supabase una tabella di
+ * `public` senza RLS e' leggibile E SCRIVIBILE con la chiave pubblica del
+ * progetto: chiunque potrebbe dichiarare applicata una migrazione mai eseguita.
+ * Sul percorso delle migrazioni ci pensa
+ * 20260904120000_row_level_security_everywhere, che gira dopo che il registro
+ * esiste; qui quella migrazione viene marcata, non eseguita. Idempotente: si
+ * ripete anche quando una `--marca` rilanciata non ha piu' niente da scrivere.
+ */
+async function attivaRlsSulRegistro(esegui: Esegui): Promise<void> {
+  if (!(await leggiRegistro(esegui))) return;
   await esegui('ALTER TABLE public."_prisma_migrations" ENABLE ROW LEVEL SECURITY');
   console.log('RLS attivata sul registro delle migrazioni.');
 }

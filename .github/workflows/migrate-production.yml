@@ -67,6 +67,29 @@ jobs:
     # ha i SUOI, con gli stessi nomi: e' l'environment a decidere il database.
     environment: ${{ inputs.database == 'live' && 'production' || 'test' }}
 
+    # Un Postgres vuoto, locale e usa e getta: il database di APPOGGIO.
+    #
+    # Prima di `applica` il database e' indietro rispetto a `schema.prisma` per
+    # definizione — gli mancano proprio le migrazioni in attesa — quindi il
+    # confronto giusto e' con lo schema delle migrazioni gia' registrate. Per
+    # ricavarlo Prisma le rigioca qui sopra (e lo svuota prima di farlo:
+    # registro.ts rifiuta qualunque indirizzo che non sia localhost). Non ha
+    # niente a che fare con il database di Live o di Test.
+    services:
+      appoggio:
+        image: postgres:16
+        env:
+          POSTGRES_USER: appoggio
+          POSTGRES_PASSWORD: appoggio
+          POSTGRES_DB: appoggio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       # Due indirizzi per lo stesso database, e servono entrambi: Prisma vuole
       # `?schema=public`, psql quel parametro non lo conosce e rifiuta l'intero
@@ -86,6 +109,7 @@ jobs:
       PSQL_URL: ${{ secrets.PRODUCTION_PSQL_URL }}
       # Dove finisce l'output di ogni passo: viene conservato come artifact del
       # run e copiato nel riepilogo. Passa sempre da scripts/oscura-segreti.ts.
+      SHADOW_DATABASE_URL: postgresql://appoggio:appoggio@localhost:5432/appoggio?schema=public
       REGISTRO: registro-migrazione
       AZIONE: ${{ inputs.azione }}
       DATABASE: ${{ inputs.database }}
@@ -191,11 +215,18 @@ jobs:
       # due chiavi esterne sul nome del piano — volute, e non modellate in
       # schema.prisma — ci siano ancora.
       #
-      # Fase `pre`: il database non e' ancora migrato, quindi puo' avere lo stato
-      # di partenza che una migrazione in attesa sta per togliere (oggi:
-      # `plans.max_orders` dello stato B). E' conoscenza esplicita in
-      # expected-drift.ts, non deriva tollerata: dopo le migrazioni torna a
-      # fermare tutto.
+      # Fase `pre`: il riferimento NON e' `schema.prisma` ma lo schema delle
+      # migrazioni gia' registrate in `_prisma_migrations` (prima della linea di
+      # base: quelle fino alla linea di base), rigiocate sul database di
+      # appoggio. Cosi' una migrazione in attesa — una colonna o una tabella
+      # nuova — non e' deriva, e' quello che `applica` sta per fare; tutto il
+      # resto si'. Il log elenca quali migrazioni sono rimaste fuori dal
+      # confronto perche' in attesa.
+      #
+      # In piu' puo' esserci lo stato di partenza che una migrazione in attesa
+      # sta per togliere (oggi: `plans.max_orders` dello stato B). E'
+      # conoscenza esplicita in expected-drift.ts, non deriva tollerata: dopo
+      # le migrazioni torna a fermare tutto.
       - name: Refuse to proceed on unexpected drift
         run: |
           npx tsx prisma/expected-drift.ts --fase=pre 2>&1 \

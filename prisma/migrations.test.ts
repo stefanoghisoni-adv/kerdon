@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { ULTIMA_DELLA_LINEA_DI_BASE } from './registro';
+
+/** L'impronta di `0_init` alla linea di base: lo sha256 che Prisma registra. */
+const IMPRONTA_0_INIT = '601463ed9a4421d5c221fe3b8d8b85adc4c7527da325d7e63338bfb3e262d9cb';
 
 /**
  * Cosa deve essere vero della cartella delle migrazioni, senza toccare nessun
@@ -42,29 +47,44 @@ function cartelle(): string[] {
 
 describe('la migrazione iniziale', () => {
   /**
-   * `0_init` e' la COPIA di `owner-bootstrap.sql`, non una seconda scrittura
-   * della stessa cosa.
+   * `0_init` e' FERMO: e' la fotografia dello schema alla linea di base
+   * (ULTIMA_DELLA_LINEA_DI_BASE), e da qui in poi non si tocca piu'.
    *
-   * Due file che descrivono lo stesso database sono due file da ricordarsi di
-   * aggiornare, ed e' gia' successo due volte che uno dei due restasse indietro
-   * in silenzio. Tenendoli identici byte per byte la domanda "sono allineati?"
-   * ha una risposta sola, e `owner-bootstrap.test.ts` — che confronta il
-   * bootstrap con lo schema — vale automaticamente anche per la migrazione.
+   * Finora era la copia byte per byte di `owner-bootstrap.sql`, e il test li
+   * voleva identici. Ma il database owner sta per essere messo in linea di base
+   * con `migrate resolve --applied 0_init`, e due cose dipendono dal fatto che
+   * `0_init` non cambi:
    *
-   * Quando si rigenera `owner-bootstrap.sql` si ricopia:
+   *   - Prisma registra l'impronta (sha256) del file e rifiuta ogni
+   *     `migrate deploy` successivo se cambia ("migration file has been
+   *     modified");
+   *   - la prova di struttura della linea di base (prisma/linea-di-base.ts)
+   *     confronta la produzione con lo schema delle migrazioni fino alla linea
+   *     di base. Se `0_init` venisse rigenerato con una migrazione successiva
+   *     dentro, quello schema la conterrebbe, la produzione no, e la linea di
+   *     base non si potrebbe piu' fare.
    *
-   *   cp prisma/owner-bootstrap.sql prisma/migrations/0_init/migration.sql
-   *
-   * ATTENZIONE: dopo che un database e' stato messo in linea di base
-   * (`prisma migrate resolve --applied 0_init`) Prisma confronta il file con
-   * l'impronta registrata e rifiuta di procedere se e' cambiato. Da quel
-   * momento `0_init` non si tocca piu': le modifiche allo schema diventano
-   * migrazioni nuove. Il percorso sta in docs/database-migrations.md.
+   * Quindi: una modifica allo schema e' una migrazione NUOVA, e
+   * `owner-bootstrap.sql` si rigenera per descrivere lo stato finale (le
+   * istruzioni sono nella sua intestazione). Che le due strade portino allo
+   * stesso database lo provano il job `migrations` della CI
+   * (prisma/percorsi-uguali.ts) e i test PGlite, non piu' un confronto di testo.
    */
-  it('e\' identica a owner-bootstrap.sql', () => {
+  it('ha l\'impronta della linea di base, e non cambia', () => {
+    const init = readFileSync(resolve(MIGRAZIONI, '0_init/migration.sql'));
+    expect(createHash('sha256').update(init).digest('hex')).toBe(IMPRONTA_0_INIT);
+  });
+
+  /**
+   * Finche' dopo la linea di base non c'e' nessuna migrazione, lo schema finale
+   * e' quello della linea di base: lo script e `0_init` sono lo stesso testo.
+   * Dalla prima migrazione successiva lo script va avanti e `0_init` no.
+   */
+  it('coincide con owner-bootstrap.sql finche\' non ci sono migrazioni dopo la linea di base', () => {
+    const dopo = cartelle().filter((nome) => nome > ULTIMA_DELLA_LINEA_DI_BASE);
+    if (dopo.length > 0) return;
     const bootstrap = leggi(resolve(ROOT, 'prisma/owner-bootstrap.sql'));
     const init = leggi(resolve(MIGRAZIONI, '0_init/migration.sql'));
-
     expect(init).toBe(bootstrap);
   });
 

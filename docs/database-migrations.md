@@ -19,22 +19,13 @@ automatico insieme al deploy dell'app.
 | `prisma migrate deploy` | il database esiste gia' e deve cambiare | applica le sole migrazioni non ancora applicate |
 | `.github/workflows/migrate-production.yml` | il database e' quello owner, Live o Test | fa la stessa cosa, ma dietro un'approvazione, con i controlli prima e dopo e un registro di ogni esecuzione |
 
-`prisma/migrations/0_init/migration.sql` e' la **copia identica** di
-`owner-bootstrap.sql`: le due strade partono dallo stesso testo, e un test
-(`prisma/migrations.test.ts`) non le lascia divergere. E' il motivo per cui un
-database costruito con lo script e uno costruito con le migrazioni sono lo
-stesso database.
-
-> **`0_init` si puo' modificare solo PRIMA della linea di base di produzione, mai
-> dopo.** Finche' la produzione non ha la riga di `0_init` in
-> `_prisma_migrations`, `0_init` e `owner-bootstrap.sql` si aggiornano insieme
-> (e' successo il 26 settembre 2026, per seminare il listino Basic/Growth/Scale/
-> Core). Dal momento in cui si esegue `migrate resolve --applied 0_init` Prisma
-> ne registra l'impronta: modificarlo dopo vuol dire un database di produzione
-> che non corrisponde piu' alla storia scritta. Da li' in poi ogni cambiamento,
-> anche ai dati iniziali, e' una migrazione nuova; `owner-bootstrap.sql` si
-> aggiorna per descrivere lo stato finale e `0_init` resta com'era — a quel
-> punto il test che li vuole identici va rivisto insieme.
+`prisma/migrations/0_init/migration.sql` e' la fotografia dello schema alla
+linea di base (`20260926000000_plans_basic_growth_scale_core`), ed e' **fermo**:
+un test (`prisma/migrations.test.ts`) ne controlla l'impronta. Oggi coincide
+ancora con `owner-bootstrap.sql`; dalla prima migrazione scritta dopo la linea
+di base lo script va avanti e `0_init` no. Che le due strade arrivino comunque
+allo stesso database lo prova la CI (job `migrations`, `prisma/percorsi-uguali.ts`).
+Il perche' in "`0_init` non si tocca", in fondo.
 
 ## La procedura, passo per passo
 
@@ -126,7 +117,7 @@ run:
 | File nel registro | Cosa dice | Verde vuol dire |
 | --- | --- | --- |
 | `02-stato-prima.log` | cosa Prisma ha nel suo registro e cosa e' in attesa | `ESITO: nessuna migrazione in attesa` oppure `ESITO: ci sono migrazioni in attesa` |
-| `03-deriva-prima.log` | il database corrisponde a `schema.prisma`? | `Nessuna deriva inattesa` |
+| `03-deriva-prima.log` | il database e' quello che dicono le migrazioni gia' registrate (prima della linea di base: quelle fino alla linea di base)? Le migrazioni in attesa sono elencate a parte e non contano | `Nessuna deriva inattesa` |
 | `04-controlli-prima.log` | piani, listino, RLS, chiavi esterne sul piano | finisce con `DO`, nessun `ERROR` |
 | `05-linea-di-base-resoconto.log` | la linea di base: c'e'? se no, cosa si marcherebbe | `La linea di base c'e' gia'` oppure l'elenco "Da marcare" |
 
@@ -326,12 +317,13 @@ documento (com'era prima): lo fa `prisma/linea-di-base.ts`, e marca solo cio'
 che **dimostra** presente nel database. Per ogni migrazione ha una prova:
 
 - **struttura** — per le migrazioni che creano o cambiano tabelle, colonne,
-  indici, chiavi esterne, tipi e RLS. La prova e' che il database corrisponda a
-  `schema.prisma` (lo stesso confronto di `03-deriva-prima.log`), con RLS su
-  ogni tabella e le due chiavi esterne sul nome del piano. Basta, perche' la CI
-  dimostra a ogni commit che la catena delle migrazioni arriva esattamente a
-  `schema.prisma`: un database uguale a `schema.prisma` contiene l'effetto di
-  ognuna;
+  indici, chiavi esterne, tipi e RLS. La prova e' che il database corrisponda
+  allo schema a cui portano le migrazioni **fino alla linea di base**, che
+  Prisma rigioca su un database di appoggio vuoto (lo fornisce il workflow da
+  se', non serve niente), con RLS su ogni tabella e le due chiavi esterne sul
+  nome del piano. Non contro `schema.prisma`: quello contiene anche le
+  migrazioni scritte dopo la linea di base, che il database non ha ancora — e
+  dalla prima di esse la prova non passerebbe piu';
 - **una domanda sui dati** — per le migrazioni che hanno toccato anche il
   contenuto, che il confronto con lo schema non vede: il partner iniziale,
   il prezzo in dollari di ogni piano, i giorni di prova, e soprattutto il
@@ -369,6 +361,15 @@ prima di lanciare `linea-di-base`.
 
 Se si interrompe a meta' (rete, run annullato), rilanciare `linea-di-base`:
 riconosce il registro incompleto e riprende da dove era arrivato.
+
+**Un registro con dei buchi ferma tutto.** Il registro e' sempre un tratto
+iniziale delle cartelle: Prisma scrive e applica in ordine. Se una migrazione
+non risulta applicata ma una successiva si' (qualcuno ha cancellato o scritto
+righe a mano), il resoconto dice `FERMATI` ed elenca i buchi, e `applica` non
+parte: `migrate deploy` rigiocherebbe il buco sopra lo stato delle successive —
+la migrazione del 23 sopra il listino finale, per esempio. Si decide caso per
+caso, con il registro in mano: o si dimostra che il buco c'e' e lo si dichiara
+con `migrate resolve --applied`, o si capisce perche' manca.
 
 ## Ogni volta: una migrazione nuova
 
@@ -463,7 +464,12 @@ migrazioni e `schema.prisma` dicano la stessa cosa a ogni commit (job
 2. Backup, poi il workflow lanciato **dal ramo della PR**: in "Run workflow",
    `Use workflow from:` il nome del ramo invece di `main`. `verifica`, poi
    `applica`, su Test e poi su Live. Il registro (`00-intestazione.log`) annota
-   il commit da cui e' partito.
+   il commit da cui e' partito. In `verifica` la migrazione nuova compare in
+   `02-stato-prima.log` come "in attesa" e in `03-deriva-prima.log` fra quelle
+   "che non fanno parte del confronto": e' giusto cosi', il confronto prima di
+   `applica` e' con le migrazioni gia' registrate, non con lo `schema.prisma`
+   del ramo. Dopo `applica` invece `08-deriva-dopo.log` confronta con
+   `schema.prisma`, e li' la colonna deve esserci.
 3. Il merge, subito dopo, **senza piu' toccare la migrazione**: Prisma ne ha
    registrato l'impronta, e un file cambiato dopo l'applicazione fa fallire i
    controlli successivi.
@@ -708,14 +714,21 @@ Se dovessero mancare, le ricrea la coda di `owner-bootstrap.sql`.
 
 ## `0_init` non si tocca
 
-Da quando un database e' stato messo in linea di base, Prisma confronta il
-contenuto di ogni cartella con l'impronta registrata: modificare
-`prisma/migrations/0_init/migration.sql` fa fallire ogni `migrate deploy`
-successivo con "migration file has been modified".
+`0_init` e' la fotografia dello schema alla linea di base, e non cambia piu',
+per due motivi:
 
-Quindi: `owner-bootstrap.sql` si continua a rigenerare quando lo schema cambia
-(le istruzioni sono nella sua intestazione), ma **la copia in `0_init` resta
-ferma**. Il test che pretende che i due file siano identici va aggiornato
-insieme: quando arrivera' quel momento, il modo giusto e' far si' che `0_init`
-resti la fotografia del giorno della linea di base, e che tutto il resto sia una
-migrazione.
+- da quando un database e' stato messo in linea di base, Prisma confronta il
+  contenuto di ogni cartella con l'impronta registrata: modificare
+  `prisma/migrations/0_init/migration.sql` fa fallire ogni `migrate deploy`
+  successivo con "migration file has been modified";
+- la prova di struttura della linea di base confronta il database con lo schema
+  delle migrazioni fino alla linea di base, `0_init` compreso. Un `0_init`
+  rigenerato con dentro una migrazione successiva renderebbe la linea di base
+  impossibile su un database che quella migrazione non l'ha ancora.
+
+Quindi: ogni cambiamento allo schema, anche ai dati iniziali, e' una migrazione
+nuova; `owner-bootstrap.sql` si continua a rigenerare per descrivere lo stato
+finale (le istruzioni sono nella sua intestazione), e `0_init` resta com'e'. Il
+test in `prisma/migrations.test.ts` ne controlla l'impronta, e pretende che
+coincida con lo script solo finche' non esistono migrazioni dopo la linea di
+base.
