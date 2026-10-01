@@ -13,16 +13,13 @@ import {
   TextField,
 } from '@shopify/polaris';
 import { CheckCircleIcon, AlertCircleIcon } from '@shopify/polaris-icons';
-import { CopyIconButton } from './CopyIconButton';
 import { MetricRow } from './MetricRow';
 import { useLocale } from '~/lib/i18n/context';
-import { bridgeSnippet, installCopy } from '~/lib/tracking/install-copy';
+import { installCopy } from '~/lib/tracking/install-copy';
 import { INSTALL_PATHS, isInstallPath, type InstallPath } from '~/lib/tracking/install';
 import { CHECK_ORDER, type CheckResult } from '~/lib/tracking/verify-checks';
 
 export interface TrackingInstallProps {
-  /** L'indirizzo dell'app: entra nel pezzo da incollare in vetrina. */
-  appUrl: string | null;
   path: InstallPath | null;
   endpoint: string | null;
   verifiedAt: string | null;
@@ -56,7 +53,7 @@ interface VerifyResponse {
  * chiude. E' esattamente il modo in cui un merchant arrivava in fondo, vedeva
  * tutto a posto, e non tracciava niente.
  */
-export function TrackingInstall({ appUrl, path, endpoint, verifiedAt }: TrackingInstallProps) {
+export function TrackingInstall({ path, endpoint, verifiedAt }: TrackingInstallProps) {
   const locale = useLocale();
   const t = installCopy(locale);
 
@@ -132,7 +129,6 @@ export function TrackingInstall({ appUrl, path, endpoint, verifiedAt }: Tracking
       ? { tone: 'warning', content: t.statusToVerify }
       : { content: t.statusNotStarted };
 
-  const snippet = bridgeSnippet(appUrl ?? '', address.trim() || null);
   const checks = result?.checks ?? [];
 
   return (
@@ -192,20 +188,6 @@ export function TrackingInstall({ appUrl, path, endpoint, verifiedAt }: Tracking
             inputMode="url"
             error={saveError ?? undefined}
           />
-
-          {/* Il pezzo da incollare porta gia' dentro l'indirizzo appena scritto:
-              un esempio da riadattare si sbaglia, uno gia' giusto si copia. */}
-          <BlockStack gap="200">
-            <Text as="span" variant="bodyMd">
-              {t.snippetLabel}
-            </Text>
-            <InlineStack align="space-between" blockAlign="center" gap="200" wrap={false}>
-              <Text as="span" tone="subdued" truncate>
-                {snippet.replace(/\n\s+/g, ' ')}
-              </Text>
-              <CopyIconButton value={snippet} />
-            </InlineStack>
-          </BlockStack>
 
           <InlineStack gap="200">
             <Button onClick={save} loading={saving} disabled={verifying}>

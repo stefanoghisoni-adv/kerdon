@@ -40,7 +40,9 @@ beforeEach(() => {
   db = new PGlite();
 });
 
-describe('dopo la cancellazione non resta niente del guardiano', () => {
+// PGlite carica il suo WASM al primo uso: sulla macchina di build Vercel i
+// 5s di default non bastano al primo test.
+describe('dopo la cancellazione non resta niente del guardiano', { timeout: 30_000 }, () => {
   it('orders creata da Kerdon: via le tabelle, il trigger e la funzione', async () => {
     await db.exec(buildMerchantSchemaSQL(true, true));
     expect(await guardiano()).toHaveLength(2);

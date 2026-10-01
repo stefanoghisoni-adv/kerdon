@@ -698,7 +698,7 @@ describe('webhook orders — il browser che ha comprato', () => {
   const VISITATORE = 'corew_1700000000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
   /** L'attributo di carrello, com'e' scritto nel corpo REST del webhook. */
-  function conAttributo(value: string, name = '_corew_external_id') {
+  function conAttributo(value: string, name = '_kerdon_external_id') {
     return receipt({
       note_attributes: [{ name: 'consegna', value: 'al piano' }, { name, value }],
     });
@@ -717,6 +717,28 @@ describe('webhook orders — il browser che ha comprato', () => {
     );
   });
 
+  it('il nome di prima (_corew_external_id) lega ancora, come ripiego', async () => {
+    mockShop();
+    mockSupabase();
+
+    await action({ request: req(conAttributo(VISITATORE, '_corew_external_id')) } as any);
+
+    expect(linkUserToCustomer).toHaveBeenCalledWith(
+      expect.anything(),
+      { externalId: VISITATORE, shopifyCustomerId: 77 },
+      expect.any(Function),
+    );
+  });
+
+  it('il nome del cookie (kerdon_eid) non e l attributo: nessun legame', async () => {
+    mockShop();
+    mockSupabase();
+
+    await action({ request: req(conAttributo(VISITATORE, 'kerdon_eid')) } as any);
+
+    expect(linkUserToCustomer).not.toHaveBeenCalled();
+  });
+
   it('l attributo si chiama con l underscore davanti, che per Shopify vuol dire privato', async () => {
     // Senza l'underscore l'identificativo comparirebbe nel carrello e sulla
     // conferma d'ordine del cliente: rumore per chi compra e una domanda in
@@ -724,7 +746,7 @@ describe('webhook orders — il browser che ha comprato', () => {
     mockShop();
     mockSupabase();
 
-    await action({ request: req(conAttributo(VISITATORE, 'corew_external_id')) } as any);
+    await action({ request: req(conAttributo(VISITATORE, 'kerdon_external_id')) } as any);
 
     expect(linkUserToCustomer).not.toHaveBeenCalled();
   });

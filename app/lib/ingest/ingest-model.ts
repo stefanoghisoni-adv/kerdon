@@ -71,7 +71,7 @@ export const INGEST_VERSION = 1;
  *    qualcun altro.
  *
  * Ogni rotta chiede SOLO il proprio. Un ambito unico "puo' scrivere" avrebbe
- * dato a chi installa il ponte in vetrina — che ha bisogno del primo — anche il
+ * dato a chi installa il client nel container — che ha bisogno del primo — anche il
  * terzo, cioe' avrebbe rifatto in piccolo lo stesso errore da cui si parte.
  */
 export const INGEST_SCOPES = ['ingest:identity', 'ingest:browsers', 'ingest:links'] as const;

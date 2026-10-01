@@ -134,6 +134,30 @@ export async function recordRevocation(
   }
 }
 
+/**
+ * Se per questo soggetto una revoca e' gia' stata presa in carico, in
+ * qualunque stato.
+ *
+ * Si cerca per impronta, cioe' senza leggere nessun identificativo in chiaro:
+ * e' la domanda precisa per cui l'impronta esiste. Serve a chi sta per RIUSARE
+ * un identificativo — un browser che dopo la revoca si ripresenta con quello
+ * vecchio non deve riaverlo.
+ */
+export async function hasRevocation(richiesta: RevocationRequest): Promise<boolean> {
+  if (!isRevocationScope(richiesta.scope)) return false;
+  const riga = await prisma.consentRevocation.findUnique({
+    where: {
+      idempotencyKey: revocationIdempotencyKey({
+        shopId: richiesta.shopId,
+        scope: richiesta.scope,
+        subject: richiesta.externalId,
+      }),
+    },
+    select: { id: true },
+  });
+  return riga !== null;
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return (
     typeof error === 'object' &&

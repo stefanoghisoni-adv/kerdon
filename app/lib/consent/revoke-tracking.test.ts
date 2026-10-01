@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const recordRevocation = vi.fn();
 const processRevocation = vi.fn();
+const hasRevocation = vi.fn();
 // I getter sono necessari, non una civetteria: `vi.mock` viene issato in cima
 // al file, quindi la fabbrica gira prima che le due spie esistano.
 vi.mock('./revocation-register.server', () => ({
@@ -11,9 +12,12 @@ vi.mock('./revocation-register.server', () => ({
   get processRevocation() {
     return processRevocation;
   },
+  get hasRevocation() {
+    return hasRevocation;
+  },
 }));
 
-import { revokeTrackingIdentity } from './revoke-tracking.server';
+import { isTrackingIdentityRevoked, revokeTrackingIdentity } from './revoke-tracking.server';
 
 const VISITATORE = 'corew_1700000000000_abcdefghijklmnopqrstuvwxyz012345';
 const chiamata = () => revokeTrackingIdentity({ shopId: 'negozio-1', externalId: VISITATORE });
@@ -95,5 +99,28 @@ describe('la revoca dal lato delle rotte', () => {
     await chiamata();
 
     expect(processRevocation).toHaveBeenCalledWith('revoca-1', undefined);
+  });
+});
+
+describe('un identificativo revocato non si riusa', () => {
+  const domanda = () => isTrackingIdentityRevoked({ shopId: 'negozio-1', externalId: VISITATORE });
+
+  it('chiede al registro per quel negozio e quel soggetto', async () => {
+    hasRevocation.mockResolvedValue(true);
+    expect(await domanda()).toBe(true);
+    expect(hasRevocation).toHaveBeenCalledWith(
+      expect.objectContaining({ shopId: 'negozio-1', scope: 'tracking_identity', externalId: VISITATORE }),
+    );
+  });
+
+  it('mai revocato: si puo riusare', async () => {
+    hasRevocation.mockResolvedValue(false);
+    expect(await domanda()).toBe(false);
+  });
+
+  it('registro irraggiungibile: nel dubbio vale come revocato', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    hasRevocation.mockRejectedValue(new Error('owner giu'));
+    expect(await domanda()).toBe(true);
   });
 });

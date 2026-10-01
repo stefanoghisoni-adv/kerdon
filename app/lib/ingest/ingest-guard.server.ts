@@ -690,7 +690,7 @@ function verifySignature(
  * `updateMany` e non `upsert`: un negozio che non e' mai passato dal
  * tracciamento non ha quella riga, e inventargliene una — con una risposta che
  * non ha mai dato — vorrebbe dire scriverne una falsa per tenere una statistica.
- * Quella riga esiste per ogni negozio che ha installato il ponte, che sono tutti
+ * Quella riga esiste per ogni negozio che ha installato il tracciamento, che sono tutti
  * e soli quelli che arrivano qui.
  */
 async function recordAdoption(shop: ShopRow, now: Date): Promise<void> {

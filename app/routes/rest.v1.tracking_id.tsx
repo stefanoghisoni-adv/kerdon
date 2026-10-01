@@ -18,7 +18,10 @@ import {
   type ConsentDecision,
 } from '~/lib/tracking/consent';
 import { recordUserSeen, supabaseFromReadContext } from '~/lib/tracking/users.server';
-import { revokeTrackingIdentity } from '~/lib/consent/revoke-tracking.server';
+import {
+  isTrackingIdentityRevoked,
+  revokeTrackingIdentity,
+} from '~/lib/consent/revoke-tracking.server';
 import { postgrestFilterValue } from '~/lib/tracking/users';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
 
@@ -109,7 +112,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return withoutIdentifier(ctx, consent, existing);
   }
 
-  const externalId = existing ?? newExternalId();
+  // UN IDENTIFICATIVO REVOCATO NON TORNA. Chi si ripresenta con quello di
+  // prima dopo averlo revocato — da un parametro, da un'intestazione, da un
+  // cookie rimasto altrove — ne riceve uno nuovo: riusarlo vorrebbe dire
+  // ricucire la persona di prima della revoca a quella di dopo.
+  const reusable =
+    existing && !(await isTrackingIdentityRevoked({ shopId: ctx.shopId, externalId: existing }))
+      ? existing
+      : null;
+  const externalId = reusable ?? newExternalId();
 
   // Qui il browser diventa una riga.
   //
@@ -131,7 +142,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // attesa muore con l'istanza. Best effort dentro: qualunque cosa vada storta,
   // l'identificativo si restituisce lo stesso — la vetrina sta aspettando.
   await recordVisitor(ctx, externalId, request);
-  permesso.finish(existing ? 'seen' : 'minted');
+  permesso.finish(reusable ? 'seen' : 'minted');
 
   const headers = new Headers({
     'Content-Type': 'application/json',
@@ -149,7 +160,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // cache vorrebbe dire darne lo stesso a due browser diversi.
     'Cache-Control': 'no-store',
   });
-  if (!existing) headers.append('Set-Cookie', externalIdCookie(externalId));
+  if (!reusable) headers.append('Set-Cookie', externalIdCookie(externalId));
 
   // L'array, non l'oggetto: vedi sopra. Una riga sola, che e' la risposta alla
   // domanda posta.

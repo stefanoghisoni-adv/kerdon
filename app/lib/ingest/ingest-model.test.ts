@@ -25,7 +25,7 @@ const chiave = (over: Record<string, unknown> = {}) => ({
 
 describe('gli ambiti', () => {
   it('sono tre e separati: identificativo, browser, legami', () => {
-    // Uno solo avrebbe dato a chi installa il ponte in vetrina — che ha bisogno
+    // Uno solo avrebbe dato a chi installa il client nel container — che ha bisogno
     // del primo — anche il terzo, cioe' il permesso di legare un browser a una
     // persona. E' lo stesso errore da cui si parte, in piccolo.
     expect([...INGEST_SCOPES]).toEqual(['ingest:identity', 'ingest:browsers', 'ingest:links']);

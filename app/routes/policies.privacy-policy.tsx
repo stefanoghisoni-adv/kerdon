@@ -24,7 +24,7 @@ import { linguaDellaPagina, paginaInformativa } from '~/lib/legal/privacy-policy
  * sulla privacy che per essere letta chiede di installare un'app e accedere a un
  * negozio non e' un'informativa: e' un documento riservato ai clienti, che e'
  * l'opposto del suo scopo. Servendo una `Response` da una rotta-risorsa —
- * come fanno gia' `tracking.bridge[.]js` e `[robots.txt]` — il guscio dell'app
+ * come fa gia' `[robots.txt]` — il guscio dell'app
  * non entra in gioco e la pagina risponde a chiunque, revisore Shopify
  * compreso.
  *
