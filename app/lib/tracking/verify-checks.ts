@@ -49,67 +49,6 @@ export interface VerifyResult {
   checks: CheckResult[];
 }
 
-/**
- * Gli indirizzi che non chiamiamo, e perche' non e' pignoleria.
- *
- * Questo indirizzo lo scrive il merchant e lo chiama il NOSTRO server: senza un
- * filtro, chiunque abbia un negozio potrebbe farci bussare a un indirizzo
- * interno della nostra rete e leggere nella risposta cosa c'e' dietro. Si
- * accettano nomi pubblici e basta: niente indirizzi numerici, niente `localhost`,
- * niente nomi di rete locale.
- */
-const PRIVATE_HOST = /^(localhost|.*\.local|.*\.internal|.*\.localhost)$/i;
-const IP_LITERAL = /^\d{1,3}(\.\d{1,3}){3}$/;
-
-/** Un nome che sta su internet, e a cui quindi si puo' bussare. */
-export function isPublicHost(host: string): boolean {
-  const name = host.toLowerCase();
-  return name.includes('.') && !PRIVATE_HOST.test(name) && !IP_LITERAL.test(name);
-}
-
-/**
- * I suffissi a due livelli che vanno tenuti insieme.
- *
- * Serve a rispondere a "questi due nomi sono lo stesso sito?": `sgtm.negozio.it`
- * e `www.negozio.it` si', `sgtm.altro.it` no. Le ultime due etichette bastano
- * quasi sempre, tranne dove il registro sta al secondo livello — li' `co.uk`
- * risulterebbe il dominio di chiunque, e due negozi britannici diversi
- * sembrerebbero lo stesso.
- *
- * E' un elenco corto e non la lista pubblica completa: qui l'esito peggiore di
- * un caso non previsto e' un avviso di troppo su una configurazione buona, non
- * un permesso dato a una cattiva.
- */
-const TWO_LEVEL_SUFFIXES = new Set([
-  'co.uk', 'org.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'net.uk', 'sch.uk', 'ac.uk', 'gov.uk',
-  'com.au', 'net.au', 'org.au', 'edu.au', 'id.au',
-  'co.nz', 'net.nz', 'org.nz',
-  'co.za', 'org.za',
-  'com.br', 'net.br', 'org.br',
-  'co.jp', 'or.jp', 'ne.jp',
-  'com.mx', 'com.ar', 'com.tr', 'com.sg', 'com.hk', 'com.cn', 'com.tw',
-  'co.in', 'net.in', 'org.in',
-  'co.il', 'co.kr', 'com.pl', 'com.es', 'com.pt', 'com.gr', 'com.ua',
-]);
-
-/**
- * Il dominio registrabile di un nome: cio' che rende un cookie first-party.
- *
- * Non e' una curiosita' tecnica. Un cookie che vive su un dominio diverso da
- * quello della vetrina e' di terze parti per definizione, ed e' esattamente il
- * cookie che i browser cancellano — cioe' il problema per cui questo endpoint
- * esiste. Un endpoint sul dominio sbagliato non e' una configurazione lenta:
- * e' una configurazione che non traccia, e che sembra a posto.
- */
-export function registrableDomain(host: string): string {
-  const labels = host.toLowerCase().replace(/\.$/, '').split('.');
-  if (labels.length <= 2) return labels.join('.');
-
-  const lastTwo = labels.slice(-2).join('.');
-  const take = TWO_LEVEL_SUFFIXES.has(lastTwo) ? 3 : 2;
-  return labels.slice(-take).join('.');
-}
-
 export interface ParsedCookie {
   value: string;
   attributes: Record<string, string>;

@@ -9,13 +9,20 @@ import {
   CHECK_ORDER,
   cookieAttributeProblem,
   isExpiredCookie,
-  isPublicHost,
   parseSetCookie,
-  registrableDomain,
   type CheckId,
   type CheckResult,
   type VerifyResult,
 } from './verify-checks';
+import { isPublicName, registrableDomain } from './endpoint-host.server';
+import {
+  SafeFetchError,
+  safeFetch,
+  systemResolver,
+  urlProblem,
+  type Resolver,
+  type Transport,
+} from '~/lib/net/safe-fetch.server';
 
 /**
  * La prova che il giro si chiude davvero.
@@ -57,6 +64,18 @@ const CONSENT_WITHDRAWN = 'v1.a0.m0.p0.s0';
 
 /** Oltre questo, l'endpoint non e' lento: e' fermo. La vetrina non aspetta. */
 const TIMEOUT_MS = 8000;
+/**
+ * Il tempo per tutta la verifica, le tre chiamate insieme: tre endpoint lenti
+ * di fila non devono diventare una richiesta che resta appesa mezzo minuto.
+ */
+const TOTAL_TIMEOUT_MS = 20000;
+/**
+ * Quanto si legge di una risposta. L'endpoint restituisce un identificativo e
+ * poco altro: qualche centinaio di byte. Il tetto e' largo cento volte tanto, e
+ * serve a non scaricare in memoria quello che un indirizzo sbagliato — o
+ * scelto apposta — puo' mandare.
+ */
+const MAX_BYTES = 32 * 1024;
 
 function ok(id: CheckId): CheckResult {
   return { id, ok: true, reason: null };
@@ -123,15 +142,59 @@ export interface VerifyOptions {
    * inventato.
    */
   storefrontDomain?: string | null;
-  /** Iniettabile per i test; in esercizio e' quella della piattaforma. */
-  fetchImpl?: typeof fetch;
+  /**
+   * Iniettabili per i test: chi risolve i nomi e chi si collega. In esercizio
+   * sono il DNS e https di Node, sempre dietro `safeFetch`.
+   */
+  resolve?: Resolver;
+  transport?: Transport;
+  /** Il tempo massimo di ogni chiamata; i test lo accorciano. */
+  timeoutMs?: number;
+}
+
+/**
+ * Perche' una chiamata non e' andata, detto come lo deve leggere il merchant.
+ *
+ * Un nome che porta a un indirizzo privato non e' "irraggiungibile" nel senso
+ * di spento: e' un indirizzo che da internet non si vede, e la frase giusta e'
+ * quella. Tutto il resto — DNS che non risponde, tempo scaduto, connessione
+ * rifiutata — per chi guarda e' la stessa cosa: non risponde.
+ */
+function callFailure(err: unknown): string {
+  if (err instanceof SafeFetchError) {
+    if (err.code === 'blocked_address') return 'endpoint_not_public';
+    if (err.code === 'too_large') return 'response_too_large';
+  }
+  return 'unreachable';
+}
+
+/**
+ * Il DNS, interrogato una volta per verifica.
+ *
+ * Le tre chiamate vanno allo stesso indirizzo: se il nome cambiasse risposta
+ * fra la prima e la seconda — ed e' il trucco di chi vuole far passare il
+ * controllo a un indirizzo pubblico e la chiamata a uno privato — la seconda
+ * userebbe comunque quello gia' verificato.
+ */
+function resolveOnce(resolve: Resolver): Resolver {
+  const seen = new Map<string, ReturnType<Resolver>>();
+  return (host) => {
+    let found = seen.get(host);
+    if (!found) {
+      found = resolve(host);
+      seen.set(host, found);
+    }
+    return found;
+  };
 }
 
 export async function verifyTrackingEndpoint({
   endpoint,
   appHost,
   storefrontDomain,
-  fetchImpl = fetch,
+  resolve = systemResolver,
+  transport,
+  timeoutMs = TIMEOUT_MS,
 }: VerifyOptions): Promise<VerifyResult> {
   const checks: CheckResult[] = [];
   const rest = (reason: string): VerifyResult => {
@@ -149,15 +212,24 @@ export async function verifyTrackingEndpoint({
     return rest('not_run');
   }
 
-  const host = url.hostname.toLowerCase();
-  if (!isPublicHost(host)) {
+  // Nome e password nell'indirizzo: nessuna pagina del negozio li manda, e
+  // un endpoint che li vuole non e' quello che le pagine chiamano.
+  if (urlProblem(url) === 'userinfo') {
+    checks.push(fail('endpoint_url', 'endpoint_credentials'));
+    return rest('not_run');
+  }
+
+  // Senza il punto finale: `negozio.myshopify.com.` e' lo stesso nome, e non
+  // deve passare i controlli che il nome senza punto non passa.
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  if (!isPublicName(host)) {
     checks.push(fail('endpoint_url', 'endpoint_not_public'));
     return rest('not_run');
   }
   // Il nostro dominio non e' first-party per nessun negozio: un endpoint che
   // punta qui rimette il cookie esattamente dove i browser lo cancellano, che e'
   // il problema da cui tutto questo giro nasce.
-  if (host === appHost.toLowerCase()) {
+  if (host === appHost.toLowerCase().replace(/\.$/, '')) {
     checks.push(fail('endpoint_url', 'endpoint_is_app'));
     return rest('not_run');
   }
@@ -174,6 +246,13 @@ export async function verifyTrackingEndpoint({
     checks.push(fail('endpoint_url', 'endpoint_not_first_party'));
     return rest('not_run');
   }
+  // La porta di https e nessun'altra: le pagine del negozio chiamano
+  // l'indirizzo come lo chiamerebbe un browser, e un endpoint su una porta
+  // diversa e' un servizio che non e' fatto per loro.
+  if (urlProblem(url) === 'bad_port') {
+    checks.push(fail('endpoint_url', 'endpoint_port'));
+    return rest('not_run');
+  }
   checks.push(ok('endpoint_url'));
 
   if (url.protocol !== 'https:') {
@@ -182,21 +261,30 @@ export async function verifyTrackingEndpoint({
   }
   checks.push(ok('https'));
 
+  // Una scadenza per tutta la verifica, oltre a quella di ogni chiamata.
+  const total = AbortSignal.timeout(TOTAL_TIMEOUT_MS);
+  const lookup = resolveOnce(resolve);
+
   const call = (params: Record<string, string>, cookie?: string) =>
-    fetchImpl(callUrl(endpoint, params), {
-      // Manuale: un 301 verso lo stesso indirizzo in https sembra innocuo, ma
-      // fa perdere per strada gli header e i `Set-Cookie` a chi lo segue, e in
-      // vetrina si traduce in un identificativo che non arriva mai.
-      redirect: 'manual',
+    safeFetch(callUrl(endpoint, params), {
+      // Nessun rimando seguito: un 301 verso lo stesso indirizzo in https
+      // sembra innocuo, ma fa perdere per strada gli header e i `Set-Cookie` a
+      // chi lo segue, e in vetrina si traduce in un identificativo che non
+      // arriva mai. Il 3xx torna qui com'e', e diventa un controllo fallito.
+      maxRedirects: 0,
+      maxBytes: MAX_BYTES,
+      timeoutMs,
+      signal: total,
       headers: cookie ? { Accept: 'application/json', Cookie: cookie } : { Accept: 'application/json' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      resolve: lookup,
+      transport,
     });
 
   let granted: Response;
   try {
     granted = await call({ [CONSENT_QUERY_PARAM]: CONSENT_GRANTED });
-  } catch {
-    checks.push(fail('reachable', 'unreachable'));
+  } catch (err) {
+    checks.push(fail('reachable', callFailure(err)));
     return rest('not_run');
   }
   checks.push(ok('reachable'));
@@ -235,8 +323,8 @@ export async function verifyTrackingEndpoint({
     if (missingId) checks.push(fail('consent_missing', 'identifier_without_consent'));
     else if (planted) checks.push(fail('consent_missing', 'cookie_without_consent'));
     else checks.push(ok('consent_missing'));
-  } catch {
-    checks.push(fail('consent_missing', 'unreachable'));
+  } catch (err) {
+    checks.push(fail('consent_missing', callFailure(err)));
   }
 
   // La revoca: si dichiara il no e si rimanda l'identificativo di prima, che e'
@@ -259,8 +347,8 @@ export async function verifyTrackingEndpoint({
     else if (!cookie) checks.push(fail('consent_withdrawn', 'cookie_not_cleared'));
     else if (!isExpiredCookie(cookie)) checks.push(fail('consent_withdrawn', 'cookie_not_cleared'));
     else checks.push(ok('consent_withdrawn'));
-  } catch {
-    checks.push(fail('consent_withdrawn', 'unreachable'));
+  } catch (err) {
+    checks.push(fail('consent_withdrawn', callFailure(err)));
   }
 
   return { passed: checks.every((c) => c.ok), checks };
