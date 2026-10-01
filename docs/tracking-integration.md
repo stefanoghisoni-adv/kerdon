@@ -352,7 +352,15 @@ browser soggetta al consenso**, non una promessa di conservazione:
 - il consenso si puo' ritirare in qualunque momento, e da quell'istante non c'e'
   piu' niente da conservare;
 - il browser puo' accorciare la durata per politica propria — Safari lo fa anche
-  sui cookie first-party scritti da JavaScript;
+  sui cookie first-party scritti da JavaScript, riducendoli a 7 giorni quando
+  rileva pattern di tracciamento cross-site (ITP);
+- Firefox con Enhanced Tracking Protection (strict) puo' isolare i cookie per sito,
+  anche se first-party, quando l'infrastruttura che li scrive e' classificata come
+  tracker;
+- il CNAME cloaking verso IP di terzi (Stape, altri CDN) puo' essere rilevato da
+  Safari e Firefox: se il CNAME punta a un indirizzo IP noto per il tracciamento,
+  il browser puo' trattare il cookie come di terze parti anche se il dominio e'
+  quello del negozio;
 - la persona puo' cancellare i cookie, o navigare in una sessione privata che non
   ne conserva nessuno.
 
@@ -360,8 +368,17 @@ Quindi: un anno e' il **massimo** che si chiede, non il tempo per cui un
 riconoscimento esiste. Dirlo come una durata certa e' il modo in cui, mesi dopo,
 qualcuno si accorge che i numeri non tornano e non capisce perche'. La durata
 piu' vicina a quel massimo la ottiene il cookie first-party dell'endpoint del
-negozio; quella di un cookie emesso sul nostro dominio sarebbe molto piu'
-incerta, ed e' esattamente il motivo per cui questo trasporto esiste.
+negozio con una rotta same-origin o edge verificata; quella di un cookie emesso
+sul nostro dominio sarebbe molto piu' incerta, ed e' esattamente il motivo per cui
+questo trasporto esiste.
+
+**Per verificare la persistenza reale** del cookie nei browser principali (Safari
+macOS e iOS, Firefox con protezione standard e strict) con il dominio e il CDN di
+produzione, segui la checklist in
+[`docs/tracking-persistenza-test.md`](tracking-persistenza-test.md). I test
+coprono: primo PageView con consenso, ritorno dopo 1 e 7 giorni, rinnovo della
+scadenza, revoca del consenso, cancellazione dati del browser, e confronto fra
+CNAME verso infrastruttura terza e rotta same-origin.
 
 ## Il formato dell'identificativo
 
