@@ -9,32 +9,49 @@ name: Migrazione del database di produzione
 # non e' chiaro cosa sia arrivato e cosa no. Qui invece: si decide di farlo, si
 # guarda cosa verrebbe applicato, si approva, e poi si applica.
 #
-# Il percorso completo, compreso come si stabilisce la linea di base la prima
-# volta e come si torna indietro, sta in docs/database-migrations.md.
+# Il percorso completo — la procedura passo per passo, la linea di base, l'ordine
+# rispetto al deploy del codice e come si torna indietro — sta in
+# docs/database-migrations.md.
 
 on:
   workflow_dispatch:
     inputs:
+      database:
+        description: "Su quale database (prima test, poi live)"
+        type: choice
+        required: true
+        default: test
+        options:
+          - test   # il database owner di Test: environment `test`
+          - live   # il database owner di Live: environment `production`
       azione:
         description: "Cosa fare"
         type: choice
         required: true
         default: verifica
         options:
-          - verifica   # solo guardare: cosa manca, e il database e' come dovrebbe
-          - applica    # applicare davvero le migrazioni in attesa
+          - verifica       # solo guardare: cosa manca, e il database e' come dovrebbe
+          - linea-di-base  # una volta sola: scrivere nel registro di Prisma cio' che si dimostra gia' presente
+          - applica        # applicare davvero le migrazioni in attesa
       backup:
-        description: "Ho preso un backup del database (obbligatorio per 'applica')"
+        description: "Ho preso un backup del database e l'ho controllato (obbligatorio per 'linea-di-base' e 'applica')"
         type: boolean
         required: true
         default: false
 
-# Una alla volta, e senza interrompere quella in corso: due `migrate deploy` in
-# parallelo sullo stesso database si contendono il lock di Prisma, e la seconda
-# fallisce a meta' invece di aspettare.
+# Una alla volta per database, e senza interrompere quella in corso: due
+# `migrate deploy` in parallelo sullo stesso database si contendono il lock di
+# Prisma, e la seconda fallisce a meta' invece di aspettare.
 concurrency:
-  group: migrate-production
+  group: migrate-${{ inputs.database }}
   cancel-in-progress: false
+
+# `bash` dichiarato, e non lasciato al default, per avere `-o pipefail`: ogni
+# comando passa per `| oscura-segreti | tee`, e senza pipefail l'esito del passo
+# sarebbe quello di `tee` — sempre zero — anche con il comando fallito.
+defaults:
+  run:
+    shell: bash
 
 jobs:
   migrate:
@@ -42,12 +59,36 @@ jobs:
 
     # Il cancello vero.
     #
-    # L'environment `production` va configurato su GitHub (Settings →
-    # Environments) con "Required reviewers": da li' in poi questo job si ferma
-    # e aspetta un'approvazione umana prima di collegarsi a qualsiasi cosa. I
-    # segreti stanno nell'environment, non nel repository, cosi' nessun altro
-    # workflow puo' leggerli.
-    environment: production
+    # Gli environment `production` (Live) e `test` (Test) vanno configurati su
+    # GitHub (Settings → Environments) con "Required reviewers": da li' in poi
+    # questo job si ferma e aspetta un'approvazione umana prima di collegarsi a
+    # qualsiasi cosa. I segreti stanno nell'environment, non nel repository,
+    # cosi' nessun altro workflow puo' leggerli — e ognuno dei due environment
+    # ha i SUOI, con gli stessi nomi: e' l'environment a decidere il database.
+    environment: ${{ inputs.database == 'live' && 'production' || 'test' }}
+
+    # Un Postgres vuoto, locale e usa e getta: il database di APPOGGIO.
+    #
+    # Prima di `applica` il database e' indietro rispetto a `schema.prisma` per
+    # definizione — gli mancano proprio le migrazioni in attesa — quindi il
+    # confronto giusto e' con lo schema delle migrazioni gia' registrate. Per
+    # ricavarlo Prisma le rigioca qui sopra (e lo svuota prima di farlo:
+    # registro.ts rifiuta qualunque indirizzo che non sia localhost). Non ha
+    # niente a che fare con il database di Live o di Test.
+    services:
+      appoggio:
+        image: postgres:16
+        env:
+          POSTGRES_USER: appoggio
+          POSTGRES_PASSWORD: appoggio
+          POSTGRES_DB: appoggio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
       # Due indirizzi per lo stesso database, e servono entrambi: Prisma vuole
@@ -55,12 +96,24 @@ jobs:
       # indirizzo con "invalid URI query parameter: schema". E' una lezione gia'
       # pagata in questo repository, nel job `bootstrap` della CI.
       #
-      # Devono puntare alla connessione DIRETTA (porta 5432), non al pooler
-      # (6543): il pooler in modalita' transaction non esegue DDL, ed e' il
-      # motivo per cui finora le migrazioni si incollavano a mano nell'SQL
-      # editor di Supabase.
+      # Non devono puntare al pooler in modalita' transaction (6543): non esegue
+      # DDL, ed e' il motivo per cui finora le migrazioni si incollavano a mano
+      # nell'SQL editor di Supabase. Vanno bene la connessione diretta o il
+      # pooler in modalita' session, entrambi sulla porta 5432: i dettagli, e
+      # perche' da GitHub serve quasi sempre il secondo, in
+      # docs/database-migrations.md.
+      #
+      # Il nome PRODUCTION_ e' storico: nell'environment `test` i segreti si
+      # chiamano allo stesso modo e puntano al database di Test.
       DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
       PSQL_URL: ${{ secrets.PRODUCTION_PSQL_URL }}
+      # Dove finisce l'output di ogni passo: viene conservato come artifact del
+      # run e copiato nel riepilogo. Passa sempre da scripts/oscura-segreti.ts.
+      SHADOW_DATABASE_URL: postgresql://appoggio:appoggio@localhost:5432/appoggio?schema=public
+      REGISTRO: registro-migrazione
+      AZIONE: ${{ inputs.azione }}
+      DATABASE: ${{ inputs.database }}
+      BACKUP: ${{ inputs.backup }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -74,43 +127,82 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Chi, cosa, quando e su quale commit: la prima cosa che si vuole sapere
+      # riaprendo un registro fra sei mesi.
+      - name: Start the run log
+        run: |
+          mkdir -p "$REGISTRO"
+          {
+            echo "Database:  $DATABASE"
+            echo "Azione:    $AZIONE"
+            echo "Backup:    $BACKUP"
+            echo "Commit:    $GITHUB_SHA"
+            echo "Lanciato:  $GITHUB_ACTOR"
+            echo "Quando:    $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "Run:       $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } | tee "$REGISTRO/00-intestazione.log"
+
       # I segreti ci sono davvero? Senza questo passo un segreto non
       # configurato arriva a Prisma come stringa vuota, e il messaggio che ne
       # esce parla di URL non valido invece che di segreto mancante.
       #
       # Nessuno dei due valori viene stampato: si stampa solo il verdetto.
-      - name: Check the secrets and refuse the pooler
+      - name: Check the secrets and refuse the transaction pooler
         run: |
-          if [ -z "$DATABASE_URL" ] || [ -z "$PSQL_URL" ]; then
-            echo "Mancano PRODUCTION_DATABASE_URL o PRODUCTION_PSQL_URL"
-            echo "nell'environment 'production'."
+          {
+            if [ -z "$DATABASE_URL" ] || [ -z "$PSQL_URL" ]; then
+              echo "Mancano PRODUCTION_DATABASE_URL o PRODUCTION_PSQL_URL"
+              echo "nell'environment del database scelto ($DATABASE)."
+              exit 1
+            fi
+
+            case "$DATABASE_URL$PSQL_URL" in
+              *:6543*|*pgbouncer=true*)
+                echo "L'indirizzo punta al pooler in modalita' transaction (6543)."
+                echo "Non esegue DDL: serve la connessione diretta o il pooler session (5432)."
+                exit 1
+                ;;
+            esac
+
+            case "$DATABASE_URL" in
+              *schema=public*) ;;
+              *) echo "PRODUCTION_DATABASE_URL deve contenere ?schema=public (lo vuole Prisma)."; exit 1 ;;
+            esac
+
+            case "$PSQL_URL" in
+              *schema=*) echo "PRODUCTION_PSQL_URL non deve contenere schema=: psql lo rifiuta."; exit 1 ;;
+            esac
+
+            echo "Segreti presenti, porta giusta."
+          } 2>&1 | tee "$REGISTRO/01-segreti.log"
+
+      # Cosa Prisma ha nel registro e cosa verrebbe applicato. Da leggere PRIMA
+      # di approvare un'esecuzione con `applica`: se l'elenco contiene qualcosa
+      # che non ci si aspetta, la risposta e' fermarsi, non riprovare.
+      #
+      # `migrate status` esce con 1 anche solo perche' ci sono migrazioni in
+      # attesa — o perche' il registro non esiste ancora, che per Prisma e' lo
+      # stesso caso con tutte in attesa. Lasciarlo decidere da solo voleva dire
+      # un `verifica` sempre rosso proprio quando c'e' qualcosa da applicare, e
+      # un `applica` che non arrivava mai al suo passo. Quindi l'esito si legge:
+      # in attesa va bene, una migrazione fallita o un database irraggiungibile
+      # no.
+      - name: What Prisma has recorded and what is pending
+        run: |
+          LOG="$REGISTRO/02-stato-prima.log"
+          stato=0
+          npx prisma migrate status 2>&1 | npx tsx scripts/oscura-segreti.ts | tee "$LOG" || stato=$?
+          if [ "$stato" -eq 0 ]; then
+            echo "ESITO: nessuna migrazione in attesa." | tee -a "$LOG"
+          elif grep -qi "have failed" "$LOG"; then
+            echo "ESITO: FERMATI. C'e' una migrazione fallita: vedi 'Come si torna indietro'." | tee -a "$LOG"
+            exit 1
+          elif grep -q "not yet been applied" "$LOG"; then
+            echo "ESITO: ci sono migrazioni in attesa (elenco qui sopra)." | tee -a "$LOG"
+          else
+            echo "ESITO: FERMATI. Prisma non ha potuto leggere lo stato del database." | tee -a "$LOG"
             exit 1
           fi
-
-          case "$DATABASE_URL$PSQL_URL" in
-            *:6543*|*pgbouncer=true*)
-              echo "L'indirizzo punta al pooler in modalita' transaction."
-              echo "Il pooler non esegue DDL: serve la connessione diretta (5432)."
-              exit 1
-              ;;
-          esac
-
-          case "$DATABASE_URL" in
-            *schema=public*) ;;
-            *) echo "PRODUCTION_DATABASE_URL deve contenere ?schema=public (lo vuole Prisma)."; exit 1 ;;
-          esac
-
-          case "$PSQL_URL" in
-            *schema=*) echo "PRODUCTION_PSQL_URL non deve contenere schema=: psql lo rifiuta."; exit 1 ;;
-          esac
-
-          echo "Segreti presenti, connessione diretta."
-
-      # Cosa verrebbe applicato. Da leggere PRIMA di approvare l'esecuzione con
-      # `applica`: se l'elenco contiene qualcosa che non ci si aspetta, la
-      # risposta e' fermarsi, non riprovare.
-      - name: What would be applied
-        run: npx prisma migrate status
 
       # Il database e' ancora quello che lo schema descrive?
       #
@@ -123,48 +215,153 @@ jobs:
       # due chiavi esterne sul nome del piano — volute, e non modellate in
       # schema.prisma — ci siano ancora.
       #
-      # Fase `pre`: il database non e' ancora migrato, quindi puo' avere lo stato
-      # di partenza che una migrazione in attesa sta per togliere (oggi:
-      # `plans.max_orders` dello stato B). E' conoscenza esplicita in
-      # expected-drift.ts, non deriva tollerata: dopo le migrazioni torna a
-      # fermare tutto.
+      # Fase `pre`: il riferimento NON e' `schema.prisma` ma lo schema delle
+      # migrazioni gia' registrate in `_prisma_migrations` (prima della linea di
+      # base: quelle fino alla linea di base), rigiocate sul database di
+      # appoggio. Cosi' una migrazione in attesa — una colonna o una tabella
+      # nuova — non e' deriva, e' quello che `applica` sta per fare; tutto il
+      # resto si'. Il log elenca quali migrazioni sono rimaste fuori dal
+      # confronto perche' in attesa.
+      #
+      # In piu' puo' esserci lo stato di partenza che una migrazione in attesa
+      # sta per togliere (oggi: `plans.max_orders` dello stato B). E'
+      # conoscenza esplicita in expected-drift.ts, non deriva tollerata: dopo
+      # le migrazioni torna a fermare tutto.
       - name: Refuse to proceed on unexpected drift
-        run: npx tsx prisma/expected-drift.ts --fase=pre
+        run: |
+          npx tsx prisma/expected-drift.ts --fase=pre 2>&1 \
+            | npx tsx scripts/oscura-segreti.ts | tee "$REGISTRO/03-deriva-prima.log"
 
       # Fase `pre` anche qui: il listino puo' essere ancora uno dei due di prima
       # (Free/Pro/Business/Enterprise o Free/Core/Growth/Scale). Pretendere
       # quello finale fermerebbe la produzione proprio prima della migrazione
       # che ce la porta.
       - name: Check seed rows, row level security and the plan foreign keys
-        run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -v fase=pre -f prisma/bootstrap-check.sql
-
-      # Il backup non lo puo' prendere questo workflow: sta dentro Supabase, e
-      # una migrazione sbagliata si torna indietro da li'. Quindi si chiede, e
-      # senza la spunta non si va avanti.
-      - name: Require the backup checkbox
-        if: inputs.azione == 'applica' && !inputs.backup
         run: |
-          echo "Per applicare serve la spunta sul backup."
-          echo "Supabase → Database → Backups, poi si rilancia."
+          psql "$PSQL_URL" -X -v ON_ERROR_STOP=1 -v fase=pre -f prisma/bootstrap-check.sql 2>&1 \
+            | npx tsx scripts/oscura-segreti.ts | tee "$REGISTRO/04-controlli-prima.log"
+
+      # La linea di base: cosa si dimostra gia' presente nel database e cosa
+      # resta da applicare. Qui SOLO il resoconto, con ogni azione: non scrive
+      # niente. Se la linea di base c'e' gia' lo dice e passa; se non c'e' e lo
+      # stato del database non e' uno di quelli previsti, si ferma. Come decide
+      # sta in prisma/linea-di-base.ts.
+      #
+      # Con `applica` la linea di base deve esserci gia' (`--deve-esserci`):
+      # senza, `migrate deploy` si fermerebbe con un P3005 che parla d'altro.
+      - name: Baseline report (writes nothing)
+        run: |
+          deve=""
+          if [ "$AZIONE" = "applica" ]; then deve="--deve-esserci"; fi
+          npx tsx prisma/linea-di-base.ts $deve 2>&1 \
+            | npx tsx scripts/oscura-segreti.ts | tee "$REGISTRO/05-linea-di-base-resoconto.log"
+
+      # Il backup non lo puo' prendere questo workflow: sta dentro Supabase (o
+      # sul computer di chi lancia), e una migrazione sbagliata si torna
+      # indietro da li'. Quindi si chiede, e senza la spunta non si va avanti.
+      - name: Require the backup checkbox
+        if: inputs.azione != 'verifica' && !inputs.backup
+        run: |
+          echo "Per '$AZIONE' serve la spunta sul backup."
+          echo "Come prenderlo e controllarlo: docs/database-migrations.md, passo 1."
           exit 1
+
+      # `migrate resolve --applied` non esegue SQL: scrive nel registro di Prisma
+      # "questa c'e' gia'". Solo per le migrazioni che il resoconto qui sopra ha
+      # dimostrato presenti, e poi attiva RLS sul registro stesso.
+      - name: Write the baseline
+        if: inputs.azione == 'linea-di-base' && inputs.backup
+        run: |
+          npx tsx prisma/linea-di-base.ts --marca 2>&1 \
+            | npx tsx scripts/oscura-segreti.ts | tee "$REGISTRO/06-linea-di-base.log"
 
       - name: Apply the pending migrations
         if: inputs.azione == 'applica' && inputs.backup
-        run: npx prisma migrate deploy
+        run: |
+          npx prisma migrate deploy 2>&1 \
+            | npx tsx scripts/oscura-segreti.ts | tee "$REGISTRO/06-applica.log"
 
-      # Gli stessi due controlli di prima, sul database migrato. Sono qui perche'
-      # una migrazione puo' riuscire e lasciare comunque il database in uno stato
-      # sbagliato: una tabella nuova senza RLS — che su Supabase vuol dire
-      # leggibile con la sola chiave pubblica del progetto — oppure le due chiavi
-      # esterne sul nome del piano cancellate da un `migrate diff` applicato alla
-      # lettera. E' gia' successo con compliance_requests, che conteneva le
-      # esportazioni GDPR complete.
+      # Dopo la linea di base: cosa resta in attesa (lo applichera' `applica`), e
+      # i controlli di prima, che ora guardano anche il registro appena creato —
+      # una tabella di `public` senza RLS su Supabase e' scrivibile con la chiave
+      # pubblica del progetto.
+      - name: After the baseline, what is still pending
+        if: inputs.azione == 'linea-di-base' && inputs.backup
+        run: |
+          LOG="$REGISTRO/07-stato-dopo.log"
+          stato=0
+          npx prisma migrate status 2>&1 | npx tsx scripts/oscura-segreti.ts | tee "$LOG" || stato=$?
+          if [ "$stato" -eq 0 ]; then
+            echo "ESITO: nessuna migrazione in attesa, non serve 'applica'." | tee -a "$LOG"
+          elif grep -q "not yet been applied" "$LOG" && ! grep -qi "have failed" "$LOG"; then
+            echo "ESITO: restano migrazioni in attesa: le applica l'azione 'applica'." | tee -a "$LOG"
+          else
+            echo "ESITO: FERMATI. Stato del registro non atteso dopo la linea di base." | tee -a "$LOG"
+            exit 1
+          fi
+
+      - name: After the baseline, seed rows, RLS and plan foreign keys
+        if: inputs.azione == 'linea-di-base' && inputs.backup
+        run: |
+          psql "$PSQL_URL" -X -v ON_ERROR_STOP=1 -v fase=pre -f prisma/bootstrap-check.sql 2>&1 \
+            | npx tsx scripts/oscura-segreti.ts | tee "$REGISTRO/08-controlli-dopo.log"
+
+      # Gli stessi controlli di prima, sul database migrato, e ognuno ferma il
+      # run da solo. Sono qui perche' una migrazione puo' riuscire e lasciare
+      # comunque il database in uno stato sbagliato: una tabella nuova senza RLS
+      # — che su Supabase vuol dire leggibile con la sola chiave pubblica del
+      # progetto — oppure le due chiavi esterne sul nome del piano cancellate da
+      # un `migrate diff` applicato alla lettera. E' gia' successo con
+      # compliance_requests, che conteneva le esportazioni GDPR complete.
       #
       # Fase `post`: qui il listino deve essere quello finale e `max_orders` non
       # deve esserci piu'.
-      - name: Check the migrated database
+      - name: After applying, nothing is pending
         if: inputs.azione == 'applica' && inputs.backup
         run: |
-          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -v fase=post -f prisma/bootstrap-check.sql
-          npx tsx prisma/expected-drift.ts --fase=post
-          npx prisma migrate status
+          npx prisma migrate status 2>&1 \
+            | npx tsx scripts/oscura-segreti.ts | tee "$REGISTRO/07-stato-dopo.log"
+
+      - name: After applying, no unexpected drift
+        if: inputs.azione == 'applica' && inputs.backup
+        run: |
+          npx tsx prisma/expected-drift.ts --fase=post 2>&1 \
+            | npx tsx scripts/oscura-segreti.ts | tee "$REGISTRO/08-deriva-dopo.log"
+
+      - name: After applying, seed rows, RLS and plan foreign keys
+        if: inputs.azione == 'applica' && inputs.backup
+        run: |
+          psql "$PSQL_URL" -X -v ON_ERROR_STOP=1 -v fase=post -f prisma/bootstrap-check.sql 2>&1 \
+            | npx tsx scripts/oscura-segreti.ts | tee "$REGISTRO/09-controlli-dopo.log"
+
+      # Conservare l'output, anche — soprattutto — quando qualcosa e' fallito.
+      #
+      # Il riepilogo sta nella pagina del run; l'artifact si scarica come zip.
+      # GitHub cancella entrambi dopo un po' (l'artifact dopo 90 giorni): il
+      # runbook dice di scaricarlo e tenerlo. I file sono gia' passati da
+      # oscura-segreti, quindi non contengono password ne' host.
+      - name: Copy the run log into the summary
+        if: always()
+        run: |
+          [ -d "$REGISTRO" ] || exit 0
+          {
+            echo "## Migrazione: $AZIONE su $DATABASE"
+            echo
+            for file in "$REGISTRO"/*.log; do
+              echo "<details><summary>$(basename "$file")</summary>"
+              echo
+              echo '```'
+              cat "$file"
+              echo '```'
+              echo "</details>"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the run log as an artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: registro-${{ inputs.database }}-${{ inputs.azione }}-${{ github.run_number }}
+          path: registro-migrazione/
+          retention-days: 90
+          if-no-files-found: warn

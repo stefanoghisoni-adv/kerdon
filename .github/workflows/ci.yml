@@ -231,13 +231,16 @@ jobs:
   # incollando SQL a mano nell'editor di Supabase — cioe' senza revisione, senza
   # una traccia di cosa fosse stato applicato e senza modo di rifarlo uguale.
   #
-  # Tre cose, in ordine:
+  # Quattro cose, in ordine:
   #   1. `migrate deploy` su un database vuoto arriva allo schema dichiarato;
   #   2. il database che ne esce ha i dati iniziali, RLS ovunque e le due chiavi
   #      esterne sul nome del piano;
-  #   3. la procedura di linea di base descritta in docs/database-migrations.md
-  #      funziona davvero: un database costruito con lo script e poi dichiarato
-  #      in linea non ha piu' niente da applicare.
+  #   3. la linea di base (prisma/linea-di-base.ts, la stessa che il workflow di
+  #      produzione esegue) funziona davvero: su un database fermo alla linea
+  #      di base (`0_init`) dimostra presenti e marca tutte le migrazioni fino
+  #      li', e `migrate deploy` applica le successive senza lasciare niente;
+  #   4. lo script e le migrazioni portano allo STESSO database, confrontati fra
+  #      loro e non solo ognuno con lo schema.
   migrations:
     runs-on: ubuntu-latest
 
@@ -265,6 +268,10 @@ jobs:
       PSQL_ADMIN: postgresql://ci:ci@localhost:5432/postgres
       BASE_DATABASE_URL: postgresql://ci:ci@localhost:5432/kerdon_linea?schema=public
       BASE_PSQL_URL: postgresql://ci:ci@localhost:5432/kerdon_linea
+      # Il database di appoggio su cui Prisma rigioca le migrazioni per la
+      # prova di struttura della linea di base e per la fase `pre` del
+      # cancello sulla deriva. Prisma lo svuota: e' un database a parte.
+      SHADOW_DATABASE_URL: postgresql://ci:ci@localhost:5432/kerdon_appoggio?schema=public
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -287,27 +294,69 @@ jobs:
       - name: Check seed rows, row level security and the plan foreign keys
         run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/bootstrap-check.sql
 
-      # La prova della linea di base, che e' il passo che il proprietario dovra'
-      # eseguire una volta sola sul database di produzione. Qui si fa su un
-      # database costruito con lo script, che e' cio' che la produzione e':
-      # dopo `migrate resolve --applied` non deve restare niente da applicare.
-      # Se un giorno restasse qualcosa, vorrebbe dire che una migrazione nuova e'
-      # stata inserita PRIMA di una gia' dichiarata in linea, e su un database
-      # vero verrebbe saltata in silenzio.
-      - name: Rehearse the baseline procedure on a script-built database
+      # La prova della linea di base, che e' il passo da eseguire una volta sola
+      # sul database owner (azione `linea-di-base` del workflow di produzione),
+      # e poi di `applica`, nell'ordine in cui la produzione li vivra'.
+      #
+      # Il database di prova si costruisce da `0_init`, non da
+      # owner-bootstrap.sql. `0_init` e' fermo (prisma/migrations.test.ts ne
+      # controlla l'impronta) ed e' lo schema ALLA linea di base, cioe' lo stato
+      # a cui la produzione e' stata portata a mano. Lo script invece descrive
+      # lo schema FINALE: dalla prima migrazione scritta dopo la linea di base
+      # avrebbe un oggetto in piu', la prova di struttura lo leggerebbe come
+      # deriva e questo passo diventerebbe rosso senza che niente sia rotto.
+      #
+      # Quindi: la linea di base deve dimostrare presente e marcare ogni
+      # migrazione fino a ULTIMA_DELLA_LINEA_DI_BASE; quelle successive restano
+      # in attesa e le applica `migrate deploy`, come farebbe `applica`; alla
+      # fine non resta niente in attesa e i controlli `post` sono verdi, anche
+      # sul registro appena creato da Prisma (che senza RLS su Supabase sarebbe
+      # scrivibile con la chiave pubblica del progetto). Se qualcosa restasse
+      # in attesa vorrebbe dire una prova che non riconosce piu' il proprio
+      # stato, oppure una migrazione inserita PRIMA di una gia' dichiarata in
+      # linea, che su un database vero verrebbe saltata in silenzio.
+      - name: Rehearse the baseline and the apply on a database at the baseline
+        env:
+          DATABASE_URL: ${{ env.BASE_DATABASE_URL }}
+          PSQL_URL: ${{ env.BASE_PSQL_URL }}
         run: |
+          set -o pipefail
           psql "$PSQL_ADMIN" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE kerdon_linea'
+          psql "$PSQL_ADMIN" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE kerdon_appoggio'
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/migrations/0_init/migration.sql
+
+          npx tsx prisma/linea-di-base.ts --marca
+
+          # La fase `pre` del workflow di produzione, a registro appena scritto:
+          # il database corrisponde alle migrazioni registrate, e quelle dopo la
+          # linea di base sono elencate come in attesa.
+          npx tsx prisma/expected-drift.ts --fase=pre
+          npx tsx prisma/linea-di-base.ts --deve-esserci
+
+          # `applica`: le migrazioni dopo la linea di base, se ce ne sono.
+          npx prisma migrate deploy
+
+          # Esce con 1 se resta qualcosa in attesa.
+          npx prisma migrate status
+          npx tsx prisma/expected-drift.ts
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -v fase=post -f prisma/bootstrap-check.sql
+
+      # Lo script e le migrazioni, confrontati direttamente fra loro: struttura
+      # (con `migrate diff`), dati iniziali, RLS e vincoli. Ognuno dei due e' gia'
+      # stato confrontato con schema.prisma, ma quel confronto tollera la deriva
+      # nota, e una differenza fra i due percorsi ci si nascondeva dentro.
+      #
+      # Un database a parte, costruito con owner-bootstrap.sql: quello della
+      # prova qui sopra nasce da `0_init`, che dopo la linea di base non e' piu'
+      # lo script.
+      - name: Script and migrations build the same database
+        env:
+          BASE_DATABASE_URL: postgresql://ci:ci@localhost:5432/kerdon_script?schema=public
+          BASE_PSQL_URL: postgresql://ci:ci@localhost:5432/kerdon_script
+        run: |
+          psql "$PSQL_ADMIN" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE kerdon_script'
           psql "$BASE_PSQL_URL" -v ON_ERROR_STOP=1 -f prisma/owner-bootstrap.sql
-
-          for cartella in prisma/migrations/*/; do
-            DATABASE_URL="$BASE_DATABASE_URL" \
-              npx prisma migrate resolve --applied "$(basename "$cartella")"
-          done
-
-          DATABASE_URL="$BASE_DATABASE_URL" npx prisma migrate status
-
-          DATABASE_URL="$BASE_DATABASE_URL" npx prisma migrate deploy | tee applicate.txt
-          grep -q "No pending migrations to apply" applicate.txt
+          npx tsx prisma/percorsi-uguali.ts
 
   # Le dipendenze: quelle che bloccano e quelle che si e' scelto di tollerare.
   #

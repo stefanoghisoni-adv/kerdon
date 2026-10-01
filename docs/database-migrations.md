@@ -1,8 +1,9 @@
 # Il database owner: come si cambia
 
-Questo documento e' per chi eseguira' una migrazione sul database owner di
-produzione. Non serve aver scritto il codice: serve seguire i passi nell'ordine
-e fermarsi dove il documento dice di fermarsi.
+Questo documento e' per chi eseguira' una migrazione sul database owner (Live e
+Test). Non serve aver scritto il codice ne' sapere di database: serve seguire i
+passi nell'ordine e fermarsi dove il documento dice di fermarsi. I passi sono
+in "La procedura, passo per passo"; il resto spiega il perche'.
 
 ## In una riga
 
@@ -16,72 +17,291 @@ automatico insieme al deploy dell'app.
 | --- | --- | --- |
 | `prisma/owner-bootstrap.sql` | si ricostruisce un ambiente da zero | crea tutto: tabelle, piani, listino, RLS, chiavi esterne |
 | `prisma migrate deploy` | il database esiste gia' e deve cambiare | applica le sole migrazioni non ancora applicate |
-| `.github/workflows/migrate-production.yml` | il database e' quello di produzione | fa la stessa cosa, ma dietro un'approvazione e con i controlli prima e dopo |
+| `.github/workflows/migrate-production.yml` | il database e' quello owner, Live o Test | fa la stessa cosa, ma dietro un'approvazione, con i controlli prima e dopo e un registro di ogni esecuzione |
 
-`prisma/migrations/0_init/migration.sql` e' la **copia identica** di
-`owner-bootstrap.sql`: le due strade partono dallo stesso testo, e un test
-(`prisma/migrations.test.ts`) non le lascia divergere. E' il motivo per cui un
-database costruito con lo script e uno costruito con le migrazioni sono lo
-stesso database.
+`prisma/migrations/0_init/migration.sql` e' la fotografia dello schema alla
+linea di base (`20260926000000_plans_basic_growth_scale_core`), ed e' **fermo**:
+un test (`prisma/migrations.test.ts`) ne controlla l'impronta. Oggi coincide
+ancora con `owner-bootstrap.sql`; dalla prima migrazione scritta dopo la linea
+di base lo script va avanti e `0_init` no. Che le due strade arrivino comunque
+allo stesso database lo prova la CI (job `migrations`, `prisma/percorsi-uguali.ts`).
+Il perche' in "`0_init` non si tocca", in fondo.
 
-> **`0_init` si puo' modificare solo PRIMA della linea di base di produzione, mai
-> dopo.** Finche' la produzione non ha la riga di `0_init` in
-> `_prisma_migrations`, `0_init` e `owner-bootstrap.sql` si aggiornano insieme
-> (e' successo il 26 settembre 2026, per seminare il listino Basic/Growth/Scale/
-> Core). Dal momento in cui si esegue `migrate resolve --applied 0_init` Prisma
-> ne registra l'impronta: modificarlo dopo vuol dire un database di produzione
-> che non corrisponde piu' alla storia scritta. Da li' in poi ogni cambiamento,
-> anche ai dati iniziali, e' una migrazione nuova; `owner-bootstrap.sql` si
-> aggiorna per descrivere lo stato finale e `0_init` resta com'era — a quel
-> punto il test che li vuole identici va rivisto insieme.
+## La procedura, passo per passo
 
-## Prima di tutto: la connessione diretta, non il pooler
+Questa e' la sezione da seguire. Vale per **Test** e per **Live**, sempre in
+quest'ordine: prima Test, e Live solo quando Test e' arrivato verde in fondo.
+Tutto quello che c'e' da fare si fa da GitHub e dal proprio computer; niente
+si incolla nell'editor SQL di Supabase.
 
-Supabase espone due porte. Il pooler (**6543**, `pgbouncer=true`) in modalita'
-transaction **non esegue DDL**: e' il motivo per cui finora le migrazioni si
-incollavano a mano nell'SQL editor. Tutto quello che segue vuole la connessione
-**diretta**, porta **5432**.
+Ogni lancio del workflow si fa da GitHub: **Actions → Migrazione del database
+di produzione → Run workflow**, con `Use workflow from: main` (l'unica
+eccezione e' una migrazione che aggiunge qualcosa e deve precedere il merge:
+"L'ordine fra migrazione e deploy del codice"), scegliendo tre cose: il **database** (`test` o `live`), l'**azione**
+(`verifica`, `linea-di-base`, `applica`) e la spunta sul **backup**. Poi GitHub
+chiede l'approvazione (il pulsante **Review deployments** nella pagina del run)
+e solo dopo il workflow si collega al database.
 
-Il workflow si rifiuta di partire se l'indirizzo che riceve punta al pooler.
+### Passo 0 — una volta sola: preparare GitHub
 
-## Una volta sola: la linea di base
+Su GitHub, **Settings → Environments**, due environment:
 
-Il database owner ha lo schema di oggi, ma non ha la tabella `_prisma_migrations`
-che dice a Prisma cosa e' gia' stato applicato: le migrazioni finora sono state
-eseguite a mano. Senza quella tabella `prisma migrate deploy` proverebbe a
-rieseguirle tutte dalla prima.
+| Environment | Database | Chi lo approva |
+| --- | --- | --- |
+| `test` | il database owner di Test | tu (Required reviewers) |
+| `production` | il database owner di Live | tu (Required reviewers) |
 
-Stabilire la linea di base vuol dire scrivere in quella tabella "queste ci sono
-gia'", **senza eseguirle**. E' un'operazione che non tocca lo schema.
-
-### 1. Preparare i segreti
-
-Su GitHub, **Settings → Environments → New environment → `production`**:
-
-- spuntare **Required reviewers** e mettersi in elenco (e' questo che fa fermare
-  il workflow in attesa di approvazione);
-- aggiungere due segreti **dell'environment**, non del repository:
+In ognuno: spuntare **Required reviewers** e mettersi in elenco (e' questo che
+fa fermare il workflow in attesa di approvazione). Non limitarli al solo ramo
+`main` (Deployment branches): una migrazione che aggiunge qualcosa si applica
+dal ramo della PR, prima del merge, e l'approvazione resta il cancello. Poi due
+segreti **dell'environment**, non del repository, con gli
+stessi nomi in tutti e due (il nome `PRODUCTION_` e' storico: in `test`
+puntano al database di Test):
 
 | Segreto | Valore | Nota |
 | --- | --- | --- |
-| `PRODUCTION_DATABASE_URL` | `postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres?schema=public` | lo usa Prisma |
-| `PRODUCTION_PSQL_URL` | `postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres` | lo usa `psql` |
+| `PRODUCTION_DATABASE_URL` | l'indirizzo del database, con `?schema=public` in fondo | lo usa Prisma |
+| `PRODUCTION_PSQL_URL` | lo stesso indirizzo, **senza** `?schema=public` | lo usa `psql` |
 
-Sono lo stesso indirizzo scritto in due modi, e servono entrambi: Prisma vuole
-`?schema=public`, `psql` quel parametro non lo conosce e rifiuta l'intero
-indirizzo con `invalid URI query parameter: schema`.
+Quale indirizzo: vedi "La connessione" piu' sotto. In breve, da Supabase
+**Connect → Session pooler** (porta **5432**), non "Transaction pooler" (6543).
+Il pannello mostra l'indirizzo con `[YOUR-PASSWORD]` al posto della password:
+va sostituito con la password del database (vedi "La password del database").
 
-### 2. Guardare com'e' messo il database, prima di toccarlo
+### Passo 1 — il backup, e controllare che ci sia davvero
 
-Lanciare il workflow **Migrazione del database di produzione** con azione
-`verifica`. Non applica niente: stampa cosa Prisma vede e si ferma sulla prima
-differenza inattesa fra il database e `schema.prisma`.
+Prima di `linea-di-base` e di `applica`, sempre. Per `verifica` non serve: non
+scrive niente.
 
-La prima volta questo passo **fallira' quasi certamente**, ed e' voluto: e' li'
-per mostrare la deriva che c'e' davvero. Quello che ci si aspetta di vedere:
+Il backup che si puo' controllare e' una copia scaricata sul proprio computer.
+Servono `pg_dump` e `pg_restore`. Si controlla con `pg_dump --version`; se il
+Terminale risponde "command not found", si installano una volta sola:
+
+```bash
+brew install libpq
+# Apple Silicon (M1/M2/M3...):
+echo 'export PATH="/opt/homebrew/opt/libpq/bin:$PATH"' >> ~/.zshrc
+# Mac Intel:
+echo 'export PATH="/usr/local/opt/libpq/bin:$PATH"' >> ~/.zshrc
+# poi chiudere e riaprire il Terminale
+```
+
+La versione di `pg_dump` deve essere **uguale o piu' recente** di quella del
+server (Supabase: **Settings → Infrastructure**, voce Postgres; oggi 15 o 17):
+un `pg_dump` piu' vecchio si rifiuta con "server version mismatch". `libpq` di
+Homebrew e' sempre l'ultima, quindi va bene.
+
+Poi, da Terminale, nella cartella dove si vogliono tenere le copie:
+
+```bash
+# Incollare l'indirizzo quando lo chiede (Session pooler, senza ?schema=public).
+# Non si vede mentre lo si incolla, ed e' voluto: cosi' non resta nella
+# cronologia del Terminale.
+read -rs INDIRIZZO_DB
+
+pg_dump "$INDIRIZZO_DB" --schema=public --format=custom --no-owner --no-privileges \
+  --file "kerdon-test-$(date +%Y%m%d-%H%M).dump"
+```
+
+(`kerdon-test` o `kerdon-live` a seconda del database.)
+
+Poi il controllo — un backup che non si e' guardato non e' un backup:
+
+```bash
+ls -lh kerdon-test-*.dump                                   # deve esistere e pesare piu' di qualche KB
+pg_restore --list kerdon-test-AAAAMMGG-HHMM.dump | grep -c "TABLE DATA"   # quante tabelle con dati: decine, non zero
+pg_restore --list kerdon-test-AAAAMMGG-HHMM.dump | grep -E "TABLE DATA public (shops|plans|plan_prices)"
+```
+
+L'ultimo comando deve stampare **tre righe**, una per `shops`, `plans` e
+`plan_prices`. Se `pg_dump` da' errore, o se manca una delle tre righe: **non
+mettere la spunta**, il backup non c'e'.
+
+In piu', se il progetto Supabase e' su un piano a pagamento: **Database →
+Backups** deve mostrare un backup giornaliero di oggi. E' un secondo paracadute,
+non sostituisce il file: non lo si puo' aprire per controllarlo.
+
+Il file `.dump` si tiene almeno finche' la migrazione non ha girato per qualche
+giorno senza problemi. Contiene dati dei negozi: non va in cartelle condivise.
+
+### Passo 2 — `verifica`
+
+Database `test`, azione `verifica`, spunta backup non necessaria. Approvare
+quando GitHub lo chiede.
+
+`verifica` non scrive niente. Guarda quattro cose e le scrive nel registro del
+run:
+
+| File nel registro | Cosa dice | Verde vuol dire |
+| --- | --- | --- |
+| `02-stato-prima.log` | cosa Prisma ha nel suo registro e cosa e' in attesa | `ESITO: nessuna migrazione in attesa` oppure `ESITO: ci sono migrazioni in attesa` |
+| `03-deriva-prima.log` | il database e' quello che dicono le migrazioni gia' registrate (prima della linea di base: quelle fino alla linea di base)? Le migrazioni in attesa sono elencate a parte e non contano | `Nessuna deriva inattesa` |
+| `04-controlli-prima.log` | piani, listino, RLS, chiavi esterne sul piano | finisce con `DO`, nessun `ERROR` |
+| `05-linea-di-base-resoconto.log` | la linea di base: c'e'? se no, cosa si marcherebbe | `La linea di base c'e' gia'` oppure l'elenco "Da marcare" |
+
+### Passo 3 — leggere e conservare l'output
+
+L'output di ogni run sta in due posti, gia' ripulito da password e indirizzi:
+
+- **il riepilogo**, in fondo alla pagina del run: un riquadro per file,
+  da aprire con un clic;
+- **l'artifact** `registro-<database>-<azione>-<numero>`, nella stessa pagina
+  sotto "Artifacts": si scarica come zip.
+
+GitHub cancella entrambi dopo 90 giorni. Scaricare lo zip di **ogni** run di
+`linea-di-base` e `applica` (e del `verifica` che li precede e li segue) e
+tenerlo accanto al backup, per esempio in una cartella
+`Kerdon/registri-migrazioni/` con nomi come `2026-10-02-test-verifica.zip`. E'
+la prova di cosa e' stato fatto, quando e su quale commit
+(`00-intestazione.log`).
+
+### Passo 4 — quando fermarsi
+
+Ci si ferma — non si rilancia, non si prova `applica` "per vedere" — se:
+
+- il run e' rosso, in qualunque passo;
+- `02-stato-prima.log` dice `FERMATI` (una migrazione fallita, o Prisma non
+  riesce a collegarsi: vedi "La connessione");
+- `03-deriva-prima.log` elenca una "Deriva inattesa": ogni riga chiede una
+  decisione (vedi "La prima volta: la deriva");
+- `05-linea-di-base-resoconto.log` dice `FERMATI`, o elenca come "NON PROVATA"
+  una migrazione che non ti aspetti;
+- l'elenco delle migrazioni in attesa contiene qualcosa che non sai spiegare.
+
+In tutti questi casi: scaricare il registro e chiedere, con il registro in mano.
+
+### Passo 5 — `linea-di-base`, una volta sola per database
+
+Serve solo se `05-linea-di-base-resoconto.log` **non** dice "La linea di base
+c'e' gia'". Succede la prima volta, perche' fino a oggi le migrazioni sono state
+incollate a mano e Prisma non ha un registro.
+
+1. Leggere nel resoconto l'elenco "Da marcare come applicate" e quello
+   "Restano in attesa". Ci si aspetta che in attesa ci siano **zero**
+   migrazioni (se il database ha gia' tutto, compresa la migrazione del 26
+   settembre incollata a mano) oppure solo migrazioni dal **23 settembre** in
+   poi. Qualunque altra cosa: fermarsi.
+2. Backup (passo 1).
+3. Database `test`, azione `linea-di-base`, spunta backup. Approvare.
+4. Il run deve essere verde. `06-linea-di-base.log` finisce con
+   `RLS attivata sul registro delle migrazioni`.
+5. Rilanciare `verifica` (passo 2): ora il resoconto deve dire "La linea di base
+   c'e' gia'".
+
+Cosa fa e cosa non fa: scrive nel registro di Prisma "queste migrazioni ci sono
+gia'", **senza eseguirle e senza toccare tabelle o dati**, e solo per quelle che
+riesce a dimostrare presenti. Come le dimostra: "La linea di base: come decide"
+piu' sotto.
+
+### Passo 6 — `applica`, se c'e' qualcosa in attesa
+
+Solo se `02-stato-prima.log` dell'ultimo `verifica` dice
+`ci sono migrazioni in attesa`, e solo se l'elenco e' quello che ti aspetti.
+
+1. La CI e' verde sul commit da cui si lancia il workflow: l'ultimo di `main`,
+   o quello del ramo della PR quando la migrazione deve precedere il merge
+   (pagina **Actions**, workflow **CI**).
+2. Backup (passo 1) — fatto **adesso**, non quello di ieri.
+3. Database `test`, azione `applica`, spunta backup. Approvare: e' il momento
+   in cui si decide davvero. Prima di cliccare, riguardare l'elenco delle
+   migrazioni in attesa, e **il ramo**: la pagina del run lo mostra accanto al
+   nome del workflow (e `00-intestazione.log` riporta il commit). Gli
+   environment non sono limitati a `main`, quindi chiunque possa lanciare il
+   workflow puo' farlo da un ramo qualsiasi, con le migrazioni di quel ramo:
+   approvare solo se e' `main`, o il ramo della PR che ci si aspetta.
+4. Il run applica le migrazioni (`06-applica.log`) e subito dopo ricontrolla
+   tutto sul database migrato.
+
+### Passo 7 — i controlli dopo
+
+Dopo `applica`, nel registro dello stesso run, tre file e tre verdi:
+
+| File | Verde vuol dire |
+| --- | --- |
+| `07-stato-dopo.log` | `Database schema is up to date!` (niente piu' in attesa) |
+| `08-deriva-dopo.log` | `Nessuna deriva inattesa` (in fase `post`: anche `plans.max_orders` non deve esserci piu') |
+| `09-controlli-dopo.log` | finisce con `DO`, nessun `ERROR`: listino finale, RLS ovunque (registro compreso), chiavi esterne sul piano |
+
+Ognuno dei tre, se fallisce, rende rosso il run. Poi rilanciare `verifica` una
+volta: deve essere verde e dire "nessuna migrazione in attesa".
+
+### Passo 8 — se qualcosa fallisce
+
+- **Rosso prima di `Apply the pending migrations`** (o in `verifica`): non e'
+  stato toccato niente. Fermarsi e leggere il registro.
+- **Rosso in `Apply the pending migrations`**: Prisma ha segnato la migrazione
+  come fallita e non ne applichera' altre. **Non rilanciare.** Scaricare il
+  registro e seguire "Come si torna indietro".
+- **Verde in `applica` ma rosso nei controlli dopo**: la migrazione e' passata
+  ma il database non e' come dovrebbe (per esempio una tabella senza RLS). Non
+  si torna al backup per questo: si scrive una migrazione che corregge, e si
+  ripete dal passo 2.
+- **L'app non funziona dopo la migrazione** e i dati sono stati danneggiati:
+  e' il caso del backup. Fermare tutto e chiedere aiuto prima di ripristinare:
+  un ripristino sovrascrive anche quello che i negozi hanno scritto nel
+  frattempo.
+
+### Passo 9 — Live
+
+Quando Test e' arrivato verde fino al passo 7: stessi passi, con database
+`live`. Un backup nuovo, preso da Live. Se Live mostra qualcosa che Test non
+mostrava (una deriva, una migrazione "NON PROVATA"), ci si ferma lo stesso: i
+due database sono stati aggiornati a mano in momenti diversi e possono non
+essere uguali.
+
+## La connessione: niente pooler transaction
+
+Supabase espone tre indirizzi per lo stesso database (pulsante **Connect** in
+alto nella dashboard del progetto):
+
+| Indirizzo | Porta | DDL (migrazioni) | Raggiungibile da GitHub |
+| --- | --- | --- | --- |
+| Direct connection, `db.<ref>.supabase.co` | 5432 | si' | di solito **no**: e' solo IPv6, e le macchine di GitHub Actions non hanno IPv6 (a meno dell'add-on IPv4 di Supabase) |
+| Session pooler, `aws-0-<regione>.pooler.supabase.com`, utente `postgres.<ref>` | 5432 | si' | si' |
+| Transaction pooler | **6543** | **no** | si' |
+
+Il pooler in modalita' transaction non esegue DDL: e' il motivo per cui finora
+le migrazioni si incollavano a mano nell'SQL editor. Il workflow si rifiuta di
+partire se riceve un indirizzo sulla 6543 o con `pgbouncer=true`.
+
+Quindi, nei segreti: il **Session pooler**. La connessione diretta va bene solo
+se il progetto ha l'add-on IPv4. Se il primo `verifica` si ferma con
+`P1001: Can't reach database server`, e' quasi sempre questo.
+
+I due segreti sono lo stesso indirizzo scritto in due modi:
+
+```
+PRODUCTION_DATABASE_URL  postgresql://postgres.<ref>:<password>@aws-0-<regione>.pooler.supabase.com:5432/postgres?schema=public
+PRODUCTION_PSQL_URL      postgresql://postgres.<ref>:<password>@aws-0-<regione>.pooler.supabase.com:5432/postgres
+```
+
+Prisma vuole `?schema=public`; `psql` quel parametro non lo conosce e rifiuta
+l'intero indirizzo con `invalid URI query parameter: schema`. Se la password
+contiene caratteri come `@`, `/` o `#` va scritta codificata (`%40`, `%2F`,
+`%23`).
+
+### La password del database
+
+Supabase non la mostra mai dopo averla creata: nel pannello **Connect** al suo
+posto c'e' `[YOUR-PASSWORD]`. Se non la si ha salvata (per esempio in un
+gestore di password), si reimposta da **Project Settings → Database →
+Database password → Reset database password**.
+
+Reimpostarla ha una conseguenza: tutto quello che usa la vecchia smette di
+collegarsi. Prima di farlo, controllare dove compare — tipicamente
+`DATABASE_URL` nelle variabili d'ambiente di Vercel (Live e Test), un `.env`
+locale, i segreti degli environment GitHub — e aggiornarli subito dopo,
+rilanciando un deploy su Vercel. Per Live, farlo in un momento tranquillo.
+
+## La prima volta: la deriva
+
+Il primo `verifica` su un database aggiornato a mano puo' fermarsi in
+`03-deriva-prima.log`, ed e' voluto: e' li' per mostrare la deriva che c'e'
+davvero. Quello che ci si puo' aspettare di vedere:
 
 - **`shops_current_plan_fkey` e `shops_last_synced_plan_fkey`**: non sono deriva,
-  sono volute — vedi l'ultima sezione. Il controllo le conosce e non se ne
+  sono volute — vedi "Le due chiavi esterne sul nome del piano". Il controllo le conosce e non se ne
   lamenta;
 - **`supabase_configs.supabase_db_password`**: una colonna aggiunta da una
   migrazione di luglio e mai rimossa, sparita nel frattempo da `schema.prisma`.
@@ -92,12 +312,15 @@ per mostrare la deriva che c'e' davvero. Quello che ci si aspetta di vedere:
   `String @id` scrive `text`. Se compare, **non convertire il tipo**: e' una
   colonna di chiave primaria con delle chiavi esterne addosso, e la conversione
   va pensata a parte;
-- **`plans.max_orders`** (solo se la produzione e' nello stato di
+- **`plans.max_orders`** (solo se il listino e' ancora quello di
   `pricing_alignment`): prima di `migrate deploy` e' atteso, perche' lo toglie
   la migrazione del 26. I controlli prima delle migrazioni girano in fase `pre`
   (`expected-drift.ts --fase=pre`, `bootstrap-check.sql -v fase=pre`), che
   accetta questo stato di partenza e anche i due listini di prima; quelli dopo
   girano in fase `post` e pretendono il listino finale e niente `max_orders`;
+- una tabella che `schema.prisma` ha e il database no (per esempio una
+  `CREATE TABLE` nell'elenco): una migrazione incollata a meta', o mai
+  incollata;
 - qualunque altra cosa: fermarsi e guardarla.
 
 Per ogni differenza che compare ci sono tre risposte possibili, e nessuna e'
@@ -108,124 +331,81 @@ Per ogni differenza che compare ci sono tre risposte possibili, e nessuna e'
 3. e' una differenza voluta → si aggiunge a `prisma/expected-drift.ts`, con
    scritto **perche'**.
 
-Il workflow ricomincia a passare quando ogni riga ha ricevuto una risposta.
+Il workflow ricomincia a passare quando ogni riga ha ricevuto una risposta, e
+la linea di base si puo' fare solo da li': la sua prova principale e' proprio
+questo confronto.
 
-### 3. Dichiarare applicato quello che c'e' gia'
+## La linea di base: come decide
 
-Dalla propria macchina, con l'indirizzo **diretto** del database di produzione.
-Questo passo va fatto una volta sola.
+Il database owner ha lo schema, ma non `_prisma_migrations`, il registro in cui
+Prisma scrive cosa e' gia' stato applicato: le migrazioni finora sono state
+incollate a mano. Senza registro `prisma migrate deploy` si rifiuta di partire
+(errore P3005, "the database schema is not empty").
 
-```bash
-export DATABASE_URL='postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres?schema=public'
+Stabilire la linea di base vuol dire scrivere nel registro "queste ci sono
+gia'" con `prisma migrate resolve --applied`, che **non esegue SQL**. E' anche
+il punto piu' delicato di tutto il percorso: una migrazione dichiarata
+applicata senza esserlo e' **persa per sempre**, perche' da quel momento
+`migrate deploy` la salta e nessun controllo chiede piu' se c'e' davvero.
 
-# Tutte le migrazioni tranne quelle che sul database owner non sono mai passate.
-for cartella in prisma/migrations/*/; do
-  nome=$(basename "$cartella")
-  case "$nome" in
-    20260904120000_row_level_security_everywhere) continue ;;
-    20260904160000_supabase_managed_resources) continue ;;
-    20260905120000_sync_request_queue) continue ;;
-    20260905190000_sync_repairs) continue ;;
-    20260922000000_pricing_alignment_guard) continue ;;
-    20260926000000_plans_basic_growth_scale_core) continue ;;
-  esac
-  npx prisma migrate resolve --applied "$nome"
-done
-```
+Per questo non si marca a mano e non si marca da un elenco scritto in questo
+documento (com'era prima): lo fa `prisma/linea-di-base.ts`, e marca solo cio'
+che **dimostra** presente nel database. Per ogni migrazione ha una prova:
 
-`migrate resolve --applied` **non esegue SQL**: scrive una riga in
-`_prisma_migrations` e basta. Se il comando viene interrotto a meta' lo si
-rilancia: le cartelle gia' dichiarate danno un errore innocuo e si va avanti.
+- **struttura** — per le migrazioni che creano o cambiano tabelle, colonne,
+  indici, chiavi esterne, tipi e RLS. La prova e' che il database corrisponda
+  allo schema a cui portano le migrazioni **fino alla linea di base**, che
+  Prisma rigioca su un database di appoggio vuoto (lo fornisce il workflow da
+  se', non serve niente), con RLS su ogni tabella e le due chiavi esterne sul
+  nome del piano. Non contro `schema.prisma`: quello contiene anche le
+  migrazioni scritte dopo la linea di base, che il database non ha ancora — e
+  dalla prima di esse la prova non passerebbe piu';
+- **una domanda sui dati** — per le migrazioni che hanno toccato anche il
+  contenuto, che il confronto con lo schema non vede: il partner iniziale,
+  il prezzo in dollari di ogni piano, i giorni di prova, e soprattutto il
+  listino (23 e 26 settembre).
 
-Le esclusioni sono le migrazioni che passeranno davvero da questo percorso, ed
-e' importante che restino fuori dal ciclo: dichiararle applicate senza
-eseguirle vorrebbe dire perderle per sempre, perche' da quel momento
-`migrate deploy` le salta.
+Poi decide cosi':
 
-`20260904120000_row_level_security_everywhere` e' la prima. Attiva RLS su ogni
-tabella dello schema `public`: sul database owner alcune tabelle create dalle
-migrazioni ne sono rimaste senza — fra le altre `meta_connections`, che porta il
-token di accesso a Meta del negozio, e `product_feeds`, che porta il token con
-cui si scarica un feed senza autenticarsi. Senza RLS quelle righe sono leggibili
-da chiunque abbia la chiave pubblica del progetto.
+1. marca il tratto **iniziale** di migrazioni provate, e si ferma alla prima non
+   provata. Tutto cio' che viene dopo resta in attesa e lo applichera'
+   `applica`. Mai il contrario: una migrazione non provata che girasse dopo una
+   successiva gia' marcata girerebbe sullo stato sbagliato (la migrazione del 23
+   rigiocata sopra il listino finale riscrive i limiti del piano Core);
+2. se in attesa resterebbe qualcosa che il database **deve** avere — tutto cio'
+   che precede il 23 settembre, che l'app usa da settimane — **non marca
+   niente** e si ferma: e' uno stato che nessuno ha previsto;
+3. dopo aver marcato, attiva RLS sul registro: Prisma lo crea senza, e su
+   Supabase una tabella di `public` senza RLS e' leggibile e scrivibile con la
+   chiave pubblica del progetto.
 
-`20260904160000_supabase_managed_resources` e' la seconda, e va dopo: aggiunge
-`supabase_managed_resources` (il registro di quali tabelle, nel database di quale
-merchant, le ha create l'app) e `supabase_data_deletions` (l'esito di ogni
-tentativo di eliminarle). Nasce dallo scollegamento con eliminazione, che faceva
-`DROP` su due nomi soli — presi dalla configurazione, quindi anche su tabelle che
-erano del merchant — e cancellava comunque token e credenziali, pure quando il
-`DROP` era fallito. Nasce gia' con RLS attiva, come tutte.
+**La migrazione del 26 settembre incollata a mano**
+(`20260926000000_plans_basic_growth_scale_core`, su Live e su Test). La sua
+prova e' il listino finale:
+Basic/Growth/Scale/Core e Lifetime, nessun nome vecchio sui piani, sugli
+addebiti e sui prezzi riservati, niente `max_orders`, prezzi in euro e in
+dollari. Se il database lo ha, la migrazione e' provata e viene marcata, e
+insieme a lei quelle del 22 e del 23 (la guardia non avrebbe niente da fare, e
+la 23 e' superata dalla 26). Se invece il listino non e' quello finale, la 26
+resta in attesa e la applica `applica`: e' scritta per arrivare al listino
+finale da tutti e due i listini di prima, e rieseguita su quello finale non
+cambia niente.
 
-`20260905120000_sync_request_queue` e' la terza, e va per ultima: porta
-`sync_requests` (la coda dei lavori) e `shop_locks` (il lucchetto per negozio).
-La coda stava su Redis e nessuno ne prendeva possesso — due drenaggi
-simultanei lavoravano lo stesso job, e su eccezione il job veniva rimosso, cosi'
-un errore di rete perdeva la sincronizzazione per sempre. Il perche' per esteso
-sta in `docs/architecture/queue-adr.md`; la procedura per accendere il
-consumatore nuovo, in "Cambiare il consumatore della coda" piu' sotto. Nasce
-gia' con RLS attiva, come tutte.
+Il resoconto (`05-linea-di-base-resoconto.log`) elenca migrazione per
+migrazione "PROVATA" o "NON PROVATA" e con quale prova: e' la cosa da leggere
+prima di lanciare `linea-di-base`.
 
-`20260905190000_sync_repairs` e' la quarta e va per ultima: porta la tabella
-`sync_repairs` (le risorse che una corsa non e' riuscita a scrivere) e due
-colonne su `sync_jobs`, `watermark_at` e `repairs_opened`.
+Se si interrompe a meta' (rete, run annullato), rilanciare `linea-di-base`:
+riconosce il registro incompleto e riprende da dove era arrivato.
 
-Nasce da un guasto che non lasciava traccia. Nei processor una quantita' di
-errori veniva registrata e ignorata, e la corsa si dichiarava `completed` lo
-stesso; il confine incrementale della corsa successiva si calcolava dall'ultima
-corsa completata, quindi passava sopra le risorse che nessuno era riuscito a
-scrivere. Se su Shopify quelle risorse non venivano piu' toccate non tornavano
-nel delta mai piu': il difetto diventava permanente e nessun registro sapeva
-dire quale riga fosse rimasta indietro.
-
-Va dopo `sync_request_queue` solo perche' e' piu' recente: non dipende da
-quella. Nasce gia' con RLS attiva, come tutte.
-
-Le ultime due esclusioni riguardano il listino.
-
-`20260926000000_plans_basic_growth_scale_core` porta il listino a Basic/Growth/
-Scale/Core, toglie `plans.max_orders` e riallinea negozi, addebiti e prezzi
-riservati. Dichiararla applicata senza eseguirla lascerebbe la produzione sui
-nomi di prima per sempre, con l'app che si aspetta quelli nuovi. Deve girare
-davvero, e non importa da dove parte: arriva al listino finale sia da
-Free/Pro/Business/Enterprise sia da Free/Core/Growth/Scale.
-
-Per lo stesso motivo **`20260923000000_pricing_alignment` si puo' dichiarare
-applicata** anche se in produzione non e' mai passata: la migrazione del 26
-va dallo stato di prima direttamente a quello finale, senza bisogno del passo
-intermedio.
-
-`20260922000000_pricing_alignment_guard` resta fuori perche' e' comunque
-innocua: sul listino di produzione non fa niente (crea una riga provvisoria
-solo su un database nuovo, dove il listino e' gia' quello finale e ne' la
-migrazione del 23 ne' quella del 26 risultano passate). Lasciarla girare
-costa zero; dichiararla applicata non servirebbe a niente.
-
-Se la migrazione del 26 e' stata incollata a mano nell'editor di Supabase, va
-comunque lasciata fuori dal ciclo: rieseguita, non cambia niente.
-
-### 4. Controllare che la linea di base sia giusta
-
-```bash
-npx prisma migrate status
-```
-
-Deve elencare **sei** migrazioni da applicare, in questo ordine:
-
-1. `20260904120000_row_level_security_everywhere`
-2. `20260904160000_supabase_managed_resources`
-3. `20260905120000_sync_request_queue`
-4. `20260905190000_sync_repairs`
-5. `20260922000000_pricing_alignment_guard`
-6. `20260926000000_plans_basic_growth_scale_core`
-
-Se ne elenca altre, qualcosa non e' stato dichiarato: rifare il passo 3 prima di
-andare avanti.
-
-### 5. Applicarla
-
-Lanciare il workflow con azione `applica` e la spunta sul backup. Da qui in poi
-il percorso e' quello di ogni rilascio.
+**Un registro con dei buchi ferma tutto.** Il registro e' sempre un tratto
+iniziale delle cartelle: Prisma scrive e applica in ordine. Se una migrazione
+non risulta applicata ma una successiva si' (qualcuno ha cancellato o scritto
+righe a mano), il resoconto dice `FERMATI` ed elenca i buchi, e `applica` non
+parte: `migrate deploy` rigiocherebbe il buco sopra lo stato delle successive —
+la migrazione del 23 sopra il listino finale, per esempio. Si decide caso per
+caso, con il registro in mano: o si dimostra che il buco c'e' e lo si dichiara
+con `migrate resolve --applied`, o si capisce perche' manca.
 
 ## Ogni volta: una migrazione nuova
 
@@ -269,27 +449,108 @@ Tre regole, e sono quelle che hanno gia' fatto danni quando sono state saltate:
 
 `npx vitest run` e la CI. Il job `migrations` costruisce un Postgres vuoto,
 applica tutta la catena, verifica che il risultato sia lo schema dichiarato e
-ricontrolla dati iniziali, RLS e chiavi esterne. Se passa li', passa in
-produzione.
+ricontrolla dati iniziali, RLS e chiavi esterne; poi prova la linea di base e
+`applica` su un database fermo alla linea di base (costruito da `0_init`), e
+confronta un database costruito con lo script con quello delle migrazioni
+(`prisma/percorsi-uguali.ts`): lo script e le migrazioni devono arrivare allo
+stesso risultato. Se passa li', passa in produzione.
 
 ### 3. Applicarla
 
-1. la migrazione e' su `main`;
-2. Actions → **Migrazione del database di produzione** → `Run workflow`;
-3. azione `verifica`: leggere cosa verrebbe applicato, e fermarsi se c'e' altro;
-4. backup: Supabase → Database → Backups;
-5. azione `applica` con la spunta sul backup;
-6. approvare quando GitHub lo chiede;
-7. leggere i controlli finali.
+Con la procedura passo per passo, dall'inizio: backup, `verifica`, `applica`,
+controlli dopo, prima su Test e poi su Live. **Quando** farlo rispetto al merge
+dipende da cosa fa la migrazione: la sezione qui sotto.
 
-**L'ordine rispetto al deploy del codice conta.** Una migrazione additiva
-(colonne o tabelle nuove) va applicata **prima** che il codice nuovo arrivi su
-Vercel. Una migrazione che toglie qualcosa va applicata **dopo** che il codice
-vecchio non e' piu' in produzione — altrimenti il codice ancora vivo legge una
-colonna che non c'e' piu'. Quando entrambe servono, sono due migrazioni in due
-momenti: `20260825160000_plan_prices_backfill_base` e
-`20260825170000_drop_plan_price_columns` sono l'esempio, e nei loro commenti c'e'
+## L'ordine fra migrazione e deploy del codice
+
+**Il merge su `main` e' il deploy.** Vercel pubblica in produzione ogni commit
+su `main`, da solo e in un paio di minuti; le migrazioni invece partono solo
+quando qualcuno lancia `applica`. Fra le due cose non c'e' nessun legame
+automatico, ed e' voluto — quindi l'ordine giusto lo deve tenere chi rilascia.
+
+La regola e' una sola: **in ogni momento il codice in produzione deve funzionare
+con il database che ha davanti.** Da qui tre tempi (in gergo
+*expand → deploy → contract*):
+
+1. **Allargare** (expand): la migrazione che **aggiunge** — una tabella, una
+   colonna, un indice — si applica **prima** del merge. Il codice vecchio non la
+   conosce e non se ne accorge.
+2. **Deployare**: il merge su `main`, cioe' il codice nuovo in produzione.
+3. **Stringere** (contract): quello che va **tolto** — una colonna non piu'
+   letta, una tabella vecchia — si toglie **dopo** il merge, quando il codice
+   che lo usava non e' piu' in produzione.
+
+### Perche' "prima del merge", e non "subito dopo"
+
+Prisma, per ogni modello, chiede al database **tutte** le colonne che
+`schema.prisma` dichiara, anche quelle che il codice non usa. Un merge che
+aggiunge un campo a `schema.prisma` mette in produzione, due minuti dopo, un
+client che chiede quella colonna: se nel database non c'e' ancora, **ogni**
+lettura di quella tabella fallisce (`P2022: column does not exist`), non solo
+quelle del codice nuovo. Se `applica` arriva un'ora dopo, o il giorno dopo,
+l'app e' rotta per tutto quel tempo.
+
+E non si puo' rimandare l'aggiunta a `schema.prisma`: la CI pretende che le
+migrazioni e `schema.prisma` dicano la stessa cosa a ogni commit (job
+`migrations`), quindi la migrazione e il campo nello schema viaggiano insieme.
+
+### Una colonna o una tabella nuova (il caso piu' comune)
+
+1. La PR contiene la migrazione, `schema.prisma` e il codice. La CI della PR e'
+   verde.
+2. Backup, poi il workflow lanciato **dal ramo della PR**: in "Run workflow",
+   `Use workflow from:` il nome del ramo invece di `main`. `verifica`, poi
+   `applica`, su Test e poi su Live. Il registro (`00-intestazione.log`) annota
+   il commit da cui e' partito. In `verifica` la migrazione nuova compare in
+   `02-stato-prima.log` come "in attesa" e in `03-deriva-prima.log` fra quelle
+   "che non fanno parte del confronto": e' giusto cosi', il confronto prima di
+   `applica` e' con le migrazioni gia' registrate, non con lo `schema.prisma`
+   del ramo. Dopo `applica` invece `08-deriva-dopo.log` confronta con
+   `schema.prisma`, e li' la colonna deve esserci.
+3. Il merge, subito dopo, **senza piu' toccare la migrazione**: Prisma ne ha
+   registrato l'impronta, e un file cambiato dopo l'applicazione fa fallire i
+   controlli successivi.
+4. Un `verifica` su Live da `main`: `nessuna migrazione in attesa`.
+
+Due cautele per la migrazione:
+
+- la colonna nuova nasce **facoltativa o con un default**. Fra il passo 2 e il
+  passo 3 in produzione gira ancora il codice vecchio, che crea righe senza
+  conoscerla: una colonna obbligatoria senza default gliele rifiuterebbe. Se
+  deve diventare obbligatoria, lo diventa in un rilascio successivo;
+- se la PR non viene unita (cambio di idea), la colonna resta nel database e va
+  tolta con una migrazione: una colonna in piu' non rompe niente, ma
+  `verifica` la segnalera' come deriva.
+
+### Togliere o rinominare
+
+L'ordine e' il rovescio:
+
+1. La PR toglie l'uso dal codice, toglie il campo da `schema.prisma` e contiene
+   la migrazione che toglie la colonna. Il merge, **senza** `applica`: il codice
+   nuovo non la chiede piu', la colonna puo' restare dov'e'.
+2. Quando il codice nuovo e' in produzione — compresi il worker e i cron, che
+   sono "codice in produzione" anche loro — backup, `verifica`, `applica` da
+   `main`.
+
+Una rinomina e' sempre "aggiungi il nuovo, copia, sposta il codice, togli il
+vecchio", in due rilasci, mai un `RENAME` secco mentre il codice vecchio e'
+vivo. `20260825160000_plan_prices_backfill_base` e
+`20260825170000_drop_plan_price_columns` sono l'esempio: nei loro commenti c'e'
 scritto quale va prima e quale dopo.
+
+Se una modifica deve sia aggiungere sia togliere, sono **due** PR: prima quella
+che aggiunge (applicata prima del merge), poi quella che toglie (applicata dopo).
+
+### Come si controlla, prima di ogni merge che tocca il database
+
+- La PR aggiunge una cartella in `prisma/migrations/` che **aggiunge** qualcosa?
+  Allora prima del merge c'e' un `applica` verde lanciato da quel ramo, su Live,
+  e nel suo `07-stato-dopo.log` c'e' `Database schema is up to date!`.
+- La PR aggiunge una migrazione che **toglie** qualcosa? Allora non aggiunge
+  anche altro, e l'`applica` si lancia dopo il merge.
+- La PR cambia `schema.prisma` senza una migrazione? La CI la ferma: le due cose
+  vanno insieme.
 
 ## Cambiare il consumatore della coda
 
@@ -450,8 +711,10 @@ npx prisma migrate resolve --applied "<nome_cartella>"       # l'ho completata a
 `_prisma_migrations`: si scrive una migrazione nuova che disfa quello che ha
 fatto. Resta la storia di cosa e' successo, che e' esattamente il punto.
 
-**Se ha distrutto dei dati.** Il ripristino e' il backup di Supabase. E' il
-motivo per cui il workflow chiede la spunta prima di applicare.
+**Se ha distrutto dei dati.** Il ripristino e' il backup preso al passo 1 (il
+file `.dump`, o quello giornaliero di Supabase). E' il motivo per cui il
+workflow chiede la spunta prima di applicare. Un ripristino sovrascrive anche
+cio' che i negozi hanno scritto dopo il backup: va deciso, non fatto d'istinto.
 
 ## Le due chiavi esterne sul nome del piano
 
@@ -482,20 +745,27 @@ Tre controlli le proteggono, e sono tre perche' la prima volta e' bastato un
 - `prisma/expected-drift.ts` le conosce e non le segnala come deriva, ma segnala
   se **spariscono**;
 - `prisma/bootstrap-check.sql` fallisce se non ci sono;
-- il workflow di produzione esegue entrambi, prima e dopo.
+- il workflow di migrazione esegue entrambi, prima e dopo.
 
 Se dovessero mancare, le ricrea la coda di `owner-bootstrap.sql`.
 
 ## `0_init` non si tocca
 
-Da quando un database e' stato messo in linea di base, Prisma confronta il
-contenuto di ogni cartella con l'impronta registrata: modificare
-`prisma/migrations/0_init/migration.sql` fa fallire ogni `migrate deploy`
-successivo con "migration file has been modified".
+`0_init` e' la fotografia dello schema alla linea di base, e non cambia piu',
+per due motivi:
 
-Quindi: `owner-bootstrap.sql` si continua a rigenerare quando lo schema cambia
-(le istruzioni sono nella sua intestazione), ma **la copia in `0_init` resta
-ferma**. Il test che pretende che i due file siano identici va aggiornato
-insieme: quando arrivera' quel momento, il modo giusto e' far si' che `0_init`
-resti la fotografia del giorno della linea di base, e che tutto il resto sia una
-migrazione.
+- da quando un database e' stato messo in linea di base, Prisma confronta il
+  contenuto di ogni cartella con l'impronta registrata: modificare
+  `prisma/migrations/0_init/migration.sql` fa fallire ogni `migrate deploy`
+  successivo con "migration file has been modified";
+- la prova di struttura della linea di base confronta il database con lo schema
+  delle migrazioni fino alla linea di base, `0_init` compreso. Un `0_init`
+  rigenerato con dentro una migrazione successiva renderebbe la linea di base
+  impossibile su un database che quella migrazione non l'ha ancora.
+
+Quindi: ogni cambiamento allo schema, anche ai dati iniziali, e' una migrazione
+nuova; `owner-bootstrap.sql` si continua a rigenerare per descrivere lo stato
+finale (le istruzioni sono nella sua intestazione), e `0_init` resta com'e'. Il
+test in `prisma/migrations.test.ts` ne controlla l'impronta, e pretende che
+coincida con lo script solo finche' non esistono migrazioni dopo la linea di
+base.

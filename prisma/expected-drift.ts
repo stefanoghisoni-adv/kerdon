@@ -13,13 +13,39 @@
  * Se si', si passa. Se compare una riga in piu' — una colonna sparita, un indice
  * che non c'e', un tipo cambiato — ci si ferma e la si legge.
  *
- * Si usa in due punti:
+ * Si usa in tre punti:
  *   - la CI, contro il database appena costruito (bootstrap e migrazioni);
  *   - il workflow di migrazione, contro il database di produzione, PRIMA di
- *     applicare qualsiasi cosa.
+ *     applicare qualsiasi cosa;
+ *   - prisma/linea-di-base.ts, per cui questo confronto e' la prova che le
+ *     migrazioni di sola struttura ci sono gia'.
+ *
+ * DUE RIFERIMENTI, a seconda della fase.
+ *
+ *   post (default)  il database contro `schema.prisma`: dopo le migrazioni, e
+ *                   in CI, deve essere esattamente lo schema che l'app usa.
+ *   pre             il database contro lo schema a cui portano le migrazioni
+ *                   GIA' REGISTRATE in `_prisma_migrations` (o, prima della
+ *                   linea di base, quelle fino alla linea di base), rigiocate
+ *                   su un database di appoggio locale (SHADOW_DATABASE_URL).
+ *                   Contro `schema.prisma` ogni migrazione additiva ancora in
+ *                   attesa — una colonna, una tabella — compariva come deriva
+ *                   inattesa, e il workflow si fermava qui senza mai arrivare
+ *                   ad applicarla. Le migrazioni in attesa non sono deriva:
+ *                   sono quello che `applica` sta per fare. In questa fase le
+ *                   due chiavi esterne sul nome del piano sono nelle
+ *                   migrazioni, quindi una loro assenza compare come
+ *                   `ADD CONSTRAINT` inatteso e ferma tutto lo stesso.
  */
 
 import { execFileSync } from 'node:child_process';
+import {
+  cartelleMigrazioni,
+  diffVersoMigrazioni,
+  leggiRegistro,
+  migrazioniDiRiferimento,
+  psql,
+} from './registro';
 
 /**
  * Deriva VOLUTA: c'e' nel database, non c'e' nello schema, e deve restare cosi'.
@@ -51,10 +77,18 @@ export const DERIVA_VOLUTA = [
  * apposta, non con un DROP eseguito a mano nell'SQL editor, e la decisione di
  * quando farlo e' del proprietario del database.
  *
- * Quando la migrazione ci sara', questa riga va via da qui: se resta, copre.
+ * Due righe per la stessa colonna, una per verso. Contro `schema.prisma` un
+ * database che la ha mostra il DROP. Contro le migrazioni (fase `pre`) e' il
+ * rovescio: le migrazioni la creano, e un database costruito con
+ * owner-bootstrap.sql — che non la ha — mostra l'ADD. Averla o non averla e'
+ * indifferente per l'app, e nessuna delle due cose deve fermare il cancello.
+ *
+ * Quando la migrazione ci sara', queste righe vanno via da qui: se restano,
+ * coprono.
  */
 export const DERIVA_DA_RISOLVERE = [
   'ALTER TABLE "supabase_configs" DROP COLUMN "supabase_db_password";',
+  'ALTER TABLE "supabase_configs" ADD COLUMN "supabase_db_password" TEXT;',
 ];
 
 /**
@@ -88,7 +122,10 @@ export function istruzioni(script: string): string[] {
     .filter((riga) => !riga.trimStart().startsWith('--'))
     .join('\n');
 
+  // `"public".` lo scrive Prisma solo in alcuni confronti (fra due database
+  // si', fra database e schema no): la stessa istruzione deve risultare uguale.
   return senzaCommenti
+    .replace(/"public"\./g, '')
     .split(';')
     .map((istruzione) => istruzione.replace(/\s+/g, ' ').trim())
     .filter((istruzione) => istruzione.length > 0)
@@ -149,7 +186,7 @@ function diff(origine: { url: string } | { migrazioni: string; shadow: string })
   );
 }
 
-function principale(): void {
+async function principale(): Promise<void> {
   const daMigrazioni = process.argv.includes('--from-migrations');
   // `--fase=pre` solo nel workflow di produzione, prima di `migrate deploy`.
   const fase: Fase = process.argv.includes('--fase=pre') ? 'pre' : 'post';
@@ -160,19 +197,47 @@ function principale(): void {
     process.exit(1);
   }
 
-  const script = daMigrazioni
-    ? diff({ migrazioni: 'prisma/migrations', shadow: databaseUrl })
-    : diff({ url: databaseUrl });
-
-  const origine = daMigrazioni
-    ? 'la catena delle migrazioni'
-    : 'il database indicato da DATABASE_URL';
+  let script: string;
+  let origine: string;
+  let riferimento = 'schema.prisma';
+  if (daMigrazioni) {
+    script = diff({ migrazioni: 'prisma/migrations', shadow: databaseUrl });
+    origine = 'la catena delle migrazioni';
+  } else if (fase === 'pre') {
+    const psqlUrl = process.env.PSQL_URL;
+    if (!psqlUrl) {
+      console.error('Manca PSQL_URL: in fase pre serve per leggere il registro delle migrazioni.');
+      process.exit(1);
+    }
+    const cartelle = cartelleMigrazioni();
+    const registro = await leggiRegistro(psql(psqlUrl));
+    const elenco = migrazioniDiRiferimento(cartelle, registro);
+    script = diffVersoMigrazioni(databaseUrl, elenco, process.env.SHADOW_DATABASE_URL);
+    origine = 'il database indicato da DATABASE_URL';
+    riferimento =
+      !registro || registro.concluse.length === 0
+        ? `le migrazioni fino alla linea di base (${elenco.length}, registro assente o vuoto)`
+        : `le ${elenco.length} migrazioni registrate come applicate`;
+    const inAttesa = cartelle.filter((nome) => !elenco.includes(nome));
+    console.log(`Riferimento: ${riferimento}.`);
+    if (inAttesa.length > 0) {
+      console.log(`Non fanno parte del confronto, perche' in attesa (${inAttesa.length}):`);
+      for (const nome of inAttesa) console.log(`  ${nome}`);
+    }
+  } else {
+    script = diff({ url: databaseUrl });
+    origine = 'il database indicato da DATABASE_URL';
+  }
 
   const inattesa = derivaInattesa(script, fase);
-  const mancante = daMigrazioni ? [] : derivaVolutaMancante(script);
+  // Contro schema.prisma le due chiavi esterne volute compaiono come DROP: se
+  // il DROP non c'e', le chiavi non ci sono. Contro le migrazioni invece ci
+  // sono gia' nel riferimento, e la loro assenza e' un ADD inatteso.
+  const controllaChiavi = !daMigrazioni && riferimento === 'schema.prisma';
+  const mancante = controllaChiavi ? derivaVolutaMancante(script) : [];
 
   if (inattesa.length === 0 && mancante.length === 0) {
-    console.log(`Nessuna deriva inattesa fra ${origine} e schema.prisma.`);
+    console.log(`Nessuna deriva inattesa fra ${origine} e ${riferimento}.`);
     if (!daMigrazioni) {
       console.log('Le due chiavi esterne sul nome del piano sono al loro posto.');
     }
@@ -192,7 +257,7 @@ function principale(): void {
 
   if (inattesa.length > 0) {
     console.error('');
-    console.error(`Deriva inattesa fra ${origine} e schema.prisma:`);
+    console.error(`Deriva inattesa fra ${origine} e ${riferimento}:`);
     for (const riga of inattesa) console.error(`  ${riga}`);
     console.error('');
     console.error('Per ognuna serve una decisione, non un DROP eseguito a mano:');
@@ -209,5 +274,8 @@ function principale(): void {
 
 // Solo quando lo si esegue, non quando il test lo importa.
 if (process.argv[1]?.endsWith('expected-drift.ts')) {
-  principale();
+  principale().catch((errore) => {
+    console.error(errore instanceof Error ? errore.message : errore);
+    process.exit(1);
+  });
 }

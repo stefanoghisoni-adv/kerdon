@@ -8,7 +8,9 @@ import { PLAN_CURRENCIES, PLAN_TIERS } from '../app/lib/billing/plan-tiers';
  * Il listino e' scritto in tre posti, e devono dire la stessa cosa:
  *
  *   - app/lib/billing/plan-tiers.ts, il listino deciso;
- *   - il seed di owner-bootstrap.sql (e di `0_init`, che ne e' la copia);
+ *   - il seed di owner-bootstrap.sql (e di `0_init`, che ne e' stato la copia
+ *     fino alla linea di base: da li' `0_init` e' fermo e lo script va avanti
+ *     con le migrazioni — prisma/migrations.test.ts);
  *   - lo stato in cui le migrazioni portano un database che parte dai nomi di
  *     prima — Free/Pro/Business/Enterprise, oppure Free/Core/Growth/Scale.
  *
