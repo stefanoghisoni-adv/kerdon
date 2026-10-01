@@ -13,10 +13,13 @@
  * Se si', si passa. Se compare una riga in piu' — una colonna sparita, un indice
  * che non c'e', un tipo cambiato — ci si ferma e la si legge.
  *
- * Si usa in due punti:
+ * Si usa in tre punti:
  *   - la CI, contro il database appena costruito (bootstrap e migrazioni);
  *   - il workflow di migrazione, contro il database di produzione, PRIMA di
- *     applicare qualsiasi cosa.
+ *     applicare qualsiasi cosa;
+ *   - prisma/linea-di-base.ts, per cui questo confronto e' la prova che le
+ *     migrazioni di sola struttura ci sono gia' (per questo `diff` e'
+ *     esportata).
  */
 
 import { execFileSync } from 'node:child_process';
@@ -121,7 +124,7 @@ export function derivaVolutaMancante(script: string): string[] {
  * seconda risponde alla domanda "le migrazioni scritte finora arrivano dove
  * dicono di arrivare?" senza bisogno di toccare niente di vero.
  */
-function diff(origine: { url: string } | { migrazioni: string; shadow: string }): string {
+export function diff(origine: { url: string } | { migrazioni: string; shadow: string }): string {
   const argomenti =
     'url' in origine
       ? ['migrate', 'diff', '--from-url', origine.url]
