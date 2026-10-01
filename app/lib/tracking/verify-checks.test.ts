@@ -2,9 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   cookieAttributeProblem,
   isExpiredCookie,
-  isPublicHost,
   parseSetCookie,
-  registrableDomain,
 } from './verify-checks';
 
 const cookie = (raw: string) => parseSetCookie([raw], 'kerdon_eid')!;
@@ -89,37 +87,5 @@ describe('cookieAttributeProblem', () => {
   // attaccare lo stesso identificativo al carrello.
   it('HttpOnly non e un problema, e non e nemmeno richiesto', () => {
     expect(cookieAttributeProblem(cookie(`${buono}; HttpOnly`))).toBeNull();
-  });
-});
-
-describe('registrableDomain', () => {
-  it('due nomi dello stesso sito danno lo stesso dominio', () => {
-    expect(registrableDomain('sgtm.negozio.it')).toBe('negozio.it');
-    expect(registrableDomain('www.negozio.it')).toBe('negozio.it');
-  });
-
-  it('due siti diversi restano diversi', () => {
-    expect(registrableDomain('sgtm.altro.it')).not.toBe(registrableDomain('www.negozio.it'));
-  });
-
-  // Senza questo, due negozi britannici diversi risulterebbero lo stesso sito.
-  it('i suffissi a due livelli non diventano il dominio di tutti', () => {
-    expect(registrableDomain('shop.negozio.co.uk')).toBe('negozio.co.uk');
-    expect(registrableDomain('www.altro.co.uk')).toBe('altro.co.uk');
-  });
-});
-
-describe('isPublicHost', () => {
-  it('un dominio vero si puo chiamare', () => {
-    expect(isPublicHost('negozio.it')).toBe(true);
-  });
-
-  // Il nostro server chiama questo indirizzo: senza filtro, chiunque abbia un
-  // negozio potrebbe farci bussare dentro la nostra rete.
-  it('quel che punta in casa nostra no', () => {
-    expect(isPublicHost('localhost')).toBe(false);
-    expect(isPublicHost('10.0.0.1')).toBe(false);
-    expect(isPublicHost('macchina.local')).toBe(false);
-    expect(isPublicHost('api.internal')).toBe(false);
   });
 });

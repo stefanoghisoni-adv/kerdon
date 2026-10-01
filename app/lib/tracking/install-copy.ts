@@ -115,12 +115,17 @@ const it: InstallCopy = {
     endpoint_is_shopify: "L’indirizzo punta a un dominio myshopify.com, dove non puoi mettere il tuo codice.",
     endpoint_not_first_party:
       "L’indirizzo è su un dominio diverso da quello del negozio: da lì il riconoscimento verrebbe cancellato dai browser.",
+    endpoint_port:
+      "L’indirizzo indica un numero di porta: toglilo, l’endpoint deve rispondere sulla porta standard di https.",
+    endpoint_credentials:
+      "L’indirizzo contiene un nome utente o una password: toglili, le pagine del negozio lo chiamano senza.",
     not_https: "L’indirizzo non è in https.",
     unreachable: "Nessuna risposta. Controlla che sia pubblicato e che l’indirizzo sia esatto.",
     redirected: "L’indirizzo rimanda altrove. Punta direttamente a dove risponde.",
     no_identifier:
       "Con il consenso non ha restituito nessun riconoscimento. Controlla la chiave di invio nel client: va incollata intera, ed è quella che comincia con kin_.",
     endpoint_error: "L’endpoint ha risposto con un errore.",
+    response_too_large: "L’endpoint risponde con troppi dati: deve restituire solo il riconoscimento.",
     no_cookie: "Non scrive il riconoscimento nel browser.",
     cookie_not_secure: "Manca l’attributo Secure: senza, il riconoscimento viaggia in chiaro.",
     cookie_path: "Vale solo per una parte del sito: serve Path=/.",
@@ -198,12 +203,17 @@ const en: InstallCopy = {
     endpoint_is_shopify: "The address points at a myshopify.com domain, where you cannot host your own code.",
     endpoint_not_first_party:
       "The address is on a different domain than your store: browsers would delete the recognition written from there.",
+    endpoint_port:
+      "The address includes a port number: remove it, the endpoint must answer on the standard https port.",
+    endpoint_credentials:
+      "The address contains a username or password: remove them, your store pages call it without.",
     not_https: "The address is not https.",
     unreachable: "No answer. Check that it is published and that the address is exact.",
     redirected: "The address redirects elsewhere. Point it straight at where it answers.",
     no_identifier:
       "With consent it returned no recognition. Check the sending key in the client: paste it whole, and make sure it is the one starting with kin_.",
     endpoint_error: "The endpoint answered with an error.",
+    response_too_large: "The endpoint answers with too much data: it must return only the recognition.",
     no_cookie: "It does not write the recognition into the browser.",
     cookie_not_secure: "The Secure attribute is missing: without it the recognition travels in the clear.",
     cookie_path: "It only applies to part of the site: it needs Path=/.",
