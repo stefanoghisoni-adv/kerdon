@@ -39,6 +39,8 @@ import { withdrawConsentFor } from '~/lib/customers/consent-withdrawal';
 import { isCustomerOptedIn } from '~/lib/stats/customer-consent-stats';
 import { can } from '~/lib/authz/capabilities';
 import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
+import { findPlanByName } from '~/lib/billing/find-plan.server';
+import { loadCustomerQuota } from '~/lib/limits/customer-limit.server';
 import type { ShopifyCustomer } from '~/types/shopify';
 import type { ClaimedWebhookEvent } from './inbox.server';
 import type { WebhookOutcome } from './inbox-model';
@@ -97,12 +99,35 @@ export async function handleCustomerUpsert(
 
   const supabase = createSupabaseClient(shop.supabaseConfig);
   const table = shop.supabaseConfig.tableNameCustomers;
+  const optedIn = isCustomerOptedIn(customer);
+
+  // Il tetto clienti del piano, con la stessa graduatoria della corsa completa
+  // (app/lib/limits/customer-limit.ts): un cliente gia' dentro continua ad
+  // aggiornarsi, uno nuovo entra solo se c'e' posto. Le revoche non passano di
+  // qui: si applicano sempre, anche a tetto pieno.
+  if (optedIn) {
+    const plan = await findPlanByName(shop.currentPlan);
+    const loaded = await loadCustomerQuota(supabase, table, plan?.maxCustomers ?? null);
+    if (!loaded.ok) {
+      console.error('Supabase customer quota read error:', loaded.error);
+      await registraFallimento(shop.id, { message: loaded.error });
+      // Senza sapere chi c'e' gia' non si scrive: si potrebbe superare il
+      // tetto. Quasi sempre e' passeggero, e l'evento resta da lavorare.
+      return 'retry';
+    }
+    if (!loaded.quota.admit({ id: customer.id, createdAt: customer.created_at ?? null })) {
+      console.log(
+        `Tetto clienti del piano raggiunto per ${event.shopDomain}: cliente ${customer.id} non scritto`,
+      );
+      return 'done';
+    }
+  }
 
   // Consenziente: riga completa. Non consenziente: nessuna insert, e la riga
   // che gia' c'era viene svuotata di cio' che identifica la persona — resta
   // con il consenso a false, che e' cio' su cui il proxy decide il 403.
   // No-op su un cliente mai sincronizzato: una update non crea righe.
-  const { error } = isCustomerOptedIn(customer)
+  const { error } = optedIn
     ? await supabase.from(table).upsert(transformCustomer(customer), {
         onConflict: 'shopify_customer_id',
         ignoreDuplicates: false,

@@ -341,3 +341,116 @@ describe('webhook customers/create — una scrittura fallita non si dichiara riu
     expect(evento().status).toBe('completed');
   });
 });
+
+/**
+ * Il tetto clienti del piano vale anche per la strada delle notifiche: la
+ * stessa graduatoria della corsa completa, letta dal database del merchant.
+ */
+describe('webhook customers/create — tetto clienti del piano', () => {
+  beforeEach(() => {
+    store.reset();
+    vi.clearAllMocks();
+    (prisma.shop.findUnique as any).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test-shop.myshopify.com',
+      uninstalledAt: null,
+      authorization: 'ENABLED',
+      trackingAuthorization: 'ENABLED',
+      scopes: 'read_products,read_customers',
+      currentPlan: 'growth',
+      supabaseConfig: { connectionVerifiedAt: new Date(), tableNameCustomers: 'customers' },
+    });
+    (prisma.plan.findFirst as any).mockResolvedValue({
+      planName: 'growth',
+      customersSyncEnabled: true,
+      maxCustomers: 1,
+    });
+    (prisma.syncJob.create as any).mockResolvedValue({});
+  });
+
+  /** Database del merchant con `seed` clienti idonei gia' dentro. */
+  function db(seed: any[] | { error: string }) {
+    const upserted: any[] = [];
+    const updates: any[] = [];
+    (createSupabaseClient as any).mockReturnValue({
+      from: () => ({
+        upsert: async (row: any) => {
+          upserted.push(row);
+          return { error: null };
+        },
+        update: (payload: any) => ({
+          eq: async () => {
+            updates.push(payload);
+            return { error: null, count: 1 };
+          },
+          in: async () => {
+            updates.push(payload);
+            return { error: null, count: 1 };
+          },
+        }),
+        select: () => ({
+          eq: () => ({
+            order: () => ({
+              order: () => ({
+                limit: async (n: number) =>
+                  Array.isArray(seed)
+                    ? { data: seed.slice(0, n), error: null }
+                    : { data: null, error: { message: seed.error } },
+              }),
+            }),
+          }),
+        }),
+      }),
+    });
+    return { upserted, updates };
+  }
+
+  it('tetto pieno: un cliente nuovo non viene scritto, e l evento e concluso', async () => {
+    const merchant = db([{ shopify_customer_id: 10, created_at: '2023-01-01T00:00:00' }]);
+    const res = await action({
+      request: req({
+        id: 77,
+        created_at: '2025-01-01T00:00:00+01:00',
+        email_marketing_consent: { state: 'subscribed' },
+      }),
+    } as any);
+    expect(res.status).toBe(200);
+    expect(merchant.upserted).toHaveLength(0);
+    expect(evento().status).toBe('completed');
+  });
+
+  it('chi e gia dentro il tetto continua ad aggiornarsi', async () => {
+    const merchant = db([{ shopify_customer_id: 10, created_at: '2023-01-01T00:00:00' }]);
+    await action({
+      request: req({
+        id: 10,
+        created_at: '2023-01-01T00:00:00+01:00',
+        email_marketing_consent: { state: 'subscribed' },
+      }),
+    } as any);
+    expect(merchant.upserted).toHaveLength(1);
+    expect(merchant.upserted[0].shopify_customer_id).toBe(10);
+  });
+
+  it('la revoca del consenso si applica anche a tetto pieno', async () => {
+    const merchant = db([{ shopify_customer_id: 10, created_at: '2023-01-01T00:00:00' }]);
+    await action({
+      request: req({ id: 55, email_marketing_consent: { state: 'unsubscribed' } }),
+    } as any);
+    expect(merchant.upserted).toHaveLength(0);
+    expect(merchant.updates).toEqual([{ accepts_marketing: false }]);
+  });
+
+  it('quota non leggibile: niente scrittura, l evento resta da lavorare', async () => {
+    const merchant = db({ error: 'timeout' });
+    await action({
+      request: req({
+        id: 77,
+        created_at: '2025-01-01T00:00:00Z',
+        email_marketing_consent: { state: 'subscribed' },
+      }),
+    } as any);
+    expect(merchant.upserted).toHaveLength(0);
+    expect(evento().status).toBe('queued');
+  });
+});

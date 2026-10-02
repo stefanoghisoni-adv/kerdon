@@ -1730,3 +1730,149 @@ describe('una corsa e un negozio che si sta cancellando', () => {
     expect(upsert).toHaveBeenCalled();
   });
 });
+
+describe('il tetto clienti del piano', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(prisma.syncJob.create).mockResolvedValue({ id: 'job-1' } as any);
+    vi.mocked(prisma.syncJob.update).mockResolvedValue({} as any);
+    vi.mocked(prisma.shop.update).mockResolvedValue({} as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test-shop.myshopify.com',
+      accessToken: 'encrypted-token',
+      authorization: 'ENABLED',
+      currentPlan: 'growth',
+      supabaseConfig: {
+        connectionVerifiedAt: new Date(),
+        tableNameProducts: 'products',
+        tableNameCustomers: 'customers',
+        supabaseUrl: 'https://test.supabase.co',
+        supabasePublicKey: 'k',
+        supabaseServiceRoleKey: 's',
+      },
+    } as any);
+  });
+
+  /**
+   * Il database del merchant: `seed` sono i clienti idonei gia' presenti, come
+   * li restituisce la lettura della quota (i primi N in graduatoria).
+   */
+  function merchantDb(seed: Array<{ shopify_customer_id: number; created_at: string | null }>) {
+    const upserted: any[] = [];
+    const deletes: string[] = [];
+    const seedLimits: number[] = [];
+    vi.mocked(createSupabaseClient).mockReturnValue({
+      from: (table: string) => ({
+        upsert: (rows: any[]) => {
+          upserted.push(...rows);
+          return { error: null };
+        },
+        select: () => ({
+          limit: async () => ({ data: [{ shopify_customer_id: 1 }], error: null }),
+          range: async () => ({ data: [], error: null }),
+          in: async () => ({ data: [], error: null }),
+          eq: () => ({
+            order: () => ({
+              order: () => ({
+                limit: async (n: number) => {
+                  seedLimits.push(n);
+                  return { data: seed.slice(0, n), error: null };
+                },
+              }),
+            }),
+          }),
+        }),
+        update: () => ({
+          in: () => ({ error: null, count: 0 }),
+          eq: () => ({ error: null, count: 0 }),
+        }),
+        delete: () => {
+          deletes.push(table);
+          return {
+            gte: vi.fn().mockReturnValue({ error: null }),
+            lt: vi.fn().mockReturnValue({ error: null }),
+          };
+        },
+      }),
+    } as any);
+    return { upserted, deletes, seedLimits };
+  }
+
+  function shopifyCustomers(customers: any[]) {
+    vi.mocked(ShopifyAPIClient).mockImplementation(() => ({
+      getProducts: vi.fn().mockResolvedValue({ products: [], nextPageInfo: null }),
+      getCustomers: vi.fn().mockResolvedValue({ customers, nextPageInfo: null }),
+    }) as any);
+  }
+
+  const subscribed = (id: number, createdAt: string) => ({
+    id,
+    email: `c${id}@x.it`,
+    created_at: createdAt,
+    email_marketing_consent: { state: 'subscribed' },
+  });
+
+  it('oltre il tetto non scrive: entrano i piu vecchi, i nuovi restano fuori', async () => {
+    vi.mocked(prisma.plan.findFirst).mockResolvedValue({
+      maxProducts: null,
+      maxCustomers: 2,
+      customersSyncEnabled: true,
+    } as any);
+    // Uno e' gia' dentro: occupa un posto dei due.
+    const db = merchantDb([{ shopify_customer_id: 50, created_at: '2023-06-01T00:00:00' }]);
+    shopifyCustomers([
+      subscribed(3, '2024-03-01T00:00:00+01:00'),
+      subscribed(1, '2024-01-01T00:00:00+01:00'),
+      subscribed(2, '2024-02-01T00:00:00+01:00'),
+      { id: 9, email: 'no@x.it', email_marketing_consent: { state: 'unsubscribed' } },
+    ]);
+
+    await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+    const ids = db.upserted.filter((r) => r.shopify_customer_id != null).map((r) => r.shopify_customer_id);
+    expect(ids).toEqual([1]);
+    expect(db.seedLimits).toEqual([2]);
+  });
+
+  it('sceso di piano: nessuna cancellazione, si aggiornano solo i primi N', async () => {
+    vi.mocked(prisma.plan.findFirst).mockResolvedValue({
+      maxProducts: null,
+      maxCustomers: 2,
+      customersSyncEnabled: true,
+    } as any);
+    // Tre gia' presenti dal piano di prima; la lettura ne restituisce i primi 2.
+    const db = merchantDb([
+      { shopify_customer_id: 1, created_at: '2024-01-01T00:00:00' },
+      { shopify_customer_id: 2, created_at: '2024-02-01T00:00:00' },
+      { shopify_customer_id: 3, created_at: '2024-03-01T00:00:00' },
+    ]);
+    shopifyCustomers([
+      subscribed(1, '2024-01-01T00:00:00+01:00'),
+      subscribed(2, '2024-02-01T00:00:00+01:00'),
+      subscribed(3, '2024-03-01T00:00:00+01:00'),
+    ]);
+
+    await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+    const ids = db.upserted.filter((r) => r.shopify_customer_id != null).map((r) => r.shopify_customer_id);
+    expect(ids).toEqual([1, 2]);
+    expect(db.deletes).not.toContain('customers');
+  });
+
+  it('piano senza tetto clienti: nessuna lettura della quota, entrano tutti', async () => {
+    vi.mocked(prisma.plan.findFirst).mockResolvedValue({
+      maxProducts: null,
+      maxCustomers: null,
+      customersSyncEnabled: true,
+    } as any);
+    const db = merchantDb([]);
+    shopifyCustomers([subscribed(1, '2024-01-01T00:00:00Z'), subscribed(2, '2024-02-01T00:00:00Z')]);
+
+    await processInitialBulkSync('shop-1', { updateProgress: vi.fn() } as any);
+
+    const ids = db.upserted.filter((r) => r.shopify_customer_id != null).map((r) => r.shopify_customer_id);
+    expect(ids).toEqual([1, 2]);
+    expect(db.seedLimits).toEqual([]);
+  });
+});
