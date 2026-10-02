@@ -49,7 +49,8 @@
 //      di chi si parla, ed e' la prima cosa che serve per tutto il resto.
 //   3. IL PERMESSO. La policy delle capacita', `ingest_tracking`, che e'
 //      DIVERSA da quella di lettura (vedi `authz/capabilities`).
-//   4. LA QUOTA. In memoria, per negozio e credenziale. Viene prima del corpo
+//   4. LA QUOTA. Prima in memoria, per negozio e credenziale; poi, se quella
+//      passa, il tetto condiviso fra le istanze su Redis. Viene prima del corpo
 //      perche' rifiutare senza leggere costa meno che leggere per rifiutare.
 //   5. IL CORPO, con i suoi due tetti, e sempre prima del parse completo.
 //   6. LA FIRMA e la finestra, sull'impronta del corpo appena letto.
@@ -92,6 +93,7 @@ import {
 } from './ingest-key.server';
 import { bodyDigest, readBoundedJsonBody } from './ingest-body.server';
 import { requestSource, takeIngestSlot } from './ingest-rate-limit.server';
+import { takeSharedIngestSlot } from './ingest-shared-rate-limit.server';
 import { claimIdempotencyKey } from './ingest-replay.server';
 
 /**
@@ -247,14 +249,25 @@ export async function authorizeIngest(
     // sono le sole due prove che dicano qualcosa.
     now: now.getTime(),
   });
-  if (!quota.allowed) {
+  // Poi il tetto condiviso fra le istanze, e solo se il locale ha detto si':
+  // chi e' gia' fermo qui non paga il viaggio fino a Redis. Il locale da solo
+  // valeva N volte con N istanze; questo e' il conto unico (vedi
+  // `ingest-shared-rate-limit`). Se Redis non risponde, lascia passare.
+  const decisione = quota.allowed
+    ? await takeSharedIngestSlot({
+        shopId: shop.shopId,
+        keyId: identificato.keyId,
+        now: now.getTime(),
+      })
+    : quota;
+  if (!decisione.allowed) {
     return refuse(
       log,
       'rate_limited',
       429,
       { error: 'too_many_requests' },
-      { shop: shop.shopId, key: identificato.keyId, limit: quota.bucket },
-      { 'Retry-After': String(quota.retryAfterSeconds) },
+      { shop: shop.shopId, key: identificato.keyId, limit: decisione.bucket },
+      { 'Retry-After': String(decisione.retryAfterSeconds) },
     );
   }
 

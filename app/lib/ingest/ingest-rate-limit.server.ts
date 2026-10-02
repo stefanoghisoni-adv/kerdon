@@ -2,23 +2,19 @@
 //
 // Quanta scrittura un negozio puo' fare, e in che ritmo.
 //
-// PERCHE' PER ISTANZA E NON SU UN ARCHIVIO CONDIVISO, che e' la prima obiezione
-// da fare a un limite di frequenza scritto cosi'. La scelta e' voluta e ha un
-// prezzo dichiarato: con N istanze vive il tetto vero e' N volte quello scritto
-// qui. Il conto si e' fatto lo stesso perche' l'alternativa e' peggiore in
-// entrambe le direzioni. Un contatore condiviso vorrebbe dire un viaggio di
-// rete PRIMA di ogni scrittura, su una rotta chiamata a ogni visita di ogni
-// vetrina — cioe' aggiungere al percorso caldo una dipendenza che, quando non
-// risponde, lascia due sole strade: rifiutare tutto (un guasto dell'archivio
-// spegne il tracciamento di tutti) o lasciar passare tutto (il limite non c'e'
-// proprio nel momento in cui servirebbe).
+// QUESTO E' IL PRIMO DEI DUE TETTI, quello in memoria. Da solo aveva un
+// prezzo dichiarato: con N istanze vive il tetto vero era N volte quello
+// scritto qui. Adesso c'e' anche il secondo, condiviso fra le istanze su Redis
+// (`ingest-shared-rate-limit.server`), e questo resta davanti a lui per due
+// ragioni. Non costa niente — nessun viaggio di rete — e ferma da solo la
+// raffica che arriva a una istanza, che quindi non paga nemmeno la chiamata a
+// Redis. E se Redis non risponde il condiviso lascia passare (rifiutare tutto
+// vorrebbe dire spegnere il tracciamento di tutti per un guasto dell'archivio),
+// e allora questo e' il limite che resta.
 //
-// E soprattutto: questo limite non e' li' per contare al gettone. E' li' per
-// fermare l'abuso — una credenziale in mano a qualcun altro usata per riempire
-// il database di un merchant — e l'abuso si ferma allo stesso modo se il tetto
-// e' trecento o milleduecento. Il giorno in cui servisse un conto esatto, la
-// forma non cambia: `takeToken` e' gia' pura e gia' provata, e cambia solo dove
-// sta il secchiello.
+// Nessuno dei due e' li' per contare al gettone. Sono li' per fermare l'abuso —
+// una credenziale in mano a qualcun altro usata per riempire il database di un
+// merchant. `takeToken` e' pura e gia' provata.
 //
 // L'INDIRIZZO IP NON E' UN'IDENTITA', e in questo file si vede in tre punti.
 // Non autorizza (a dire di chi e' la richiesta e' la credenziale, sempre), non
@@ -79,8 +75,9 @@ export interface RateDecision {
    * Quale secchiello ha detto di no. Va nel log — e' la sola cosa del limite
    * che interessi a chi legge dopo — e distingue "questo negozio sta scrivendo
    * troppo" da "una sola provenienza sta consumando la quota di tutte".
+   * `shared` e' il tetto condiviso fra le istanze (`ingest-shared-rate-limit`).
    */
-  bucket: 'none' | 'credential' | 'source';
+  bucket: 'none' | 'credential' | 'source' | 'shared';
 }
 
 const PASSA: RateDecision = { allowed: true, retryAfterSeconds: 0, bucket: 'none' };
