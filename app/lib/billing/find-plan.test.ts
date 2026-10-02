@@ -150,6 +150,14 @@ describe('findPlanByName', () => {
     expect(prisma.plan.findFirst).not.toHaveBeenCalled();
   });
 
+  it('legge con il client indicato, quando c\'e\' (una transazione in corso)', async () => {
+    const tx = { plan: { findFirst: vi.fn().mockResolvedValue({ planName: 'Scale' }) } };
+
+    expect(await findPlanByName('scale', tx as never)).toEqual({ planName: 'Scale' });
+    expect(tx.plan.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.plan.findFirst).not.toHaveBeenCalled();
+  });
+
   it('nome fuori dal listino → null', async () => {
     (prisma.plan.findFirst as any).mockResolvedValue(null);
     expect(await findPlanByName('inesistente')).toBeNull();

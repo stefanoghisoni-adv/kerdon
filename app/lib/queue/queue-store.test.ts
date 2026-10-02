@@ -230,6 +230,31 @@ describe('l\'accodamento', () => {
     expect(esito).toEqual({ id: 'gia-in-coda', duplicate: true });
   });
 
+  it('dentro una transazione scrive con il suo client, non con quello principale', async () => {
+    // Con una connessione sola nel pool, una scrittura sul client principale
+    // mentre la transazione tiene la connessione resterebbe ad aspettarla fino
+    // allo scadere della transazione stessa.
+    const tx = {
+      syncRequest: {
+        createMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findUnique: vi.fn().mockResolvedValue({ id: 'gia-in-coda' }),
+      },
+    };
+
+    const esito = await enqueueSyncRequest({
+      type: 'initial-bulk-sync',
+      shopId: 'shop-1',
+      dedupKey: 'initial-bulk-sync:shop-1:1',
+      db: tx as never,
+    });
+
+    expect(esito).toEqual({ id: 'gia-in-coda', duplicate: true });
+    expect(tx.syncRequest.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.syncRequest.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.syncRequest.createMany).not.toHaveBeenCalled();
+    expect(prisma.syncRequest.findUnique).not.toHaveBeenCalled();
+  });
+
   it('porta il payload minimo, non il corpo del lavoro', async () => {
     await enqueueSyncRequest({
       type: 'compliance-request',

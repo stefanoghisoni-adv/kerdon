@@ -50,6 +50,9 @@ vi.mock('~/db.server', () => ({
           findUnique: (...a: unknown[]) => findUniqueShop(...a),
           update: (...a: unknown[]) => updateShop(...a),
         },
+        // Il listino, letto dentro la transazione per sapere se il piano nuovo
+        // alza un tetto.
+        plan: { findFirst: (...a: unknown[]) => findPlanMock(...a) },
         billingCharge: { updateMany: (...a: unknown[]) => updateManyCharges(...a) },
       }),
   },
