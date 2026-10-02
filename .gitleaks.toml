@@ -1,0 +1,15 @@
+title = "Kerdon gitleaks configuration"
+
+[allowlist]
+  description = "Allowlist for test fixtures and dummy credentials"
+
+  # Test files with dummy credentials and fixtures
+  paths = [
+    '''e2e/ambiente\.ts''',
+    '''app/lib/queue/.*\.test\.ts''',
+  ]
+
+  # Dummy Shopify tokens in tests (format: shpat_...)
+  regexes = [
+    '''shpat_[0-9a-f]{32}''',  # Test fixture Shopify tokens
+  ]

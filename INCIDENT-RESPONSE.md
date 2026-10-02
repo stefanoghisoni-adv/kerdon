@@ -1,4 +1,4 @@
-# CoreWard — Policy di risposta agli incidenti di sicurezza
+# Kerdon — Policy di risposta agli incidenti di sicurezza
 
 Ultima revisione: 6 agosto 2026 · Prossima revisione: 6 febbraio 2027
 
@@ -6,14 +6,14 @@ Questo documento dice cosa si fa quando qualcosa va storto con i dati. Esiste
 perché senza un piano scritto, nel momento in cui serve si improvvisa — e si
 improvvisa male, di notte, sotto pressione.
 
-È deliberatamente breve. CoreWard è gestito da una persona sola: una procedura
+È deliberatamente breve. Kerdon è gestito da una persona sola: una procedura
 con sei livelli di escalation sarebbe una finzione.
 
 ---
 
 ## 1. Chi risponde
 
-**Responsabile unico**: il titolare di CoreWard, che è anche l'unica persona con
+**Responsabile unico**: il titolare di Kerdon, che è anche l'unica persona con
 accesso ai sistemi di produzione.
 
 **Contatto di sicurezza**: security@kerdon.io — casella da tenere
@@ -41,8 +41,8 @@ dei dati trattati. In concreto, per questa architettura:
 | Vulnerabilità segnalata ma non ancora sfruttata | Media |
 
 I dati dei clienti dei merchant vivono nei progetti Supabase dei merchant, non
-sull'infrastruttura di CoreWard. Un incidente su quei progetti riguarda il
-merchant come titolare: CoreWard collabora ma non è il custode.
+sull'infrastruttura di Kerdon. Un incidente su quei progetti riguarda il
+merchant come titolare: Kerdon collabora ma non è il custode.
 
 ---
 
@@ -98,7 +98,7 @@ corso. Le risposte si scrivono man mano, non a memoria dopo.
 - **A Shopify**: attraverso i canali del Partner Program, per qualunque incidente
   che coinvolga dati protetti dei clienti o le credenziali dell'app.
 - **All'autorità di controllo**: dove previsto, entro 72 ore dalla scoperta. Il
-  ruolo di CoreWard è di responsabile del trattamento, quindi l'obbligo primario
+  ruolo di Kerdon è di responsabile del trattamento, quindi l'obbligo primario
   è verso i titolari — ma la valutazione va fatta caso per caso, non data per
   scontata.
 

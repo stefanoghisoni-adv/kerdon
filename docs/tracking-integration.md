@@ -85,8 +85,8 @@ e quindi a far partire la revoca.
    legge il permesso.
 3. Il container chiama l'app con la chiave di invio, **senza**
    identificativo: non ne ha ancora uno.
-4. L'app ne conia uno e lo restituisce nell'header `X-CoreW-External-Id` (e nel
-   corpo, come `external_id`).
+4. L'app ne conia uno e lo restituisce nell'header `X-Kerdon-External-Id` (e
+   `X-CoreW-External-Id` per compatibilita', e nel corpo come `external_id`).
 5. **L'endpoint del negozio pianta il cookie**, dal proprio dominio, con il
    valore ricevuto. E' un cookie first-party: nessun browser lo tratta da
    estraneo.
@@ -145,7 +145,7 @@ non esiste e non c'e' niente da copiare.
 | Chiamare | `GET <indirizzo dell'API>/rest/v1/tracking_id` |
 | Autenticarsi | la credenziale di **invio**: firmata dove si puo' (vedi sotto), altrimenti presentata intera in `apikey`. Il token di lettura qui non vale |
 | Inoltrare | il permesso del visitatore, e `X-Kerdon-External-Id` con il valore del cookie first-party quando c'e' (solo dal cookie, mai da un parametro che non coincide) |
-| Leggere | l'header `X-CoreW-External-Id` della risposta |
+| Leggere | l'header `X-Kerdon-External-Id` (o `X-CoreW-External-Id`) della risposta |
 | Piantare | il cookie `kerdon_eid` **dal proprio dominio**, con `Secure`, `Path=/`, un `SameSite` dichiarato e una durata |
 | Non fare | niente, quando non arriva nessun segnale di permesso |
 
@@ -382,13 +382,14 @@ CNAME verso infrastruttura terza e rotta same-origin.
 
 ## Il formato dell'identificativo
 
-`corew_` seguito da 32 caratteri casuali. Non contiene altro: non l'ora in cui
+`kerdon_` seguito da 32 caratteri casuali. Non contiene altro: non l'ora in cui
 e' stato coniato, non il negozio, non il dispositivo.
 
-Gli identificativi del formato precedente — `corew_<millisecondi>_<32
-caratteri>` — restano validi e vengono riconosciuti: sono nei browser delle
+Gli identificativi dei formati precedenti — `corew_` seguito da 32 caratteri
+(dal cambio di marchio precedente) e `corew_<millisecondi>_<32 caratteri>` (da
+prima ancora) — restano validi e vengono riconosciuti: sono nei browser delle
 persone, e rifiutarli vorrebbe dire coniarne uno nuovo a chiunque torni. Non se
-ne creano piu' di nuovi in quella forma.
+ne creano piu' di nuovi in quelle forme.
 
 ## Cosa questi asset non fanno
 
@@ -396,7 +397,7 @@ Non parlano con Meta, con Google o con nessun'altra piattaforma. Restituiscono
 un identificativo e piantano un cookie. A chi mandarlo, e se mandarlo, lo decide
 il merchant nei propri tag: quella decisione deve stare dove avviene il fatto.
 Cosa ha risposto il visitatore sulla condivisione con terzi glielo diciamo
-nell'header `X-CoreW-Sale-Of-Data`.
+nell'header `X-Kerdon-Sale-Of-Data` (e `X-CoreW-Sale-Of-Data` per compatibilita').
 
 ## Limiti noti e cose da fare
 

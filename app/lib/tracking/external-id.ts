@@ -222,9 +222,9 @@ export function readExternalId(cookieHeader: string | null | undefined): string 
  *
  * Tre posti, in quest'ordine, e l'ordine e' la parte che conta:
  *
- *  1. l'header `X-CoreW-External-Id` della richiesta. E' la via normale: il
- *     container server-side rimanda il valore letto dal cookie first-party del
- *     negozio;
+ *  1. l'header `X-Kerdon-External-Id` (o `X-CoreW-External-Id`, nome precedente
+ *     ancora accettato) della richiesta. E' la via normale: il container
+ *     server-side rimanda il valore letto dal cookie first-party del negozio;
  *  2. il parametro di query `existing_external_id`. Serve dove l'header non si
  *     puo' aggiungere — certi template di tag non lo permettono, e chi li usa
  *     non li puo' modificare;
