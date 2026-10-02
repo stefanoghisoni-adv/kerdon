@@ -1,4 +1,4 @@
-import type { Plan } from '@prisma/client';
+import type { Plan, Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { isSelectablePlan } from '~/components/Billing/plan-access';
 import { BASE_CURRENCY } from './money';
@@ -26,20 +26,26 @@ import { BASE_PLAN_NAME, resolvePlanName } from './plan-tiers';
  */
 export async function findPlanByName(
   name: string | null | undefined,
+  /**
+   * Il client con cui leggere. Dentro una transazione va passato il suo: con
+   * una connessione sola nel pool, una lettura sul client principale
+   * aspetterebbe che la transazione la liberi, cioe' il suo scadere.
+   */
+  db: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<Plan | null> {
   const trimmed = (name ?? '').trim();
   if (!trimmed) return null;
 
   // findFirst e non findUnique: il confronto insensibile a maiuscole richiede
   // `mode: 'insensitive'`, che Prisma accetta solo sulle query non-unique.
-  const plan = await prisma.plan.findFirst({
+  const plan = await db.plan.findFirst({
     where: { planName: { equals: trimmed, mode: 'insensitive' } },
   });
   if (plan) return plan;
 
   const today = resolvePlanName(trimmed);
   if (today.toLowerCase() === trimmed.toLowerCase()) return null;
-  return prisma.plan.findFirst({
+  return db.plan.findFirst({
     where: { planName: { equals: today, mode: 'insensitive' } },
   });
 }

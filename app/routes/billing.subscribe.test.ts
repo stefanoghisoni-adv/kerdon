@@ -45,7 +45,15 @@ vi.mock('~/db.server', () => ({
     // sapere per quale strada.
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
-        shop: { update: (...a: unknown[]) => updateShop(...a) },
+        shop: {
+          // `applyPlanToShop` legge il piano di prima dentro la transazione:
+          // serve a sapere se il piano nuovo alza un tetto.
+          findUnique: (...a: unknown[]) => findUniqueShop(...a),
+          update: (...a: unknown[]) => updateShop(...a),
+        },
+        // Il listino, letto dentro la transazione per sapere se il piano nuovo
+        // alza un tetto.
+        plan: { findFirst: (...a: unknown[]) => findPlanMock(...a) },
         billingCharge: {
           create: (...a: unknown[]) => createCharge(...a),
           updateMany: (...a: unknown[]) => updateManyCharges(...a),

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const findUniqueShop = vi.fn();
 const updateShop = vi.fn();
+const queueCapCatchUp = vi.fn();
 
 vi.mock('~/db.server', () => ({
   prisma: {
@@ -10,6 +11,12 @@ vi.mock('~/db.server', () => ({
       update: (...a: unknown[]) => updateShop(...a),
     },
   },
+}));
+
+// Il recupero ha le sue prove (cap-catch-up.server.test.ts): qui si guarda solo
+// che il cambio di piano lo chiami, e con che cosa.
+vi.mock('./cap-catch-up.server', () => ({
+  queueCapCatchUp: (...a: unknown[]) => queueCapCatchUp(...a),
 }));
 
 import { applyPlanToShop, appSubscriptionGid } from './apply-plan.server';
@@ -31,7 +38,12 @@ describe('appSubscriptionGid', () => {
 describe('applyPlanToShop', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    findUniqueShop.mockResolvedValue({ authorization: 'ENABLED', trackingAuthorization: 'ENABLED' });
+    findUniqueShop.mockResolvedValue({
+      currentPlan: 'Basic',
+      authorization: 'ENABLED',
+      trackingAuthorization: 'ENABLED',
+    });
+    queueCapCatchUp.mockResolvedValue({ status: 'not_raised', products: false, customers: false });
   });
 
   it('piano a pagamento senza prova: nessun trial e addebito collegato', async () => {
@@ -70,10 +82,14 @@ describe('applyPlanToShop', () => {
     expect((data.trialEndsAt as Date).toISOString()).toBe('2026-08-11T10:00:00.000Z');
   });
 
-  it('piano gratuito: nessun addebito collegato e nessuna lettura dello stato', async () => {
+  it('piano gratuito: nessun addebito collegato e nessuna riattivazione', async () => {
+    findUniqueShop.mockResolvedValue({
+      currentPlan: 'Growth',
+      authorization: 'PENDING',
+      trackingAuthorization: 'PENDING',
+    });
     await applyPlanToShop({ shopId: 'shop-1', planName: 'Basic', chargeId: null, now: NOW });
 
-    expect(findUniqueShop).not.toHaveBeenCalled();
     expect(writtenData()).toMatchObject({ currentPlan: 'Basic', activeChargeId: null });
     expect(writtenData()).not.toHaveProperty('authorization');
   });
@@ -128,5 +144,54 @@ describe('applyPlanToShop', () => {
   it('non tocca lastSyncedPlan: e il confronto che innesca il recupero', async () => {
     await applyPlanToShop({ shopId: 'shop-1', planName: 'Growth', chargeId: '1234', now: NOW });
     expect(writtenData()).not.toHaveProperty('lastSyncedPlan');
+  });
+
+  it('dopo la scrittura chiede il recupero, con il piano di prima e quello nuovo', async () => {
+    await applyPlanToShop({ shopId: 'shop-1', planName: 'Growth', chargeId: '1234', now: NOW });
+
+    expect(queueCapCatchUp).toHaveBeenCalledTimes(1);
+    expect(queueCapCatchUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shopId: 'shop-1',
+        previousPlanName: 'Basic',
+        nextPlanName: 'Growth',
+        now: NOW,
+      }),
+    );
+    // Dopo, non prima: il recupero rilegge il negozio come e' appena diventato.
+    expect(updateShop.mock.invocationCallOrder[0]).toBeLessThan(
+      queueCapCatchUp.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('il recupero legge con lo stesso client della scrittura', async () => {
+    const tx = {
+      shop: {
+        findUnique: (...a: unknown[]) => findUniqueShop(...a),
+        update: (...a: unknown[]) => updateShop(...a),
+      },
+    };
+    await applyPlanToShop({
+      shopId: 'shop-1',
+      planName: 'Growth',
+      chargeId: '1234',
+      now: NOW,
+      tx: tx as never,
+    });
+
+    expect(queueCapCatchUp.mock.calls[0][0].db).toBe(tx);
+  });
+
+  it('anche il piano gratuito passa dal recupero: e il recupero a dire che non sale', async () => {
+    findUniqueShop.mockResolvedValue({
+      currentPlan: 'Growth',
+      authorization: 'ENABLED',
+      trackingAuthorization: 'ENABLED',
+    });
+    await applyPlanToShop({ shopId: 'shop-1', planName: 'Basic', chargeId: null, now: NOW });
+
+    expect(queueCapCatchUp).toHaveBeenCalledWith(
+      expect.objectContaining({ previousPlanName: 'Growth', nextPlanName: 'Basic' }),
+    );
   });
 });

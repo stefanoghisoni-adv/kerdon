@@ -255,6 +255,11 @@ export interface EnqueueOptions {
   dedupKey: string;
   /** Quando l'item diventa prendibile. Di norma subito. */
   notBefore?: Date;
+  /**
+   * Il client con cui scrivere: quello di una transazione in corso, se
+   * l'accodamento deve stare o cadere con essa. Assente = `prisma`.
+   */
+  db?: Prisma.TransactionClient | typeof prisma;
 }
 
 export interface EnqueueResult {
@@ -282,12 +287,13 @@ export async function enqueueSyncRequest(opts: EnqueueOptions): Promise<EnqueueR
     throw new Error(`Tipo di lavoro sconosciuto: ${String(opts.type)}`);
   }
 
+  const db = opts.db ?? prisma;
   const id = randomUUID();
 
   // `skipDuplicates` e non un controllo prima: due richieste arrivate insieme
   // passerebbero tutte e due un controllo, mentre sull'indice unico ne entra
   // una sola. La deduplica e' una proprieta' del database, non una speranza.
-  const esito = await prisma.syncRequest.createMany({
+  const esito = await db.syncRequest.createMany({
     data: [
       {
         id,
@@ -306,7 +312,7 @@ export async function enqueueSyncRequest(opts: EnqueueOptions): Promise<EnqueueR
 
   // Ha vinto l'altra: si restituisce la sua, cosi' chi ha chiamato ha comunque
   // un id da nominare nei log.
-  const esistente = await prisma.syncRequest.findUnique({
+  const esistente = await db.syncRequest.findUnique({
     where: { dedupKey: opts.dedupKey },
     select: { id: true },
   });

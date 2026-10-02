@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { invalidateReadContextForShop } from '~/lib/read-proxy/context.server';
+import { queueCapCatchUp } from './cap-catch-up.server';
 
 // Il passaggio "abbonamento confermato -> piano scritto sullo shop" ha due
 // chiamanti diversi: la callback di ritorno da Shopify e il webhook
@@ -104,16 +105,19 @@ export async function applyPlanToShop(opts: ApplyPlanOptions): Promise<void> {
     data.planConfirmedAt = opts.planConfirmedAt;
   }
 
+  // Lo stato di prima, letto una volta sola per due domande: se riattivare un
+  // negozio sospeso (sotto) e se il piano nuovo alza un tetto (in fondo).
+  const current = await db.shop.findUnique({
+    where: { id: opts.shopId },
+    select: { currentPlan: true, authorization: true, trackingAuthorization: true },
+  });
+
   // Un piano a pagamento appena attivato riapre l'app a chi era finito in
   // PENDING alla fine della prova: e' quello che gli promettiamo a schermo
   // ("Aggiorna il piano per riattivarle"), e senza questa riga il merchant
   // pagherebbe restando sospeso. DISABLED invece non si sblocca mai da solo:
   // e' una decisione dell'owner, non la scadenza di un periodo.
   if (opts.chargeId) {
-    const current = await db.shop.findUnique({
-      where: { id: opts.shopId },
-      select: { authorization: true, trackingAuthorization: true },
-    });
     if (current?.authorization === 'PENDING') data.authorization = 'ENABLED';
     if (current?.trackingAuthorization === 'PENDING') data.trackingAuthorization = 'ENABLED';
   }
@@ -131,4 +135,18 @@ export async function applyPlanToShop(opts: ApplyPlanOptions): Promise<void> {
   // e' di microsecondi, e non lasciar dimenticare l'invalidazione a nessuno dei
   // chiamanti vale piu' di quella finestra.
   invalidateReadContextForShop(opts.shopId);
+
+  // Se il piano nuovo alza il tetto prodotti o clienti, quel che il tetto
+  // vecchio lasciava fuori non arriverebbe con le sync incrementali: si accoda
+  // una passata completa. Qui e non nei chiamanti perche' da qui passano tutti
+  // (callback, webhook, riconciliazione, piano gratuito). Non solleva mai, e
+  // quando il tetto non sale non accoda niente — una notifica ripetuta trova
+  // il piano gia' scritto, quindi prima e dopo coincidono.
+  await queueCapCatchUp({
+    shopId: opts.shopId,
+    previousPlanName: current?.currentPlan ?? null,
+    nextPlanName: opts.planName,
+    db,
+    now,
+  });
 }
