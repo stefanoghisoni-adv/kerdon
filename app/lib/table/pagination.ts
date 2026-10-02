@@ -11,12 +11,12 @@
 /**
  * Quante righe stanno in una pagina.
  *
- * Cinquanta e non venti: l'elenco si scorre per cercare qualcosa, e a venti
- * righe si passava piu' tempo a cambiare pagina che a leggere. E' lo stesso
- * numero per tutte le tabelle dell'app — un elenco che ne mostra venti e uno
- * che ne mostra cinquanta fanno sembrare piu' corto quello che non lo e'.
+ * Venticinque righe: un equilibrio fra lo scroll continuo (troppe poche righe
+ * per pagina) e l'altezza eccessiva (troppe righe). E' lo stesso numero per
+ * tutte le tabelle dell'app — un elenco che ne mostra venti e uno che ne
+ * mostra cinquanta fanno sembrare piu' corto quello che non lo e'.
  */
-export const PER_PAGE = 50;
+export const PER_PAGE = 25;
 
 /** Quante pagine servono per `total` righe. Nessuna riga, nessuna pagina. */
 export function pageCount(total: number, perPage: number): number {
@@ -30,7 +30,7 @@ export function pageSlice<T>(rows: T[], page: number, perPage: number): T[] {
   return rows.slice(start, start + perPage);
 }
 
-/** Da quale riga a quale riga: `1-50`, `51-73`. */
+/** Da quale riga a quale riga: `1-25`, `26-48`. */
 export interface VisibleRange {
   from: number;
   to: number;
@@ -41,13 +41,13 @@ export interface VisibleRange {
  *
  * `total` e' quello che si vede, non quello che si ha: con una ricerca che ne
  * lascia dodici l'etichetta dice `1-12`, perche' e' quello che il merchant ha
- * davanti. Contare sul totale grezzo direbbe `1-50` sopra una tabella di dodici
+ * davanti. Contare sul totale grezzo direbbe `1-25` sopra una tabella di dodici
  * righe.
  *
  * La pagina viene riportata dentro i limiti invece di essere creduta sulla
  * parola: fra il momento in cui una riga sparisce dall'elenco e quello in cui
  * la pagina si arretra passa un render, e in quel render il conto sarebbe
- * `51-50`.
+ * `26-25`.
  *
  * `null` quando non c'e' niente da mostrare: un intervallo `0-0` sotto una
  * tabella vuota e' un numero che non vuol dire niente.

@@ -718,6 +718,9 @@ export default function Customers() {
                             vuole sistemare il profitto di questo cliente, non fare
                             le pulizie di primavera nel catalogo. */}
                         {row.coveredLines < row.totalLines && (
+                          // Flex container con minHeight mantiene l'altezza di riga
+                          // costante quando il link viene sostituito dallo spinner
+                          // (nessuna prop Polaris copre questo caso d'uso)
                           <div style={{ display: 'flex', alignItems: 'center', minHeight: '20px' }}>
                             {clienteInApertura === String(row.customerId) ? (
                               <Spinner size="small" accessibilityLabel={t.customers.fixIssues} />
