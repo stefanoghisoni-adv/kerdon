@@ -12,7 +12,7 @@ unidirezionale, via webhook + polling periodico, con credenziali cifrate.
 - `@shopify/shopify-app-remix` (embedded auth: token exchange)
 - Prisma (PostgreSQL) per i metadata dell'app
 - Coda dei lavori su Postgres (`sync_requests`), con presa atomica
-- Redis/Upstash per la sola cache delle statistiche
+- Redis/Upstash per la cache delle statistiche e, se acceso (`INGEST_SHARED_RATE_LIMIT=true`), per i contatori anti-abuso delle scritture
 - Supabase JS client verso il DB del merchant
 - Crittografia AES-256-GCM per le credenziali
 
@@ -58,7 +58,7 @@ npm run dev             # shopify app dev
 1. **Shopify Partner Account** — app registrata nel Partner Dashboard (API Key + Secret)
 2. **Vercel** (Free) — importa il repository GitHub (framework: Remix)
 3. **Supabase** (Free) — progetto per i metadata dell'app (`DATABASE_URL`, pooler in transaction mode)
-4. **Upstash** (Free) — Redis per la cache delle statistiche (`REDIS_URL` in formato `rediss://`)
+4. **Upstash** (Free) — Redis per la cache delle statistiche (`REDIS_URL` in formato `rediss://`). Il tetto delle scritture condiviso fra le istanze (`INGEST_SHARED_RATE_LIMIT=true`) va acceso solo con un piano a pagamento: un INCR a ogni scrittura esaurirebbe la quota Free
 5. **GitHub** — repository per CI e trigger cron
 
 ### Step 1 — App su Vercel
@@ -75,6 +75,7 @@ npm run dev             # shopify app dev
    SHOPIFY_API_VERSION=2026-07
    DATABASE_URL=postgresql://...   # Supabase Free, pooler transaction mode
    REDIS_URL=rediss://...          # Upstash Free
+   # INGEST_SHARED_RATE_LIMIT=true # solo con Redis a pagamento (vedi sopra)
    ENCRYPTION_SECRET=...           # 64 caratteri hex (vedi sotto)
    SESSION_SECRET=...              # stringa random
    CRON_SECRET=...                 # stringa random (Vercel Cron la usa in automatico)

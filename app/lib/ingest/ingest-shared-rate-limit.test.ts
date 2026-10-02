@@ -6,6 +6,8 @@ import {
   INGEST_BUCKET_REFILL_PER_SEC,
 } from './ingest-model';
 import {
+  redisSharedCounter,
+  sharedIngestCounter,
   sharedIngestKey,
   takeSharedIngestSlot,
   type SharedCounter,
@@ -138,5 +140,52 @@ describe('quando il contatore condiviso non risponde', () => {
 
     expect(esito.allowed).toBe(true);
     expect(Date.now() - iniziato).toBeLessThan(1_000);
+  });
+});
+
+describe('acceso solo su richiesta, e leggero quando e acceso', () => {
+  // Su Upstash Free (~10k comandi al giorno, condivisi con la cache delle
+  // statistiche) un contatore a ogni scrittura esaurirebbe la quota in poche
+  // ore di traffico vero: il limite si spegnerebbe proprio sotto carico, e con
+  // lui la cache. Per questo e' spento finche' non lo si accende.
+  it('spento per default, anche con Redis configurato', () => {
+    expect(sharedIngestCounter({ REDIS_URL: 'rediss://x.upstash.io:6379' })).toBeNull();
+    expect(
+      sharedIngestCounter({ REDIS_URL: 'rediss://x.upstash.io:6379', INGEST_SHARED_RATE_LIMIT: 'false' }),
+    ).toBeNull();
+  });
+
+  it('acceso con il flag, ma solo se Redis c e', () => {
+    expect(
+      sharedIngestCounter({ REDIS_URL: 'rediss://x.upstash.io:6379', INGEST_SHARED_RATE_LIMIT: 'true' }),
+    ).not.toBeNull();
+    expect(sharedIngestCounter({ INGEST_SHARED_RATE_LIMIT: 'true' })).toBeNull();
+  });
+
+  it('INCR sempre, EXPIRE solo alla prima richiesta della finestra, niente MULTI', async () => {
+    const comandi: string[] = [];
+    const valori = new Map<string, number>();
+    const finto = {
+      incr: async (key: string) => {
+        comandi.push(`incr ${key}`);
+        const n = (valori.get(key) ?? 0) + 1;
+        valori.set(key, n);
+        return n;
+      },
+      expire: async (key: string, ttl: number) => {
+        comandi.push(`expire ${key} ${ttl}`);
+        return 1;
+      },
+      multi: () => {
+        throw new Error('MULTI non deve essere usato');
+      },
+    };
+    const counter = redisSharedCounter(async () => finto);
+
+    expect(await counter.increment('k', 20)).toBe(1);
+    expect(await counter.increment('k', 20)).toBe(2);
+    expect(await counter.increment('k', 20)).toBe(3);
+
+    expect(comandi).toEqual(['incr k', 'expire k 20', 'incr k', 'incr k']);
   });
 });

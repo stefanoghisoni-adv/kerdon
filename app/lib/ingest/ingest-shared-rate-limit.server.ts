@@ -14,6 +14,9 @@
 // caso che il locale non vede, cioe' la stessa credenziale distribuita su
 // molte istanze.
 //
+// E' SPENTO PER DEFAULT: si accende con `INGEST_SHARED_RATE_LIMIT=true`, e va
+// acceso solo con un piano Redis a pagamento (vedi `sharedIngestCounter`).
+//
 // SE REDIS NON RISPONDE SI PASSA. L'obiezione che stava scritta nel file del
 // secchiello locale resta vera: un contatore condiviso che, quando cade,
 // rifiuta tutto spegne il tracciamento di tutti i negozi per un guasto che non
@@ -116,26 +119,72 @@ let clientPromise: Promise<Redis> | null = null;
 
 function getClient(): Promise<Redis> {
   if (!clientPromise) {
-    clientPromise = import('ioredis').then(
-      ({ default: RedisClient }) =>
-        new RedisClient({ ...redisConnectionOptions(), maxRetriesPerRequest: 1 }),
-    );
+    const pending = import('ioredis').then(({ default: RedisClient }) => {
+      const client = new RedisClient({ ...redisConnectionOptions(), maxRetriesPerRequest: 1 });
+      // Senza un ascoltatore ioredis scrive ogni errore di connessione come
+      // "Unhandled error event", a raffica. Passa invece dallo stesso avviso
+      // limitato a uno al minuto.
+      client.on('error', (error: Error) => warnUnavailable(Date.now(), error.message));
+      return client;
+    });
+    // Una promessa rifiutata non resta in cache: altrimenti ogni richiesta
+    // successiva ritroverebbe lo stesso errore per tutta la vita dell'istanza.
+    pending.catch(() => {
+      if (clientPromise === pending) clientPromise = null;
+    });
+    clientPromise = pending;
   }
   return clientPromise;
 }
 
-const redisCounter: SharedCounter = {
-  async increment(key, ttlSeconds) {
-    const redis = await getClient();
-    // INCR e EXPIRE nello stesso giro: niente chiave che resta senza scadenza
-    // se il processo muore fra le due.
-    const results = await redis.multi().incr(key).expire(key, ttlSeconds).exec();
-    const [incrError, value] = results?.[0] ?? [new Error('risposta vuota'), null];
-    if (incrError) throw incrError;
-    return Number(value);
-  },
-};
+/** Il minimo di Redis che serve: e' anche cio' che i test sostituiscono. */
+interface CounterCommands {
+  incr(key: string): Promise<number>;
+  expire(key: string, seconds: number): Promise<number>;
+}
+
+/**
+ * Il contatore su Redis, con il minor numero di comandi possibile.
+ *
+ * INCR a ogni richiesta, EXPIRE solo quando il conteggio vale 1, cioe' alla
+ * prima richiesta della finestra. Niente MULTI: su Upstash ogni comando conta
+ * nella quota, e MULTI/EXEC ne aggiungerebbe due a ogni scrittura. Se il
+ * processo muore fra INCR ed EXPIRE la chiave resterebbe senza scadenza; la
+ * chiave porta il numero della finestra, quindi non viene piu' riletta da
+ * nessuno, ed e' un prezzo che si accetta.
+ */
+export function redisSharedCounter(
+  client: () => Promise<CounterCommands>,
+): SharedCounter {
+  return {
+    async increment(key, ttlSeconds) {
+      const redis = await client();
+      const count = Number(await redis.incr(key));
+      if (count === 1) await redis.expire(key, ttlSeconds);
+      return count;
+    },
+  };
+}
+
+const redisCounter = redisSharedCounter(getClient);
+
+/**
+ * Il contatore da usare, o `null` se il limite condiviso e' spento.
+ *
+ * SPENTO PER DEFAULT, e si accende con `INGEST_SHARED_RATE_LIMIT=true`. Il
+ * motivo e' la quota di Redis: su Upstash Free (~10k comandi al giorno,
+ * condivisi con la cache delle statistiche) un INCR a ogni scrittura la
+ * esaurirebbe con poco traffico, e da li' il limite si spegnerebbe proprio
+ * sotto carico e la cache smetterebbe di funzionare. Si accende con un piano
+ * Redis a pagamento; fino ad allora resta il secchiello di ogni istanza.
+ */
+export function sharedIngestCounter(
+  env: Record<string, string | undefined> = process.env,
+): SharedCounter | null {
+  if (env.INGEST_SHARED_RATE_LIMIT !== 'true') return null;
+  return env.REDIS_URL ? redisCounter : null;
+}
 
 function defaultCounter(): SharedCounter | null {
-  return process.env.REDIS_URL ? redisCounter : null;
+  return sharedIngestCounter();
 }

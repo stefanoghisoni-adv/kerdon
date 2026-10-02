@@ -5,7 +5,8 @@
 // QUESTO E' IL PRIMO DEI DUE TETTI, quello in memoria. Da solo aveva un
 // prezzo dichiarato: con N istanze vive il tetto vero era N volte quello
 // scritto qui. Adesso c'e' anche il secondo, condiviso fra le istanze su Redis
-// (`ingest-shared-rate-limit.server`), e questo resta davanti a lui per due
+// (`ingest-shared-rate-limit.server`, spento finche' non si imposta
+// `INGEST_SHARED_RATE_LIMIT=true`), e questo resta davanti a lui per due
 // ragioni. Non costa niente — nessun viaggio di rete — e ferma da solo la
 // raffica che arriva a una istanza, che quindi non paga nemmeno la chiamata a
 // Redis. E se Redis non risponde il condiviso lascia passare (rifiutare tutto

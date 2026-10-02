@@ -289,11 +289,15 @@ un invio ripetuto.
 
 La quota e' per negozio e per credenziale: **300 richieste in un colpo** e
 **40 al secondo** di regime, perche' il traffico di una vetrina arriva a
-raffiche. Quel secchiello vive nella memoria di ogni istanza; sopra c'e' un
-tetto **condiviso fra tutte le istanze** (su Redis): al massimo **700 richieste
-ogni 10 secondi** (la raffica piu' dieci secondi di regime), cosi' il tetto non
-si moltiplica per il numero di istanze. Se Redis non risponde il tetto
-condiviso lascia passare e resta quello di ogni istanza. L'indirizzo IP e' un segnale secondario — impedisce a una sola
+raffiche. Quel secchiello vive nella memoria di ogni istanza. Sopra si puo'
+accendere un tetto **condiviso fra tutte le istanze** (su Redis), con
+`INGEST_SHARED_RATE_LIMIT=true`: al massimo **700 richieste ogni 10 secondi**
+(la raffica piu' dieci secondi di regime), cosi' il tetto non si moltiplica per
+il numero di istanze. **E' spento per default**: costa un comando Redis a ogni
+scrittura, e su Upstash Free (~10k comandi al giorno, condivisi con la cache
+delle statistiche) esaurirebbe la quota con poco traffico. Va acceso solo con un
+piano Redis a pagamento. Se Redis non risponde il tetto condiviso lascia passare
+e resta quello di ogni istanza. L'indirizzo IP e' un segnale secondario — impedisce a una sola
 provenienza di consumare la quota di tutte — e **non e' mai un'identita'**: non
 autorizza niente e non compare in nessun log.
 
@@ -489,11 +493,20 @@ nell'header `X-Kerdon-Sale-Of-Data` (e `X-CoreW-Sale-Of-Data` per compatibilita'
   negozio).** Il tetto per credenziale non ferma chi bussa senza credenziale. Va
   creata a mano, nel progetto Vercel, una regola del Firewall:
   *Firewall → Configure → New Rule*, nome `ingest-coarse-rate-limit`;
-  **If** `Request Path` *starts with* `/rest/v1/`; **Then** `Rate Limit`,
-  algoritmo *Fixed Window*, finestra **60 secondi**, **10000 richieste**, chiave
-  **IP**, azione **Too Many Requests (429)**. Il numero e' largo apposta: tutte
-  le visite di un negozio arrivano dall'indirizzo del suo container, e un tetto
-  stretto per IP fermerebbe un negozio vero prima di un abuso.
+  **If** `Request Path` *equals* uno fra `/rest/v1/tracking_id`,
+  `/rest/v1/users` e `/rest/v1/identify` (le tre rotte di scrittura; il proxy di
+  lettura resta fuori, perche' lo chiamano i tag a ogni ricerca); **Then**
+  `Rate Limit`, algoritmo *Fixed Window*, finestra **60 secondi**, **10000
+  richieste**, chiave **IP**, azione **Too Many Requests (429)**. Il numero e'
+  largo apposta: tutte le visite di un negozio arrivano dall'indirizzo del suo
+  container, e un tetto stretto per IP fermerebbe un negozio vero prima di un
+  abuso.
+  **Attenzione agli IP condivisi.** I container ospitati (Stape e simili, ma
+  anche Cloud Run) fanno uscire il traffico di molti negozi, di clienti diversi,
+  dagli stessi indirizzi: per il Firewall sono un IP solo. La regola e' un
+  freno grossolano contro chi martella senza credenziale, non un limite per
+  negozio; se i log del Firewall mostrano 429 su IP di un provider di container,
+  la soglia va alzata, non abbassata.
 - **Righe collegate a un cliente: nessuna potatura automatica.**
   `pruneAnonymousUsers` cancella solo le righe con `shopify_customer_id` vuoto,
   90 giorni dopo l'ultimo avvistamento. Una riga collegata a un cliente resta
