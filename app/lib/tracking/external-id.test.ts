@@ -97,9 +97,22 @@ describe('newExternalId', () => {
         performance.now = originalPerfNow;
       }
 
-      // Cambia navigator.userAgent (se newExternalId lo leggesse, l'ID cambierebbe)
-      const id3 = newExternalId();
-      expect(id3).toBe(id1);
+      // Cambia navigator.userAgent (se newExternalId lo leggesse mescolando un UA
+      // costante, l'ID sarebbe sempre lo stesso anche qui)
+      const originalUA = navigator.userAgent;
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 (Test) AppleWebKit/537.36',
+        configurable: true,
+      });
+      try {
+        const id3 = newExternalId();
+        expect(id3).toBe(id1);
+      } finally {
+        Object.defineProperty(navigator, 'userAgent', {
+          value: originalUA,
+          configurable: true,
+        });
+      }
 
     } finally {
       crypto.getRandomValues = originalGetRandomValues;

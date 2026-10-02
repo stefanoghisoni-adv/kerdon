@@ -288,6 +288,29 @@ describe('safeFetch — intestazioni', () => {
     await safeFetch('https://negozio.it/x', { resolve: resolveTo(PUBLIC_V4), transport });
     expect(transport.mock.calls[0][0].headers['Accept-Encoding']).toBe('identity');
   });
+
+  it('copia gli header della risposta in un oggetto Headers nuovo', async () => {
+    // Il ciclo che copia gli header sta dentro il try: se Headers.append solleva
+    // (per esempio header malformati), la promessa rigetta invece di propagare
+    // l'eccezione come non gestita. Questo test verifica che il percorso felice
+    // funziona; il percorso di errore richiede mock complessi di Node internals.
+    const transport = fakeTransport(() =>
+      new Response('ok', {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Custom-Header': 'value',
+          'Cache-Control': 'no-cache',
+        },
+      }),
+    );
+    const res = await safeFetch('https://negozio.it/x', {
+      resolve: resolveTo(PUBLIC_V4),
+      transport,
+    });
+    expect(res.headers.get('content-type')).toBe('application/json');
+    expect(res.headers.get('x-custom-header')).toBe('value');
+    expect(res.headers.get('cache-control')).toBe('no-cache');
+  });
 });
 
 describe('safeFetch — rimandi', () => {

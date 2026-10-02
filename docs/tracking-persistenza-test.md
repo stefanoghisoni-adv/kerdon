@@ -263,8 +263,7 @@ Questi comportamenti sono **attesi**, non bug:
 
 - **Safari può accorciare la durata** dei cookie first-party scritti via JavaScript,
   anche se il dominio è quello del negozio. ITP (Intelligent Tracking Prevention)
-  si applica ai cookie piantati da script, e può ridurli a 7 giorni se rileva
-  pattern di tracciamento cross-site.
+  limita a 7 giorni ogni cookie scritto da JavaScript, senza condizioni.
   
 - **Firefox con Enhanced Tracking Protection (strict)** può isolare i cookie per
   sito, anche se first-party, quando l'infrastruttura che li scrive è

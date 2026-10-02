@@ -79,6 +79,19 @@ describe('validaEccezioni', () => {
     ]);
   });
 
+  it('rifiuta date impossibili (giorno o mese fuori intervallo)', () => {
+    const errori = validaEccezioni([
+      eccezione('a', [TURBO], '2026-13-01'), // mese 13
+      eccezione('b', [TURBO], '2026-02-30'), // 30 febbraio
+      eccezione('c', [TURBO], '2026-04-31'), // 31 aprile
+    ]);
+    expect(errori).toEqual([
+      "a: 'scadenza' 2026-13-01 non e' una data valida",
+      "b: 'scadenza' 2026-02-30 non e' una data valida",
+      "c: 'scadenza' 2026-04-31 non e' una data valida",
+    ]);
+  });
+
   it('segnala lo stesso pacchetto ripetuto', () => {
     const errori = validaEccezioni([eccezione('x', [TURBO]), eccezione('x', [TURBO])]);
     expect(errori).toEqual(['x: pacchetto ripetuto']);

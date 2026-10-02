@@ -105,7 +105,10 @@ describe('receiveShopifyWebhook con waitUntil', () => {
     await settleWebhookWork();
   });
 
-  it('passa la promise a waitUntil quando fornita', async () => {
+  it('passa la promise a waitUntil quando fornita, e quella promise non rigetta mai', async () => {
+    // Forziamo processWebhookEvent a rigettare
+    processWebhookEvent.mockRejectedValueOnce(new Error('Processing failed'));
+
     const mockWaitUntil = vi.fn();
 
     const response = await receiveShopifyWebhook(req('products/update', 'delivery-3'), 'products/update', {
@@ -118,13 +121,24 @@ describe('receiveShopifyWebhook con waitUntil', () => {
     const arg = mockWaitUntil.mock.calls[0][0];
     expect(arg).toBeInstanceOf(Promise);
 
-    // Verifica che sia la promise con .catch (quella che gestisce gli errori)
-    // Non e' la promise raw di processWebhookEvent, ma quella wrappata dal .catch
+    // Verifica che processWebhookEvent sia stata chiamata
     expect(processWebhookEvent).toHaveBeenCalledTimes(1);
-    const rawPromise = processWebhookEvent.mock.results[0].value;
-    expect(arg).not.toBe(rawPromise); // diversa: arg e' rawPromise.catch(...)
+
+    // CLAIM: la promise passata a waitUntil non deve mai rigettare, nemmeno se
+    // processWebhookEvent fallisce. Il .catch() in receive.server.ts swallows
+    // l'errore e logga, ma non re-throw. Testiamo che arg risolva sempre.
+    let rejected = false;
+    const settled = arg.then(
+      () => 'resolved',
+      () => {
+        rejected = true;
+        return 'rejected';
+      },
+    );
 
     await settleWebhookWork();
+    expect(await settled).toBe('resolved');
+    expect(rejected).toBe(false);
   });
 
   it('avvia il processore anche senza waitUntil', async () => {

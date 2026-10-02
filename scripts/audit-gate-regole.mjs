@@ -60,6 +60,13 @@ export function validaEccezioni(eccezioni) {
     if (!testoPieno(e?.owner)) errori.push(`${chi}: manca 'owner'`);
     if (typeof e?.scadenza !== "string" || !FORMATO_DATA.test(e.scadenza)) {
       errori.push(`${chi}: 'scadenza' deve essere una data AAAA-MM-GG`);
+    } else {
+      // Controlla che la data sia valida (non 2026-13-45): il costruttore
+      // restituisce Invalid Date o una data diversa se i valori sono impossibili.
+      const parsed = new Date(e.scadenza + 'T00:00:00Z');
+      if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== e.scadenza) {
+        errori.push(`${chi}: 'scadenza' ${e.scadenza} non e' una data valida`);
+      }
     }
   });
   return errori;

@@ -193,13 +193,13 @@ export const httpsTransport: Transport = ({ url, addresses, headers, signal }) =
         signal,
       },
       (res) => {
-        const out = new Headers();
-        for (const [name, value] of Object.entries(res.headers)) {
-          if (value === undefined) continue;
-          for (const v of Array.isArray(value) ? value : [value]) out.append(name, v);
-        }
         const status = res.statusCode ?? 0;
         try {
+          const out = new Headers();
+          for (const [name, value] of Object.entries(res.headers)) {
+            if (value === undefined) continue;
+            for (const v of Array.isArray(value) ? value : [value]) out.append(name, v);
+          }
           const body = NULL_BODY_STATUSES.has(status)
             ? null
             : (Readable.toWeb(res) as unknown as ReadableStream<Uint8Array>);
