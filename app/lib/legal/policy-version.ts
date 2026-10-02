@@ -51,8 +51,8 @@ function inizioDelGiorno(data: string): Date {
  *
  *  - il negozio ha gia' detto "Ho capito" per questa versione o per una piu'
  *    recente;
- *  - il negozio e' stato installato (o reinstallato) dal giorno della
- *    versione in poi: l'informativa che ha accettato installando e' gia'
+ *  - il negozio e' stato installato per la prima volta (nuova riga) dal giorno
+ *    della versione in poi: l'informativa che ha accettato installando e' gia'
  *    questa, e annunciargli una "modifica" sarebbe falso — anche se una volta,
  *    prima di disinstallare, aveva visto l'avviso di una versione vecchia.
  *

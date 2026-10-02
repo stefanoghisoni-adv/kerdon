@@ -295,7 +295,7 @@ Partner Dashboard → App **Kerdon** → **Distribution** → **Manage listing**
 
 | Tipo | URL | Codice HTTP | Note |
 |------|-----|-------------|------|
-| **Privacy Policy (EN)** | `https://api.kerdon.io/policies/privacy-policy` | 200 ✅ | Versione 1.4, include dati logistici ordini |
+| **Privacy Policy (EN)** | `https://api.kerdon.io/policies/privacy-policy` | 200 ✅ | Versione 1.5, include dati logistici ordini |
 | **Privacy Policy (IT)** | `https://kerdon.io/policies/privacy-policy` | 307 → redirect | Rewrite verso `api.kerdon.io` (fonte: `project_kerdon_sito_e_pagine_info.md`) |
 | **Support** | `support@kerdon.io` | Email valida | Indicata in privacy policy riga 8 e DPA |
 | **Terms of Service** | Nessuno | 410 su `/policies/terms` | Non richiesto da Shopify, l'app non ne ha |

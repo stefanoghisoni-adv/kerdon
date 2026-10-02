@@ -30,6 +30,15 @@ describe('la versione corrente', () => {
   it('coincide con la testata di privacy-policy.html', () => {
     const html = readFileSync(join(process.cwd(), 'docs', 'legal', 'privacy-policy.html'), 'utf-8');
     expect(/Version\s*<b>([^<]+)<\/b>/.exec(html)?.[1].trim()).toBe(PRIVACY_POLICY_VERSION);
+    // Controlla anche la data nell'HTML.
+    const [g, m, a] = PRIVACY_POLICY_DATE.split('-').map(Number);
+    const attesoHtml = new Date(Date.UTC(a, m - 1, g)).toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    expect(/Last updated\s*<b>([^<]+)<\/b>/.exec(html)?.[1].trim()).toBe(attesoHtml);
   });
 
   it('il DPA porta la stessa data', () => {
@@ -44,6 +53,17 @@ describe('la versione corrente', () => {
     const dpa = readFileSync(join(process.cwd(), 'docs', 'legal', 'dpa.md'), 'utf-8');
     expect(dpa).toContain(`Last updated: ${atteso}`);
     expect(dpa).toContain(`Version: ${PRIVACY_POLICY_VERSION}`);
+
+    // Controlla anche il DPA italiano.
+    const attesoIt = new Date(Date.UTC(a, m - 1, g)).toLocaleDateString('it-IT', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    const dpaIt = readFileSync(join(process.cwd(), 'docs', 'legal', 'dpa.it.md'), 'utf-8');
+    expect(dpaIt).toContain(`Ultimo aggiornamento: ${attesoIt}`);
+    expect(dpaIt).toContain(`Versione: ${PRIVACY_POLICY_VERSION}`);
   });
 });
 
@@ -83,9 +103,10 @@ describe('avvisoInformativaDovuto', () => {
     expect(avvisoInformativaDovuto({ seenVersion: null, installedAt: dopo })).toBe(false);
   });
 
-  it('una reinstallazione dopo la versione vale come averla accettata', () => {
-    // Visto 1.4, poi reinstallato dopo la 1.5: reinstallando ha accettato la
-    // 1.5, e il vecchio "Ho capito" non lo rende un negozio da avvisare.
+  it('una nuova installazione dopo la versione vale come averla accettata', () => {
+    // Visto 1.4, poi disinstallato e reinstallato dopo la 1.5 con una NUOVA riga
+    // (installedAt = reinstall date): installando ha accettato la 1.5, e il
+    // vecchio "Ho capito" non lo rende un negozio da avvisare.
     expect(avvisoInformativaDovuto({ seenVersion: '1.4', installedAt: dopo })).toBe(false);
   });
 
