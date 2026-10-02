@@ -318,6 +318,26 @@ export const INGEST_BUCKET_CAPACITY = 300;
 export const INGEST_BUCKET_REFILL_PER_SEC = 40;
 
 /**
+ * Il tetto CONDIVISO fra tutte le istanze, per negozio e credenziale.
+ *
+ * Il secchiello qui sopra vive nella memoria di una istanza: con N istanze vive
+ * il tetto vero e' N volte quello scritto, ed e' il difetto che l'audit ha
+ * segnalato. Il contatore condiviso (su Redis) lo chiude: una finestra fissa di
+ * dieci secondi, e dentro la finestra al massimo cio' che il secchiello di UNA
+ * istanza lascerebbe passare — la raffica intera piu' dieci secondi di regime.
+ * Non e' un secondo numero da tarare: discende dai due di sopra, e cambia con
+ * loro.
+ *
+ * Finestra fissa e non secchiello perche' costa un solo INCR atomico per
+ * richiesta, senza leggere-e-riscrivere uno stato. Il prezzo noto e' il bordo:
+ * a cavallo di due finestre possono passare fino a due tetti in poco tempo, che
+ * per un limite contro l'abuso non cambia niente.
+ */
+export const INGEST_SHARED_WINDOW_SECONDS = 10;
+export const INGEST_SHARED_LIMIT_PER_WINDOW =
+  INGEST_BUCKET_CAPACITY + INGEST_BUCKET_REFILL_PER_SEC * INGEST_SHARED_WINDOW_SECONDS;
+
+/**
  * Il secchiello per singola provenienza, dentro quello del negozio.
  *
  * L'INDIRIZZO IP E' UN SEGNALE, NON UN'IDENTITA', e la differenza si vede

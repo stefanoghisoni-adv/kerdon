@@ -145,6 +145,45 @@ export function postgrestFilterValue(raw: string | null | undefined): string | n
   return value === '' ? null : value;
 }
 
+/**
+ * La colonna che dice per quale negozio un identificativo e' stato emesso.
+ *
+ * LA FORMA NON BASTA PIU'. Un valore `kerdon_` piu' 32 caratteri lo puo'
+ * scrivere chiunque — nel cookie del proprio browser, in un attributo del
+ * carrello, nel corpo di una chiamata — e fino a qui bastava avere la forma
+ * giusta per entrare: una riga nuova, un legame con un cliente vero. Adesso un
+ * identificativo che arriva da fuori vale solo se c'e' la sua riga in `users`
+ * e quella riga e' di questo negozio. La riga nasce in un posto solo, quando
+ * `/rest/v1/tracking_id` conia l'identificativo: e' quella la prova che
+ * l'abbiamo emesso noi, per questo negozio.
+ *
+ * PERCHE' UNA COLONNA E NON SOLO LA RIGA. Ogni negozio ha il suo database, e
+ * nella maggior parte dei casi la sola esistenza della riga gia' basterebbe a
+ * tenere fuori gli identificativi di un altro negozio. Ma niente impedisce a
+ * un merchant di collegare due negozi allo stesso progetto: li' la riga c'e'
+ * per tutti e due, e serve dire di chi e'.
+ *
+ * Il valore e' l'identificativo interno del negozio nell'app: opaco, stabile,
+ * nessun dato personale. Le righe scritte prima di questa colonna l'hanno
+ * vuota, e la prima verifica le reclama per il negozio che le presenta (vedi
+ * `touchIssuedUser`): e' la migrazione, e non chiede niente a nessuno.
+ */
+export const ISSUED_FOR_SHOP_COLUMN = 'issued_for_shop';
+
+/**
+ * Il filtro "di questo negozio, o di prima della verifica", in sintassi
+ * PostgREST.
+ *
+ * Si compone in una stringa, e una stringa con dentro una virgola o un punto
+ * diventerebbe un filtro diverso. I nostri identificativi di negozio non ne
+ * hanno, ma il controllo sta qui comunque: `null` vuol dire "non si interroga",
+ * e chi chiama lo tratta come un identificativo sconosciuto.
+ */
+export function issuedForShopFilter(shopId: string): string | null {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(shopId)) return null;
+  return `${ISSUED_FOR_SHOP_COLUMN}.is.null,${ISSUED_FOR_SHOP_COLUMN}.eq.${shopId}`;
+}
+
 /** Cio' che si sa di un browser nel momento in cui lo si vede. */
 export interface SeenVisitor {
   externalId: string;

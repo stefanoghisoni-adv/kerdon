@@ -32,11 +32,20 @@ vi.mock('~/lib/ingest/ingest-guard.server', () => ({
   },
 }));
 
-const recordUserSeen = vi.fn(
-  async (_supabase: unknown, _visitor: Record<string, unknown>) => 'written' as const,
+// Questa rotta non crea righe: verifica e aggiorna quella che `tracking_id` ha
+// fatto nascere. Di default l'identificativo e' stato emesso per questo negozio.
+const touchIssuedUser = vi.fn(
+  async (
+    _supabase: unknown,
+    _visitor: Record<string, unknown>,
+  ): Promise<'issued' | 'unknown' | 'unverified'> => 'issued',
 );
+// Tenuta qui solo per provare che non viene MAI chiamata: e' l'upsert, e un
+// upsert su un valore inventato lo farebbe diventare vero.
+const recordUserSeen = vi.fn(async () => 'written' as const);
 const forgetVisitor = vi.fn(async () => 'forgotten' as const);
 vi.mock('~/lib/tracking/users.server', () => ({
+  touchIssuedUser,
   recordUserSeen,
   forgetVisitor,
   supabaseFromReadContext: () => ({}) as never,
@@ -97,6 +106,7 @@ function write(body: unknown, headers: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  touchIssuedUser.mockResolvedValue('issued');
   ingestRefusal = null;
   // Di default: consenso completo.
   evaluateVisitorConsent.mockReturnValue({
@@ -112,6 +122,34 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// P2-01. La forma giusta non basta piu': prima questa rotta faceva un upsert, e
+// un identificativo inventato — o di un altro negozio — diventava una riga.
+describe('/rest/v1/users — solo identificativi emessi per questo negozio', () => {
+  it('verifica con il negozio della credenziale, e non crea niente', async () => {
+    const res = await write({ external_id: VISITATORE, browser: 'Safari' });
+
+    expect(res.status).toBe(200);
+    expect(touchIssuedUser.mock.calls[0][1]).toMatchObject({
+      externalId: VISITATORE,
+      shopId: ingestCtx.shopId,
+    });
+    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(finish).toHaveBeenLastCalledWith('issued');
+  });
+
+  it('un identificativo che non abbiamo emesso: 200, nessuna riga, e il log lo dice', async () => {
+    // 2xx come ogni richiesta ben formata: un tag che riceve un errore lo
+    // segnala al merchant, e non c'e' niente che lui possa correggere.
+    touchIssuedUser.mockResolvedValue('unknown');
+
+    const res = await write({ external_id: VISITATORE });
+
+    expect(res.status).toBe(200);
+    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(finish).toHaveBeenLastCalledWith('unknown_external_id');
+  });
+});
+
 describe('/rest/v1/users — la forma che il template sa mandare', () => {
   it('accetta l oggetto piatto del Writer', async () => {
     const res = await write({
@@ -121,7 +159,7 @@ describe('/rest/v1/users — la forma che il template sa mandare', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(recordUserSeen.mock.calls[0][1]).toMatchObject({
+    expect(touchIssuedUser.mock.calls[0][1]).toMatchObject({
       externalId: VISITATORE,
       browser: 'Safari',
       deviceType: 'mobile',
@@ -149,7 +187,7 @@ describe('/rest/v1/users — il corpo non viene inoltrato', () => {
     expect(res.status).toBe(200);
     // In silenzio e non con un errore: un container che manda una chiave in
     // piu' non sta sbagliando niente di suo, e un errore lo fermerebbe.
-    const visitor = recordUserSeen.mock.calls[0][1];
+    const visitor = touchIssuedUser.mock.calls[0][1];
     expect(visitor).not.toHaveProperty('colonna_inventata');
     expect(visitor).not.toHaveProperty('note');
   });
@@ -159,7 +197,7 @@ describe('/rest/v1/users — il corpo non viene inoltrato', () => {
     // acquisti di chiunque.
     await write({ external_id: VISITATORE, shopify_customer_id: 999, merged_into: VISITATORE });
 
-    const visitor = recordUserSeen.mock.calls[0][1];
+    const visitor = touchIssuedUser.mock.calls[0][1];
     expect(visitor).not.toHaveProperty('shopify_customer_id');
     expect(visitor).not.toHaveProperty('merged_into');
   });
@@ -167,7 +205,7 @@ describe('/rest/v1/users — il corpo non viene inoltrato', () => {
   it('i timestamp li mette il codice, non chi chiama', async () => {
     await write({ external_id: VISITATORE, last_seen_at: '1999-01-01', first_seen_at: '1999-01-01' });
 
-    const visitor = recordUserSeen.mock.calls[0][1];
+    const visitor = touchIssuedUser.mock.calls[0][1];
     expect(visitor).not.toHaveProperty('last_seen_at');
     expect(visitor).not.toHaveProperty('first_seen_at');
   });
@@ -175,7 +213,7 @@ describe('/rest/v1/users — il corpo non viene inoltrato', () => {
   it('nelle etichette ci vanno solo stringhe', async () => {
     await write({ external_id: VISITATORE, browser: { nome: 'Safari' }, device_type: 42 });
 
-    expect(recordUserSeen.mock.calls[0][1]).toMatchObject({ browser: null, deviceType: null });
+    expect(touchIssuedUser.mock.calls[0][1]).toMatchObject({ browser: null, deviceType: null });
   });
 });
 
@@ -185,27 +223,27 @@ describe('/rest/v1/users — cosa non entra', () => {
     // visita successiva.
     const res = await write({ external_id: 'inventato' });
     expect(res.status).toBe(400);
-    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(touchIssuedUser).not.toHaveBeenCalled();
   });
 
   it('senza credenziale non si scrive nel database di nessuno', async () => {
     ingestRefusal = { status: 401, error: 'unauthorized' };
     const res = await write({ external_id: VISITATORE });
     expect(res.status).toBe(401);
-    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(touchIssuedUser).not.toHaveBeenCalled();
   });
 
   it('negozio che non puo scrivere: non si scrive', async () => {
     ingestRefusal = { status: 403, error: 'forbidden' };
     const res = await write({ external_id: VISITATORE });
     expect(res.status).toBe(403);
-    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(touchIssuedUser).not.toHaveBeenCalled();
   });
 
   it('corpo illeggibile: 400', async () => {
     const res = await write('{non json');
     expect(res.status).toBe(400);
-    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(touchIssuedUser).not.toHaveBeenCalled();
   });
 });
 
@@ -221,7 +259,7 @@ describe('/rest/v1/users — consenso del visitatore', () => {
     const res = await write({ external_id: VISITATORE, browser: 'Safari' });
 
     expect(res.status).toBe(200);
-    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(touchIssuedUser).not.toHaveBeenCalled();
   });
 
   it('consenso parziale (solo analytics): non basta', async () => {
@@ -234,7 +272,7 @@ describe('/rest/v1/users — consenso del visitatore', () => {
 
     const res = await write({ external_id: VISITATORE });
 
-    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(touchIssuedUser).not.toHaveBeenCalled();
   });
 
   it('consenso parziale (solo marketing): non basta', async () => {
@@ -247,7 +285,7 @@ describe('/rest/v1/users — consenso del visitatore', () => {
 
     const res = await write({ external_id: VISITATORE });
 
-    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(touchIssuedUser).not.toHaveBeenCalled();
   });
 
   it('entrambe concesse: riga scritta', async () => {
@@ -261,7 +299,7 @@ describe('/rest/v1/users — consenso del visitatore', () => {
     const res = await write({ external_id: VISITATORE, browser: 'Safari' });
 
     expect(res.status).toBe(200);
-    expect(recordUserSeen).toHaveBeenCalledTimes(1);
+    expect(touchIssuedUser).toHaveBeenCalledTimes(1);
   });
 
   it('revoca esplicita: riga cancellata, nessuna scrittura', async () => {
@@ -275,7 +313,7 @@ describe('/rest/v1/users — consenso del visitatore', () => {
     const res = await write({ external_id: VISITATORE });
 
     expect(res.status).toBe(200);
-    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(touchIssuedUser).not.toHaveBeenCalled();
     expect(revokeTrackingIdentity).toHaveBeenCalledWith({
       shopId: 's1',
       externalId: VISITATORE,

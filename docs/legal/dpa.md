@@ -152,7 +152,7 @@ obligations.
 |---|---|---|
 | Vercel Inc. | Running the application | Data in transit during processing |
 | Supabase Inc. | The application's database | Configuration, encrypted credentials, records |
-| Upstash Inc. | Cache of the counts shown in the app | Internal store identifier and aggregate counts only |
+| Upstash Inc. | Cache of the counts shown in the app and, when enabled, anti-abuse counters for writes | Internal store identifier, public ingest-key identifier, time window and aggregate counts only; no personal data |
 
 The catalogue and customer database does **not** appear in this table: it is held
 by the merchant, who has a direct contractual relationship with its own provider.

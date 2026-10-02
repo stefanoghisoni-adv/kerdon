@@ -167,24 +167,32 @@ Poi si aggiornano le tabelle qui sopra e la data in cima.
 ## Secret scanning e push protection
 
 GitHub offre **secret scanning** (rilevamento di credenziali nei commit) e **push
-protection** (blocco di push contenenti segreti). Per repository **privati**,
-queste funzionalita' richiedono **GitHub Advanced Security**, disponibile con:
+protection** (blocco di push contenenti segreti). Dal 2025 per i repository
+**privati** queste funzionalita' fanno parte di **GitHub Secret Protection**, un
+prodotto venduto a parte (per utente attivo che fa commit), acquistabile su
+piani **Team** ed Enterprise:
 
-- GitHub Enterprise Cloud (piano a pagamento per organizzazioni)
-- GitHub Enterprise Server
-- Non e' disponibile su repository privati in piani Free o Team
+- non e' disponibile su repository privati di un account o piano Free;
+- non serve piu' l'intera GitHub Advanced Security: Secret Protection si compra
+  da sola, separata da Code Security.
 
-Per repository **pubblici**, secret scanning e' sempre gratuito.
+Per repository **pubblici**, secret scanning e push protection sono gratuiti.
 
 **Come abilitarle** (se il piano lo consente):
 
-1. Andare su Settings → Security → Code security
-2. Abilitare **Secret scanning** (rileva credenziali gia' nel repository)
-3. Abilitare **Push protection** (blocca push contenenti nuove credenziali)
+1. Andare su Settings → **Advanced Security**
+2. Attivare **Secret Protection** (secret scanning sulle credenziali gia' nel
+   repository)
+3. Attivare **Push protection** (blocca push contenenti nuove credenziali)
 
 Per il repository Kerdon (privato su piano Free), queste protezioni non sono
-disponibili. La scansione avviene manualmente con `gitleaks` (vedi `.gitleaks.toml`
-per le allowlist di test fixtures).
+disponibili. La scansione avviene manualmente con `gitleaks` (vedi
+`.gitleaks.toml`, che estende le regole di default e allowlista solo i file di
+test con credenziali finte):
+
+```
+gitleaks git --redact -c .gitleaks.toml .
+```
 
 ## Segnalare una vulnerabilita'
 

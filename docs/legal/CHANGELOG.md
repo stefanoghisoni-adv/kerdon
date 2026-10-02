@@ -3,6 +3,16 @@
 Una voce per ogni cambio di informativa, DPA o dichiarazione dei dati cliente
 protetti. La data e la versione sono quelle scritte in testa ai documenti.
 
+## Precisazione senza cambio di versione — 02-10-2026
+
+- Upstash (informativa EN/IT/HTML, DPA EN/IT): oltre alla cache dei conteggi,
+  ospita, se attivati (`INGEST_SHARED_RATE_LIMIT=true`), i contatori anti-abuso
+  delle scritture: identificativo interno del negozio, identificativo pubblico
+  della chiave di invio, numero della finestra di 10 secondi. Nessun dato
+  personale, stesso fornitore e stessa regione. Trattata come precisazione e
+  non come modifica sostanziale: niente nuova versione né annuncio in app. Se
+  il titolare la ritiene sostanziale, va portata in una 1.5.
+
 ## Informativa 1.4 — 27-09-2026 (DPA dello stesso giorno)
 
 **Modifica sostanziale: va annunciata dentro l'app prima che valga** (sezione 10

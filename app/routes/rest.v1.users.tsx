@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { isExternalId } from '~/lib/tracking/external-id';
-import { recordUserSeen, supabaseFromReadContext } from '~/lib/tracking/users.server';
+import { supabaseFromReadContext, touchIssuedUser } from '~/lib/tracking/users.server';
 import { revokeTrackingIdentity } from '~/lib/consent/revoke-tracking.server';
 import { evaluateVisitorConsent } from '~/lib/tracking/consent';
 import { provisionUsersTable } from '~/lib/supabase/ensure-users-table.server';
@@ -60,6 +60,8 @@ export async function action({ request }: ActionFunctionArgs) {
   // L'unico campo senza il quale non c'e' niente da scrivere, ed e' anche
   // l'unico controllato: dev'essere un identificativo coniato da noi. Uno
   // inventato creerebbe una riga che nessuna visita successiva ritrovera' mai.
+  // Qui si guarda la forma; che sia davvero nostro, per questo negozio, lo dice
+  // `touchIssuedUser` piu' sotto.
   if (!isExternalId(externalId)) {
     finish('bad_external_id', 400);
     return json({ error: 'bad_request' }, 400);
@@ -96,10 +98,16 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ ok: true }, 200);
   }
 
-  const outcome = await recordUserSeen(
+  // NON CREA LA RIGA: la aggiorna, se c'e' ed e' di questo negozio. Prima qui
+  // c'era un upsert, e la sola forma giusta bastava a far nascere una riga —
+  // anche per un valore inventato, o emesso per un altro negozio. La riga di un
+  // browser nasce in un posto solo, quando `/rest/v1/tracking_id` conia il suo
+  // identificativo; questa rotta ci aggiunge le etichette.
+  const verifica = await touchIssuedUser(
     supabase,
     {
       externalId,
+      shopId: ctx.shopId,
       // Le due sole altre colonne che accettiamo da fuori. Sono etichette per
       // segmentare, non condizioni per riconoscere qualcuno: nel peggiore dei
       // casi un valore sbagliato qui sporca un segmento, non l'identita'.
@@ -113,7 +121,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // riceve un errore lo segnala al merchant, e una scrittura non riuscita sul
   // suo database non e' qualcosa che lui possa risolvere. L'esito vero sta nel
   // log.
-  finish(outcome);
+  finish(verifica === 'unknown' ? 'unknown_external_id' : verifica);
   return json({ ok: true }, 200);
 }
 

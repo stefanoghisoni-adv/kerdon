@@ -234,6 +234,15 @@ describe('tabella users', () => {
     expect(sql).not.toMatch(/DROP\s+(TABLE|COLUMN)/i);
   });
 
+  it('issued_for_shop c e, ed e vuota sulle righe di prima', () => {
+    // Dice per quale negozio l identificativo e' stato emesso. Nessun DEFAULT e
+    // nessun NOT NULL: le righe gia' scritte non lo sanno, e la prima verifica
+    // le reclama.
+    expect(sql).toContain('issued_for_shop TEXT');
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS issued_for_shop TEXT');
+    expect(sql).not.toMatch(/issued_for_shop TEXT (NOT NULL|DEFAULT)/);
+  });
+
   it('un indice per i browser di un cliente e uno per la potatura', () => {
     expect(sql).toContain('idx_users_customer');
     expect(sql).toContain('idx_users_anonymous_last_seen');

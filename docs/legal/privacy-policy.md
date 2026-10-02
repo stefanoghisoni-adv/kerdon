@@ -136,7 +136,7 @@ The app notices in two ways: when a read of your database fails, and through a p
 | Shopify | Source of store, product, customer and order data; billing | As per Shopify's own terms |
 | Supabase | Your database, and our own database | European Union |
 | Vercel | Application hosting | European Union |
-| Upstash | Cache of the counts the app shows you — products ready, customers, and the like | European Union |
+| Upstash | Cache of the counts the app shows you — products ready, customers, and the like — and, when enabled, anti-abuse counters for writes (internal store identifier, key identifier, time window; no personal data) | European Union |
 
 **We do not sell data.** Not yours, not your customers', to anyone, in any form. And we do not use it to train models.
 

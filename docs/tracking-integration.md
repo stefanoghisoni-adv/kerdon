@@ -111,8 +111,79 @@ identificativo revocato**: se ne arriva uno — da header, parametro o cookie �
 conia uno nuovo.
 
 Se il valore che arriva non ha la forma giusta viene trattato come assente e se
-ne conia uno buono: e' anche cio' che impedisce a qualcuno di farsi assegnare un
-identificativo scelto da lui.
+ne conia uno buono. **La forma pero' non basta**: vedi la sezione qui sotto.
+
+## Un identificativo vale solo se l'abbiamo emesso noi, per quel negozio
+
+Il cookie `kerdon_eid` sta nel browser, e nel browser chiunque puo' scriverci un
+valore con la forma giusta: inventato, o copiato da un altro negozio. Lo stesso
+vale per l'attributo del carrello e per il corpo di `users` e `identify`. Fino a
+qui la sola forma bastava per entrare: una riga nuova in `users`, un legame con
+un cliente vero.
+
+Adesso un identificativo che arriva da fuori vale solo se **la sua riga c'e' in
+`users` ed e' di quel negozio**. La riga nasce in un posto solo, quando
+`/rest/v1/tracking_id` conia l'identificativo, e porta la colonna
+`issued_for_shop` con il negozio per cui e' stato emesso. Quella riga e' la
+prova.
+
+| Da dove arriva | Cosa succede se non e' stato emesso per quel negozio |
+|---|---|
+| `GET /rest/v1/tracking_id` (header, parametro o cookie) | non si riusa: se ne conia uno nuovo, con la sua riga e il suo cookie |
+| `POST /rest/v1/users` | 200, nessuna riga creata; nel log `unknown_external_id` |
+| `POST /rest/v1/identify` | 200 con `outcome: "unknown_external_id"`; nessun cliente cercato, nessun legame |
+| attributo del carrello `_kerdon_external_id` (webhook ordini) | nessun legame e nessuna riga; l'ordine si scrive comunque |
+| proxy di lettura `/rest/v1/{tabella}` | nessun cambiamento: rimanda l'header e non scrive niente (vedi "Limiti noti") |
+
+### Perche' la verifica e non la firma
+
+Le strade erano due: cercare l'identificativo fra quelli emessi per quel negozio,
+oppure aggiungergli una firma del server (un HMAC dentro il valore o accanto).
+Si e' scelta la verifica, per quattro ragioni.
+
+- **Niente da cambiare fuori dal server.** Una firma cambia il formato del
+  cookie: il template sGTM, i tag che copiano `kerdon_eid` nel carrello e
+  l'attributo stesso dovrebbero portarsi dietro un pezzo in piu' (o un secondo
+  cookie e un secondo attributo). La verifica non cambia niente di quello che e'
+  gia' piantato.
+- **Gli identificativi gia' emessi restano validi.** Ognuno ha gia' la sua riga
+  in `users`, scritta quando e' stato coniato. Una firma invece non c'e' sui
+  cookie di oggi, e durante il passaggio si sarebbe dovuto accettare quelli
+  senza firma, cioe' tenere aperta proprio la porta da chiudere.
+- **Lo stesso costo di prima.** La verifica e' un UPDATE filtrato per
+  identificativo e negozio che restituisce le righe toccate: una riga toccata
+  vuol dire "e' nostro", zero righe vuol dire "no". Prima, a ogni chiamata, si
+  scriveva comunque il passaggio; adesso quella stessa scrittura fa anche da
+  verifica, in un viaggio solo.
+- **Nessuna credenziale nuova.** L'identificativo resta un valore opaco e
+  casuale (`kerdon_` piu' 32 caratteri), senza user agent ne' istante; chi lo
+  possiede non ottiene niente di piu' di prima. La firma avrebbe introdotto un
+  segreto da ruotare.
+
+### La migrazione, e chi condivide un progetto
+
+Le righe scritte prima di questa versione non dicono per quale negozio sono
+state emesse (`issued_for_shop` vuota). La prima verifica le reclama per il
+negozio che le presenta, e da li' un altro negozio non le puo' piu' usare. Se il
+database del merchant non ha ancora la colonna (lo schema si aggiorna con la
+versione 17), si ricade sulla sola esistenza della riga: con un database per
+negozio e' gia' la stessa garanzia.
+
+La colonna conta davvero solo dove due negozi sono collegati **allo stesso
+progetto Supabase**: li' la riga c'e' per tutti e due, ed e' la colonna a dire
+di chi e'.
+
+### Quando il database non risponde
+
+Su `tracking_id` si restituisce lo stesso il valore che il browser ha, **senza
+scriverlo** e senza un nuovo cookie (nel log `unverified`). Coniarne uno nuovo a
+ogni guasto sovrascriverebbe il cookie di chiunque passi in quel momento. Le
+rotte che legano (`identify`, ordini) invece non legano finche' la verifica non
+riesce.
+
+Il fatto che sia "emesso per il negozio" non dice che il browser sia di chi lo
+presenta: un identificativo copiato da un browser all'altro dello stesso negozio
+resta valido. Non e' una credenziale e non deve diventarlo.
 
 ## Il legame con l'ordine
 
@@ -218,7 +289,15 @@ un invio ripetuto.
 
 La quota e' per negozio e per credenziale: **300 richieste in un colpo** e
 **40 al secondo** di regime, perche' il traffico di una vetrina arriva a
-raffiche. L'indirizzo IP e' un segnale secondario — impedisce a una sola
+raffiche. Quel secchiello vive nella memoria di ogni istanza. Sopra si puo'
+accendere un tetto **condiviso fra tutte le istanze** (su Redis), con
+`INGEST_SHARED_RATE_LIMIT=true`: al massimo **700 richieste ogni 10 secondi**
+(la raffica piu' dieci secondi di regime), cosi' il tetto non si moltiplica per
+il numero di istanze. **E' spento per default**: costa un comando Redis a ogni
+scrittura, e su Upstash Free (~10k comandi al giorno, condivisi con la cache
+delle statistiche) esaurirebbe la quota con poco traffico. Va acceso solo con un
+piano Redis a pagamento. Se Redis non risponde il tetto condiviso lascia passare
+e resta quello di ogni istanza. L'indirizzo IP e' un segnale secondario — impedisce a una sola
 provenienza di consumare la quota di tutte — e **non e' mai un'identita'**: non
 autorizza niente e non compare in nessun log.
 
@@ -283,7 +362,8 @@ tabella `users` del database del merchant: l'identificativo stesso, l'etichetta
 del browser e quella del tipo di dispositivo quando il container le trasmette, il
 primo e l'ultimo avvistamento, l'eventuale collegamento al cliente Shopify e il
 rimando all'identificativo piu' vecchio quando due browser risultano della stessa
-persona.
+persona, e il negozio per cui l'identificativo e' stato emesso
+(`issued_for_shop`, l'identificativo interno del negozio nell'app).
 
 Non e' un dato anonimo, e non va chiamato cosi': l'identificativo vive nel browser
 di una persona e, dal collegamento in poi, dice quali dispositivi usa e quando li
@@ -401,6 +481,32 @@ nell'header `X-Kerdon-Sale-Of-Data` (e `X-CoreW-Sale-Of-Data` per compatibilita'
 
 ## Limiti noti e cose da fare
 
+- **Il proxy di lettura conia ancora un identificativo, ma non lo scrive.**
+  `/rest/v1/{tabella}` rimanda nell'header il valore che arriva o ne conia uno,
+  senza nessuna riga in `users`. Un identificativo nato li' non vale per
+  `users`, `identify` e ordini finche' non passa da `tracking_id`, che lo
+  sostituisce con uno emesso. Da fare: togliere il conio dal proxy.
+- **Un browser anonimo assente da oltre 90 giorni riceve un identificativo
+  nuovo.** La potatura toglie la sua riga, e senza la riga il valore del cookie
+  non e' piu' riconosciuto come emesso.
+- **Protezione davanti all'app (da fare a mano da chi gestisce Kerdon, non dal
+  negozio).** Il tetto per credenziale non ferma chi bussa senza credenziale. Va
+  creata a mano, nel progetto Vercel, una regola del Firewall:
+  *Firewall → Configure → New Rule*, nome `ingest-coarse-rate-limit`;
+  **If** `Request Path` *equals* uno fra `/rest/v1/tracking_id`,
+  `/rest/v1/users` e `/rest/v1/identify` (le tre rotte di scrittura; il proxy di
+  lettura resta fuori, perche' lo chiamano i tag a ogni ricerca); **Then**
+  `Rate Limit`, algoritmo *Fixed Window*, finestra **60 secondi**, **10000
+  richieste**, chiave **IP**, azione **Too Many Requests (429)**. Il numero e'
+  largo apposta: tutte le visite di un negozio arrivano dall'indirizzo del suo
+  container, e un tetto stretto per IP fermerebbe un negozio vero prima di un
+  abuso.
+  **Attenzione agli IP condivisi.** I container ospitati (Stape e simili, ma
+  anche Cloud Run) fanno uscire il traffico di molti negozi, di clienti diversi,
+  dagli stessi indirizzi: per il Firewall sono un IP solo. La regola e' un
+  freno grossolano contro chi martella senza credenziale, non un limite per
+  negozio; se i log del Firewall mostrano 429 su IP di un provider di container,
+  la soglia va alzata, non abbassata.
 - **Righe collegate a un cliente: nessuna potatura automatica.**
   `pruneAnonymousUsers` cancella solo le righe con `shopify_customer_id` vuoto,
   90 giorni dopo l'ultimo avvistamento. Una riga collegata a un cliente resta

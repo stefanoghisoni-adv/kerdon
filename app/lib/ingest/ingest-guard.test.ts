@@ -91,6 +91,18 @@ vi.mock('~/lib/billing/find-plan.server', () => ({
   }),
 }));
 
+// Il tetto condiviso fra le istanze ha i suoi test accanto al proprio file:
+// qui interessa che il cancello lo chieda DOPO il secchiello locale, e che un no
+// diventi un 429 con il suo nome nel log. Di default lascia passare.
+const takeSharedIngestSlot = vi.fn(async (..._args: unknown[]) => ({
+  allowed: true,
+  retryAfterSeconds: 0,
+  bucket: 'none' as 'none' | 'shared',
+}));
+vi.mock('./ingest-shared-rate-limit.server', () => ({
+  takeSharedIngestSlot: (...args: unknown[]) => takeSharedIngestSlot(...args),
+}));
+
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { hashReadProxyToken } from '~/lib/read-proxy/token.server';
@@ -477,6 +489,46 @@ describe('la quota', () => {
     if (oltre.ok) return;
     expect(oltre.response.status).toBe(429);
     expect(Number(oltre.response.headers.get('Retry-After'))).toBeGreaterThanOrEqual(1);
+  });
+
+  it('il tetto condiviso fra le istanze si chiede per negozio e credenziale', async () => {
+    const shopId = negozioSano();
+    const credenziale = credenzialeViva(shopId);
+
+    const esito = await chiedi(firmata(credenziale));
+
+    expect(esito.ok).toBe(true);
+    expect(takeSharedIngestSlot).toHaveBeenCalledWith(
+      expect.objectContaining({ shopId, keyId: credenziale.keyId, now: ORA.getTime() }),
+    );
+  });
+
+  it('il tetto condiviso superato: 429 con Retry-After, e il log dice quale', async () => {
+    // Il difetto dell'audit: con N istanze il tetto vero era N volte quello
+    // scritto. Il no del contatore condiviso vale quanto quello locale.
+    const shopId = negozioSano();
+    const credenziale = credenzialeViva(shopId);
+    takeSharedIngestSlot.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 7, bucket: 'shared' });
+
+    const esito = await chiedi(firmata(credenziale));
+
+    expect(esito.ok).toBe(false);
+    if (esito.ok) return;
+    expect(esito.response.status).toBe(429);
+    expect(esito.response.headers.get('Retry-After')).toBe('7');
+    expect(logged.join('\n')).toContain('"limit":"shared"');
+  });
+
+  it('chi il secchiello locale ha gia fermato non paga il viaggio fino a Redis', async () => {
+    const shopId = negozioSano();
+    const credenziale = credenzialeViva(shopId);
+    for (let i = 0; i < INGEST_BUCKET_CAPACITY; i++) await chiedi(firmata(credenziale));
+    takeSharedIngestSlot.mockClear();
+
+    const oltre = await chiedi(firmata(credenziale));
+
+    expect(oltre.ok).toBe(false);
+    expect(takeSharedIngestSlot).not.toHaveBeenCalled();
   });
 });
 
