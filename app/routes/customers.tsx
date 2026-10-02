@@ -589,7 +589,7 @@ export default function Customers() {
             <div className="stable-columns stable-columns--customers">
             <IndexTable
               resourceName={t.customers.resource}
-              itemCount={visibleRows.length}
+              itemCount={PER_PAGE}
               selectable={false}
               loading={periodLoading}
               headings={[
@@ -604,105 +604,155 @@ export default function Customers() {
                 { title: t.customers.columns.status },
                 { title: t.customers.columns.actions },
               ]}
-              emptyState={
-                <Box padding="600">
-                  <Text as="p" tone="subdued" alignment="center">
-                    {noSearchResults
-                      ? t.customers.searchNoResults(query.trim())
-                      : t.customers.empty}
-                  </Text>
-                </Box>
-              }
             >
-              {visibleRows.map((row, index) => (
-                <IndexTable.Row id={String(row.customerId)} key={row.customerId} position={index}>
-                  <IndexTable.Cell>
-                    {/* Il nome porta alla scheda del cliente. _top e non
-                        _blank: dentro l'admin il target nuovo aprirebbe una
-                        finestra spoglia, senza il menu di Shopify intorno. */}
-                    <Link
-                      url={`${adminBase}/customers/${row.customerId}`}
-                      target="_top"
-                      removeUnderline
-                    >
-                      <Text as="span" fontWeight="semibold">
-                        {[row.firstName, row.lastName].filter(Boolean).join(' ') ||
-                          t.customers.noName}
-                      </Text>
-                    </Link>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    {/* Il profitto di questa riga e' completo, oppure e'
-                        calcolato su prodotti di cui non si conosce il costo.
-                        L'icona lo dice senza occupare una riga di testo sotto
-                        ogni nome: la spiegazione sta nel tooltip, per chi la
-                        cerca. */}
-                    <InlineStack align="center">
-                      <Tooltip
-                        content={
-                          row.coveredLines < row.totalLines
-                            ? t.customers.warning(row.totalLines - row.coveredLines)
-                            : t.customers.allGood
-                        }
-                      >
-                        <Icon
-                          source={
-                            row.coveredLines < row.totalLines ? AlertCircleIcon : CheckCircleIcon
-                          }
-                          tone={row.coveredLines < row.totalLines ? 'warning' : 'success'}
-                        />
-                      </Tooltip>
-                    </InlineStack>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>{row.orders}</IndexTable.Cell>
-                  <IndexTable.Cell>
-                    {row.averageOrderProfit == null
-                      ? '—'
-                      : formatMoney(row.averageOrderProfit, currency, locale)}
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    <InlineStack gap="200" blockAlign="center" wrap={false}>
-                      <Text as="span">{formatMoney(row.lifetimeProfit, currency, locale)}</Text>
-                      {/* La variazione sul periodo precedente, in grigio quando
-                          non c'e' nulla da confrontare: verde e rosso dicono da
-                          soli in che direzione si sta andando. */}
-                      {row.profitChange != null && (
-                        <Text
-                          as="span"
-                          variant="bodySm"
-                          tone={row.profitChange >= 0 ? 'success' : 'critical'}
-                        >
-                          {row.profitChange >= 0 ? '+' : ''}
-                          {row.profitChange}%
+              {visibleRows.length === 0 ? (
+                <>
+                  {/* Messaggio quando non ci sono dati, centrato sotto le intestazioni */}
+                  <IndexTable.Row id="empty-state" position={0} disabled>
+                    <IndexTable.Cell colSpan={7}>
+                      <Box paddingBlock="400">
+                        <Text as="p" tone="subdued" alignment="center">
+                          {noSearchResults
+                            ? t.customers.searchNoResults(query.trim())
+                            : t.customers.empty}
                         </Text>
-                      )}
-                    </InlineStack>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    <Badge tone={row.synced ? 'success' : 'warning'}>
-                      {row.synced ? t.customers.synced : t.customers.notSynced}
-                    </Badge>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    {/* Solo dove c'e' qualcosa da risolvere. Un comando su ogni
-                        riga, anche su quelle a posto, si smette di leggere: e'
-                        la riga senza comando che deve saltare all'occhio. */}
-                    {/* Il cliente viaggia nell'indirizzo: di la' l'elenco si
-                        restringe ai soli prodotti che compaiono nei SUOI
-                        ordini. Chi preme "Risolvi problemi" da questa riga
-                        vuole sistemare il profitto di questo cliente, non fare
-                        le pulizie di primavera nel catalogo. */}
-                    {row.coveredLines < row.totalLines &&
-                      (clienteInApertura === String(row.customerId) ? (
-                        <Spinner size="small" accessibilityLabel={t.customers.fixIssues} />
-                      ) : (
-                        <Link url={`/products/issues?customer=${row.customerId}`} removeUnderline>
-                          {t.customers.fixIssues}
-                        </Link>
+                      </Box>
+                    </IndexTable.Cell>
+                  </IndexTable.Row>
+                  {/* Righe di riempimento per mantenere l'altezza costante */}
+                  {Array.from({ length: PER_PAGE - 1 }, (_, i) => (
+                    <IndexTable.Row
+                      key={`filler-${i}`}
+                      id={`filler-${i}`}
+                      position={i + 1}
+                      disabled
+                    >
+                      {Array.from({ length: 7 }, (_, colIdx) => (
+                        <IndexTable.Cell key={colIdx}>
+                          <span aria-hidden="true" style={{ visibility: 'hidden' }}>
+                            &nbsp;
+                          </span>
+                        </IndexTable.Cell>
                       ))}
-                  </IndexTable.Cell>
-                </IndexTable.Row>
-              ))}
+                    </IndexTable.Row>
+                  ))}
+                </>
+              ) : (
+                <>
+                  {visibleRows.map((row, index) => (
+                    <IndexTable.Row id={String(row.customerId)} key={row.customerId} position={index}>
+                      <IndexTable.Cell>
+                        {/* Il nome porta alla scheda del cliente. _top e non
+                            _blank: dentro l'admin il target nuovo aprirebbe una
+                            finestra spoglia, senza il menu di Shopify intorno. */}
+                        <Link
+                          url={`${adminBase}/customers/${row.customerId}`}
+                          target="_top"
+                          removeUnderline
+                        >
+                          <Text as="span" fontWeight="semibold">
+                            {[row.firstName, row.lastName].filter(Boolean).join(' ') ||
+                              t.customers.noName}
+                          </Text>
+                        </Link>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        {/* Il profitto di questa riga e' completo, oppure e'
+                            calcolato su prodotti di cui non si conosce il costo.
+                            L'icona lo dice senza occupare una riga di testo sotto
+                            ogni nome: la spiegazione sta nel tooltip, per chi la
+                            cerca. */}
+                        <InlineStack align="center">
+                          <Tooltip
+                            content={
+                              row.coveredLines < row.totalLines
+                                ? t.customers.warning(row.totalLines - row.coveredLines)
+                                : t.customers.allGood
+                            }
+                          >
+                            <Icon
+                              source={
+                                row.coveredLines < row.totalLines ? AlertCircleIcon : CheckCircleIcon
+                              }
+                              tone={row.coveredLines < row.totalLines ? 'warning' : 'success'}
+                            />
+                          </Tooltip>
+                        </InlineStack>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>{row.orders}</IndexTable.Cell>
+                      <IndexTable.Cell>
+                        {row.averageOrderProfit == null
+                          ? '—'
+                          : formatMoney(row.averageOrderProfit, currency, locale)}
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <InlineStack gap="200" blockAlign="center" wrap={false}>
+                          <Text as="span">{formatMoney(row.lifetimeProfit, currency, locale)}</Text>
+                          {/* La variazione sul periodo precedente, in grigio quando
+                              non c'e' nulla da confrontare: verde e rosso dicono da
+                              soli in che direzione si sta andando. */}
+                          {row.profitChange != null && (
+                            <Text
+                              as="span"
+                              variant="bodySm"
+                              tone={row.profitChange >= 0 ? 'success' : 'critical'}
+                            >
+                              {row.profitChange >= 0 ? '+' : ''}
+                              {row.profitChange}%
+                            </Text>
+                          )}
+                        </InlineStack>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <Badge tone={row.synced ? 'success' : 'warning'}>
+                          {row.synced ? t.customers.synced : t.customers.notSynced}
+                        </Badge>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        {/* Solo dove c'e' qualcosa da risolvere. Un comando su ogni
+                            riga, anche su quelle a posto, si smette di leggere: e'
+                            la riga senza comando che deve saltare all'occhio. */}
+                        {/* Il cliente viaggia nell'indirizzo: di la' l'elenco si
+                            restringe ai soli prodotti che compaiono nei SUOI
+                            ordini. Chi preme "Risolvi problemi" da questa riga
+                            vuole sistemare il profitto di questo cliente, non fare
+                            le pulizie di primavera nel catalogo. */}
+                        {row.coveredLines < row.totalLines && (
+                          // Flex container con minHeight mantiene l'altezza di riga
+                          // costante quando il link viene sostituito dallo spinner
+                          // (nessuna prop Polaris copre questo caso d'uso)
+                          <div style={{ display: 'flex', alignItems: 'center', minHeight: '20px' }}>
+                            {clienteInApertura === String(row.customerId) ? (
+                              <Spinner size="small" accessibilityLabel={t.customers.fixIssues} />
+                            ) : (
+                              <Link url={`/products/issues?customer=${row.customerId}`} removeUnderline>
+                                {t.customers.fixIssues}
+                              </Link>
+                            )}
+                          </div>
+                        )}
+                      </IndexTable.Cell>
+                    </IndexTable.Row>
+                  ))}
+                  {/* Righe di riempimento per mantenere l'altezza costante */}
+                  {Array.from({ length: Math.max(0, PER_PAGE - visibleRows.length) }, (_, i) => (
+                    <IndexTable.Row
+                      key={`filler-${i}`}
+                      id={`filler-${i}`}
+                      position={visibleRows.length + i}
+                      disabled
+                    >
+                      {Array.from({ length: 7 }, (_, colIdx) => (
+                        <IndexTable.Cell key={colIdx}>
+                          <span aria-hidden="true" style={{ visibility: 'hidden' }}>
+                            &nbsp;
+                          </span>
+                        </IndexTable.Cell>
+                      ))}
+                    </IndexTable.Row>
+                  ))}
+                </>
+              )}
             </IndexTable>
             </div>
             <TablePagination total={matching.length} page={page} onPage={setPage} />
