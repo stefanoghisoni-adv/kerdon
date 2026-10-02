@@ -27,7 +27,12 @@ export default async function handleRequest(
 
   return new Promise((resolve, reject) => {
     const { pipe, abort } = renderToPipeableStream(
-      <RemixServer context={remixContext} url={request.url} />,
+      // `abortDelay`: i dati che la pagina riceve dopo (`defer`, la tab Clienti)
+      // si chiudono come FALLITI allo scadere di `streamTimeout`, prima che
+      // il render qui sotto venga troncato. Senza, lo stream si tagliava con
+      // la promessa ancora aperta nel browser, e lo scheletro restava a
+      // girare per sempre invece di dire che la lettura non e' riuscita.
+      <RemixServer context={remixContext} url={request.url} abortDelay={streamTimeout} />,
       {
         [callbackName]: () => {
           const body = new PassThrough();

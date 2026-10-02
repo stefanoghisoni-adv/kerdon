@@ -48,10 +48,13 @@ function getClient(): Promise<Redis> {
 const TIMEOUT_MS = 300;
 
 function withTimeout<T>(operation: Promise<T>, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     operation,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), TIMEOUT_MS)),
-  ]);
+    new Promise<T>((resolve) => {
+      timer = setTimeout(() => resolve(fallback), TIMEOUT_MS);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 const MEMORY_TTL_MS = 60 * 60 * 1000;
