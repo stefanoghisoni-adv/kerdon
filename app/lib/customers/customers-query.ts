@@ -143,6 +143,54 @@ LIMIT ${rows};`.trim();
 }
 
 /**
+ * Le tre letture della tab Clienti in una sola istruzione.
+ *
+ * Sono le stesse tre query di sempre — periodo scelto, periodo precedente,
+ * profitto di sempre — messe una accanto all'altra, ciascuna raccolta in un
+ * array JSON. Al database non cambia niente: le legge come prima. Cambia il
+ * viaggio: ogni domanda alla Management API di Supabase e' una richiesta HTTP
+ * con la sua attesa e il suo posto nel limite di richieste al minuto, e tre in
+ * parallelo si pagavano tre volte, una sola si paga una volta.
+ *
+ * L'aggregato non garantisce l'ordine della sottoquery da cui legge, quindi
+ * l'ordine per profitto si ripete dentro `json_agg`: e' quello in cui la tabella
+ * mostra i clienti. Le altre due parti si leggono per cliente, l'ordine non
+ * conta.
+ */
+export function customersReportSQL(input: {
+  current: QueryRange;
+  /** null quando un "prima" non esiste ("da sempre"): la parte resta vuota. */
+  previous: QueryRange | null;
+  limit?: number;
+}): string {
+  const part = (sql: string) => sql.replace(/;\s*$/, '');
+  const current = part(customersInRangeSQL({ ...input.current, limit: input.limit }));
+  const previous = input.previous
+    ? part(customersInRangeSQL({ ...input.previous, limit: input.limit }))
+    : null;
+  const lifetime = part(lifetimeProfitSQL(input.limit));
+
+  return `
+SELECT
+  (SELECT COALESCE(json_agg(r ORDER BY r.profit DESC, r.customer_id), '[]'::json)
+     FROM (
+${current}
+     ) r) AS current_rows,
+  ${
+    previous
+      ? `(SELECT COALESCE(json_agg(r), '[]'::json)
+     FROM (
+${previous}
+     ) r) AS previous_rows`
+      : `'[]'::json AS previous_rows`
+  },
+  (SELECT COALESCE(json_agg(r), '[]'::json)
+     FROM (
+${lifetime}
+     ) r) AS lifetime_rows;`.trim();
+}
+
+/**
  * Il periodo di lunghezza uguale che precede quello scelto.
  *
  * Serve al confronto: "rispetto a prima" ha senso solo se "prima" dura quanto

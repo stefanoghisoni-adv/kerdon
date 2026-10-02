@@ -1,7 +1,7 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
-import { json } from '@remix-run/node';
-import { useFetcher, useLoaderData, useNavigation, useSearchParams } from '@remix-run/react';
-import { useEffect, useState } from 'react';
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
+import { Await, useLoaderData, useNavigation, useSearchParams } from '@remix-run/react';
+import { Suspense, useEffect, useState } from 'react';
 import {
   Badge,
   Banner,
@@ -16,11 +16,13 @@ import {
   InlineStack,
   Link,
   Page,
+  SkeletonBodyText,
   Spinner,
   Text,
   TextField,
   Tooltip,
 } from '@shopify/polaris';
+import type { IndexTableProps } from '@shopify/polaris';
 import { AlertCircleIcon, CheckCircleIcon } from '@shopify/polaris-icons';
 import { PlanChangeBanner } from '~/components/Dashboard/PlanChangeBanner';
 import { prisma } from '~/db.server';
@@ -28,11 +30,13 @@ import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-format';
 import { BASE_CURRENCY } from '~/lib/billing/money';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
-import { loadCustomersReport } from '~/lib/customers/customers.server';
+import type { CustomersReport } from '~/lib/customers/customers.server';
 import {
-  birthdateNoticeDismissedFor,
-  dismissBirthdateNotice,
-} from '~/lib/customers/birthdate-dismissal.server';
+  startCustomersPageData,
+  type BirthdateData,
+} from '~/lib/customers/page-data.server';
+import { dismissBirthdateNotice } from '~/lib/customers/birthdate-dismissal.server';
+import { ServerTiming } from '~/lib/timing/server-timing';
 import { isCalendarDate } from '~/lib/customers/customers-query';
 import {
   ALL_TIME_START,
@@ -41,7 +45,7 @@ import {
   type DateRange,
 } from '~/lib/dates/ranges';
 import { DateRangePicker } from '~/components/Dashboard/DateRangePicker';
-import { PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
+import { CUSTOMERS_PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
 import { TablePagination } from '~/components/Dashboard/TablePagination';
 import { matchesCustomerSearch } from '~/lib/customers/customer-search';
 import { formatMoney } from '~/lib/billing/money';
@@ -57,20 +61,34 @@ import { ExtraFieldsCard } from '~/components/Customers/ExtraFieldsCard';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   BIRTHDATE_METAFIELD_KEY,
-  birthdateFieldState,
   birthdateMetafieldOf,
   formatMetafieldKey,
-  isDateMetafieldType,
   parseMetafieldKey,
 } from '~/lib/customers/birthdate-metafield';
-import { customerMetafieldsUrl, storeHandle } from '~/utils/admin-page';
+import { storeHandle } from '~/utils/admin-page';
 import {
   requireShopCapability,
   shopCapabilityOutcome,
 } from '~/lib/authz/require-capability.server';
 
 
+/**
+ * I tempi del caricamento, anche quando la pagina arriva intera e non da una
+ * navigazione: senza, l'header resterebbe sulla sola risposta dei dati.
+ */
+export const headers: HeadersFunction = ({ loaderHeaders }) => {
+  const out = new Headers();
+  const timing = loaderHeaders.get('Server-Timing');
+  if (timing) out.set('Server-Timing', timing);
+  return out;
+};
+
 export async function loader({ request }: LoaderFunctionArgs) {
+  // Quanto costa ogni fase, nell'header `Server-Timing`: si legge dagli
+  // strumenti del browser, anche in produzione. Le fasi che finiscono dopo la
+  // risposta (i dati che arrivano in un secondo momento) vanno nei log.
+  const timing = new ServerTiming();
+
   // IL CANCELLO, E VIENE PRIMA DI TUTTO.
   //
   // Questa pagina e' la piu' esposta dell'app: sotto ci sono nomi, email e
@@ -83,10 +101,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // sostituita da un codice di stato non dice al merchant che cosa puo' fare,
   // e la dashboard invece glielo dice gia' — con il banner e, quando serve, la
   // strada per aggiornare il piano.
-  const { session, shop } = await requireShopCapability(request, 'use_app', {
-    onDenied: 'redirect',
+  const { session, shop } = await timing.measure('auth', async () => {
+    const grant = await requireShopCapability(request, 'use_app', { onDenied: 'redirect' });
+    await requireSetupComplete(grant.session.shop);
+    return grant;
   });
-  await requireSetupComplete(session.shop);
 
   // Le date arrivano dalla URL, quindi da fuori: quello che non e' una data si
   // ignora e si torna al periodo di partenza, invece di far fallire la pagina.
@@ -97,144 +116,94 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? wanted
       : null;
 
-  // Il piano decide se questa tabella ha qualcosa da mostrare. Senza la
-  // sincronizzazione clienti la tabella nel database del merchant non esiste
-  // nemmeno, e la query falliva con un 400 che arrivava fino a schermo come
-  // "Unexpected Server Error" — con la pagina d'errore che, per giunta, torna
-  // scura. Meglio entrare e trovare scritto perche' non c'e' niente.
   // Il periodo di partenza e' "da sempre": la tabella deve mostrare tutti i
   // clienti che hanno comprato, non solo quelli dell'ultimo mese. Con trenta
   // giorni di partenza e nessun selettore a vista, chi aveva ordinato prima
   // spariva senza un segno. Si sceglie dopo aver letto il negozio, perche'
   // "oggi" — la fine del periodo — e' il giorno del SUO fuso.
   const range = rangeFromUrl ?? defaultRange(shop.ianaTimezone, undefined, CUSTOMERS_DEFAULT_PRESET);
-  const plan = await findPlanByName(shop.currentPlan);
-  const customersIncluded = plan?.customersSyncEnabled ?? false;
 
-  let upgradePlan: string | null = null;
-  if (!customersIncluded) {
+  // Il piano decide se questa tabella ha qualcosa da mostrare. Senza la
+  // sincronizzazione clienti la tabella nel database del merchant non esiste
+  // nemmeno, e la query falliva con un 400 che arrivava fino a schermo come
+  // "Unexpected Server Error" — con la pagina d'errore che, per giunta, torna
+  // scura. Meglio entrare e trovare scritto perche' non c'e' niente.
+  const { customersIncluded, upgradePlan } = await timing.measure('plan', async () => {
+    const plan = await findPlanByName(shop.currentPlan);
+    const included = plan?.customersSyncEnabled ?? false;
+    if (included) return { customersIncluded: true, upgradePlan: null };
+
     const [plans, basePrices] = await Promise.all([
       prisma.plan.findMany(),
       prisma.planPrice.findMany({ where: { currency: BASE_CURRENCY } }),
     ]);
     const monthlyOf = new Map(basePrices.map((row) => [row.planName, Number(row.priceMonthly)]));
-    upgradePlan = firstPlanWithCustomersSync(
-      plans.map((p) => ({
-        planName: p.planName,
-        priceMonthly: monthlyOf.get(p.planName) ?? 0,
-        customersSyncEnabled: p.customersSyncEnabled,
-      })),
-      shop.currentPlan,
-    );
-  }
-
-  // I campi personalizzati che il negozio ha sui clienti.
-  //
-  // Una domanda sola a Shopify, che pero' ne risolve due: riempie la tendina da
-  // cui il merchant indica un campo che ha gia', e dice se il nostro c'e' —
-  // quest'ultima e' una rilevazione vera, non la deduzione da un tentativo di
-  // scrittura andato a vuoto. Chi il campo ce l'ha gia' deve vederselo scritto
-  // senza che l'app provi a scrivergli addosso per scoprirlo.
-  //
-  // Un guasto qui non porta via la pagina: l'elenco resta vuoto e il pulsante
-  // si comporta come se il campo mancasse. Crearlo due volte non fa danno,
-  // Shopify risponde che quella chiave e' gia' occupata.
-  let definitions: { key: string; name: string; type: string }[] = [];
-  let definitionsRead = false;
-  if (customersIncluded) {
-    definitions = await ShopifyAPIClient.forShop(session.shop)
-      .then((client) => client.listCustomerMetafieldDefinitions())
-      .then((list) => {
-        definitionsRead = true;
-        return list.map((d) => ({
-          key: formatMetafieldKey(d),
-          name: d.name,
-          type: d.type,
-        }));
-      })
-      .catch((error) => {
-        console.warn(
-          '[customers] campi personalizzati dei clienti non leggibili:',
-          error instanceof Error ? error.message : 'errore sconosciuto',
-        );
-        return [];
-      });
-  }
-
-  const configured = birthdateMetafieldOf(shop);
-  const configuredKey = formatMetafieldKey(configured);
-  const configuredDefinition = definitions.find((d) => d.key === configuredKey);
-
-  // Anche col piano giusto una lettura puo' fallire — tabella non ancora
-  // creata, progetto irraggiungibile. Un guasto sul database del merchant non
-  // deve diventare una pagina d'errore dell'app.
-  const report = customersIncluded
-    ? await loadCustomersReport({ shopDomain: session.shop, ...range }).catch((error) => {
-        console.warn(
-          '[customers] lettura non riuscita:',
-          error instanceof Error ? error.message : 'errore sconosciuto',
-        );
-        return { rows: [], currency: 'EUR', lifetimeCustomers: 0, unavailable: 'failed' as const };
-      })
-    : { rows: [], currency: 'EUR', lifetimeCustomers: 0, unavailable: 'plan_required' as const };
-
-  return json({
-    ...report,
-    upgradePlan,
-    range,
-    // Per il selettore: "oggi" e' il giorno del negozio, non del browser.
-    timeZone: shop.ianaTimezone ?? null,
-    // Il riquadro del campo "Data di nascita": c'e' solo con un piano che
-    // sincronizza i clienti, perche' senza quel piano il campo non arriverebbe
-    // da nessuna parte e il merchant lo compilerebbe per niente.
-    birthdate: customersIncluded
-      ? {
-          /** Il campo da cui si legge oggi, vuoto se non ne e' stato scelto uno. */
-          configured: configuredKey,
-          /**
-           * Nessuno, in uso, oppure scelto ma non presente sul negozio.
-           *
-           * Lo decide il server perche' e' l'unico ad avere in mano tutt'e due
-           * le meta' della domanda: la scelta salvata e l'elenco vero delle
-           * definizioni. L'elenco non letto vale `null` e non "vuoto" — non
-           * sapere non e' lo stesso che sapere di no, e su un dubbio non si
-           * smentisce una configurazione che il merchant ha fatto davvero.
-           */
-          state: birthdateFieldState(
-            configuredKey,
-            definitionsRead ? definitions.map((d) => d.key) : null,
-          ),
-          /** La nostra definizione esiste gia' sul negozio? */
-          ourDefinitionPresent: definitionsRead
-            ? definitions.some((d) => d.key === formatMetafieldKey(BIRTHDATE_METAFIELD_KEY))
-            : null,
-          definitions,
-          /**
-           * Il campo in uso non contiene una data: si avvisa, perche' da un
-           * testo libero la data si ricava solo se e' scritta in modo
-           * riconoscibile, e quello che non lo e' lascia la colonna vuota.
-           * Nessun avviso quando il campo non e' fra le definizioni: di quello
-           * non si conosce il tipo, e un avviso a caso e' peggio di nessuno.
-           */
-          notADate: configuredDefinition != null && !isDateMetafieldType(configuredDefinition.type),
-          adminUrl: customerMetafieldsUrl(session.shop),
-          /**
-           * Per quale campo l'avviso di conferma risulta gia' chiuso.
-           *
-           * Viene da qui e non dal browser: `localStorage` appartiene
-           * all'indirizzo da cui la pagina arriva, e dentro l'admin questa
-           * pagina sta in un iframe di un'altra origine — storage di terze
-           * parti, che Safari blocca e Chrome partiziona. Arrivando col loader
-           * il primo render sa gia', quindi non c'e' il lampo fra quel che si
-           * mostra e quel che l'idratazione corregge.
-           */
-          dismissedFor: await birthdateNoticeDismissedFor(shop.id, configuredKey),
-        }
-      : null,
-    // Per aprire la scheda del cliente: da qui il merchant vede l'anagrafica
-    // vera, ed e' il gesto che segue la lettura di una riga.
-    adminBase: `https://admin.shopify.com/store/${storeHandle(session.shop)}`,
+    return {
+      customersIncluded: false,
+      upgradePlan: firstPlanWithCustomersSync(
+        plans.map((p) => ({
+          planName: p.planName,
+          priceMonthly: monthlyOf.get(p.planName) ?? 0,
+          customersSyncEnabled: p.customersSyncEnabled,
+        })),
+        shop.currentPlan,
+      ),
+    };
   });
+
+  // Il report dal database del merchant e i campi personalizzati da Shopify
+  // sono le due attese lunghe, e la pagina non le aspetta: partono qui, insieme,
+  // e arrivano dopo. Il cambio di tab e' immediato — intestazione, periodo e lo
+  // scheletro della tabella — invece di restare fermi sulla pagina di prima
+  // finche' il database non ha risposto.
+  //
+  // Senza il piano non c'e' niente da attendere: si sa gia' cosa dire.
+  const data: Promise<CustomersPageView> | CustomersPageView = customersIncluded
+    ? startCustomersPageData({ shopDomain: session.shop, shop, range, timing })
+    : {
+        report: { rows: [], currency: 'EUR', lifetimeCustomers: 0, unavailable: 'plan_required' },
+        // Il riquadro del campo "Data di nascita" c'e' solo con un piano che
+        // sincronizza i clienti: senza, il campo non arriverebbe da nessuna
+        // parte e il merchant lo compilerebbe per niente.
+        birthdate: null,
+      };
+
+  return defer(
+    {
+      data,
+      customersIncluded,
+      upgradePlan,
+      range,
+      // Per il selettore: "oggi" e' il giorno del negozio, non del browser.
+      timeZone: shop.ianaTimezone ?? null,
+      // Per aprire la scheda del cliente: da qui il merchant vede l'anagrafica
+      // vera, ed e' il gesto che segue la lettura di una riga.
+      adminBase: `https://admin.shopify.com/store/${storeHandle(session.shop)}`,
+    },
+    { headers: { 'Server-Timing': timing.header() } },
+  );
+}
+
+/** Le intestazioni della tabella, uguali nello scheletro e nella tabella vera. */
+function customerHeadings(t: ReturnType<typeof useT>): IndexTableProps['headings'] {
+  return [
+    { title: t.customers.columns.customer },
+    // Senza intestazione: e' una spia, non un dato. Un titolo sopra due icone
+    // chiederebbe di leggere una parola per capire un segno che si capisce
+    // gia' da solo.
+    { title: '', alignment: 'center' as const },
+    { title: t.customers.columns.orders },
+    { title: t.customers.columns.aop },
+    { title: t.customers.columns.ltp },
+    { title: t.customers.columns.status },
+    { title: t.customers.columns.actions },
+  ];
+}
+
+/** Cio' che la pagina riceve quando i dati sono arrivati. */
+interface CustomersPageView {
+  report: CustomersReport;
+  birthdate: BirthdateData | null;
 }
 
 /**
@@ -338,18 +307,29 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
-export default function Customers() {
-  const {
-    rows,
-    currency,
-    unavailable,
-    upgradePlan,
-    adminBase,
-    birthdate,
-    range,
-    timeZone,
-    lifetimeCustomers,
-  } = useLoaderData<typeof loader>();
+/**
+ * Il contenuto della tab, una volta arrivati i dati.
+ *
+ * Sta in un componente a se' perche' vive dentro `<Await>`: i suoi stati —
+ * ricerca, filtro, pagina — si conservano quando il periodo cambia, perche'
+ * le navigazioni di Remix sono transizioni e React tiene a schermo il
+ * contenuto gia' mostrato finche' i dati nuovi non arrivano.
+ */
+function CustomersContent({
+  view,
+  upgradePlan,
+  adminBase,
+  range,
+  timeZone,
+}: {
+  view: CustomersPageView;
+  upgradePlan: string | null;
+  adminBase: string;
+  range: DateRange;
+  timeZone: string | null;
+}) {
+  const { rows, currency, unavailable, lifetimeCustomers } = view.report;
+  const birthdate = view.birthdate;
   const t = useT();
   const locale = useLocale();
   // Quale riga ha appena chiesto "Risolvi problemi": la pagina dei prodotti
@@ -409,7 +389,7 @@ export default function Customers() {
   // insieme — sono gia' filtrate dal periodo — quindi si impagina qui, dove si
   // sa anche cosa la ricerca ha lasciato.
   const [page, setPage] = useState(1);
-  const visibleRows = pageSlice(matching, page, PER_PAGE);
+  const visibleRows = pageSlice(matching, page, CUSTOMERS_PER_PAGE);
 
   // Cambiando ricerca o filtro si riparte da pagina 1: restare a pagina 4 su un
   // risultato che ne ha due mostrerebbe una tabella vuota senza spiegazione.
@@ -420,7 +400,7 @@ export default function Customers() {
 
   // E se le righe si accorciano sotto i piedi — un filtro acceso mentre si e'
   // in fondo — si arretra invece di restare su una pagina che non c'e' piu'.
-  const totalPages = pageCount(matching.length, PER_PAGE);
+  const totalPages = pageCount(matching.length, CUSTOMERS_PER_PAGE);
   useEffect(() => {
     if (totalPages > 0 && page > totalPages) setPage(totalPages);
   }, [totalPages, page]);
@@ -430,23 +410,7 @@ export default function Customers() {
   const noSearchResults = query.trim().length > 0 && matching.length === 0;
 
   return (
-    <Page
-      fullWidth
-      title={t.customers.title}
-      backAction={{ url: '/' }}
-      // Il periodo si vede, sopra la tabella. Senza, la pagina ne usava uno
-      // che nessuno aveva scelto e che non si leggeva da nessuna parte, e i
-      // clienti che avevano ordinato prima sparivano in silenzio.
-    >
-      <BlockStack gap="400">
-        {/* Il cambio di piano si legge da ogni tab, non solo da dove e' stato
-            fatto: chi lo cambia e va dritto qui deve sapere lo stesso cosa e'
-            cambiato. Il contenuto lo calcola la dashboard e lo lascia nel
-            sessionStorage; se non c'e' niente da dire, questo non rende nulla. */}
-        <PlanChangeBanner />
-
-        <ProductOverflowBanner />
-
+    <>
         {unavailable === 'not_connected' && (
           <Banner tone="info">{t.customers.notConnected}</Banner>
         )}
@@ -589,21 +553,10 @@ export default function Customers() {
             <div className="stable-columns stable-columns--customers">
             <IndexTable
               resourceName={t.customers.resource}
-              itemCount={PER_PAGE}
+              itemCount={CUSTOMERS_PER_PAGE}
               selectable={false}
               loading={periodLoading}
-              headings={[
-                { title: t.customers.columns.customer },
-                // Senza intestazione: e' una spia, non un dato. Un titolo sopra
-                // due icone chiederebbe di leggere una parola per capire un
-                // segno che si capisce gia' da solo.
-                { title: '', alignment: 'center' as const },
-                { title: t.customers.columns.orders },
-                { title: t.customers.columns.aop },
-                { title: t.customers.columns.ltp },
-                { title: t.customers.columns.status },
-                { title: t.customers.columns.actions },
-              ]}
+              headings={customerHeadings(t)}
             >
               {visibleRows.length === 0 ? (
                 <>
@@ -620,7 +573,7 @@ export default function Customers() {
                     </IndexTable.Cell>
                   </IndexTable.Row>
                   {/* Righe di riempimento per mantenere l'altezza costante */}
-                  {Array.from({ length: PER_PAGE - 1 }, (_, i) => (
+                  {Array.from({ length: CUSTOMERS_PER_PAGE - 1 }, (_, i) => (
                     <IndexTable.Row
                       key={`filler-${i}`}
                       id={`filler-${i}`}
@@ -718,10 +671,12 @@ export default function Customers() {
                             vuole sistemare il profitto di questo cliente, non fare
                             le pulizie di primavera nel catalogo. */}
                         {row.coveredLines < row.totalLines && (
-                          // Flex container con minHeight mantiene l'altezza di riga
-                          // costante quando il link viene sostituito dallo spinner
-                          // (nessuna prop Polaris copre questo caso d'uso)
-                          <div style={{ display: 'flex', alignItems: 'center', minHeight: '20px' }}>
+                          // Altezza esatta e lineHeight 0: lo Spinner di Polaris 13.9.5 rende
+                          // uno span inline con svg inline, che poggia sulla baseline lasciando
+                          // sotto lo spazio per i discendenti del line box (~4-5px). Il flex con
+                          // height fissa e lineHeight 0 elimina quel gap, mantenendo l'altezza
+                          // costante quando il Link diventa Spinner.
+                          <div style={{ display: 'flex', alignItems: 'center', height: '20px', lineHeight: 0 }}>
                             {clienteInApertura === String(row.customerId) ? (
                               <Spinner size="small" accessibilityLabel={t.customers.fixIssues} />
                             ) : (
@@ -735,7 +690,7 @@ export default function Customers() {
                     </IndexTable.Row>
                   ))}
                   {/* Righe di riempimento per mantenere l'altezza costante */}
-                  {Array.from({ length: Math.max(0, PER_PAGE - visibleRows.length) }, (_, i) => (
+                  {Array.from({ length: Math.max(0, CUSTOMERS_PER_PAGE - visibleRows.length) }, (_, i) => (
                     <IndexTable.Row
                       key={`filler-${i}`}
                       id={`filler-${i}`}
@@ -755,7 +710,7 @@ export default function Customers() {
               )}
             </IndexTable>
             </div>
-            <TablePagination total={matching.length} page={page} onPage={setPage} />
+            <TablePagination total={matching.length} page={page} onPage={setPage} perPage={CUSTOMERS_PER_PAGE} />
           </Card>
 
           {birthdate && notice.view === 'status' && (
@@ -765,8 +720,119 @@ export default function Customers() {
           )}
           </InlineGrid>
         )}
+    </>
+  );
+}
+
+export default function Customers() {
+  const { data, customersIncluded, upgradePlan, adminBase, range, timeZone } =
+    useLoaderData<typeof loader>();
+  const t = useT();
+
+  return (
+    <Page
+      fullWidth
+      title={t.customers.title}
+      backAction={{ url: '/' }}
+      // Il periodo si vede, sopra la tabella. Senza, la pagina ne usava uno
+      // che nessuno aveva scelto e che non si leggeva da nessuna parte, e i
+      // clienti che avevano ordinato prima sparivano in silenzio.
+    >
+      <BlockStack gap="400">
+        {/* Il cambio di piano si legge da ogni tab, non solo da dove e' stato
+            fatto: chi lo cambia e va dritto qui deve sapere lo stesso cosa e'
+            cambiato. Il contenuto lo calcola la dashboard e lo lascia nel
+            sessionStorage; se non c'e' niente da dire, questo non rende nulla. */}
+        <PlanChangeBanner />
+
+        <ProductOverflowBanner />
+
+        {/* I clienti arrivano dopo la pagina: intanto si vede la sua forma. */}
+        <Suspense
+          fallback={
+            <CustomersSkeleton range={range} timeZone={timeZone} withPeriod={customersIncluded} />
+          }
+        >
+          <Await
+            resolve={data}
+            // Non dovrebbe succedere — le letture gestiscono da se' i propri
+            // guasti — ma se succede si dice come per una lettura fallita,
+            // invece di lasciare lo scheletro a girare per sempre.
+            errorElement={<Banner tone="warning">{t.customers.loadFailed}</Banner>}
+          >
+            {(view) => (
+              <CustomersContent
+                view={view}
+                upgradePlan={upgradePlan}
+                adminBase={adminBase}
+                range={range}
+                timeZone={timeZone}
+              />
+            )}
+          </Await>
+        </Suspense>
       </BlockStack>
       <Box paddingBlockEnd="800" />
     </Page>
+  );
+}
+
+/**
+ * La forma della tab mentre i clienti arrivano: il periodo, gia' leggibile, e
+ * la tabella con le sue intestazioni e righe in attesa, alta quanto sara'.
+ * Cosi' quando i dati arrivano non si sposta niente.
+ */
+function CustomersSkeleton({
+  range,
+  timeZone,
+  withPeriod,
+}: {
+  range: DateRange;
+  timeZone: string | null;
+  withPeriod: boolean;
+}) {
+  const t = useT();
+  return (
+    <>
+      {withPeriod && (
+        <InlineStack gap="200" blockAlign="center">
+          <DateRangePicker
+            value={range}
+            timeZone={timeZone}
+            onChange={() => {}}
+            disabled
+            allTime
+          />
+        </InlineStack>
+      )}
+      <InlineGrid columns={{ xs: 1, md: '3fr 1fr' }} gap="400" alignItems="start">
+        <Card padding="0">
+          <Box padding="400">
+            <Text as="p" tone="subdued">
+              {t.customers.intro}
+            </Text>
+          </Box>
+          <div className="stable-columns stable-columns--customers">
+            <IndexTable
+              resourceName={t.customers.resource}
+              itemCount={CUSTOMERS_PER_PAGE}
+              selectable={false}
+              loading
+              headings={customerHeadings(t)}
+            >
+              {Array.from({ length: CUSTOMERS_PER_PAGE }, (_, i) => (
+                <IndexTable.Row key={`skeleton-${i}`} id={`skeleton-${i}`} position={i} disabled>
+                  {Array.from({ length: 7 }, (_, colIdx) => (
+                    <IndexTable.Cell key={colIdx}>
+                      <SkeletonBodyText lines={1} />
+                    </IndexTable.Cell>
+                  ))}
+                </IndexTable.Row>
+              ))}
+            </IndexTable>
+          </div>
+        </Card>
+      </InlineGrid>
+    </>
   );
 }

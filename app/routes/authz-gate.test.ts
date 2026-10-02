@@ -205,9 +205,14 @@ describe('negozio attivo', () => {
   });
 
   it('la pagina Clienti legge le righe', async () => {
-    const risposta = await chiamata(paginaClienti, 'https://app/customers');
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    // La pagina risponde subito e i clienti arrivano dopo (`defer`): la
+    // risposta porta la promessa dei dati, non i dati.
+    const risposta = (await chiamata(paginaClienti, 'https://app/customers')) as unknown as {
+      data: { data: Promise<unknown> };
+    };
+    await risposta.data.data;
 
-    expect(risposta.status).toBe(200);
     expect(loadCustomersReport).toHaveBeenCalled();
   });
 });

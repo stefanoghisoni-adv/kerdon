@@ -1,11 +1,13 @@
 import { Box, InlineStack, Pagination, Text } from '@shopify/polaris';
-import { PER_PAGE, pageCount, visibleRange } from '~/lib/table/pagination';
+import { pageCount, visibleRange } from '~/lib/table/pagination';
 
 interface Props {
   /** Quante righe restano DOPO filtri e ricerca: e' quello che si vede. */
   total: number;
   page: number;
   onPage: (page: number) => void;
+  /** Quante righe stanno in una pagina: decide il numero di pagine e l'intervallo. */
+  perPage: number;
 }
 
 /**
@@ -29,9 +31,9 @@ interface Props {
  * Sotto la soglia di una pagina sola il piede non c'e': niente frecce spente e
  * niente "1-12" sotto dodici righe che si contano guardandole.
  */
-export function TablePagination({ total, page, onPage }: Props) {
-  const pages = pageCount(total, PER_PAGE);
-  const range = visibleRange(total, page, PER_PAGE);
+export function TablePagination({ total, page, onPage, perPage }: Props) {
+  const pages = pageCount(total, perPage);
+  const range = visibleRange(total, page, perPage);
 
   if (pages <= 1 || !range) return null;
 

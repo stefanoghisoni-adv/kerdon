@@ -7,20 +7,23 @@ import {
   missingReportTables,
   missingReportTablesSQL,
 } from '~/lib/supabase/report-tables';
-import {
-  customersInRangeSQL,
-  lifetimeProfitSQL,
-  previousRange,
-} from './customers-query';
+import { customersReportSQL, previousRange } from './customers-query';
 import { ALL_TIME_START } from '~/lib/dates/ranges';
+import {
+  forgetReportTables,
+  rememberReportTables,
+  reportTablesKnown,
+} from '~/lib/cache/report-tables-cache.server';
+import type { ServerTiming } from '~/lib/timing/server-timing';
 
 /**
  * I clienti con i loro numeri, pronti per la tabella.
  *
- * Tre domande al database e una fusione qui: il periodo scelto, lo stesso
- * periodo di prima (per dire di quanto e' cambiato) e il profitto di sempre.
- * Farne una sola avrebbe voluto dire leggere tre volte le stesse tabelle dentro
- * la stessa istruzione, con tre filtri diversi.
+ * Tre parti e una fusione qui: il periodo scelto, lo stesso periodo di prima
+ * (per dire di quanto e' cambiato) e il profitto di sempre. Al database
+ * arrivano in una richiesta sola (`customersReportSQL`): ogni richiesta alla
+ * Management API e' un viaggio con la sua attesa, e la tab si apriva pagandone
+ * quattro o cinque.
  */
 
 export interface CustomerRow {
@@ -84,6 +87,30 @@ interface LifetimeRow {
   profit: number | string;
 }
 
+/** La riga unica della lettura: le tre parti, ciascuna un array JSON. */
+interface ReportRow {
+  current_rows: unknown;
+  previous_rows: unknown;
+  lifetime_rows: unknown;
+}
+
+/**
+ * Un array JSON come arriva dalla Management API: gia' letto, oppure come
+ * testo — dipende da come il tipo `json` viene servito, e non ci si appoggia
+ * a uno solo dei due.
+ */
+function jsonRows<T>(value: unknown): T[] {
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  return Array.isArray(parsed) ? (parsed as T[]) : [];
+}
+
+/** Postgres dice cosi' che una tabella non c'e' (codice 42P01). */
+function isMissingRelation(error: unknown): boolean {
+  return (
+    error instanceof Error && /42P01|relation .* does not exist/i.test(error.message)
+  );
+}
+
 /** I numeri arrivano dal database come stringhe quando sono grandi. */
 function num(value: number | string | null | undefined): number {
   const n = typeof value === 'string' ? Number(value) : (value ?? 0);
@@ -99,11 +126,18 @@ export async function loadCustomersReport(opts: {
   from: string;
   to: string;
   limit?: number;
+  /** Dove annotare quanto ha impiegato ogni fase, se chi chiama lo vuole. */
+  timing?: ServerTiming;
 }): Promise<CustomersReport> {
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: opts.shopDomain },
-    include: { supabaseConfig: true },
-  });
+  const measure = <T>(name: string, work: () => Promise<T>): Promise<T> =>
+    opts.timing ? opts.timing.measure(name, work) : work();
+
+  const shop = await measure('shop', () =>
+    prisma.shop.findUnique({
+      where: { shopDomain: opts.shopDomain },
+      include: { supabaseConfig: true },
+    }),
+  );
 
   const empty = (unavailable: CustomersReport['unavailable']): CustomersReport => ({
     rows: [],
@@ -119,8 +153,13 @@ export async function loadCustomersReport(opts: {
   // mostrare una tabella vuota che sembrerebbe un negozio senza clienti.
   if (!hasOrdersAccess(shop.scopes)) return empty('no_orders_access');
 
-  const token = await getValidAccessToken(shop.id);
   const ref = shop.supabaseConfig.supabaseProjectRef;
+  // Il token e il ricordo delle tabelle non dipendono l'uno dall'altro: si
+  // chiedono insieme.
+  const [token, tablesKnown] = await Promise.all([
+    measure('token', () => getValidAccessToken(shop.id)),
+    reportTablesKnown(shop.id, ref),
+  ]);
   // Il fuso e' del negozio, non della richiesta: si legge dalla sua riga
   // insieme a tutto il resto, cosi' chi chiama non puo' scordarselo.
   const timeZone = shop.ianaTimezone;
@@ -128,23 +167,33 @@ export async function loadCustomersReport(opts: {
   // prima che Shopify esistesse, e sarebbe una query che torna vuota per forza.
   const before = opts.from <= ALL_TIME_START ? null : previousRange(opts.from, opts.to);
 
-  await ensureReportTables(token, ref);
+  const sql = customersReportSQL({
+    current: { from: opts.from, to: opts.to, timeZone },
+    previous: before ? { ...before, timeZone } : null,
+    limit: opts.limit,
+  });
+  const ensure = () =>
+    measure('ensure', () => ensureReportTables(token, ref, shop.id));
+  const read = () => measure('report', () => runQueryRows<ReportRow>(token, ref, sql));
 
-  const [current, previous, lifetime] = await Promise.all([
-    runQueryRows<RangeRow>(
-      token,
-      ref,
-      customersInRangeSQL({ ...opts, timeZone, limit: opts.limit }),
-    ),
-    before
-      ? runQueryRows<RangeRow>(
-          token,
-          ref,
-          customersInRangeSQL({ ...before, timeZone, limit: opts.limit }),
-        )
-      : Promise.resolve([] as RangeRow[]),
-    runQueryRows<LifetimeRow>(token, ref, lifetimeProfitSQL(opts.limit)),
-  ]);
+  // Le tabelle si controllano solo quando non si sa gia' che ci sono. Se il
+  // ricordo era sbagliato — una tabella sparita dopo — la lettura lo dice con
+  // "relation does not exist": si dimentica, si controlla, si rilegge una volta.
+  if (!tablesKnown) await ensure();
+  let result: ReportRow[];
+  try {
+    result = await read();
+  } catch (error) {
+    if (!tablesKnown || !isMissingRelation(error)) throw error;
+    await forgetReportTables(shop.id, ref);
+    await ensure();
+    result = await read();
+  }
+
+  const parts = result[0];
+  const current = jsonRows<RangeRow>(parts?.current_rows);
+  const previous = jsonRows<RangeRow>(parts?.previous_rows);
+  const lifetime = jsonRows<LifetimeRow>(parts?.lifetime_rows);
 
   const beforeByCustomer = new Map(previous.map((row) => [String(row.customer_id), num(row.profit)]));
   const lifetimeByCustomer = new Map(
@@ -197,11 +246,15 @@ export async function loadCustomersReport(opts: {
  * possibile leggere i clienti", per sempre, senza un gesto che potesse
  * risolverlo.
  *
- * Best effort di proposito: se anche la DDL non riuscisse, le tre query
- * partono comunque e il loro errore — adesso parlante — dice cosa e' successo.
+ * Si fa solo quando non si sa gia' che le tabelle ci sono (vedi
+ * `report-tables-cache.server.ts`): il loro esserci cambia quasi mai, e
+ * chiederlo a ogni apertura costava una richiesta in piu' alla Management API.
+ *
+ * Best effort di proposito: se anche la DDL non riuscisse, la lettura
+ * parte comunque e il loro errore — adesso parlante — dice cosa e' successo.
  * Fermare qui la lettura aggiungerebbe un modo di fallire senza toglierne uno.
  */
-async function ensureReportTables(token: string, ref: string): Promise<void> {
+async function ensureReportTables(token: string, ref: string, shopId: string): Promise<void> {
   try {
     const rows = await runQueryRows<{ table_name: string }>(
       token,
@@ -210,13 +263,17 @@ async function ensureReportTables(token: string, ref: string): Promise<void> {
     );
     const existing = rows.map((r) => r.table_name).filter(Boolean);
     const ddl = missingReportTablesSQL(existing);
-    if (!ddl) return;
-
-    console.warn(
-      '[customers] tabelle mancanti nel database del merchant, le creo:',
-      missingReportTables(existing).join(', '),
-    );
-    await runQuery(token, ref, ddl);
+    if (ddl) {
+      console.warn(
+        '[customers] tabelle mancanti nel database del merchant, le creo:',
+        missingReportTables(existing).join(', '),
+      );
+      await runQuery(token, ref, ddl);
+    }
+    // Ci sono, o ci sono appena state messe: le prossime aperture non lo
+    // richiedono. Solo l'esito positivo si ricorda — una DDL fallita lascia
+    // il controllo da rifare alla prossima apertura.
+    await rememberReportTables(shopId, ref);
   } catch (error) {
     console.warn(
       '[customers] verifica delle tabelle non riuscita:',
