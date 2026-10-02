@@ -8,8 +8,9 @@ con quanto scrivono privacy policy e DPA. Il revisore confronta le tre cose, e
 una differenza fra loro è un motivo di rifiuto anche quando il comportamento
 dell'app è ineccepibile.
 
-Ultimo allineamento: 27 settembre 2026, con i dati di spedizione e logistica
-degli ordini (informativa 1.4). Il 17 settembre: la data di nascita riscritta
+Ultimo allineamento: 2 ottobre 2026, con i cookie del riconoscimento dei
+visitatori dichiarati uno per uno (informativa 1.5). Il 27 settembre: i dati di
+spedizione e logistica degli ordini (informativa 1.4). Il 17 settembre: la data di nascita riscritta
 verso Shopify, il riconoscimento dei visitatori e la separazione fra la
 credenziale che legge e quella che scrive.
 
@@ -42,7 +43,11 @@ l'ultimo avvistamento, l'unione fra gli identificativi della stessa persona e il
 collegamento al cliente Shopify. **Non è un dato anonimo**: resta nel browser di
 una persona ed è a lei ricollegabile appena il collegamento esiste. Si scrive solo
 con il consenso del visitatore; le righe mai collegate a un cliente si cancellano
-dopo 90 giorni.
+dopo 90 giorni. L'identificativo viaggia nel cookie first-party `kerdon_eid`, che
+il container server-side del merchant scrive sul dominio del negozio (più
+`kerdon_rv`, solo per portare a termine una revoca): nome, durata, contenuto e
+attributi sono nella tabella della sezione 3.5 dell'informativa, e se il modulo
+chiede dei cookie si risponde con quella.
 
 **Vanno dichiarati i dati di spedizione e logistica degli ordini** (decisione
 DEC-03: il trattamento resta, e si dichiara per intero). L'elenco completo è
@@ -199,8 +204,12 @@ differenza che il revisore trova. Per gli ordini lo controlla
 `order-data-inventory.test.ts`; per clienti e visitatori va ancora fatto a mano.
 
 **Che una modifica sostanziale dell'informativa sia annunciata in app.** La
-sezione 10 lo promette. L'avviso in app non esiste ancora ed è nella lista
-«Prima del lancio» di `CHANGELOG.md`, insieme alla voce per la 1.4.
+sezione 10 lo promette, e lo fa l'avviso in cima alla Dashboard: compare a ogni
+negozio installato prima della versione in vigore finché non preme «Ho capito».
+La versione che l'avviso annuncia è `PRIVACY_POLICY_VERSION` in
+`app/lib/legal/policy-version.ts`; `policy-version.test.ts` la tiene uguale alla
+testata dei documenti. A ogni modifica sostanziale si alzano tutte e due, e si
+riscrive la frase dell'avviso (`dashboard.privacyNotice`).
 
 **Che gli scope dichiarati siano quelli veri.** La fonte di verità è `scopes` in
 `shopify.app.toml`; `SHOPIFY_SCOPES` in `.env.example` e nel README deve ripetere
@@ -258,4 +267,4 @@ rifare se l'inventario cambia.
    `customers/data_request`; paese azzerato e ordine marcato
    (`customer_redacted_at`) con `customers/redact`.
 6. **Informativa da linkare**: `https://api.kerdon.io/policies/privacy-policy`,
-   versione 1.4 del 27-09-2026 o successiva.
+   versione 1.5 del 02-10-2026 o successiva.

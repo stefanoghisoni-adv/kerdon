@@ -1,7 +1,7 @@
 # Kerdon — Privacy Policy
 
-**Last updated:** 27-09-2026
-**Version:** 1.4
+**Last updated:** 02-10-2026
+**Version:** 1.5
 
 ## 1. Who we are
 
@@ -95,6 +95,16 @@ If you enable visitor recognition, the app keeps a `users` table in **your** dat
 **This is not anonymous data, and should not be called that.** The identifier holds no name, but it lives in that person's browser and, from the moment it is linked to a customer, it says which devices that person uses and when they used them. It is personal data and is treated as such.
 
 **Consent comes first.** Without the visitor's permission — which the app reads from the Shopify Customer Privacy signals your endpoint forwards — no identifier is minted and no row is written. On withdrawal, writes stop, that browser's row is deleted along with the links that joined it to the others, and the app expires the cookie it had issued on its own domain. The cookie planted by your domain is yours: your endpoint is the only thing that can remove it.
+
+**Cookies on your store's domain.** The browser identifier travels in a cookie. When your server-side tag container uses the Kerdon template, these are the cookies it writes on your store's domain, and it writes nothing else:
+
+| Cookie | Written by, and when | Purpose | Requested duration | Content | Attributes |
+| --- | --- | --- | --- | --- | --- |
+| `kerdon_eid` | Your server-side container, on your store's domain, only with the visitor's consent | Recognising the same browser when it comes back | One year by default, set in the template. It is the maximum requested, not a guarantee: the browser may shorten it, the person can delete it at any time, and on withdrawal it expires at once | A random, opaque identifier (`kerdon_` followed by 32 random characters). No name, email address or other data | `Secure`, `SameSite=Lax`, `Path=/`. Not `HttpOnly`, so that your page tags can read it and attach it to the cart |
+| `kerdon_rv` | Your server-side container, on your store's domain, only after a withdrawal of consent that Kerdon has not yet confirmed | Keeping the withdrawal until Kerdon confirms the deletion, so that it is not lost if the connection drops. It is never used to recognise anyone | 30 days at most; it expires as soon as Kerdon confirms | A withdrawal marker and the identifiers to delete (at most three) | `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/` |
+| `corew_eid` | Nobody, any longer | The former name of `kerdon_eid`, from before the app was renamed. A browser may still hold one; Kerdon neither writes it nor uses its value | — | — | — |
+
+The template also reads, without writing them, the consent signals already on your domain: Shopify's `_tracking_consent` cookie and, where your own tags write one, `kerdon_consent` (formerly `corew_consent`). When your endpoint calls Kerdon, Kerdon's reply also carries a `kerdon_eid` cookie for Kerdon's own domain (`Secure`, `SameSite=None`, up to one year, expired on withdrawal); with the Kerdon template that reply stays with your container and is not passed on to the visitor's browser.
 
 **To link a browser to a customer** your endpoint sends us the email address or phone number the person has just given: the app uses them to find that customer in your database and write the link. Neither value is kept on our systems.
 

@@ -1,7 +1,7 @@
 # Kerdon — Informativa sulla privacy
 
-**Ultimo aggiornamento:** 27-09-2026
-**Versione:** 1.4
+**Ultimo aggiornamento:** 02-10-2026
+**Versione:** 1.5
 
 > Traduzione di cortesia. Il testo che vincola le parti è la versione inglese,
 > `privacy-policy.md`; in caso di discrepanza prevale quella.
@@ -98,6 +98,16 @@ Se attivi il riconoscimento dei visitatori, l'app tiene nel **tuo** database una
 **Non è un dato anonimo, ed è importante non chiamarlo così.** L'identificativo non contiene un nome, ma vive nel browser di quella persona e, dal momento in cui viene collegato a un cliente, dice quali dispositivi usa quella persona e quando li ha usati. È un dato personale, e va trattato come tale.
 
 **Il consenso viene prima.** Senza il permesso del visitatore — che l'app legge dai segnali del Customer Privacy di Shopify trasmessi dal tuo endpoint — non viene coniato nessun identificativo e non viene scritta nessuna riga. Alla revoca le scritture si fermano, la riga di quel browser viene cancellata insieme ai legami che la univano agli altri, e l'app fa scadere il cookie che aveva emesso sul proprio dominio. Il cookie piantato dal tuo dominio è tuo: a toglierlo è il tuo endpoint, che è l'unico a poterlo fare.
+
+**I cookie sul dominio del tuo negozio.** L'identificativo del browser viaggia in un cookie. Quando il tuo container server-side usa il template di Kerdon, questi sono i cookie che scrive sul dominio del tuo negozio, e non ne scrive altri:
+
+| Cookie | Chi lo scrive, e quando | Finalità | Durata richiesta | Contenuto | Attributi |
+| --- | --- | --- | --- | --- | --- |
+| `kerdon_eid` | Il tuo container server-side, sul dominio del tuo negozio, solo con il consenso del visitatore | Riconoscere lo stesso browser quando torna | Un anno per impostazione, scelto nel template. È il massimo richiesto, non una garanzia: il browser può accorciarlo, la persona può cancellarlo quando vuole, e alla revoca scade subito | Un identificativo casuale e opaco (`kerdon_` seguito da 32 caratteri casuali). Nessun nome, email o altro dato | `Secure`, `SameSite=Lax`, `Path=/`. Non `HttpOnly`, perché i tag delle tue pagine possano leggerlo e collegarlo al carrello |
+| `kerdon_rv` | Il tuo container server-side, sul dominio del tuo negozio, solo dopo una revoca del consenso che Kerdon non ha ancora confermato | Conservare la revoca finché Kerdon non conferma la cancellazione, perché non vada persa se la connessione cade. Non serve mai a riconoscere nessuno | Al massimo 30 giorni; scade appena Kerdon conferma | Un marcatore di revoca e gli identificativi da cancellare (al massimo tre) | `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/` |
+| `corew_eid` | Nessuno, non più | Il nome di prima di `kerdon_eid`, da prima del cambio di nome dell'app. Un browser può averne ancora uno; Kerdon non lo scrive e non ne usa il valore | — | — | — |
+
+Il template legge anche, senza scriverli, i segnali di consenso già presenti sul tuo dominio: il cookie `_tracking_consent` di Shopify e, se i tuoi tag ne scrivono uno, `kerdon_consent` (prima `corew_consent`). Quando il tuo endpoint chiama Kerdon, la risposta di Kerdon porta anche un cookie `kerdon_eid` per il dominio di Kerdon (`Secure`, `SameSite=None`, fino a un anno, fatto scadere alla revoca); con il template di Kerdon quella risposta resta al tuo container e non viene passata al browser del visitatore.
 
 **Per collegare un browser a un cliente** il tuo endpoint ci trasmette l'email o il numero di telefono che la persona ha appena lasciato: l'app li usa per cercare quel cliente nel tuo database e scrivere il collegamento. Quei due valori non vengono conservati sui nostri sistemi.
 
