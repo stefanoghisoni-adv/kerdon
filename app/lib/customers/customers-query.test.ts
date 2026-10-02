@@ -4,6 +4,7 @@ import { topProductsSQL } from './top-products';
 import {
   averagesSQL,
   customersInRangeSQL,
+  customersReportSQL,
   isCalendarDate,
   lifetimeProfitSQL,
   previousRange,
@@ -230,5 +231,49 @@ describe('i confini si scrivono nell ora di parete del negozio', () => {
     expect(orderWindow(RANGE, 'America/Los_Angeles').fromUtc.toISOString()).toBe(
       '2026-08-01T07:00:00.000Z',
     );
+  });
+});
+
+describe('customersReportSQL', () => {
+  const PREVIOUS = { from: '2026-07-01', to: '2026-07-31', timeZone: 'Europe/Rome' } as const;
+
+  it('una sola istruzione con le tre parti: periodo, periodo prima e di sempre', () => {
+    const sql = customersReportSQL({ current: RANGE, previous: PREVIOUS });
+
+    // Le tre domande di prima, intatte, dentro la stessa istruzione.
+    expect(sql).toContain(customersInRangeSQL(RANGE).replace(/;$/, ''));
+    expect(sql).toContain(customersInRangeSQL(PREVIOUS).replace(/;$/, ''));
+    expect(sql).toContain(lifetimeProfitSQL().replace(/;$/, ''));
+    expect(sql).toMatch(/AS current_rows/);
+    expect(sql).toMatch(/AS previous_rows/);
+    expect(sql).toMatch(/AS lifetime_rows/);
+    // Un solo punto e virgola, in fondo: le parti non possono chiudere
+    // l'istruzione a meta'.
+    expect(sql.match(/;/g)).toHaveLength(1);
+    expect(sql.trim().endsWith(';')).toBe(true);
+  });
+
+  it("le righe del periodo tengono l'ordine per profitto anche dentro l'aggregato", () => {
+    const sql = customersReportSQL({ current: RANGE, previous: null });
+    expect(sql).toMatch(/json_agg\(r ORDER BY r\.profit DESC/);
+  });
+
+  it('senza periodo precedente non lo chiede: la parte e\' vuota', () => {
+    const sql = customersReportSQL({ current: RANGE, previous: null });
+    expect(sql.match(/placed_at/g)?.length).toBe(
+      customersInRangeSQL(RANGE).match(/placed_at/g)?.length,
+    );
+    expect(sql).toMatch(/'\[\]'::json AS previous_rows/);
+  });
+
+  it('lo stesso tetto di righe per tutte e tre le parti', () => {
+    const sql = customersReportSQL({ current: RANGE, previous: PREVIOUS, limit: 50 });
+    expect(sql.match(/LIMIT 50\b/g)).toHaveLength(3);
+  });
+
+  it('una data che non e una data non entra nemmeno qui', () => {
+    expect(() =>
+      customersReportSQL({ current: { ...RANGE, from: "'; DROP TABLE orders; --" }, previous: null }),
+    ).toThrow();
   });
 });
