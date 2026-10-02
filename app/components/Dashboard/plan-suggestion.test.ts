@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   suggestPlanForProducts,
+  suggestPlanForLimits,
+  planOverflow,
   planComparisonRows,
   limitLabel,
   type PlanForSuggestion,
@@ -66,6 +68,43 @@ describe('suggestPlanForProducts', () => {
     // Meglio non dire niente che proporre un salto calcolato su un listino che
     // non contiene il piano da cui si parte.
     expect(suggestPlanForProducts(PLANS, 'inesistente', 5000)).toBeNull();
+  });
+});
+
+describe('planOverflow', () => {
+  const growth = PLANS[1];
+  it('conta quanti prodotti e quanti clienti con consenso restano fuori', () => {
+    expect(planOverflow(growth, { products: 250, customers: 520 })).toEqual({ products: 50, customers: 20 });
+  });
+  it('sotto i tetti: zero', () => {
+    expect(planOverflow(growth, { products: 10, customers: 10 })).toEqual({ products: 0, customers: 0 });
+  });
+  it('piano senza clienti: nessuna eccedenza clienti (e un altro invito, non un tetto)', () => {
+    expect(planOverflow(PLANS[0], { products: 10, customers: 999 })).toEqual({ products: 0, customers: 0 });
+  });
+  it('conteggi sconosciuti o piano senza tetto: zero', () => {
+    expect(planOverflow(growth, { products: null, customers: null })).toEqual({ products: 0, customers: 0 });
+    expect(planOverflow(PLANS[3], { products: 99999, customers: 99999 })).toEqual({ products: 0, customers: 0 });
+  });
+});
+
+describe('suggestPlanForLimits', () => {
+  it('clienti oltre il tetto: il piu economico che li contiene', () => {
+    // Growth tiene 500 clienti in questo listino di prova: 800 chiedono Scale.
+    expect(suggestPlanForLimits(PLANS, 'growth', { products: 10, customers: 800 })?.planName).toBe('scale');
+  });
+  it('prodotti e clienti insieme: il piano deve bastare a entrambi', () => {
+    // 300 prodotti starebbero in Scale, 5000 clienti no: serve Core.
+    expect(suggestPlanForLimits(PLANS, 'growth', { products: 300, customers: 5000 })?.planName).toBe('core');
+  });
+  it('nessuna eccedenza: nessuna proposta', () => {
+    expect(suggestPlanForLimits(PLANS, 'growth', { products: 10, customers: 100 })).toBeNull();
+  });
+  it('su un piano senza clienti i clienti non spostano la proposta dei prodotti', () => {
+    expect(suggestPlanForLimits(PLANS, 'basic', { products: 78, customers: 5000 })?.planName).toBe('growth');
+  });
+  it('mai il piano interno', () => {
+    expect(suggestPlanForLimits(PLANS, 'scale', { products: 1, customers: 99999 })?.planName).toBe('core');
   });
 });
 

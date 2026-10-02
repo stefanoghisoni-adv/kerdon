@@ -69,6 +69,81 @@ export function suggestPlanForProducts(
   )[0];
 }
 
+/** Quanti ne ha il negozio, per i due tetti del piano. null = non si sa. */
+export interface LimitCounts {
+  /** Prodotti totali del negozio. */
+  products?: number | null;
+  /** Clienti con consenso al marketing su Shopify: gli unici che si sincronizzano. */
+  customers?: number | null;
+}
+
+/** Quanti prodotti e quanti clienti restano fuori dal piano. */
+export interface PlanOverflow {
+  products: number;
+  customers: number;
+}
+
+/**
+ * Quanto eccede, per ciascun tetto.
+ *
+ * I clienti contano solo se il piano li sincronizza: su un piano che non li
+ * include non c'e' un tetto superato, c'e' una funzione da ottenere — e quella
+ * ha il suo invito, nella card dei clienti.
+ */
+export function planOverflow(plan: PlanForSuggestion, counts: LimitCounts): PlanOverflow {
+  const products =
+    plan.maxProducts != null && counts.products != null
+      ? Math.max(0, counts.products - plan.maxProducts)
+      : 0;
+  const customers =
+    plan.customersSyncEnabled && plan.maxCustomers != null && counts.customers != null
+      ? Math.max(0, counts.customers - plan.maxCustomers)
+      : 0;
+  return { products, customers };
+}
+
+/**
+ * Quale piano proporre a chi supera il tetto prodotti, quello clienti, o
+ * entrambi. Stesse regole di `suggestPlanForProducts`: il piu' economico fra i
+ * piani acquistabili e piu' cari dell'attuale che contengono tutto.
+ *
+ * I clienti pesano sulla scelta solo se il piano attuale li sincronizza gia':
+ * altrimenti un merchant su Basic con molti iscritti si vedrebbe proporre il
+ * piano piu' caro per risolvere un problema di prodotti.
+ */
+export function suggestPlanForLimits(
+  plans: PlanForSuggestion[],
+  currentPlanName: string | null | undefined,
+  counts: LimitCounts,
+): PlanForSuggestion | null {
+  const current = (currentPlanName ?? '').trim().toLowerCase();
+  const currentPlan = plans.find((p) => p.planName.trim().toLowerCase() === current) ?? null;
+  if (!currentPlan) return null;
+
+  const over = planOverflow(currentPlan, counts);
+  if (over.products === 0 && over.customers === 0) return null;
+
+  const needCustomers = currentPlan.customersSyncEnabled ? counts.customers ?? null : null;
+
+  const candidates = plans.filter((plan) => {
+    if (!isSelectablePlan(plan.planName)) return false;
+    if (plan.planName.trim().toLowerCase() === current) return false;
+    if (counts.products != null && plan.maxProducts != null && plan.maxProducts < counts.products) {
+      return false;
+    }
+    if (needCustomers != null) {
+      if (!plan.customersSyncEnabled) return false;
+      if (plan.maxCustomers != null && plan.maxCustomers < needCustomers) return false;
+    }
+    return plan.priceMonthly > currentPlan.priceMonthly;
+  });
+
+  if (candidates.length === 0) return null;
+  return [...candidates].sort(
+    (a, b) => a.priceMonthly - b.priceMonthly || a.planName.localeCompare(b.planName),
+  )[0];
+}
+
 /** Come si scrive un tetto nel confronto fra piani. */
 export function limitLabel(limit: number | null, t: Pick<Dictionary, 'planCompare'>): string {
   return limit == null ? t.planCompare.unlimited : String(limit);
