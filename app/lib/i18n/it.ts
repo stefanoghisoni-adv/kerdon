@@ -459,12 +459,13 @@ export const it = {
       customersHint:
         "I clienti che hanno acconsentito al marketing: sono quelli che l’app sincronizza.",
       ready: (ready: number, total: number) => `${ready} di ${total} pronti`,
-      optedIn: (optIn: number, total: number) =>
-        `${optIn} di ${total} con consenso`,
-      customersSynced: (synced: number, limit: number | null) =>
-        limit == null
-          ? `${synced} nel tuo database, senza limiti`
-          : `${synced} di ${limit} nel tuo database`,
+      customersRemaining: (remaining: number) =>
+        remaining === 0
+          ? "Nessun altro cliente sincronizzabile con il piano attuale"
+          : remaining === 1
+            ? "Ancora 1 cliente sincronizzabile"
+            : `Ancora ${remaining} clienti sincronizzabili`,
+      customersUnlimited: "Clienti sincronizzabili senza limiti",
       customersPaused: (paused: number) =>
         paused === 1
           ? "1 cliente resta nel tuo database con i dati dell’ultimo aggiornamento"

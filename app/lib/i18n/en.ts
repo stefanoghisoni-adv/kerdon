@@ -396,12 +396,13 @@ export const en: typeof it = {
       customersHint:
         "Customers who opted into marketing: the ones the app syncs.",
       ready: (ready: number, total: number) => `${ready} of ${total} ready`,
-      optedIn: (optIn: number, total: number) =>
-        `${optIn} of ${total} opted in`,
-      customersSynced: (synced: number, limit: number | null) =>
-        limit == null
-          ? `${synced} in your database, no limit`
-          : `${synced} of ${limit} in your database`,
+      customersRemaining: (remaining: number) =>
+        remaining === 0
+          ? "No more customers can be synced on your current plan"
+          : remaining === 1
+            ? "1 more customer can be synced"
+            : `${remaining} more customers can be synced`,
+      customersUnlimited: "Unlimited customers can be synced",
       customersPaused: (paused: number) =>
         paused === 1
           ? "1 customer stays in your database with its latest data"

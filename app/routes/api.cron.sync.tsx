@@ -29,6 +29,7 @@ import {
   drainComplianceRequests,
   pruneExpiredExports,
 } from '~/lib/gdpr/process-compliance.server';
+import { keepMerchantDbAwake } from '~/lib/supabase/keep-alive.server';
 
 /**
  * Il drenaggio della coda, innescato dal cron.
@@ -163,6 +164,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     /** Abbonamenti attivi su Shopify di cui da noi non risultava niente. */
     reconciledActivations: 0,
     expiredExportsPruned: 0,
+    /** Ping giornalieri ai database dei merchant per evitare il pause automatico. */
+    keepAlive: {
+      ok: 0,
+      failed: 0,
+      skipped: 0,
+    },
     /**
      * I database in pausa che questo giro e' andato a guardare, e quelli che ha
      * riacceso.
@@ -355,6 +362,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if (result === 'written') results.snapshots++;
     } catch (error) {
       console.error(`Snapshot idoneita' fallito per ${shop.shopDomain}:`, error);
+    }
+
+    // Ping giornaliero al database del merchant per evitare il pause automatico
+    // dopo 7 giorni di inattivita'. In un try/catch separato come lo snapshot.
+    try {
+      const keepAliveResult = await keepMerchantDbAwake(shop);
+      results.keepAlive[keepAliveResult]++;
+    } catch (error) {
+      console.error(`Keep-alive fallito per ${shop.shopDomain}:`, error);
+      results.keepAlive.failed++;
     }
 
     // Potatura dei browser mai identificati e fermi da oltre un anno. Vive nel
