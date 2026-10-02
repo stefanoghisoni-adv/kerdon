@@ -65,13 +65,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // che il piano consente. Una lettura sola, di solo conteggio, sul suo
   // database: nessuna chiamata a Shopify. Solo se il piano i clienti li
   // sincronizza — altrimenti non c'e' nessun tetto di cui parlare.
+  //
+  // Best effort fino in fondo, creazione del client compresa: aprirlo vuol dire
+  // decifrare la chiave di servizio, e una chiave che non si decifra (segreto
+  // cambiato, riga scritta a mano) non deve far cadere l'avviso intero con un
+  // 500. Senza conteggio la card e l'avviso tacciono su questo numero, come
+  // quando il database non risponde.
   let customerQuota: CustomerQuotaStatus | null = null;
   if (connected && shop.supabaseConfig && currentPlan?.customersSyncEnabled) {
-    const synced = await countSyncedCustomers(
-      createSupabaseClient(shop.supabaseConfig),
-      shop.supabaseConfig.tableNameCustomers,
-    );
-    if (synced != null) customerQuota = customerQuotaStatus(synced, currentPlan.maxCustomers);
+    try {
+      const synced = await countSyncedCustomers(
+        createSupabaseClient(shop.supabaseConfig),
+        shop.supabaseConfig.tableNameCustomers,
+      );
+      if (synced != null) customerQuota = customerQuotaStatus(synced, currentPlan.maxCustomers);
+    } catch (error) {
+      console.warn(
+        '[plan-limits] conteggio clienti non disponibile:',
+        error instanceof Error ? error.message : 'errore sconosciuto',
+      );
+    }
   }
 
   return json({

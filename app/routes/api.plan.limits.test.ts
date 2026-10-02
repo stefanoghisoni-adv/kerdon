@@ -20,7 +20,10 @@ vi.mock('~/lib/billing/shop-pricing.server', () => ({
     plans: plans.map((p) => ({ ...p, priceMonthly: 0, priceYearly: 0 })),
   }),
 }));
-vi.mock('~/lib/supabase.server', () => ({ createSupabaseClient: vi.fn(() => ({})) }));
+const createSupabaseClient = vi.fn((_config: unknown) => ({}));
+vi.mock('~/lib/supabase.server', () => ({
+  createSupabaseClient: (config: unknown) => createSupabaseClient(config),
+}));
 vi.mock('~/lib/limits/customer-limit.server', () => ({
   countSyncedCustomers: (...a: unknown[]) => countSyncedCustomers(...a),
 }));
@@ -70,5 +73,17 @@ describe('/api/plan/limits — clienti', () => {
     countSyncedCustomers.mockResolvedValue(null);
     const body = await (await call()).json();
     expect(body.customerQuota).toBeNull();
+  });
+
+  it('credenziali non utilizzabili: niente 500, solo nessun conteggio', async () => {
+    // La chiave di servizio non si decifra (segreto sbagliato, chiave non
+    // cifrata): l'avviso dei limiti deve rispondere comunque, come quando il
+    // conteggio non e' disponibile.
+    createSupabaseClient.mockImplementationOnce(() => {
+      throw new Error('ENCRYPTION_SECRET must be 64 hex characters (256 bits)');
+    });
+    const res = await call();
+    expect(res.status).toBe(200);
+    expect((await res.json()).customerQuota).toBeNull();
   });
 });
