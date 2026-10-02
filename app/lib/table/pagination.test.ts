@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { PER_PAGE, pageCount, pageSlice, visibleRange } from './pagination';
+import { CUSTOMERS_PER_PAGE, PRODUCTS_PER_PAGE, pageCount, pageSlice, visibleRange } from './pagination';
 
 describe('righe per pagina', () => {
-  it('e\' venticinque, lo stesso numero per tutte le tabelle', () => {
-    expect(PER_PAGE).toBe(25);
+  it('clienti: venti righe, tabella ad altezza fissa', () => {
+    expect(CUSTOMERS_PER_PAGE).toBe(20);
+  });
+
+  it('prodotti: quindici righe, tabella che cresce con le righe', () => {
+    expect(PRODUCTS_PER_PAGE).toBe(15);
   });
 });
 

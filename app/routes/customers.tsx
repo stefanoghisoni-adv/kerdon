@@ -41,7 +41,7 @@ import {
   type DateRange,
 } from '~/lib/dates/ranges';
 import { DateRangePicker } from '~/components/Dashboard/DateRangePicker';
-import { PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
+import { CUSTOMERS_PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
 import { TablePagination } from '~/components/Dashboard/TablePagination';
 import { matchesCustomerSearch } from '~/lib/customers/customer-search';
 import { formatMoney } from '~/lib/billing/money';
@@ -409,7 +409,7 @@ export default function Customers() {
   // insieme — sono gia' filtrate dal periodo — quindi si impagina qui, dove si
   // sa anche cosa la ricerca ha lasciato.
   const [page, setPage] = useState(1);
-  const visibleRows = pageSlice(matching, page, PER_PAGE);
+  const visibleRows = pageSlice(matching, page, CUSTOMERS_PER_PAGE);
 
   // Cambiando ricerca o filtro si riparte da pagina 1: restare a pagina 4 su un
   // risultato che ne ha due mostrerebbe una tabella vuota senza spiegazione.
@@ -420,7 +420,7 @@ export default function Customers() {
 
   // E se le righe si accorciano sotto i piedi — un filtro acceso mentre si e'
   // in fondo — si arretra invece di restare su una pagina che non c'e' piu'.
-  const totalPages = pageCount(matching.length, PER_PAGE);
+  const totalPages = pageCount(matching.length, CUSTOMERS_PER_PAGE);
   useEffect(() => {
     if (totalPages > 0 && page > totalPages) setPage(totalPages);
   }, [totalPages, page]);
@@ -589,7 +589,7 @@ export default function Customers() {
             <div className="stable-columns stable-columns--customers">
             <IndexTable
               resourceName={t.customers.resource}
-              itemCount={PER_PAGE}
+              itemCount={CUSTOMERS_PER_PAGE}
               selectable={false}
               loading={periodLoading}
               headings={[
@@ -620,7 +620,7 @@ export default function Customers() {
                     </IndexTable.Cell>
                   </IndexTable.Row>
                   {/* Righe di riempimento per mantenere l'altezza costante */}
-                  {Array.from({ length: PER_PAGE - 1 }, (_, i) => (
+                  {Array.from({ length: CUSTOMERS_PER_PAGE - 1 }, (_, i) => (
                     <IndexTable.Row
                       key={`filler-${i}`}
                       id={`filler-${i}`}
@@ -718,10 +718,12 @@ export default function Customers() {
                             vuole sistemare il profitto di questo cliente, non fare
                             le pulizie di primavera nel catalogo. */}
                         {row.coveredLines < row.totalLines && (
-                          // Flex container con minHeight mantiene l'altezza di riga
-                          // costante quando il link viene sostituito dallo spinner
-                          // (nessuna prop Polaris copre questo caso d'uso)
-                          <div style={{ display: 'flex', alignItems: 'center', minHeight: '20px' }}>
+                          // Altezza esatta e lineHeight 0: lo Spinner di Polaris 13.9.5 rende
+                          // uno span inline con svg inline, che poggia sulla baseline lasciando
+                          // sotto lo spazio per i discendenti del line box (~4-5px). Il flex con
+                          // height fissa e lineHeight 0 elimina quel gap, mantenendo l'altezza
+                          // costante quando il Link diventa Spinner.
+                          <div style={{ display: 'flex', alignItems: 'center', height: '20px', lineHeight: 0 }}>
                             {clienteInApertura === String(row.customerId) ? (
                               <Spinner size="small" accessibilityLabel={t.customers.fixIssues} />
                             ) : (
@@ -735,7 +737,7 @@ export default function Customers() {
                     </IndexTable.Row>
                   ))}
                   {/* Righe di riempimento per mantenere l'altezza costante */}
-                  {Array.from({ length: Math.max(0, PER_PAGE - visibleRows.length) }, (_, i) => (
+                  {Array.from({ length: Math.max(0, CUSTOMERS_PER_PAGE - visibleRows.length) }, (_, i) => (
                     <IndexTable.Row
                       key={`filler-${i}`}
                       id={`filler-${i}`}
@@ -755,7 +757,7 @@ export default function Customers() {
               )}
             </IndexTable>
             </div>
-            <TablePagination total={matching.length} page={page} onPage={setPage} />
+            <TablePagination total={matching.length} page={page} onPage={setPage} perPage={CUSTOMERS_PER_PAGE} />
           </Card>
 
           {birthdate && notice.view === 'status' && (

@@ -59,7 +59,7 @@ import {
 import { ProductOverflowBanner } from '~/components/Dashboard/ProductOverflowBanner';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { filterProblemVariants } from '~/lib/stats/problem-filter';
-import { PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
+import { PRODUCTS_PER_PAGE, pageCount, pageSlice } from '~/lib/table/pagination';
 import { TablePagination } from '~/components/Dashboard/TablePagination';
 import {
   selectSoldProblemVariants,
@@ -598,8 +598,8 @@ export default function ProblemProducts() {
   }, [values, restored, storageKey]);
 
   const filtered = filterProblemVariants(rows, query);
-  const totalPages = pageCount(filtered.length, PER_PAGE);
-  const visibleRows = pageSlice(filtered, page, PER_PAGE);
+  const totalPages = pageCount(filtered.length, PRODUCTS_PER_PAGE);
+  const visibleRows = pageSlice(filtered, page, PRODUCTS_PER_PAGE);
 
   // Cambiando la ricerca si riparte da pagina 1: restare a pagina 4 su un
   // risultato di 2 pagine mostrerebbe una tabella vuota senza spiegazione.
@@ -977,7 +977,7 @@ export default function ProblemProducts() {
             <div className="stable-columns stable-columns--issues">
             <IndexTable
               resourceName={t.issues.resource}
-              itemCount={PER_PAGE}
+              itemCount={visibleRows.length}
               selectable={false}
               headings={[
                 { title: t.issues.columns.product },
@@ -988,74 +988,21 @@ export default function ProblemProducts() {
                 { title: '%' },
               ]}
             >
-              {visibleRows.length === 0 ? (
-                <>
-                  {/* Messaggio quando non ci sono varianti da revisionare */}
-                  <IndexTable.Row id="empty-state" position={0} disabled>
-                    <IndexTable.Cell colSpan={6}>
-                      <Box paddingBlock="400">
-                        <Text as="p" tone="subdued" alignment="center">
-                          {query.trim() && filtered.length === 0
-                            ? t.issues.noResults(query.trim(), rows.length)
-                            : t.issues.allGood}
-                        </Text>
-                      </Box>
-                    </IndexTable.Cell>
-                  </IndexTable.Row>
-                  {/* Righe di riempimento per mantenere l'altezza costante */}
-                  {Array.from({ length: PER_PAGE - 1 }, (_, i) => (
-                    <IndexTable.Row
-                      key={`filler-${i}`}
-                      id={`filler-${i}`}
-                      position={i + 1}
-                      disabled
-                    >
-                      {Array.from({ length: 6 }, (_, colIdx) => (
-                        <IndexTable.Cell key={colIdx}>
-                          <span aria-hidden="true" style={{ visibility: 'hidden' }}>
-                            &nbsp;
-                          </span>
-                        </IndexTable.Cell>
-                      ))}
-                    </IndexTable.Row>
-                  ))}
-                </>
-              ) : (
-                <>
-                  {visibleRows.map((r, i) => (
-                    <CostRow
-                      key={r.variantId}
-                      row={r}
-                      index={i}
-                      shopDomain={shopDomain}
-                      disabled={costFieldDisabled({ updating, blocked })}
-                      value={values[r.variantId] ?? ''}
-                      onChangeValue={onChangeValue}
-                      error={rowErrors[r.variantId]}
-                    />
-                  ))}
-                  {/* Righe di riempimento per mantenere l'altezza costante */}
-                  {Array.from({ length: Math.max(0, PER_PAGE - visibleRows.length) }, (_, i) => (
-                    <IndexTable.Row
-                      key={`filler-${i}`}
-                      id={`filler-${i}`}
-                      position={visibleRows.length + i}
-                      disabled
-                    >
-                      {Array.from({ length: 6 }, (_, colIdx) => (
-                        <IndexTable.Cell key={colIdx}>
-                          <span aria-hidden="true" style={{ visibility: 'hidden' }}>
-                            &nbsp;
-                          </span>
-                        </IndexTable.Cell>
-                      ))}
-                    </IndexTable.Row>
-                  ))}
-                </>
-              )}
+              {visibleRows.map((r, i) => (
+                <CostRow
+                  key={r.variantId}
+                  row={r}
+                  index={i}
+                  shopDomain={shopDomain}
+                  disabled={costFieldDisabled({ updating, blocked })}
+                  value={values[r.variantId] ?? ''}
+                  onChangeValue={onChangeValue}
+                  error={rowErrors[r.variantId]}
+                />
+              ))}
             </IndexTable>
             </div>
-            <TablePagination total={filtered.length} page={page} onPage={setPage} />
+            <TablePagination total={filtered.length} page={page} onPage={setPage} perPage={PRODUCTS_PER_PAGE} />
           </Card>
         )}
         {/* Respiro in fondo: senza, il bordo della card/tabella tocca il fondo dell'iframe. */}

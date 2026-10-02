@@ -9,14 +9,21 @@
  */
 
 /**
- * Quante righe stanno in una pagina.
+ * Quante righe stanno in una pagina della tabella Clienti.
  *
- * Venticinque righe: un equilibrio fra lo scroll continuo (troppe poche righe
- * per pagina) e l'altezza eccessiva (troppe righe). E' lo stesso numero per
- * tutte le tabelle dell'app — un elenco che ne mostra venti e uno che ne
- * mostra cinquanta fanno sembrare piu' corto quello che non lo e'.
+ * Venti righe: la tabella mantiene altezza fissa con righe di riempimento, e
+ * un numero tondo evita spazi dimenticati sotto l'ultima riga piena.
  */
-export const PER_PAGE = 25;
+export const CUSTOMERS_PER_PAGE = 20;
+
+/**
+ * Quante righe stanno in una pagina della tabella Prodotti non idonei.
+ *
+ * Quindici righe: la tabella cresce con le righe senza altezza fissa, quindi
+ * un numero piu' contenuto evita pagine troppo lunghe. Piu' corta della
+ * tabella Clienti perche' qui ogni riga ha un campo da compilare.
+ */
+export const PRODUCTS_PER_PAGE = 15;
 
 /** Quante pagine servono per `total` righe. Nessuna riga, nessuna pagina. */
 export function pageCount(total: number, perPage: number): number {
