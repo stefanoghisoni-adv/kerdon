@@ -41,6 +41,7 @@ import {
   type BirthdateWriteTarget,
 } from '~/lib/customers/birthdate-writeback';
 import { hasCustomerWriteAccess } from '~/lib/sync/customers-write-access';
+import { loadCustomerQuota } from '~/lib/limits/customer-limit.server';
 import { redactError } from '~/lib/queue/queue-model';
 import { repairSpecOf, type FailureSiteName } from '~/lib/sync/failure-taxonomy';
 import {
@@ -656,6 +657,12 @@ async function syncCustomers(
    * negozio che si sta cancellando.
    */
   lease?: LeaseGuard,
+  /**
+   * Il tetto clienti del piano (`maxCustomers`); `null`/assente = illimitato.
+   * Conta i clienti idonei gia' nel database del merchant piu' quelli che
+   * questa corsa ammette: vedi app/lib/limits/customer-limit.ts.
+   */
+  maxCustomers: number | null = null,
 ): Promise<CustomerSyncResult> {
   let total = 0;
   let nextPageInfo: string | null = null;
@@ -663,6 +670,17 @@ async function syncCustomers(
   // centomila clienti tenere una riga di dettaglio per ognuno vorrebbe dire
   // portarsele tutte in memoria fino alla fine della corsa.
   const events = createEventBuffer();
+
+  // La quota parte da chi e' gia' dentro. Se non si riesce a leggerlo non si
+  // tira a indovinare: ammettere "fino al tetto" sopra a righe che non abbiamo
+  // contato vorrebbe dire superarlo. Si lancia come per un upsert fallito — e'
+  // lo stesso database, e la corsa successiva riparte dallo stesso confine.
+  const loaded = await loadCustomerQuota(supabase, tableName, maxCustomers);
+  if (!loaded.ok) {
+    throw new Error(`Supabase customer quota read failed: ${loaded.error}`);
+  }
+  const quota = loaded.quota;
+  let overQuota = 0;
 
   do {
     const { customers, nextPageInfo: nextPage } = await shopifyClient.getCustomers({
@@ -676,8 +694,20 @@ async function syncCustomers(
 
     // Due destini diversi per due categorie diverse.
     const page = customers as ShopifyCustomer[];
-    const optedIn = page.filter(isCustomerOptedIn);
+    const eligible = page.filter(isCustomerOptedIn);
     const revoked = page.filter((c) => !isCustomerOptedIn(c));
+
+    // Il tetto del piano: si offre alla quota l'intera pagina e si scrive solo
+    // chi ne esce dentro. Prima tutti, poi il filtro, e non uno alla volta: un
+    // cliente piu' vecchio piu' avanti nella pagina scalzerebbe uno gia'
+    // scritto, e quella scrittura sarebbe stata un posto speso per niente.
+    // Le revoche qui sotto non passano dalla quota: si applicano sempre.
+    for (const customer of eligible) {
+      quota.admit({ id: customer.id, createdAt: customer.created_at ?? null });
+    }
+    const inQuota = new Set(quota.chosenIds());
+    const optedIn = eligible.filter((c) => inQuota.has(c.id));
+    overQuota += eligible.length - optedIn.length;
     const rows = optedIn.map(transformCustomer);
     const revokedIds = revoked.map((c) => c.id);
 
@@ -796,6 +826,12 @@ async function syncCustomers(
     nextPageInfo = nextPage;
   } while (nextPageInfo);
 
+  if (overQuota > 0) {
+    console.log(
+      `Tetto clienti del piano raggiunto (${maxCustomers}): ${overQuota} clienti idonei non scritti`,
+    );
+  }
+
   return { total, events };
 }
 
@@ -816,6 +852,8 @@ async function syncCustomersIfEnabled(opts: {
   shopId: string;
   config: Parameters<typeof ensureCustomersTable>[1];
   customersSyncEnabled: boolean;
+  /** Tetto clienti del piano; `null`/assente = illimitato. */
+  maxCustomers?: number | null;
   shopifyClient: ShopifyAPIClient;
   supabase: SupabaseClient;
   updatedAtMin?: string;
@@ -892,6 +930,7 @@ async function syncCustomersIfEnabled(opts: {
     birthdateTarget,
     opts.ledger,
     opts.lease,
+    opts.maxCustomers ?? null,
   );
 }
 
@@ -1627,6 +1666,7 @@ export async function processPeriodicSyncCheck(
       shopId: shop.id,
       config: shop.supabaseConfig,
       customersSyncEnabled: can(caps, 'sync_customers'),
+      maxCustomers: plan?.maxCustomers ?? null,
       shopifyClient,
       supabase,
       updatedAtMin: lastSyncTime.toISOString(),
@@ -2350,6 +2390,7 @@ export async function processInitialBulkSync(
       shopId: shop.id,
       config: shop.supabaseConfig,
       customersSyncEnabled: can(caps, 'sync_customers'),
+      maxCustomers: plan?.maxCustomers ?? null,
       shopifyClient,
       supabase,
       shop,

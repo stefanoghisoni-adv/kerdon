@@ -37,13 +37,21 @@ Partner Dashboard → App **Kerdon** → **Distribution** → **Pricing** → Ma
 
 **Nessun limite ordini:** la colonna `max_orders` non esiste nella tabella `plans` (verificato in `prisma/plan-catalog-sync.test.ts` riga 167).
 
-### ⚠️ Rischio segnalato
-Il limite clienti (250 su Growth, 500 su Scale) è **mostrato** nel listino ma **non ancora applicato** nel codice. L'enforcement è previsto per una release successiva. Il revisore potrebbe chiedere chiarimenti.
+### Limite clienti: applicato
+Il limite clienti (Basic 0, Growth 250, Scale 500, Core illimitati) è **applicato** dalla sincronizzazione con lo stesso comportamento del limite prodotti (`app/lib/limits/customer-limit.ts`):
+- conta i clienti **con consenso al marketing** già sincronizzati, non tutti i clienti Shopify (chi non ha consenso non viene mai scritto);
+- sotto il tetto entrano i clienti più vecchi per data di creazione su Shopify (a parità, id più basso), come per i prodotti; i nuovi oltre il tetto non vengono scritti;
+- vale per la sincronizzazione iniziale, quella periodica e i webhook `customers/create` e `customers/update`;
+- scendendo di piano non si cancella nessun cliente: i primi N continuano ad aggiornarsi, gli altri restano nel database del merchant con i dati dell'ultimo aggiornamento;
+- la revoca del consenso si applica sempre, anche a tetto pieno.
+
+La Dashboard mostra nella card "Clienti con consenso" quanti clienti sono nel database sul totale consentito; oltre il tetto compare l'avviso "Limite clienti raggiunto" con il piano che basta.
 
 ### Come verificare
 1. Ogni piano nel Dashboard deve riportare prezzo e limiti identici alla tabella sopra
 2. Verificare che NON compaia nessun limite ordini in nessun piano
 3. Controllare che i nomi siano esattamente Basic / Growth / Scale / Core (non Free / Pro / Business / Enterprise, che erano i nomi vecchi)
+4. Su un negozio di prova in Growth con più di 250 clienti con consenso: dopo una sincronizzazione la card clienti della Dashboard mostra "250 di 250 nel tuo database" e compare l'avviso "Limite clienti raggiunto"
 
 ### [ ] Fatto
 Confermo che il pricing del listing coincide con i valori in `plan-tiers.ts`.
@@ -594,7 +602,7 @@ This contact is for Shopify's internal use only, not public.
 ## Notes for Reviewer
 
 - **All 11 scopes are mandatory** (no optional scopes)
-- **Customer limits (250/500) are displayed but not enforced yet** (planned for future release)
+- **Customer limits are enforced** (Growth 250, Scale 500, Core unlimited; Basic does not sync customers). Only customers who opted in to marketing are synced and counted. Below the limit the oldest customers (by Shopify creation date) are kept; new customers beyond it are not synced. Downgrading never deletes customers already in the merchant's database. To verify: on a Growth test store with more than 250 opted-in customers, run a sync — the Dashboard customers card shows "250 of 250 in your database" and the "Customer limit reached" banner offers the plan that fits
 - **No Theme App Extension** — tracking is handled via merchant's sGTM container, not theme code
 - **Data ownership:** Merchant's data lives in their own Supabase database, not Kerdon's servers
 - **Uninstall behavior:** Data stays in merchant's database (no lock-in)

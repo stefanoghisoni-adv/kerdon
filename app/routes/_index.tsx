@@ -24,6 +24,7 @@ import {
   Tooltip,
 } from '@shopify/polaris';
 import { ProductIcon, PersonIcon, SettingsIcon, LockIcon } from '@shopify/polaris-icons';
+import type { CustomerQuotaStatus } from '~/lib/limits/customer-limit';
 import { ProfitCard } from '~/components/Dashboard/ProfitCard';
 import { MarginCard } from '~/components/Dashboard/MarginCard';
 import { ProfitabilityChart } from '~/components/Dashboard/ProfitabilityChart';
@@ -750,6 +751,9 @@ export default function Dashboard() {
   const readinessFetcher = useFetcher<ReadinessResponse>();
   const readinessRefreshFetcher = useFetcher<ReadinessResponse>();
   const customerStatsFetcher = useFetcher<CustomerStatsResponse>();
+  // I clienti gia' nel database del merchant sul totale del piano: la stessa
+  // rotta dell'avviso sui limiti, cosi' i due numeri non possono divergere.
+  const planLimitsFetcher = useFetcher<{ customerQuota?: CustomerQuotaStatus | null }>();
   const customerStatsRefreshFetcher = useFetcher<CustomerStatsResponse>();
   // Il profitto arriva per conto suo: sono due interrogazioni al database del
   // merchant, e aspettarle prima di mostrare qualsiasi cosa ritarderebbe
@@ -870,6 +874,7 @@ export default function Dashboard() {
     countsFetcher.load('/api/stats/counts');
     readinessFetcher.load('/api/stats/products');
     customerStatsFetcher.load('/api/stats/customers');
+    if (customersEnabled) planLimitsFetcher.load('/api/plan/limits');
     reloadForPeriod(range, comparison);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocked]);
@@ -894,6 +899,7 @@ export default function Dashboard() {
   // Il valore live (refresh) vince appena disponibile, altrimenti la cache/primo calcolo.
   const readiness = readinessRefreshFetcher.data ?? readinessFetcher.data;
   const customerStats = customerStatsRefreshFetcher.data ?? customerStatsFetcher.data;
+  const customerQuota = planLimitsFetcher.data?.customerQuota ?? null;
   const readinessLoading = !readiness;
   // L'avviso dei costi mancanti viaggia con la readiness e non con il loader:
   // e' la stessa lettura del catalogo a dire quali costi mancano, ed e' l'unico
@@ -1905,6 +1911,20 @@ export default function Dashboard() {
               total={customerStats?.totalCustomers ?? 0}
               detail={t.dashboard.coverage.optedIn}
               loading={customerStatsLoading}
+              footer={
+                customerQuota ? (
+                  <BlockStack gap="050">
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      {t.dashboard.coverage.customersSynced(customerQuota.active, customerQuota.limit)}
+                    </Text>
+                    {customerQuota.paused > 0 && (
+                      <Text as="span" variant="bodySm" tone="caution">
+                        {t.dashboard.coverage.customersPaused(customerQuota.paused)}
+                      </Text>
+                    )}
+                  </BlockStack>
+                ) : null
+              }
             />
           ) : (
             // Piano senza clienti: resta la card di prima, che al posto dei

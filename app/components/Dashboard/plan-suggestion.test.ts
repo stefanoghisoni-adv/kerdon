@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   suggestPlanForProducts,
+  suggestPlanForLimits,
+  planOverflow,
+  overflowCopy,
   planComparisonRows,
   limitLabel,
   type PlanForSuggestion,
@@ -66,6 +69,43 @@ describe('suggestPlanForProducts', () => {
     // Meglio non dire niente che proporre un salto calcolato su un listino che
     // non contiene il piano da cui si parte.
     expect(suggestPlanForProducts(PLANS, 'inesistente', 5000)).toBeNull();
+  });
+});
+
+describe('planOverflow', () => {
+  const growth = PLANS[1];
+  it('conta quanti prodotti e quanti clienti con consenso restano fuori', () => {
+    expect(planOverflow(growth, { products: 250, customers: 520 })).toEqual({ products: 50, customers: 20 });
+  });
+  it('sotto i tetti: zero', () => {
+    expect(planOverflow(growth, { products: 10, customers: 10 })).toEqual({ products: 0, customers: 0 });
+  });
+  it('piano senza clienti: nessuna eccedenza clienti (e un altro invito, non un tetto)', () => {
+    expect(planOverflow(PLANS[0], { products: 10, customers: 999 })).toEqual({ products: 0, customers: 0 });
+  });
+  it('conteggi sconosciuti o piano senza tetto: zero', () => {
+    expect(planOverflow(growth, { products: null, customers: null })).toEqual({ products: 0, customers: 0 });
+    expect(planOverflow(PLANS[3], { products: 99999, customers: 99999 })).toEqual({ products: 0, customers: 0 });
+  });
+});
+
+describe('suggestPlanForLimits', () => {
+  it('clienti oltre il tetto: il piu economico che li contiene', () => {
+    // Growth tiene 500 clienti in questo listino di prova: 800 chiedono Scale.
+    expect(suggestPlanForLimits(PLANS, 'growth', { products: 10, customers: 800 })?.planName).toBe('scale');
+  });
+  it('prodotti e clienti insieme: il piano deve bastare a entrambi', () => {
+    // 300 prodotti starebbero in Scale, 5000 clienti no: serve Core.
+    expect(suggestPlanForLimits(PLANS, 'growth', { products: 300, customers: 5000 })?.planName).toBe('core');
+  });
+  it('nessuna eccedenza: nessuna proposta', () => {
+    expect(suggestPlanForLimits(PLANS, 'growth', { products: 10, customers: 100 })).toBeNull();
+  });
+  it('su un piano senza clienti i clienti non spostano la proposta dei prodotti', () => {
+    expect(suggestPlanForLimits(PLANS, 'basic', { products: 78, customers: 5000 })?.planName).toBe('growth');
+  });
+  it('mai il piano interno', () => {
+    expect(suggestPlanForLimits(PLANS, 'scale', { products: 1, customers: 99999 })?.planName).toBe('core');
   });
 });
 
@@ -171,5 +211,27 @@ describe('planComparisonRows', () => {
   it('scrive per esteso l assenza di tetto', () => {
     expect(limitLabel(null, itDict)).toBe('Illimitati');
     expect(limitLabel(200, itDict)).toBe('200');
+  });
+});
+
+describe('overflowCopy', () => {
+  it('solo prodotti: il testo di sempre', () => {
+    expect(overflowCopy({ products: 5, customers: 0 }, 'Scale', itDict)).toEqual({
+      title: itDict.overflow.title,
+      body: itDict.overflow.body(5, 'Scale'),
+    });
+  });
+  it('solo clienti', () => {
+    const copy = overflowCopy({ products: 0, customers: 20 }, 'Scale', itDict);
+    expect(copy?.title).toBe('Limite clienti raggiunto');
+    expect(copy?.body).toContain('20 clienti con consenso');
+  });
+  it('entrambi', () => {
+    const copy = overflowCopy({ products: 3, customers: 1 }, 'Core', itDict);
+    expect(copy?.title).toBe('Limiti del piano raggiunti');
+    expect(copy?.body).toContain('3 prodotti e 1 cliente con consenso');
+  });
+  it('nessuna eccedenza: niente da dire', () => {
+    expect(overflowCopy({ products: 0, customers: 0 }, 'Core', itDict)).toBeNull();
   });
 });
