@@ -6,7 +6,12 @@ import { PlanUpgradeAction } from './PlanUpgradeAction';
 import type { PlanUpgradeData } from './plan-upgrade-action';
 import { BASE_CURRENCY } from '~/lib/billing/money';
 import { useT } from '~/lib/i18n/context';
-import { suggestPlanForProducts, type PlanForSuggestion } from './plan-suggestion';
+import {
+  overflowCopy,
+  planOverflow,
+  suggestPlanForLimits,
+  type PlanForSuggestion,
+} from './plan-suggestion';
 
 export interface ProductOverflowBannerProps {
   disabled?: boolean;
@@ -37,7 +42,9 @@ interface ReadinessResponse {
 }
 
 /**
- * Avviso per chi ha piu' prodotti di quanti il suo piano ne sincronizzi.
+ * Avviso per chi ha piu' prodotti — o piu' clienti con consenso — di quanti il
+ * suo piano ne sincronizzi. Il nome resta quello di quando parlava solo di
+ * prodotti: lo montano gia' cinque pagine.
  *
  * Distinto dall'avviso di quota in esaurimento: quello dice che lo spazio sta
  * finendo, questo che una parte del catalogo resta gia' fuori. E soprattutto
@@ -66,7 +73,7 @@ export function ProductOverflowBanner({
   // Quanti clienti hanno dato il consenso: serve solo dentro il confronto fra i
   // piani, accanto al tetto. Si chiede insieme agli altri due perche' il
   // confronto si apre da un clic e a quel punto e' tardi per andarlo a prendere.
-  const customerStats = useFetcher<{ optIn?: number }>();
+  const customerStats = useFetcher<{ optIn?: number; enabled?: boolean }>();
   useEffect(() => {
     if (limits.state === 'idle' && !limits.data) limits.load('/api/plan/limits');
     if (readiness.state === 'idle' && !readiness.data) readiness.load('/api/stats/products');
@@ -80,6 +87,12 @@ export function ProductOverflowBanner({
   const totalProducts =
     readiness.data != null ? readiness.data.readyCount + readiness.data.problemCount : null;
   const plans = limits.data?.plans ?? [];
+  // I clienti con consenso su Shopify: sono quelli che la sincronizzazione
+  // scriverebbe, quindi quelli da confrontare con il tetto. Solo se il piano
+  // li include: altrimenti la risposta e' zero per costruzione, non un conteggio.
+  const totalCustomers =
+    customerStats.data?.enabled === true ? customerStats.data.optIn ?? null : null;
+  const counts = { products: totalProducts, customers: totalCustomers };
   const suggestedPlan =
     reason === 'feeds'
       ? // Il piu' economico fra quelli che hanno i feed: qui non c'e' un tetto
@@ -87,8 +100,8 @@ export function ProductOverflowBanner({
         plans
           .filter((p) => p.productFeedsEnabled)
           .sort((a, b) => a.priceMonthly - b.priceMonthly)[0] ?? null
-      : currentPlan && totalProducts != null
-        ? suggestPlanForProducts(plans, currentPlan.planName, totalProducts)
+      : currentPlan && (totalProducts != null || totalCustomers != null)
+        ? suggestPlanForLimits(plans, currentPlan.planName, counts)
         : null;
 
   // Senza database collegato l'avviso non ha oggetto: nessun prodotto sta
@@ -97,15 +110,13 @@ export function ProductOverflowBanner({
   if (dismissed) return null;
   if (reason === 'products' && limits.data?.connected === false) return null;
   if (!suggestedPlan || !currentPlan) return null;
-  if (reason === 'products' && totalProducts == null) return null;
+  if (reason === 'products' && totalProducts == null && totalCustomers == null) return null;
   // Il piano li ha gia': non c'e' niente da proporre.
   if (reason === 'feeds' && currentPlan.productFeedsEnabled) return null;
 
   const nextLabel = planLabel(suggestedPlan.planName);
-  const excluded =
-    currentPlan.maxProducts == null || totalProducts == null
-      ? 0
-      : totalProducts - currentPlan.maxProducts;
+  const copy = overflowCopy(planOverflow(currentPlan, counts), nextLabel, t);
+  if (reason === 'products' && !copy) return null;
 
   // Qui il listino e i conteggi ci sono gia' — senza, l'avviso non saprebbe
   // nemmeno se comparire — quindi il comando li riceve invece di richiederli:
@@ -121,7 +132,7 @@ export function ProductOverflowBanner({
   return (
     <Banner
       tone={reason === 'feeds' ? 'info' : 'warning'}
-      title={reason === 'feeds' ? undefined : t.overflow.title}
+      title={reason === 'feeds' ? undefined : copy?.title}
       onDismiss={() => setDismissed(true)}
     >
       <BlockStack gap="300">
@@ -136,7 +147,7 @@ export function ProductOverflowBanner({
               <PlanUpgradeAction plan={suggestedPlan.planName} data={upgradeData} />
             </>
           ) : (
-            t.overflow.body(excluded, nextLabel)
+            copy?.body
           )}
         </Text>
         {/* Nel modo "feed" il comando e' gia' il collegamento dentro la frase:

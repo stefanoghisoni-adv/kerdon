@@ -144,6 +144,33 @@ export function suggestPlanForLimits(
   )[0];
 }
 
+/**
+ * Titolo e testo dell'avviso di tetto superato, secondo cosa resta fuori.
+ * null quando non resta fuori niente.
+ */
+export function overflowCopy(
+  over: PlanOverflow,
+  planName: string,
+  t: Pick<Dictionary, 'overflow'>,
+): { title: string; body: string } | null {
+  if (over.products > 0 && over.customers > 0) {
+    return {
+      title: t.overflow.titleBoth,
+      body: t.overflow.bodyBoth(over.products, over.customers, planName),
+    };
+  }
+  if (over.customers > 0) {
+    return {
+      title: t.overflow.titleCustomers,
+      body: t.overflow.bodyCustomers(over.customers, planName),
+    };
+  }
+  if (over.products > 0) {
+    return { title: t.overflow.title, body: t.overflow.body(over.products, planName) };
+  }
+  return null;
+}
+
 /** Come si scrive un tetto nel confronto fra piani. */
 export function limitLabel(limit: number | null, t: Pick<Dictionary, 'planCompare'>): string {
   return limit == null ? t.planCompare.unlimited : String(limit);

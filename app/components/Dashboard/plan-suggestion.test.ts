@@ -3,6 +3,7 @@ import {
   suggestPlanForProducts,
   suggestPlanForLimits,
   planOverflow,
+  overflowCopy,
   planComparisonRows,
   limitLabel,
   type PlanForSuggestion,
@@ -210,5 +211,27 @@ describe('planComparisonRows', () => {
   it('scrive per esteso l assenza di tetto', () => {
     expect(limitLabel(null, itDict)).toBe('Illimitati');
     expect(limitLabel(200, itDict)).toBe('200');
+  });
+});
+
+describe('overflowCopy', () => {
+  it('solo prodotti: il testo di sempre', () => {
+    expect(overflowCopy({ products: 5, customers: 0 }, 'Scale', itDict)).toEqual({
+      title: itDict.overflow.title,
+      body: itDict.overflow.body(5, 'Scale'),
+    });
+  });
+  it('solo clienti', () => {
+    const copy = overflowCopy({ products: 0, customers: 20 }, 'Scale', itDict);
+    expect(copy?.title).toBe('Limite clienti raggiunto');
+    expect(copy?.body).toContain('20 clienti con consenso');
+  });
+  it('entrambi', () => {
+    const copy = overflowCopy({ products: 3, customers: 1 }, 'Core', itDict);
+    expect(copy?.title).toBe('Limiti del piano raggiunti');
+    expect(copy?.body).toContain('3 prodotti e 1 cliente con consenso');
+  });
+  it('nessuna eccedenza: niente da dire', () => {
+    expect(overflowCopy({ products: 0, customers: 0 }, 'Core', itDict)).toBeNull();
   });
 });

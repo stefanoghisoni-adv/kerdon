@@ -6,9 +6,12 @@ import { samePlanName } from '~/lib/billing/plan-name';
 import { BASE_CURRENCY } from '~/lib/billing/money';
 import { resolveShopPricing } from '~/lib/billing/shop-pricing.server';
 import { wantedCurrency } from '~/lib/i18n/preferences';
+import { createSupabaseClient } from '~/lib/supabase.server';
+import { countSyncedCustomers } from '~/lib/limits/customer-limit.server';
+import { customerQuotaStatus, type CustomerQuotaStatus } from '~/lib/limits/customer-limit';
 
 /**
- * Piano in uso e listino, per l'avviso sul limite prodotti.
+ * Piano in uso e listino, per l'avviso sui limiti di prodotti e clienti.
  *
  * Solo database: nessuna chiamata a Shopify. L'avviso compare su tre pagine
  * diverse, e farlo costare una lettura del catalogo ogni volta lo renderebbe un
@@ -23,7 +26,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     include: { supabaseConfig: true },
   });
   if (!shop) {
-    return json({ connected: false, currentPlan: null, plans: [], currency: BASE_CURRENCY });
+    return json({
+      connected: false,
+      currentPlan: null,
+      plans: [],
+      currency: BASE_CURRENCY,
+      customerQuota: null,
+    });
   }
 
   const plans = await prisma.plan.findMany();
@@ -48,15 +57,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { preferredCurrency: wantedCurrency(shop), hasReservedPrice: reserved > 0 },
   );
 
+  const connected = !!shop.supabaseConfig?.connectionVerifiedAt;
+  const currentPlan =
+    pricing.plans.find((p) => samePlanName(p.planName, shop.currentPlan)) ?? null;
+
+  // Quanti clienti con consenso sono gia' nel database del merchant, sul totale
+  // che il piano consente. Una lettura sola, di solo conteggio, sul suo
+  // database: nessuna chiamata a Shopify. Solo se il piano i clienti li
+  // sincronizza — altrimenti non c'e' nessun tetto di cui parlare.
+  let customerQuota: CustomerQuotaStatus | null = null;
+  if (connected && shop.supabaseConfig && currentPlan?.customersSyncEnabled) {
+    const synced = await countSyncedCustomers(
+      createSupabaseClient(shop.supabaseConfig),
+      shop.supabaseConfig.tableNameCustomers,
+    );
+    if (synced != null) customerQuota = customerQuotaStatus(synced, currentPlan.maxCustomers);
+  }
+
   return json({
     // Il tetto prodotti parla di una sincronizzazione che senza database non
     // esiste: chi mostra l'avviso deve poter tacere finche' il collegamento non
     // c'e'. La regola sta qui e non nelle tre pagine che lo ospitano, cosi' non
     // puo' valere in una e non nelle altre.
-    connected: !!shop.supabaseConfig?.connectionVerifiedAt,
+    connected,
     currentPlanName: shop.currentPlan,
     currency: pricing.currency,
     plans: pricing.plans,
-    currentPlan: pricing.plans.find((p) => samePlanName(p.planName, shop.currentPlan)) ?? null,
+    currentPlan,
+    customerQuota,
   });
 }

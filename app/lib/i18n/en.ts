@@ -398,6 +398,14 @@ export const en: typeof it = {
       ready: (ready: number, total: number) => `${ready} of ${total} ready`,
       optedIn: (optIn: number, total: number) =>
         `${optIn} of ${total} opted in`,
+      customersSynced: (synced: number, limit: number | null) =>
+        limit == null
+          ? `${synced} in your database, no limit`
+          : `${synced} of ${limit} in your database`,
+      customersPaused: (paused: number) =>
+        paused === 1
+          ? "1 customer stays in your database with its latest data"
+          : `${paused} customers stay in your database with their latest data`,
       fix: "Fix products",
       none: "No data",
     },
@@ -713,6 +721,18 @@ export const en: typeof it = {
 
   overflow: {
     title: "Product limit reached",
+    titleCustomers: "Customer limit reached",
+    titleBoth: "Plan limits reached",
+    bodyCustomers: (excluded: number, plan: string) =>
+      `${excluded} ${
+        excluded === 1 ? "opted-in customer won’t be synced" : "opted-in customers won’t be synced"
+      } ` +
+      `because you’ve reached your plan’s limit. With ${plan} you get all of them, ready for ` +
+      `your campaigns.`,
+    bodyBoth: (products: number, customers: number, plan: string) =>
+      `${products} ${products === 1 ? "product" : "products"} and ${customers} opted-in ` +
+      `${customers === 1 ? "customer" : "customers"} won’t be synced because you’ve reached ` +
+      `your plan’s limits. With ${plan} you get all of them.`,
     body: (excluded: number, plan: string) =>
       `${excluded} ${
         excluded === 1 ? "product won’t be synced" : "products won’t be synced"

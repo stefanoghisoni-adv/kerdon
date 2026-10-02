@@ -461,6 +461,14 @@ export const it = {
       ready: (ready: number, total: number) => `${ready} di ${total} pronti`,
       optedIn: (optIn: number, total: number) =>
         `${optIn} di ${total} con consenso`,
+      customersSynced: (synced: number, limit: number | null) =>
+        limit == null
+          ? `${synced} nel tuo database, senza limiti`
+          : `${synced} di ${limit} nel tuo database`,
+      customersPaused: (paused: number) =>
+        paused === 1
+          ? "1 cliente resta nel tuo database con i dati dell’ultimo aggiornamento"
+          : `${paused} clienti restano nel tuo database con i dati dell’ultimo aggiornamento`,
       fix: "Sistema i prodotti",
       none: "Nessun dato",
     },
@@ -872,6 +880,20 @@ export const it = {
   // Piu' prodotti di quanti il piano ne sincronizzi.
   overflow: {
     title: "Limite prodotti raggiunto",
+    titleCustomers: "Limite clienti raggiunto",
+    titleBoth: "Limiti del piano raggiunti",
+    bodyCustomers: (excluded: number, plan: string) =>
+      `${excluded} ${
+        excluded === 1
+          ? "cliente con consenso non verrà sincronizzato"
+          : "clienti con consenso non verranno sincronizzati"
+      } ` +
+      `dato che hai raggiunto il limite del tuo piano. Con ${plan} li ritrovi tutti, pronti ` +
+      `per le tue campagne.`,
+    bodyBoth: (products: number, customers: number, plan: string) =>
+      `${products} ${products === 1 ? "prodotto" : "prodotti"} e ${customers} ` +
+      `${customers === 1 ? "cliente con consenso" : "clienti con consenso"} non verranno ` +
+      `sincronizzati dato che hai raggiunto i limiti del tuo piano. Con ${plan} li ritrovi tutti.`,
     body: (excluded: number, plan: string) =>
       `${excluded} ${
         excluded === 1

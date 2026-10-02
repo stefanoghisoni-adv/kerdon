@@ -1,4 +1,5 @@
-import { Button, InlineStack, Text } from '@shopify/polaris';
+import type { ReactNode } from 'react';
+import { BlockStack, Button, InlineStack, Text } from '@shopify/polaris';
 import { coverage, coverageTone } from './coverage';
 import { StatCard } from './StatCard';
 import { useT } from '~/lib/i18n/context';
@@ -15,6 +16,8 @@ export interface CoverageCardProps {
   issue?: boolean;
   action?: { label: string; url: string; onAction?: () => void; loading?: boolean };
   loading?: boolean;
+  /** Una riga in piu' sotto il dettaglio: oggi, i clienti sul totale del piano. */
+  footer?: ReactNode;
 }
 
 /**
@@ -37,6 +40,7 @@ export function CoverageCard({
   issue,
   action,
   loading,
+  footer,
 }: CoverageCardProps) {
   const t = useT();
   const value = coverage(ready, total);
@@ -49,22 +53,25 @@ export function CoverageCard({
       value={loading || value.percent == null ? '—' : `${value.percent}%`}
       tone={tone === 'warning' ? 'caution' : undefined}
       detail={
-        <InlineStack gap="200" blockAlign="center" wrap={false}>
-          <Text as="span" variant="bodySm" tone="subdued">
-            {loading ? t.dashboard.coverage.none : detail(ready, total)}
-          </Text>
-          {!loading && issue && action && (
-            <Button
-              variant="plain"
-              url={action.url}
-              onClick={action.onAction}
-              loading={action.loading}
-              disabled={action.loading}
-            >
-              {action.label}
-            </Button>
-          )}
-        </InlineStack>
+        <BlockStack gap="100">
+          <InlineStack gap="200" blockAlign="center" wrap={false}>
+            <Text as="span" variant="bodySm" tone="subdued">
+              {loading ? t.dashboard.coverage.none : detail(ready, total)}
+            </Text>
+            {!loading && issue && action && (
+              <Button
+                variant="plain"
+                url={action.url}
+                onClick={action.onAction}
+                loading={action.loading}
+                disabled={action.loading}
+              >
+                {action.label}
+              </Button>
+            )}
+          </InlineStack>
+          {!loading && footer}
+        </BlockStack>
       }
     />
   );
