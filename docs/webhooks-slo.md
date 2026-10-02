@@ -52,6 +52,29 @@ Se Vercel termina la funzione prima che l'elaborazione finisca, o se l'elaborazi
 
 - `app/uninstalled`, `app_subscriptions/update`: elaborazione immediata, stesso SLO
 
+### Limiti di durata delle funzioni
+
+Le funzioni webhook in `vercel.json` **non dichiarano** `maxDuration`. Vale quindi
+il limite di default del progetto Vercel.
+
+**Come verificare il limite attuale**:
+- `vercel inspect <url-deployment>` mostra i limiti di tutte le funzioni
+- Dashboard Vercel → Progetto → Settings → Functions → Max Duration
+
+**Limite tipico** (Hobby/Pro senza override): 10 secondi per funzione serverless.
+
+**Cosa succede se il limite viene superato**:
+- Vercel termina forzatamente la funzione, anche se `waitUntil` è in corso
+- La ricevuta rimane nello stato in cui si trovava:
+  - Se il claim non era ancora avvenuto: ricevuta `queued`, recupero al prossimo cron
+  - Se il claim era in corso: ricevuta `processing`, ripresa dopo 5 minuti (`WEBHOOK_STALE_MS`)
+- Il cron di drenaggio (`/api/cron/sync`) riprende il lavoro dalla riga lasciata indietro
+
+**Nota**: l'elaborazione webhook è progettata per non dipendere da `maxDuration`
+lungo. La scrittura della ricevuta + ack è sotto 1 secondo (target), e `waitUntil`
+tiene viva la funzione solo se l'elaborazione finisce nel limite di piattaforma.
+L'arretrato viene smaltito dal cron.
+
 ### Cosa succede se Vercel termina la funzione
 
 **Prima del 200 OK**: impossibile — la ricevuta viene scritta *prima* di rispondere, quindi se la funzione muore prima del 200, Shopify ritenta.
