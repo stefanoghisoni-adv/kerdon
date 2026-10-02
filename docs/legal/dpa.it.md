@@ -154,7 +154,7 @@ questi obblighi.
 |---|---|---|
 | Vercel Inc. | Esecuzione dell'applicazione | Dati in transito durante l'elaborazione |
 | Supabase Inc. | Database dell'applicazione | Configurazione, credenziali cifrate, registri |
-| Upstash Inc. | Cache dei conteggi mostrati nell'app | Solo identificatore interno di negozio e conteggi aggregati |
+| Upstash Inc. | Cache dei conteggi mostrati nell'app e, se attivati, contatori anti-abuso delle scritture | Solo identificatore interno di negozio, identificativo pubblico della chiave di invio, finestra temporale e conteggi aggregati; nessun dato personale |
 
 Il database di catalogo e clientela **non** compare in questa tabella: è
 intestato al merchant, che ha un rapporto contrattuale diretto con il proprio

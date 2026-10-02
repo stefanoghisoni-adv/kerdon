@@ -139,7 +139,7 @@ L'app se ne accorge in due modi: quando una lettura del tuo database fallisce, e
 | Shopify | Origine dei dati di negozio, prodotti, clienti e ordini; fatturazione | Secondo i termini di Shopify |
 | Supabase | Il tuo database e il nostro | Unione Europea |
 | Vercel | Hosting dell'applicazione | Unione Europea |
-| Upstash | Cache dei conteggi che l'app ti mostra — prodotti pronti, clienti e simili | Unione Europea |
+| Upstash | Cache dei conteggi che l'app ti mostra — prodotti pronti, clienti e simili — e, se attivati, contatori anti-abuso delle scritture (identificativo interno del negozio, identificativo della chiave, finestra temporale; nessun dato personale) | Unione Europea |
 
 **Non vendiamo dati.** Né i tuoi, né quelli dei tuoi clienti, a nessuno e in nessuna forma. E non li usiamo per addestrare modelli.
 

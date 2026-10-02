@@ -8,8 +8,7 @@ Questa checklist va eseguita direttamente nel **Partner Dashboard di Shopify** p
 - Come verificarlo
 - Casella da spuntare al completamento
 
-**Ultimo aggiornamento:** 2026-10-01  
-**Branch:** docs/checklist-dash
+**Ultimo aggiornamento:** 2026-10-02
 
 ---
 
@@ -425,7 +424,7 @@ The store has sample products, customers with marketing consent, and test orders
 1. Install the app from the test store
 2. The app will request 11 OAuth scopes (see DASH-03 above for the full list)
 3. Approve all scopes
-4. Connect a Supabase project (credentials provided or use your own test project)
+4. The test store already has a Supabase project connected, so you don't need to create any external account. If you need to reconnect it, use these test credentials: [DA COMPILARE: project URL e credenziali Supabase di test, oppure conferma che lo store di test ha gia' Supabase collegato]
 5. The app will perform initial sync of products, customers (only those with marketing consent), and orders
 6. Wait for sync completion (visible in app dashboard)
 
@@ -435,7 +434,7 @@ The store has sample products, customers with marketing consent, and test orders
 
 ### Basic Plan (Free)
 - **Limits:** 20 products, 0 customers (customer sync disabled), no product feeds
-- **Test:** Create a store with 21 products → the 21st should trigger an upgrade prompt
+- **Test:** With 21 products eligible for sync on the Basic plan, the Dashboard shows the "Product limit reached" banner ("1 product won't be synced because you've reached your plan's limit…") with an "Upgrade to Growth now" button. Products beyond the limit are left out of the sync; nothing is deleted.
 
 ### Growth Plan (€29/month)
 - **Limits:** 200 products, 250 customers, product feeds enabled
@@ -455,14 +454,22 @@ The store has sample products, customers with marketing consent, and test orders
 
 ## 3. Test Tracking and Visitor Recognition
 
-1. From the app's Settings tab, enable "Visitor Recognition"
-2. The app will generate a pseudonymous browser identifier
-3. Visit the test store's online store with different browsers
-4. Link a visitor to a customer by completing a purchase
-5. Verify that `external_id` is written to the customer record in the app's database
-6. Revoke consent for a customer → verify that their visitor link is deleted within 90 days
+Tracking is not a switch inside the app: it connects the merchant's own server-side endpoint to the app. It is configured from the **tracking card on the app's Dashboard**:
 
-**Note:** This feature writes the browser identifier to the customer's record in Shopify (declared in DASH-02).
+1. Choose the path: a server-side Google Tag Manager container (sGTM) or a Cloudflare Worker.
+2. Enter the store's endpoint address.
+3. Generate the ingest key (`kin_…`) and copy it into the container or Worker.
+4. Press **Verify**: the app checks that the endpoint answers and that the key is accepted.
+
+The test store [DA COMPILARE: indicare se lo store di test ha gia' un container sGTM configurato con la chiave di ingest, oppure scrivere che la verifica del reviewer si ferma al passo 4 "Verify"].
+
+If the container is configured:
+
+5. Visit the online store and accept the cookie banner (analytics and marketing). The endpoint calls `/rest/v1/tracking_id`, which mints a pseudonymous browser identifier (`kerdon_` + 32 random characters) and records it in the `users` table of the merchant's own Supabase project.
+6. Place a test order as a logged-in customer. If the cart attribute `_kerdon_external_id` holds an identifier minted by `/rest/v1/tracking_id` **for this store**, the orders webhook links that browser to the customer in the `users` table. Identifiers that were never minted for this store are ignored.
+7. Withdraw consent from the banner and load another page: on the next call to the endpoint the cookie expires and the browser's row (and its link to the customer) is deleted from the merchant's database. The 90-day period applies only to the automatic pruning of anonymous rows that were never linked to a customer.
+
+**Note:** Nothing is written to Shopify by this feature. The browser–customer link lives only in the `users` table of the merchant's Supabase project. The only writes the app makes to Shopify are the date-of-birth metafield and the unit cost on InventoryItem (see DASH-02).
 
 ---
 
@@ -599,6 +606,9 @@ This contact is for Shopify's internal use only, not public.
 2. `[DA COMPILARE: email login]` — credenziali di accesso allo store
 3. `[DA COMPILARE: password]` — password dello store
 4. `[DA COMPILARE: email personale o stefanoghisoni.adv@gmail.com]` — contatto emergenza
+5. `[DA COMPILARE: project URL e credenziali Supabase di test, ...]` — il revisore non deve aprire account esterni: o lo store di test ha gia' Supabase collegato, o si forniscono credenziali di un progetto di test
+6. `[DA COMPILARE: ... container sGTM ...]` — se lo store di test ha un container sGTM gia' configurato, o se la verifica del tracciamento si ferma a "Verify"
+7. `[DA COMPILARE: email del contatto di emergenza]` — DASH-10
 
 **Perché segnaposto:** solo l'utente conosce quale store di test userà e quali credenziali fornire al revisore. Queste informazioni non devono essere committate nel repository.
 
@@ -623,10 +633,10 @@ Partner Dashboard → Settings → **Account** → Emergency contact
 ### Valore esatto
 
 **Nome:** Stefano Ghisoni  
-**Email:** stefanoghisoni.adv@gmail.com (fonte: user email from system reminder)  
+**Email:** [DA COMPILARE: email del contatto di emergenza]  
 **Telefono:** [DA COMPILARE se richiesto da Shopify]
 
-**Fonte:** email utente dalla system-reminder, dati personali da `docs/legal/privacy-policy.md` riga 7:
+**Fonte:** dati del titolare da `docs/legal/privacy-policy.md` riga 7:
 
 > Kerdon is an application for Shopify stores, operated by Stefano Ghisoni, Via Percy Bysshe Shelley 49/10, 16148, Genoa (GE), Italy, VAT IT02705860993.
 
@@ -673,7 +683,6 @@ Prima di cliccare "Submit for review", verificare:
 
 ---
 
-**Ultimo controllo eseguito:** 2026-10-01  
-**Branch:** docs/checklist-dash  
+**Ultimo controllo eseguito:** 2026-10-02  
 **Autore:** Claude Sonnet 4.5  
 **Sessione:** https://claude.ai/code/session_019kMax6s282fAemZSwU4gFo
