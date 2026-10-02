@@ -1,5 +1,11 @@
 title = "Kerdon gitleaks configuration"
 
+# Le regole di default di gitleaks, piu' l'allowlist qui sotto. Senza questo
+# blocco un file di configurazione sostituisce le regole invece di estenderle:
+# gitleaks non ne avrebbe nessuna, e direbbe sempre "no leaks found".
+[extend]
+  useDefault = true
+
 [allowlist]
   description = "Allowlist for test fixtures and dummy credentials"
 
@@ -9,7 +15,6 @@ title = "Kerdon gitleaks configuration"
     '''app/lib/queue/.*\.test\.ts''',
   ]
 
-  # Dummy Shopify tokens in tests (format: shpat_...)
-  regexes = [
-    '''shpat_[0-9a-f]{32}''',  # Test fixture Shopify tokens
-  ]
+  # Niente regex globali: `shpat_[0-9a-f]{32}` e' esattamente il formato dei
+  # token admin veri, e allowlistarla ignorerebbe proprio un token trapelato.
+  # Le fixture sono coperte dai percorsi qui sopra.
