@@ -211,6 +211,10 @@ model Shop {
   packagingConfig          PackagingConfig?
   shippingAlertDismissal   ShippingAlertDismissal?
   privacyNotice            PrivacyNoticeAcknowledgement?
+  integrationConnections   IntegrationConnection[]
+  integrationFieldMappings IntegrationFieldMapping[]
+  integrationConflicts     IntegrationConflict[]
+  integrationImportRuns    IntegrationImportRun[]
 
   @@index([shopDomain])
   @@map("shops")
@@ -1744,4 +1748,94 @@ model PrivacyNoticeAcknowledgement {
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("privacy_notice_acknowledgements")
+}
+
+/// Connessione OAuth a un provider esterno (Klaviyo, email marketing).
+///
+/// Una riga per provider: un negozio puo' collegare Klaviyo senza toccare altre
+/// integrazioni. I token sono cifrati con encrypt() (app/lib/crypto/encrypt.ts),
+/// mai in chiaro.
+model IntegrationConnection {
+  id           String    @id @default(uuid())
+  shopId       String    @map("shop_id")
+  provider     String
+  accessToken  String?   @map("access_token")
+  refreshToken String?   @map("refresh_token")
+  expiresAt    DateTime? @map("expires_at")
+  accountName  String?   @map("account_name")
+  /// 'connected' | 'needs_reconnect' | 'disconnected'
+  status       String
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  shop         Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, provider])
+  @@map("integration_connections")
+}
+
+/// Associazione fra un campo del provider e uno del nostro schema clienti.
+///
+/// Il merchant sceglie quale proprieta' di Klaviyo finisce in quale colonna del
+/// suo database, e la scelta si salva qui. Una riga per campo: il mapping e'
+/// tutto in questa tabella, non sparso fra tabelle diverse.
+model IntegrationFieldMapping {
+  id          String  @id @default(uuid())
+  shopId      String  @map("shop_id")
+  provider    String
+  sourceKey   String  @map("source_key")
+  targetField String  @map("target_field")
+  dateFormat  String? @map("date_format")
+  shop        Shop    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, provider, targetField])
+  @@map("integration_field_mappings")
+}
+
+/// Un conflitto trovato durante la sincronizzazione: noi e loro abbiamo valori
+/// diversi per lo stesso campo dello stesso cliente.
+///
+/// La UI mostra l'elenco e chiede "chi vince", e la scelta si scrive qui. Una
+/// riga per cliente per campo: riaprire lo stesso conflitto dopo averlo risolto
+/// AGGIORNA la riga esistente invece di crearne una nuova.
+model IntegrationConflict {
+  id               String    @id @default(uuid())
+  shopId           String    @map("shop_id")
+  provider         String
+  customerId       BigInt    @map("shopify_customer_id")
+  targetField      String    @map("target_field")
+  ourValue         String?   @map("our_value")
+  theirValue       String    @map("their_value")
+  /// 'open' | 'kept_ours' | 'used_theirs'
+  status           String
+  decidedAt        DateTime? @map("decided_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, provider, customerId, targetField])
+  @@index([shopId, status])
+  @@map("integration_conflicts")
+}
+
+/// Un import dall'inizio: il merchant ha premuto "importa clienti" e l'operazione
+/// e' in corso (running) o conclusa (completed, failed, interrupted).
+///
+/// Tiene il cursore per la paginazione e i contatori di cosa e' stato fatto
+/// (ImportCounters, definiti in Task 8). Una riga per operazione: riaprire
+/// l'import non sovrascrive, crea una riga nuova.
+model IntegrationImportRun {
+  id         String    @id @default(uuid())
+  shopId     String    @map("shop_id")
+  provider   String
+  /// 'running' | 'completed' | 'interrupted' | 'failed'
+  status     String
+  cursor     String?
+  counters   Json      @default("{}")
+  sample     Json?
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  shop       Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, provider, startedAt])
+  @@map("integration_import_runs")
 }

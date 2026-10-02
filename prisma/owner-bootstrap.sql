@@ -960,6 +960,93 @@ CREATE TABLE "privacy_notice_acknowledgements" (
 -- AddForeignKey
 ALTER TABLE "privacy_notice_acknowledgements" ADD CONSTRAINT "privacy_notice_acknowledgements_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- CreateTable
+CREATE TABLE "integration_connections" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "provider" TEXT NOT NULL,
+    "access_token" TEXT,
+    "refresh_token" TEXT,
+    "expires_at" TIMESTAMP(3),
+    "account_name" TEXT,
+    "status" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "integration_connections_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "integration_field_mappings" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "provider" TEXT NOT NULL,
+    "source_key" TEXT NOT NULL,
+    "target_field" TEXT NOT NULL,
+    "date_format" TEXT,
+
+    CONSTRAINT "integration_field_mappings_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "integration_conflicts" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "provider" TEXT NOT NULL,
+    "shopify_customer_id" BIGINT NOT NULL,
+    "target_field" TEXT NOT NULL,
+    "our_value" TEXT,
+    "their_value" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "decided_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "integration_conflicts_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "integration_import_runs" (
+    "id" TEXT NOT NULL,
+    "shop_id" TEXT NOT NULL,
+    "provider" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "cursor" TEXT,
+    "counters" JSONB NOT NULL DEFAULT '{}',
+    "sample" JSONB,
+    "started_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "finished_at" TIMESTAMP(3),
+
+    CONSTRAINT "integration_import_runs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "integration_connections_shop_id_provider_key" ON "integration_connections"("shop_id", "provider");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "integration_field_mappings_shop_id_provider_target_field_key" ON "integration_field_mappings"("shop_id", "provider", "target_field");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "integration_conflicts_shop_id_provider_shopify_customer_id_target_field_key" ON "integration_conflicts"("shop_id", "provider", "shopify_customer_id", "target_field");
+
+-- CreateIndex
+CREATE INDEX "integration_conflicts_shop_id_status_idx" ON "integration_conflicts"("shop_id", "status");
+
+-- CreateIndex
+CREATE INDEX "integration_import_runs_shop_id_provider_started_at_idx" ON "integration_import_runs"("shop_id", "provider", "started_at");
+
+-- AddForeignKey
+ALTER TABLE "integration_connections" ADD CONSTRAINT "integration_connections_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "integration_field_mappings" ADD CONSTRAINT "integration_field_mappings_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "integration_conflicts" ADD CONSTRAINT "integration_conflicts_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "integration_import_runs" ADD CONSTRAINT "integration_import_runs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 -- I piani: i quattro del listino piu' il Lifetime, che assegniamo a mano.
 --
 -- Non si generano dallo schema perche' non sono struttura, sono scelte:
