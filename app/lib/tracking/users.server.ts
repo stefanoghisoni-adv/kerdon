@@ -8,8 +8,10 @@ import {
   type RevocationStepName,
 } from '~/lib/consent/revocation-model';
 import {
+  ISSUED_FOR_SHOP_COLUMN,
   USERS_TABLE,
   anonymousUserCutoff,
+  issuedForShopFilter,
   browsersToForget,
   normalizeEmail,
   normalizePhone,
@@ -61,12 +63,34 @@ interface WithError {
  */
 function isMissingTable(error: WithError['error']): boolean {
   if (!error) return false;
+  // "column ... does not exist" contiene le stesse parole: e' la tabella che
+  // c'e', con una colonna di meno, e crearla di nuovo non la aggiungerebbe.
+  if (isMissingColumn(error)) return false;
   const code = error.code ?? '';
   const message = error.message ?? '';
   return (
     code === '42P01' ||
     code === 'PGRST205' ||
     /does not exist|could not find the table/i.test(message)
+  );
+}
+
+/**
+ * La colonna non c'e': lo schema del merchant e' indietro di una versione.
+ *
+ * `PGRST204` e' l'API REST che non trova nel corpo una colonna della sua copia
+ * dello schema; `42703` e' Postgres che non la trova in un filtro. Succede nel
+ * tempo fra il rilascio e l'aggiornamento dello schema di quel progetto, e chi
+ * la incontra ricade sulla forma di prima invece di fallire.
+ */
+function isMissingColumn(error: WithError['error']): boolean {
+  if (!error) return false;
+  const code = error.code ?? '';
+  const message = error.message ?? '';
+  return (
+    code === 'PGRST204' ||
+    code === '42703' ||
+    /column .* does not exist|could not find the '.*' column/i.test(message)
   );
 }
 
@@ -138,23 +162,110 @@ export async function recordUserSeen(
   supabase: SupabaseClient,
   visitor: SeenVisitor,
   provision?: ProvisionUsersTable,
+  options: {
+    /**
+     * Il negozio per cui l'identificativo e' appena stato coniato. Lo passa
+     * solo chi conia: e' questa riga, con questo valore, che le verifiche
+     * successive cercheranno (vedi `touchIssuedUser`).
+     */
+    issuedForShop?: string;
+  } = {},
 ): Promise<'written' | 'failed'> {
-  const { error } = await withUsersTable(
-    () =>
-      supabase
-        .from(USERS_TABLE)
-        .upsert([userSeenRow(visitor)], {
-          onConflict: 'external_id',
-          ignoreDuplicates: false,
-        }),
-    provision,
-  );
+  const upsert = (withShop: boolean) =>
+    supabase
+      .from(USERS_TABLE)
+      .upsert(
+        [
+          withShop
+            ? { ...userSeenRow(visitor), [ISSUED_FOR_SHOP_COLUMN]: options.issuedForShop }
+            : userSeenRow(visitor),
+        ],
+        { onConflict: 'external_id', ignoreDuplicates: false },
+      );
+
+  const withShop = Boolean(options.issuedForShop);
+  let { error } = await withUsersTable(() => upsert(withShop), provision);
+  // Schema ancora senza la colonna: la riga nasce lo stesso, senza negozio. E'
+  // una riga "di prima della verifica", e la prima verifica la reclamera'.
+  if (withShop && isMissingColumn(error)) ({ error } = await upsert(false));
 
   if (error) {
     console.warn(`[users] browser non registrato: ${error.message ?? 'errore sconosciuto'}`);
     return 'failed';
   }
   return 'written';
+}
+
+/**
+ * Com'e' andata la verifica di un identificativo arrivato da fuori.
+ *
+ *  - `issued`: c'e' la sua riga, ed e' di questo negozio (o e' di prima della
+ *    verifica, e da adesso e' di questo negozio). Il passaggio e' registrato.
+ *  - `unknown`: non l'abbiamo emesso noi per questo negozio — inventato,
+ *    copiato da un altro negozio, o di un browser potato da tempo. Non si e'
+ *    scritto niente.
+ *  - `unverified`: il database non ha risposto. Non e' ne' un si' ne' un no, e
+ *    ognuno dei chiamanti decide cosa farne: chi deve solo restituire un
+ *    identificativo lo restituisce senza scrivere, chi deve legare non lega.
+ */
+export type IssuedCheck = 'issued' | 'unknown' | 'unverified';
+
+/**
+ * "Questo identificativo e' nostro, per questo negozio?" — e, se si', "e' passato
+ * di nuovo".
+ *
+ * UN VIAGGIO SOLO, ed e' il motivo per cui la verifica e' un UPDATE e non una
+ * SELECT seguita da una scrittura. L'aggiornamento filtra per identificativo e
+ * per negozio, e restituisce le righe che ha toccato: una riga toccata e' la
+ * prova che c'era e che era di questo negozio, zero righe e' la prova
+ * contraria. Sul percorso di ogni visita la verifica costa quanto costava gia'
+ * la sola registrazione del passaggio.
+ *
+ * NON CREA MAI. E' tutta la differenza con `recordUserSeen`: quella e' un
+ * upsert, e un upsert su un valore inventato lo fa diventare vero.
+ *
+ * Il negozio si scrive anche sulla riga toccata: sulle righe gia' sue non
+ * cambia niente, su quelle di prima della verifica e' il momento in cui
+ * diventano sue. Se lo schema non ha ancora la colonna si ricade sulla sola
+ * esistenza della riga, che e' esattamente la garanzia di un database per
+ * negozio.
+ *
+ * `shopifyCustomerId`, se c'e', si scrive nella stessa riga e nello stesso
+ * viaggio: e' il legame con il cliente, che vale solo su una riga verificata.
+ */
+export async function touchIssuedUser(
+  supabase: SupabaseClient,
+  params: SeenVisitor & { shopId: string; shopifyCustomerId?: number },
+  provision?: ProvisionUsersTable,
+): Promise<IssuedCheck> {
+  const { shopId, shopifyCustomerId, ...visitor } = params;
+  const filter = issuedForShopFilter(shopId);
+  if (!filter) return 'unknown';
+
+  const patch = {
+    ...userSeenRow(visitor),
+    ...(shopifyCustomerId !== undefined ? { shopify_customer_id: shopifyCustomerId } : {}),
+  };
+
+  const touch = (withShop: boolean) => {
+    const query = supabase
+      .from(USERS_TABLE)
+      .update(withShop ? { ...patch, [ISSUED_FOR_SHOP_COLUMN]: shopId } : patch)
+      .eq('external_id', visitor.externalId);
+    return (withShop ? query.or(filter) : query).select('external_id');
+  };
+
+  let risposta = await withUsersTable(() => touch(true), provision);
+  if (isMissingColumn(risposta.error)) risposta = await touch(false);
+
+  if (risposta.error) {
+    console.warn(
+      `[users] identificativo non verificato: ${risposta.error.message ?? 'errore sconosciuto'}`,
+    );
+    return 'unverified';
+  }
+
+  return Array.isArray(risposta.data) && risposta.data.length > 0 ? 'issued' : 'unknown';
 }
 
 /**
@@ -264,7 +375,8 @@ function esito(step: RevocationStepName, risposta: WithError): RevocationStep {
 }
 
 export interface LinkResult {
-  outcome: 'linked' | 'failed';
+  /** `unknown_external_id`: non l'abbiamo emesso per questo negozio, e non si e' legato. */
+  outcome: 'linked' | 'unknown_external_id' | 'failed';
   /** L'identificativo canonico della persona dopo il legame. */
   canonical: string | null;
   /** I browser che da adesso puntano al canonico. */
@@ -296,26 +408,26 @@ export interface LinkResult {
  */
 export async function linkUserToCustomer(
   supabase: SupabaseClient,
-  params: SeenVisitor & { shopifyCustomerId: number },
+  params: SeenVisitor & { shopId: string; shopifyCustomerId: number },
   provision?: ProvisionUsersTable,
 ): Promise<LinkResult> {
-  const { shopifyCustomerId, ...visitor } = params;
+  const { shopifyCustomerId, shopId, ...visitor } = params;
 
-  const upsert = await withUsersTable(
-    () =>
-      supabase
-        .from(USERS_TABLE)
-        .upsert([{ ...userSeenRow(visitor), shopify_customer_id: shopifyCustomerId }], {
-          onConflict: 'external_id',
-          ignoreDuplicates: false,
-        }),
+  // Prima si creava al volo la riga di un browser mai visto: l'identificativo
+  // nell'attributo del carrello valeva da solo. Ma il carrello e' un posto
+  // dove chiunque scrive, e un valore inventato li' dentro diventava un
+  // browser legato a un cliente vero. Adesso il legame si scrive solo su una
+  // riga che abbiamo emesso noi per questo negozio, e nello stesso viaggio
+  // della verifica.
+  const verifica = await touchIssuedUser(
+    supabase,
+    { ...visitor, shopId, shopifyCustomerId },
     provision,
   );
-
-  if (upsert.error) {
-    console.warn(
-      `[users] legame browser-cliente non scritto: ${upsert.error.message ?? 'errore sconosciuto'}`,
-    );
+  if (verifica === 'unknown') {
+    return { outcome: 'unknown_external_id', canonical: null, merged: [] };
+  }
+  if (verifica === 'unverified') {
     return { outcome: 'failed', canonical: null, merged: [] };
   }
 
@@ -432,6 +544,8 @@ async function rememberLatestExternalId(
 export type IdentifyOutcome =
   /** Trovato il cliente e legato il browser. */
   | 'linked'
+  /** L'identificativo non e' stato emesso per questo negozio: non si e' cercato ne' scritto niente. */
+  | 'unknown_external_id'
   /** Nessun cliente con quell'email o quel telefono: il browser resta noto ma anonimo. */
   | 'no_match'
   /** Non e' arrivato niente di cercabile. */
@@ -456,20 +570,28 @@ export interface IdentifyResult {
  * vuol dire che la campagna che lo ha portato viene attribuita anche se
  * comprera' fra tre settimane da un altro dispositivo.
  *
- * Il browser si registra COMUNQUE, anche quando il cliente non si trova: e' un
- * visitatore vero, e la volta che comprera' vorremo avere la sua prima
- * comparsa. Un cliente non trovato non e' un errore — nella tabella dei clienti
+ * Il passaggio del browser si registra COMUNQUE, anche quando il cliente non si
+ * trova — purche' l'identificativo sia nostro, per questo negozio: un browser
+ * mai emesso non diventa una riga passando di qui. Un cliente non trovato non
+ * e' un errore — nella tabella dei clienti
  * ci sono solo quelli che hanno acconsentito al marketing, quindi "non trovato"
  * e' spesso la risposta giusta.
  */
 export async function identifyVisitor(
   supabase: SupabaseClient,
-  params: SeenVisitor & { email?: string | null; phone?: string | null },
+  params: SeenVisitor & { shopId: string; email?: string | null; phone?: string | null },
   provision?: ProvisionUsersTable,
 ): Promise<IdentifyResult> {
-  const { email, phone, ...visitor } = params;
+  const { email, phone, shopId, ...visitor } = params;
 
-  await recordUserSeen(supabase, visitor, provision);
+  // Prima di cercare chiunque: l'identificativo e' nostro, per questo negozio?
+  // Il legame che segue e' il piu' pesante di tutti — un browser e una persona
+  // con nome e cognome — e non si fa su un valore che non abbiamo emesso noi.
+  const verifica = await touchIssuedUser(supabase, { ...visitor, shopId }, provision);
+  if (verifica === 'unknown') {
+    return { outcome: 'unknown_external_id', canonical: null, merged: [] };
+  }
+  if (verifica === 'unverified') return { outcome: 'failed', canonical: null, merged: [] };
 
   const cleanEmail = normalizeEmail(email);
   const cleanPhone = normalizePhone(phone);
@@ -483,7 +605,7 @@ export async function identifyVisitor(
 
   const link = await linkUserToCustomer(
     supabase,
-    { ...visitor, shopifyCustomerId: found },
+    { ...visitor, shopId, shopifyCustomerId: found },
     provision,
   );
 

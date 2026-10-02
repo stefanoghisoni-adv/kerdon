@@ -109,6 +109,9 @@ export async function action({ request }: ActionFunctionArgs) {
     supabase,
     {
       externalId,
+      // L'identificativo vale solo se l'abbiamo emesso noi per QUESTO negozio:
+      // la verifica sta dentro `identifyVisitor`, prima di cercare chiunque.
+      shopId: ctx.shopId,
       email: asText(body.email),
       phone: asText(body.phone),
       // Se il container li manda si scrivono, se non li manda restano vuoti:

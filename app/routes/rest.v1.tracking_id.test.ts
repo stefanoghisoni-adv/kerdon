@@ -17,11 +17,25 @@ vi.mock('~/lib/ingest/ingest-guard.server', () => ({
 // lib/tracking/users.server.test: qui interessa solo che questa rotta la faccia
 // partire, e che non possa impedire la risposta.
 const recordUserSeen = vi.fn(
-  async (_supabase: unknown, _visitor: Record<string, unknown>) => 'written' as const,
+  async (
+    _supabase: unknown,
+    _visitor: Record<string, unknown>,
+    _provision?: unknown,
+    _options?: { issuedForShop?: string },
+  ) => 'written' as const,
 );
 const forgetVisitor = vi.fn(async () => 'forgotten' as const);
+// La verifica "e' nostro, per questo negozio?" ha i suoi test accanto a
+// `recordUserSeen`. Di default l'identificativo che arriva e' stato emesso.
+const touchIssuedUser = vi.fn(
+  async (
+    _supabase: unknown,
+    _params: Record<string, unknown>,
+  ): Promise<'issued' | 'unknown' | 'unverified'> => 'issued',
+);
 vi.mock('~/lib/tracking/users.server', () => ({
   recordUserSeen,
+  touchIssuedUser,
   forgetVisitor,
   supabaseFromReadContext: () => ({}) as never,
 }));
@@ -87,6 +101,8 @@ beforeEach(() => {
     return { ok: true, ctx: ingestCtx, body: {}, finish };
   });
   recordUserSeen.mockClear();
+  touchIssuedUser.mockReset();
+  touchIssuedUser.mockResolvedValue('issued');
   forgetVisitor.mockClear();
   revokeTrackingIdentity.mockClear();
   revokeTrackingIdentity.mockResolvedValue({ outcome: 'applied', retriable: false });
@@ -175,6 +191,67 @@ describe('/rest/v1/tracking_id', () => {
     expect(finish).toHaveBeenLastCalledWith('minted');
   });
 
+  // P2-01. La forma giusta non basta: un valore inventato, o emesso per un
+  // altro negozio, non si riusa — e non diventa una riga.
+  it('un identificativo che non abbiamo emesso per questo negozio non si riusa', async () => {
+    const estraneo = 'kerdon_ZZZZefghijklmnopqrstuvwxyz012345';
+    touchIssuedUser.mockResolvedValue('unknown');
+
+    const res = await call({ apikey: 'buono', 'X-Kerdon-External-Id': estraneo });
+    const [row] = JSON.parse(await res.text());
+
+    expect(touchIssuedUser).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ externalId: estraneo, shopId: ingestCtx.shopId }),
+      expect.any(Function),
+    );
+    expect(row.external_id).not.toBe(estraneo);
+    expect(row.external_id).toMatch(/^kerdon_[A-Za-z0-9]{32}$/);
+    expect(res.headers.get('Set-Cookie')).toContain(row.external_id);
+    // La riga nasce per quello nuovo, con il negozio che l'ha emesso; per
+    // quello estraneo non nasce niente.
+    expect(recordUserSeen).toHaveBeenCalledTimes(1);
+    expect(recordUserSeen.mock.calls[0][1]).toMatchObject({ externalId: row.external_id });
+    expect(recordUserSeen.mock.calls[0][3]).toEqual({ issuedForShop: ingestCtx.shopId });
+    expect(finish).toHaveBeenLastCalledWith('reissued');
+  });
+
+  it('un identificativo emesso per questo negozio si riusa, e la verifica e gia la scrittura', async () => {
+    const nostro = 'kerdon_abcdefghijklmnopqrstuvwxyz012345';
+
+    const res = await call({ apikey: 'buono', 'X-Kerdon-External-Id': nostro }, '?browser=Safari');
+    const [row] = JSON.parse(await res.text());
+
+    expect(row.external_id).toBe(nostro);
+    expect(touchIssuedUser.mock.calls[0][1]).toMatchObject({ browser: 'Safari' });
+    // Un viaggio solo: la verifica ha gia' registrato il passaggio.
+    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(finish).toHaveBeenLastCalledWith('seen');
+  });
+
+  it('database che non risponde: si restituisce quello che il browser ha, senza scrivere', async () => {
+    // Coniarne uno nuovo a ogni guasto del database vorrebbe dire perdere per
+    // sempre il riconoscimento di chiunque passi in quel momento — il cookie
+    // verrebbe sovrascritto. Restituire il valore senza scriverlo non lo fa
+    // entrare da nessuna parte.
+    const nostro = 'kerdon_abcdefghijklmnopqrstuvwxyz012345';
+    touchIssuedUser.mockResolvedValue('unverified');
+
+    const res = await call({ apikey: 'buono', 'X-Kerdon-External-Id': nostro });
+    const [row] = JSON.parse(await res.text());
+
+    expect(row.external_id).toBe(nostro);
+    expect(res.headers.get('Set-Cookie')).toBeNull();
+    expect(recordUserSeen).not.toHaveBeenCalled();
+    expect(finish).toHaveBeenLastCalledWith('unverified');
+  });
+
+  it('un identificativo revocato non arriva nemmeno alla verifica', async () => {
+    isTrackingIdentityRevoked.mockResolvedValue(true);
+    await call({ apikey: 'buono', 'X-Kerdon-External-Id': 'kerdon_abcdefghijklmnopqrstuvwxyz012345' });
+    expect(touchIssuedUser).not.toHaveBeenCalled();
+  });
+
   it('senza identificativo in arrivo non si interroga il registro delle revoche', async () => {
     await call({ apikey: 'buono' });
     expect(isTrackingIdentityRevoked).not.toHaveBeenCalled();
@@ -194,12 +271,14 @@ describe('/rest/v1/tracking_id', () => {
  * almeno una volta.
  */
 describe('/rest/v1/tracking_id — la riga del browser', () => {
-  it('registra la comparsa del browser', async () => {
+  it('registra la comparsa del browser, con il negozio per cui e emesso', async () => {
     const res = await call({ apikey: 'buono' });
     const [row] = JSON.parse(await res.text());
 
     expect(recordUserSeen).toHaveBeenCalledTimes(1);
     expect(recordUserSeen.mock.calls[0][1]).toMatchObject({ externalId: row.external_id });
+    expect(recordUserSeen.mock.calls[0][3]).toEqual({ issuedForShop: ingestCtx.shopId });
+    expect(touchIssuedUser).not.toHaveBeenCalled();
   });
 
   it('browser e dispositivo si scrivono solo se il container li manda', async () => {

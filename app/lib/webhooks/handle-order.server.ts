@@ -183,6 +183,10 @@ async function saveOrderWebhookOutcome(
  * ordine senza l'attributo viene da un negozio che il tracciamento non l'ha
  * ancora configurato. Nessuno dei due e' un errore da segnalare.
  *
+ * Un valore che ha la forma giusta ma che non abbiamo emesso noi per questo
+ * negozio — il carrello e' un posto dove chiunque scrive — non lega niente e
+ * non crea nessuna riga: `linkUserToCustomer` lo verifica prima di scrivere.
+ *
  * RESTA BEST EFFORT, ED E' L'UNICO PASSO CHE LO RESTA. Non e' una dimenticanza:
  * un negozio che non ha mai configurato il tracciamento non ha la tabella dei
  * visitatori, e trasformare quel caso in un ritentativo vorrebbe dire mandare
@@ -200,7 +204,9 @@ async function linkVisitorToCustomer(
   try {
     await linkUserToCustomer(
       supabase,
-      { externalId: trigger.externalId, shopifyCustomerId: trigger.customerId },
+      // Il negozio dell'ordine: il legame si scrive solo se l'identificativo
+      // nell'attributo e' stato emesso per lui (vedi `touchIssuedUser`).
+      { externalId: trigger.externalId, shopId, shopifyCustomerId: trigger.customerId },
       () => provisionUsersTable(shopId, supabase),
     );
   } catch (error) {

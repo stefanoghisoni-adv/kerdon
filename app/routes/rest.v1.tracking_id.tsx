@@ -17,7 +17,12 @@ import {
   SALE_OF_DATA_HEADER,
   type ConsentDecision,
 } from '~/lib/tracking/consent';
-import { recordUserSeen, supabaseFromReadContext } from '~/lib/tracking/users.server';
+import {
+  recordUserSeen,
+  supabaseFromReadContext,
+  touchIssuedUser,
+  type IssuedCheck,
+} from '~/lib/tracking/users.server';
 import {
   isTrackingIdentityRevoked,
   revokeTrackingIdentity,
@@ -116,10 +121,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // prima dopo averlo revocato — da un parametro, da un'intestazione, da un
   // cookie rimasto altrove — ne riceve uno nuovo: riusarlo vorrebbe dire
   // ricucire la persona di prima della revoca a quella di dopo.
-  const reusable =
+  const notRevoked =
     existing && !(await isTrackingIdentityRevoked({ shopId: ctx.shopId, externalId: existing }))
       ? existing
       : null;
+
+  // E NON TORNA NEMMENO UN IDENTIFICATIVO CHE NON ABBIAMO EMESSO NOI, per questo
+  // negozio. La forma giusta non basta piu': il cookie sta nel browser, e nel
+  // browser chiunque puo' scriverci un valore inventato o copiato da un altro
+  // negozio. Si riusa solo se la sua riga c'e' ed e' di questo negozio — e la
+  // verifica e' anche la registrazione del passaggio, in un viaggio solo.
+  //
+  // Se il database non risponde (`unverified`) si restituisce lo stesso il
+  // valore che il browser ha, SENZA scriverlo: coniarne uno nuovo a ogni guasto
+  // sovrascriverebbe il cookie di chiunque passi in quel momento, e un valore
+  // restituito ma non scritto non entra da nessuna parte. Le rotte che legano
+  // lo verificheranno di nuovo per conto loro.
+  const check: IssuedCheck | null = notRevoked
+    ? await verifyIssued(ctx, notRevoked, request)
+    : null;
+  const reusable = check === 'issued' || check === 'unverified' ? notRevoked : null;
   const externalId = reusable ?? newExternalId();
 
   // Qui il browser diventa una riga.
@@ -141,8 +162,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Attesa e non lasciata in volo: su una funzione serverless una promise non
   // attesa muore con l'istanza. Best effort dentro: qualunque cosa vada storta,
   // l'identificativo si restituisce lo stesso — la vetrina sta aspettando.
-  await recordVisitor(ctx, externalId, request);
-  permesso.finish(reusable ? 'seen' : 'minted');
+  if (!reusable) await recordVisitor(ctx, externalId, request);
+  permesso.finish(
+    check === 'issued'
+      ? 'seen'
+      : check === 'unverified'
+        ? 'unverified'
+        : check === 'unknown'
+          ? 'reissued'
+          : 'minted',
+  );
 
   const headers = new Headers({
     'Content-Type': 'application/json',
@@ -238,25 +267,57 @@ async function withoutIdentifier(
  * sembrerebbe un dato accertato. Meglio una colonna vuota di una piena e
  * sbagliata.
  */
+function seenTraits(request: Request) {
+  const params = new URL(request.url).searchParams;
+  return {
+    // `postgrestFilterValue` perche' il valore lo scrive il merchant dentro un
+    // template che crede di parlare con PostgREST: quello che arriva e'
+    // `eq.Safari`, non `Safari`.
+    browser: postgrestFilterValue(params.get('browser')),
+    deviceType: postgrestFilterValue(params.get('device_type')),
+  };
+}
+
+/**
+ * L'identificativo che il browser presenta e' stato emesso da noi, per questo
+ * negozio? Se si', il passaggio e' gia' registrato. Un'eccezione vale come
+ * `unverified`: la vetrina sta aspettando, e un guasto qui non e' un no.
+ */
+async function verifyIssued(
+  ctx: ShopIngestContext,
+  externalId: string,
+  request: Request,
+): Promise<IssuedCheck> {
+  try {
+    const supabase = supabaseFromReadContext(ctx);
+    return await touchIssuedUser(
+      supabase,
+      { externalId, shopId: ctx.shopId, ...seenTraits(request) },
+      () => provisionUsersTable(ctx.shopId, supabase),
+    );
+  } catch (error) {
+    console.warn(
+      '[rest/v1/tracking_id] identificativo non verificato:',
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+    return 'unverified';
+  }
+}
+
 async function recordVisitor(
   ctx: ShopIngestContext,
   externalId: string,
   request: Request,
 ): Promise<void> {
   try {
-    const params = new URL(request.url).searchParams;
     const supabase = supabaseFromReadContext(ctx);
     await recordUserSeen(
       supabase,
-      {
-        externalId,
-        // `postgrestFilterValue` perche' il valore lo scrive il merchant dentro
-        // un template che crede di parlare con PostgREST: quello che arriva e'
-        // `eq.Safari`, non `Safari`.
-        browser: postgrestFilterValue(params.get('browser')),
-        deviceType: postgrestFilterValue(params.get('device_type')),
-      },
+      { externalId, ...seenTraits(request) },
       () => provisionUsersTable(ctx.shopId, supabase),
+      // La riga che fa da prova: da adesso questo identificativo e' stato
+      // emesso per questo negozio, e per nessun altro.
+      { issuedForShop: ctx.shopId },
     );
   } catch (error) {
     console.warn(

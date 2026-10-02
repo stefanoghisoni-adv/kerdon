@@ -454,6 +454,12 @@ const USERS_COLUMNS: Column[] = [
   // riga qui li lascerebbe orfani per sempre. Vince il piu' vecchio perche' ha
   // la storia piu' lunga alle spalle.
   { name: 'merged_into', type: 'TEXT' },
+  // Per quale negozio l'identificativo e' stato emesso: lo scrive chi lo conia,
+  // e chi lo riceve da fuori lo verifica qui prima di crederci (vedi
+  // `touchIssuedUser`). Serve dove due negozi condividono lo stesso progetto,
+  // e solo li' dice qualcosa che la riga da sola non direbbe. Vuota sulle righe
+  // di prima: la prima verifica le reclama.
+  { name: 'issued_for_shop', type: 'TEXT' },
 ];
 
 const USERS_INDEXES = [

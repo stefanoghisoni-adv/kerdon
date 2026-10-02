@@ -105,6 +105,14 @@ describe('numero di versione e cio che promette', () => {
     expect(buildSchemaUpdateSQL(14, true, true)).toContain('ADD COLUMN IF NOT EXISTS logistics_facts_version INTEGER');
   });
 
+  it('la 17 porta su users il negozio per cui l identificativo e stato emesso', () => {
+    // Senza la versione che sale la colonna non arriverebbe sui database gia'
+    // collegati, e un identificativo di un negozio varrebbe per l'altro dove i
+    // due condividono il progetto.
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(17);
+    expect(buildSchemaUpdateSQL(16, false, false)).toContain('ADD COLUMN IF NOT EXISTS issued_for_shop TEXT');
+  });
+
   it('la 16 porta la marcatura delle cancellazioni e il suo guardiano', () => {
     // Senza la versione che sale, colonna e trigger non arriverebbero sui
     // database gia' collegati, e i dati cancellati potrebbero tornare.

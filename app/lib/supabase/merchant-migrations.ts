@@ -362,8 +362,15 @@ END $$;
  * rimasto senza paese. Colonna e trigger li porta la DDL, idempotente; nessun
  * passo esplicito. Gli ordini anonimizzati PRIMA della 16 non si possono
  * riconoscere (sembrano acquisti senza account) e restano senza marcatura.
+ *
+ * La 17 porta su `users` la colonna `issued_for_shop`: per quale negozio un
+ * identificativo e' stato emesso. Un identificativo che arriva da fuori vale
+ * solo se la sua riga c'e' ed e' di quel negozio, e la colonna e' cio' che lo
+ * dice quando due negozi condividono lo stesso progetto. Solo una colonna,
+ * nessun passo esplicito e nessun riempimento: le righe di prima restano
+ * vuote, e la prima verifica le reclama per il negozio che le presenta.
  */
-export const LATEST_SCHEMA_VERSION = 16;
+export const LATEST_SCHEMA_VERSION = 17;
 
 /** Il database del merchant e' indietro rispetto a cio' che l'app si aspetta. */
 export function needsSchemaUpdate(currentVersion: number | null | undefined): boolean {

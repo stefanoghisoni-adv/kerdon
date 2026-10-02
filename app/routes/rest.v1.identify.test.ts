@@ -187,6 +187,20 @@ describe('/rest/v1/identify — cosa arriva e cosa esce', () => {
     );
   });
 
+  it('la verifica dell identificativo si fa per il negozio della credenziale', async () => {
+    await post({ external_id: VISITATORE, email: 'anna@example.com' });
+    expect(identifyVisitor.mock.calls[0][1]).toMatchObject({ shopId: ingestCtx.shopId });
+  });
+
+  it('un identificativo che non abbiamo emesso: 200, e l esito lo dice', async () => {
+    identifyVisitor.mockResolvedValue({ outcome: 'unknown_external_id', canonical: null, merged: [] });
+    const res = await post({ external_id: VISITATORE, email: 'anna@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(await res.text())).toEqual({ ok: true, outcome: 'unknown_external_id' });
+    expect(finish).toHaveBeenLastCalledWith('unknown_external_id');
+  });
+
   it('un identificativo non nostro non entra nella tabella', async () => {
     const res = await post({ external_id: 'inventato', email: 'anna@example.com' });
     expect(res.status).toBe(400);

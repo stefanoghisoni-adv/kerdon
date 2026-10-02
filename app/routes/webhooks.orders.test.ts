@@ -712,7 +712,8 @@ describe('webhook orders — il browser che ha comprato', () => {
 
     expect(linkUserToCustomer).toHaveBeenCalledWith(
       expect.anything(),
-      { externalId: VISITATORE, shopifyCustomerId: 77 },
+      // Il negozio dell'ordine: l'identificativo vale solo se emesso per lui.
+      { externalId: VISITATORE, shopId: 'shop-1', shopifyCustomerId: 77 },
       expect.any(Function),
     );
   });
@@ -725,7 +726,8 @@ describe('webhook orders — il browser che ha comprato', () => {
 
     expect(linkUserToCustomer).toHaveBeenCalledWith(
       expect.anything(),
-      { externalId: VISITATORE, shopifyCustomerId: 77 },
+      // Il negozio dell'ordine: l'identificativo vale solo se emesso per lui.
+      { externalId: VISITATORE, shopId: 'shop-1', shopifyCustomerId: 77 },
       expect.any(Function),
     );
   });
