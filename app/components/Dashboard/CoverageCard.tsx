@@ -11,7 +11,7 @@ export interface CoverageCardProps {
   ready: number;
   total: number;
   /** La riga sotto il numero: "13 di 26 pronti". */
-  detail: (ready: number, total: number) => string;
+  detail?: (ready: number, total: number) => string;
   /** C'e' qualcosa da sistemare: accende il comando accanto al dettaglio. */
   issue?: boolean;
   action?: { label: string; url: string; onAction?: () => void; loading?: boolean };
@@ -54,22 +54,24 @@ export function CoverageCard({
       tone={tone === 'warning' ? 'caution' : undefined}
       detail={
         <BlockStack gap="100">
-          <InlineStack gap="200" blockAlign="center" wrap={false}>
-            <Text as="span" variant="bodySm" tone="subdued">
-              {loading ? t.dashboard.coverage.none : detail(ready, total)}
-            </Text>
-            {!loading && issue && action && (
-              <Button
-                variant="plain"
-                url={action.url}
-                onClick={action.onAction}
-                loading={action.loading}
-                disabled={action.loading}
-              >
-                {action.label}
-              </Button>
-            )}
-          </InlineStack>
+          {detail && (
+            <InlineStack gap="200" blockAlign="center" wrap={false}>
+              <Text as="span" variant="bodySm" tone="subdued">
+                {loading ? t.dashboard.coverage.none : detail(ready, total)}
+              </Text>
+              {!loading && issue && action && (
+                <Button
+                  variant="plain"
+                  url={action.url}
+                  onClick={action.onAction}
+                  loading={action.loading}
+                  disabled={action.loading}
+                >
+                  {action.label}
+                </Button>
+              )}
+            </InlineStack>
+          )}
           {!loading && footer}
         </BlockStack>
       }

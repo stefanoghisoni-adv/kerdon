@@ -36,6 +36,7 @@ import type { TopProductsReport } from '~/lib/customers/top-products.server';
 import type { ShopAverages, ShopProfit } from '~/lib/customers/profit.server';
 import { CoverageCard } from '~/components/Dashboard/CoverageCard';
 import { CustomersCard } from '~/components/Dashboard/CustomersCard';
+import { customerRemainingMessage } from '~/components/Dashboard/customer-remaining';
 import { Stepper, type StepperItem } from '~/components/Dashboard/Stepper';
 import { allStepsComplete, resolveStepStates } from '~/components/Dashboard/stepper-state';
 import { SupabaseAccountConnect } from '~/components/Dashboard/SupabaseAccountConnect';
@@ -1936,21 +1937,27 @@ export default function Dashboard() {
               hint={t.dashboard.coverage.customersHint}
               ready={customerStats?.optIn ?? 0}
               total={customerStats?.totalCustomers ?? 0}
-              detail={t.dashboard.coverage.optedIn}
               loading={customerStatsLoading}
               footer={
-                customerQuota ? (
-                  <BlockStack gap="050">
-                    <Text as="span" variant="bodySm" tone="subdued">
-                      {t.dashboard.coverage.customersSynced(customerQuota.active, customerQuota.limit)}
-                    </Text>
-                    {customerQuota.paused > 0 && (
-                      <Text as="span" variant="bodySm" tone="caution">
-                        {t.dashboard.coverage.customersPaused(customerQuota.paused)}
-                      </Text>
-                    )}
-                  </BlockStack>
-                ) : null
+                customerQuota
+                  ? (() => {
+                      const msg = customerRemainingMessage(customerQuota.active, customerQuota.limit);
+                      return (
+                        <BlockStack gap="050">
+                          <Text as="span" variant="bodySm" tone={msg.tone}>
+                            {msg.key === 'unlimited'
+                              ? t.dashboard.coverage.customersUnlimited
+                              : t.dashboard.coverage.customersRemaining(msg.remaining!)}
+                          </Text>
+                          {customerQuota.paused > 0 && (
+                            <Text as="span" variant="bodySm" tone="caution">
+                              {t.dashboard.coverage.customersPaused(customerQuota.paused)}
+                            </Text>
+                          )}
+                        </BlockStack>
+                      );
+                    })()
+                  : null
               }
             />
           ) : (
