@@ -948,6 +948,18 @@ CREATE TABLE "shipping_alert_dismissals" (
 -- AddForeignKey
 ALTER TABLE "shipping_alert_dismissals" ADD CONSTRAINT "shipping_alert_dismissals_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- CreateTable
+CREATE TABLE "privacy_notice_acknowledgements" (
+    "shop_id" TEXT NOT NULL,
+    "version_seen" TEXT NOT NULL,
+    "seen_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "privacy_notice_acknowledgements_pkey" PRIMARY KEY ("shop_id")
+);
+
+-- AddForeignKey
+ALTER TABLE "privacy_notice_acknowledgements" ADD CONSTRAINT "privacy_notice_acknowledgements_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 -- I piani: i quattro del listino piu' il Lifetime, che assegniamo a mano.
 --
 -- Non si generano dallo schema perche' non sono struttura, sono scelte:

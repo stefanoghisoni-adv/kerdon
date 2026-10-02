@@ -21,9 +21,10 @@ automatico insieme al deploy dell'app.
 
 `prisma/migrations/0_init/migration.sql` e' la fotografia dello schema alla
 linea di base (`20260926000000_plans_basic_growth_scale_core`), ed e' **fermo**:
-un test (`prisma/migrations.test.ts`) ne controlla l'impronta. Oggi coincide
-ancora con `owner-bootstrap.sql`; dalla prima migrazione scritta dopo la linea
-di base lo script va avanti e `0_init` no. Che le due strade arrivino comunque
+un test (`prisma/migrations.test.ts`) ne controlla l'impronta. La prima
+migrazione scritta dopo la linea di base e'
+`20261002120000_privacy_notice_acknowledgements`: da li' lo script va avanti e
+`0_init` no. Che le due strade arrivino comunque
 allo stesso database lo prova la CI (job `migrations`, `prisma/percorsi-uguali.ts`).
 Il perche' in "`0_init` non si tocca", in fondo.
 

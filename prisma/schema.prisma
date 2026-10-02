@@ -210,6 +210,7 @@ model Shop {
   shippingZones            ShippingZone[]
   packagingConfig          PackagingConfig?
   shippingAlertDismissal   ShippingAlertDismissal?
+  privacyNotice            PrivacyNoticeAcknowledgement?
 
   @@index([shopDomain])
   @@map("shops")
@@ -1720,4 +1721,27 @@ model ShippingAlertDismissal {
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("shipping_alert_dismissals")
+}
+
+/// L'ultima versione dell'informativa per cui il negozio ha detto "Ho capito".
+///
+/// La sezione 10 dell'informativa promette che una modifica sostanziale viene
+/// annunciata in app prima di valere: la Dashboard confronta questa versione
+/// con `PRIVACY_POLICY_VERSION` (app/lib/legal/policy-version.ts) e, se e'
+/// piu' vecchia, mostra l'avviso.
+///
+/// Una tabella e non una colonna su `shops` per la ragione scritta su
+/// `BirthdateNoticeDismissal`: il codice va in produzione prima che la
+/// migrazione venga lanciata, e una colonna nuova su `shops` farebbe fallire
+/// ogni lettura del negozio in quella finestra. Una tabella nuova la interroga
+/// solo chi la conosce. Una riga per negozio: l'ultima versione vista, non lo
+/// storico.
+model PrivacyNoticeAcknowledgement {
+  shopId      String   @id @map("shop_id")
+  /// La versione vista, nella forma della testata (`1.5`).
+  versionSeen String   @map("version_seen")
+  seenAt      DateTime @default(now()) @map("seen_at")
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("privacy_notice_acknowledgements")
 }

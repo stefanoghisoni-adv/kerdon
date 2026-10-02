@@ -71,6 +71,8 @@ import { ProductScopeBanner } from '~/components/Dashboard/ProductScopeBanner';
 import { suggestPlanForProducts } from '~/components/Dashboard/plan-suggestion';
 import { WeightMissingBanner } from '~/components/Dashboard/WeightMissingBanner';
 import { shouldShowWeightAlert, dismissWeightAlert } from '~/lib/shipping/weight-alert.server';
+import { PrivacyNoticeBanner, ACKNOWLEDGE_PRIVACY_NOTICE_INTENT } from '~/components/Dashboard/PrivacyNoticeBanner';
+import { acknowledgePrivacyNotice, privacyNoticeDue } from '~/lib/legal/privacy-notice.server';
 import type { TrackingFinding } from '~/lib/tracking/detect';
 import { needsSchemaUpdate } from '~/lib/supabase/merchant-migrations';
 import { triggerMerchantSchemaUpdate } from '~/lib/supabase/apply-schema-update.server';
@@ -147,7 +149,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // il loader costa due round-trip in profondità invece di tre. Su Vercel il
     // DB è remoto, quindi ogni round-trip risparmiato è latenza in meno sul TTFB
     // — che è ciò che domina l'LCP di questa pagina.
-    const [plans, recentJobs, latestBulk, lastActivityAt, customersTableJob, oauthToken, syncRuns, partnerPrices, trackingSetup, queuedSyncRequests, weightAlert] = await Promise.all([
+    const [plans, recentJobs, latestBulk, lastActivityAt, customersTableJob, oauthToken, syncRuns, partnerPrices, trackingSetup, queuedSyncRequests, weightAlert, privacyNoticeShow] = await Promise.all([
       // Tutti i piani, non solo quello in uso: quando i clienti restano fuori
       // serve anche sapere quale piano li rimetterebbe dentro, e leggerli tutti
       // costa come leggerne uno (la tabella e' di poche righe).
@@ -208,6 +210,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // Ordini senza peso: avviso chiudibile, e la chiusura e' definitiva (si
       // salva sul server). Sparisce da solo se si configura un peso di default.
       shouldShowWeightAlert(shop.id, session.shop),
+      // Informativa aggiornata dopo l'ultima versione vista dal negozio: la
+      // sezione 10 promette di annunciarlo in app. Una lettura sola, e non
+      // solleva mai: nel dubbio risponde "mostra".
+      privacyNoticeDue(shop),
     ]);
 
     // La valuta che il merchant si aspetta: la sua scelta, o quella che di
@@ -509,6 +515,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         show: weightAlert.show,
         count: weightAlert.count,
       },
+      // Modifica sostanziale dell'informativa non ancora vista da questo negozio.
+      privacyNotice: { show: privacyNoticeShow },
     });
   } catch (err) {
     // Le Response (redirect di auth, 404) devono passare intatte.
@@ -533,6 +541,22 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const shop = await getOrCreateShop(session);
 
+    // Il modulo si legge una volta sola, prima del cancello: una richiesta ha
+    // un corpo solo, e l'intent serve gia' qui sotto.
+    const form = await request.formData().catch(() => null);
+    const intent = String(form?.get('intent') ?? '');
+
+    // "Ho capito" sull'avviso dell'informativa: PRIMA del cancello, di
+    // proposito. Non e' un'azione sull'app ma la presa d'atto di un documento,
+    // e un negozio sospeso o a prova finita l'avviso lo vede comunque — deve
+    // poterlo anche chiudere. Scrive soltanto la versione vista di questo
+    // negozio, e la versione la decide il server. Su un negozio in
+    // cancellazione non si scrive niente, nemmeno questo.
+    if (intent === ACKNOWLEDGE_PRIVACY_NOTICE_INTENT) {
+      if (shop.lifecycleStatus === 'erasing') return json({ ok: false });
+      return json({ ok: await acknowledgePrivacyNotice(shop.id) });
+    }
+
     // Gate autorizzazione: nessuna azione se il negozio non è ENABLED (ban o
     // trial scaduto). Enforcement server-side: vale anche se l'utente riabilita
     // i pulsanti nell'HTML.
@@ -549,20 +573,17 @@ export async function action({ request }: ActionFunctionArgs) {
       return capabilityDenialResponse(session.shop, denial);
     }
 
-    // Due vie arrivano qui, e una sola delle due conferma il piano.
-    //
-    // Il pulsante "Sincronizzazione manuale" della dashboard chiede solo di
-    // sincronizzare. Se segnasse anche la conferma del piano, premerlo durante
-    // la configurazione chiuderebbe un passo che il merchant non ha fatto.
-    const form = await request.formData().catch(() => null);
-    const intent = String(form?.get('intent') ?? '');
-
     // Chiusura dell'avviso "ordini senza peso".
     if (intent === 'dismiss-weight-alert') {
       const dismissed = await dismissWeightAlert(shop.id);
       return json({ ok: dismissed });
     }
 
+    // Due vie arrivano qui, e una sola delle due conferma il piano.
+    //
+    // Il pulsante "Sincronizzazione manuale" della dashboard chiede solo di
+    // sincronizzare. Se segnasse anche la conferma del piano, premerlo durante
+    // la configurazione chiuderebbe un passo che il merchant non ha fatto.
     const manualOnly = intent === 'sync';
 
     // Il push manuale e' una funzione del piano: chi non ce l'ha non deve
@@ -676,7 +697,7 @@ interface ProductHistoryResponse {
 const MANUAL_SYNC_POLL_MS = 4_000;
 
 export default function Dashboard() {
-  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, blocked, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, syncPendingSince, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms, weightAlert } =
+  const { shop, plan, supabaseConnected, supabaseAccountConnected, customersEnabled, authorization, blocked, syncState, planChanged, manualSyncEnabled, currentMaxProducts, previousMaxProducts, previousCustomersEnabled, customersTableCreated, customersUpgradePlan, trackingAuthorization, planOptions, sync, recentRuns, syncPendingSince, planChosen, planConfirmedForConnection, trackingCheckedForConnection, setupDone, planCards, discountIntervals, currency, serverSideAnswer, serverSidePlatforms, weightAlert, privacyNotice } =
     useLoaderData<typeof loader>();
   const t = useT();
 
@@ -1674,6 +1695,12 @@ export default function Dashboard() {
             </Text>
           </Banner>
         )}
+
+        {/* L'informativa e' cambiata dall'ultima volta che il negozio l'ha
+            vista: la sezione 10 promette di dirlo qui, prima che valga. Prima
+            dei banner di sospensione perche' vale per tutti, sospesi compresi,
+            e non dipende dalla configurazione. */}
+        {privacyNotice.show && <PrivacyNoticeBanner />}
 
         {/* Banner di sospensione. Uso dell'app e tracciamento sono due
             autorizzazioni indipendenti: puo' esserci l'una senza l'altra, e il
