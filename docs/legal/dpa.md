@@ -1,6 +1,7 @@
 # Data Processing Agreement (DPA) — Kerdon
 
-Last updated: 27 September 2026
+Last updated: 2 October 2026
+Version: 1.5
 
 > This agreement is accepted together with the terms of service, when the app is
 > installed.
@@ -108,6 +109,15 @@ a person's browser and, once linked to a customer, is attributable to them. To
 write that link, the merchant's endpoint sends Kerdon the email address or
 telephone number the person has just given; Kerdon uses them only to search the
 merchant's database and does not retain them.
+
+**Cookies.** The identifier is kept in the visitor's browser in first-party
+cookies that the merchant's own server-side container writes on the store's
+domain: `kerdon_eid` (the identifier, only with consent; one year by default,
+the maximum requested; `Secure`, `SameSite=Lax`, not `HttpOnly`) and `kerdon_rv`
+(only after a withdrawal not yet confirmed by Kerdon, to complete the deletion;
+at most 30 days; `Secure`, `HttpOnly`, `SameSite=Lax`). The former name
+`corew_eid` is no longer written. Section 3.5 of the privacy policy lists them in
+full, with purpose, duration and content.
 
 **Explicit exclusions**: no payment data; no email address, telephone number,
 note or address — other than the shipping country above — is requested or stored

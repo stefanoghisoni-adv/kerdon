@@ -498,6 +498,13 @@ export const en: typeof it = {
       body: "Without the weight, the shipping cost stays at zero and the profit is higher than actual. Set an average weight per item and the calculation becomes accurate.",
       action: "Go to Shipping",
     },
+    privacyNotice: {
+      title: "We've updated our privacy policy",
+      body: "It now lists, one by one, the cookies that visitor recognition uses on your store, with their duration and purpose, so you can copy them straight into your own cookie policy.",
+      link: "Read the privacy policy",
+      acknowledge: "Got it",
+      saveFailed: "We couldn't save your confirmation. Please try again shortly.",
+    },
   },
 
   plan: {

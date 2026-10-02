@@ -1,6 +1,7 @@
 # Accordo sul trattamento dei dati (DPA) — Kerdon
 
-Ultimo aggiornamento: 27 settembre 2026
+Ultimo aggiornamento: 2 ottobre 2026
+Versione: 1.5
 
 > Questo accordo si accetta insieme ai termini di servizio, all'installazione
 > dell'app.
@@ -110,6 +111,15 @@ una volta collegato a un cliente, è a lei ricollegabile. Per scrivere il
 collegamento, l'endpoint del merchant trasmette a Kerdon l'indirizzo email o il
 numero di telefono lasciato dalla persona; Kerdon li usa per la sola ricerca
 nel database del merchant e non li conserva.
+
+**Cookie.** L'identificativo sta nel browser del visitatore in cookie
+first-party che il container server-side del merchant scrive sul dominio del
+negozio: `kerdon_eid` (l'identificativo, solo con il consenso; un anno per
+impostazione, il massimo richiesto; `Secure`, `SameSite=Lax`, non `HttpOnly`) e
+`kerdon_rv` (solo dopo una revoca non ancora confermata da Kerdon, per portare a
+termine la cancellazione; al massimo 30 giorni; `Secure`, `HttpOnly`,
+`SameSite=Lax`). Il nome di prima, `corew_eid`, non si scrive più. La sezione
+3.5 dell'informativa li elenca per intero, con finalità, durata e contenuto.
 
 **Esclusioni esplicite**: nessun dato di pagamento; dagli ordini non viene
 chiesto né conservato alcun indirizzo email, numero di telefono, nota o

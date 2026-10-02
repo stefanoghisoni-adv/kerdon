@@ -582,6 +582,16 @@ export const it = {
       body: "Senza il peso, il costo di spedizione resta a zero e il profitto risulta più alto del reale. Indica un peso medio per articolo e il calcolo diventa preciso.",
       action: "Vai a Spedizioni",
     },
+    // L'avviso delle modifiche all'informativa. La frase dice cosa cambia
+    // nella versione corrente (PRIVACY_POLICY_VERSION): va riscritta insieme
+    // alla versione, a ogni modifica sostanziale.
+    privacyNotice: {
+      title: "Abbiamo aggiornato l'informativa sulla privacy",
+      body: "Ora elenca uno per uno i cookie che il riconoscimento dei visitatori usa sul tuo negozio, con durata e finalità: puoi riportarli così come sono nella tua cookie policy.",
+      link: "Leggi l'informativa",
+      acknowledge: "Ho capito",
+      saveFailed: "Non siamo riusciti a registrare la conferma. Riprova tra poco.",
+    },
   },
 
   plan: {

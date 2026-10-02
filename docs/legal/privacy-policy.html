@@ -346,8 +346,8 @@
     <h1>Privacy Policy</h1>
     <p class="standfirst">Kerdon copies part of your Shopify store into a database you own, and works out what your orders and customers actually earn you. This page says exactly what it touches — and what it deliberately leaves alone.</p>
     <div class="stamp">
-      <span>Last updated <b>27 September 2026</b></span>
-      <span>Version <b>1.4</b></span>
+      <span>Last updated <b>2 October 2026</b></span>
+      <span>Version <b>1.5</b></span>
     </div>
   </header>
 
@@ -450,6 +450,20 @@
       </ul>
       <p class="keystone">This is not anonymous data, and should not be called that. The identifier holds no name, but it lives in that person's browser and, from the moment it is linked to a customer, it says which devices that person uses and when they used them. It is personal data and is treated as such.</p>
       <p><strong>Consent comes first.</strong> Without the visitor's permission — which the app reads from the Shopify Customer Privacy signals your endpoint forwards — no identifier is minted and no row is written. On withdrawal, writes stop, that browser's row is deleted along with the links that joined it to the others, and the app expires the cookie it had issued on its own domain. The cookie planted by your domain is yours: your endpoint is the only thing that can remove it.</p>
+      <p><strong>Cookies on your store's domain.</strong> The browser identifier travels in a cookie. When your server-side tag container uses the Kerdon template, these are the cookies it writes on your store's domain, and it writes nothing else:</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th scope="col">Cookie</th><th scope="col">Written by, and when</th><th scope="col">Purpose</th><th scope="col">Requested duration</th><th scope="col">Content</th><th scope="col">Attributes</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>kerdon_eid</code></td><td>Your server-side container, on your store's domain, only with the visitor's consent</td><td>Recognising the same browser when it comes back</td><td>One year by default, set in the template. It is the maximum requested, not a guarantee: the browser may shorten it, the person can delete it at any time, and on withdrawal it expires at once</td><td>A random, opaque identifier (<code>kerdon_</code> followed by 32 random characters). No name, email address or other data</td><td><code>Secure</code>, <code>SameSite=Lax</code>, <code>Path=/</code>. Not <code>HttpOnly</code>, so that your page tags can read it and attach it to the cart</td></tr>
+            <tr><td><code>kerdon_rv</code></td><td>Your server-side container, on your store's domain, only after a withdrawal of consent that Kerdon has not yet confirmed</td><td>Keeping the withdrawal until Kerdon confirms the deletion, so that it is not lost if the connection drops. It is never used to recognise anyone</td><td>30 days at most; it expires as soon as Kerdon confirms</td><td>A withdrawal marker and the identifiers to delete (at most three)</td><td><code>Secure</code>, <code>HttpOnly</code>, <code>SameSite=Lax</code>, <code>Path=/</code></td></tr>
+            <tr><td><code>corew_eid</code></td><td>Nobody, any longer</td><td>The former name of <code>kerdon_eid</code>, from before the app was renamed. A browser may still hold one; Kerdon neither writes it nor uses its value</td><td>—</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The template also reads, without writing them, the consent signals already on your domain: Shopify's <code>_tracking_consent</code> cookie and, where your own tags write one, <code>kerdon_consent</code> (formerly <code>corew_consent</code>). When your endpoint calls Kerdon, Kerdon's reply also carries a <code>kerdon_eid</code> cookie for Kerdon's own domain (<code>Secure</code>, <code>SameSite=None</code>, up to one year, expired on withdrawal); with the Kerdon template that reply stays with your container and is not passed on to the visitor's browser.</p>
       <p><strong>To link a browser to a customer</strong> your endpoint sends us the email address or phone number the person has just given: the app uses them to find that customer in your database and write the link. Neither value is kept on our systems.</p>
       <p><strong>Rows never linked to a customer are deleted 90 days</strong> after they were last seen.</p>
       <p>The app does <strong>not</strong> process the visitor's IP address and does <strong>not</strong> record the pages they visit.</p>

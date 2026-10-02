@@ -299,11 +299,11 @@ Partner Dashboard → App **Kerdon** → **Distribution** → **Manage listing**
 
 ### Valori esatti dal repository
 
-**Fonte:** `docs/legal/privacy-policy.md` (versione 1.4 del 27-09-2026)
+**Fonte:** `docs/legal/privacy-policy.md` (versione 1.5 del 02-10-2026)
 
 | Tipo | URL | Codice HTTP | Note |
 |------|-----|-------------|------|
-| **Privacy Policy (EN)** | `https://api.kerdon.io/policies/privacy-policy` | 200 ✅ | Versione 1.4, include dati logistici ordini |
+| **Privacy Policy (EN)** | `https://api.kerdon.io/policies/privacy-policy` | 200 ✅ | Versione 1.5, include dati logistici ordini |
 | **Privacy Policy (IT)** | `https://kerdon.io/policies/privacy-policy` | 307 → redirect | Rewrite verso `api.kerdon.io` (fonte: `project_kerdon_sito_e_pagine_info.md`) |
 | **Support** | `support@kerdon.io` | Email valida | Indicata in privacy policy riga 8 e DPA |
 | **Terms of Service** | Nessuno | 410 su `/policies/terms` | Non richiesto da Shopify, l'app non ne ha |
@@ -331,7 +331,7 @@ curl -s -o /dev/null -w "%{http_code}" https://api.kerdon.io/policies/terms
 - **Terms of Service:** lasciare vuoto (opzionale, l'app non ne ha)
 
 ### Come verificare
-1. Aprire `https://api.kerdon.io/policies/privacy-policy` in un browser: deve caricare la pagina della privacy policy versione 1.4
+1. Aprire `https://api.kerdon.io/policies/privacy-policy` in un browser: deve caricare la pagina della privacy policy versione 1.5
 2. Verificare che il supporto sia raggiungibile (email `support@kerdon.io` valida)
 3. Se il revisore chiede i Terms of Service, rispondere che sono opzionali e l'app non li richiede
 
@@ -684,7 +684,7 @@ Prima di cliccare "Submit for review", verificare:
 - `docs/scopes.md` — giustificazioni scope
 - `docs/legal/protected-customer-data.md` — inventario campi PCD
 - `app/lib/legal/order-data-inventory.ts` — dati logistici ordini
-- `docs/legal/privacy-policy.md` — privacy policy versione 1.4
+- `docs/legal/privacy-policy.md` — privacy policy versione 1.5
 - `/Users/stefanoghisoni/Desktop/Kerdon-App-Store/descrizione-app-store.md` — testi App Store
 - `prisma/plan-catalog-sync.test.ts` — test di coerenza listino
 - Verifiche curl su `kerdon.io` e `api.kerdon.io`
