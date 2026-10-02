@@ -431,9 +431,8 @@ browser soggetta al consenso**, non una promessa di conservazione:
 
 - il consenso si puo' ritirare in qualunque momento, e da quell'istante non c'e'
   piu' niente da conservare;
-- il browser puo' accorciare la durata per politica propria — Safari lo fa anche
-  sui cookie first-party scritti da JavaScript, riducendoli a 7 giorni quando
-  rileva pattern di tracciamento cross-site (ITP);
+- il browser puo' accorciare la durata per politica propria — Safari con ITP
+  limita a 7 giorni ogni cookie first-party scritto da JavaScript, senza condizioni;
 - Firefox con Enhanced Tracking Protection (strict) puo' isolare i cookie per sito,
   anche se first-party, quando l'infrastruttura che li scrive e' classificata come
   tracker;
