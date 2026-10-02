@@ -4,7 +4,7 @@ Lo stato di `npm audit` per Kerdon, le eccezioni che la CI accetta e la prova
 che le regge. Si aggiorna ogni volta che cambia `scripts/audit-exceptions.json`
 o il risultato di `npm audit`.
 
-Ultima verifica: **2026-10-01**, su `main` a `63b1f63`, con lo stesso
+Ultima verifica: **2026-10-02**, su `main` a `6abcef9`, con lo stesso
 `package-lock.json`. Owner di tutte le eccezioni: **Stefano Ghisoni**.
 
 ## In una riga
@@ -68,7 +68,7 @@ Remix 2.17.5 e react-router 6.30.4 sono le ultime versioni delle loro linee.
 | --- | --- | --- | --- |
 | `react-router` | 6.30.4 | GHSA-wrjc-x8rr-h8h6 (open redirect con backslash in `<Link>`/`useNavigate`), GHSA-337j-9hxr-rhxg (constructor injection in `deserializeErrors`) | corretti in react-router >= 7.18.0: si chiudono con la migrazione. Nominati nell'eccezione di `@remix-run/react` |
 | `react-router-dom` | 6.30.4 | GHSA-jjmj-jmhj-qwj2 (open redirect verso XSS) | come sopra |
-| `morgan` | 1.12.0 | GHSA-9f6g-j8ch-79g4 (log injection) | **nuovo** rispetto all'ultima revisione. Arriva da `@remix-run/serve`, che in produzione non gira (vedi sotto). La correzione (1.12.1) e' disponibile e compatibile con `^1.10.1`: va presa con un aggiornamento del lockfile in una PR a parte, non qui (questa revisione non cambia dipendenze) |
+| `morgan` | 1.12.0 | GHSA-9f6g-j8ch-79g4 (log injection) | **nuovo** rispetto all'ultima revisione. Arriva da `@remix-run/serve`, che in produzione non gira (vedi sotto). La correzione (1.12.1) e' disponibile e compatibile con `^1.10.1`: va presa con un aggiornamento del lockfile in una PR a parte, non qui (questa revisione non cambia dipendenze). **Owner:** Stefano Ghisoni. **Obiettivo:** 2026-11-02 |
 
 ## La prova di mitigazione
 
@@ -108,10 +108,11 @@ Lato client turbo-stream e' nel bundle (`build/client/assets/components-*.js`,
 dentro `@remix-run/react`), ma decodifica solo risposte single fetch, che il
 server non produce.
 
-Per i moderate di react-router: ogni `<Link to>`, `navigate()` e `redirect()`
-dell'app usa un percorso fisso scritto nel codice. L'unico caso dinamico e'
-`navigate('/products/issues?' + query)` in `app/routes/products.issues.tsx`,
-che cambia solo la query. Nessun percorso arriva da input esterno.
+Per i moderate di react-router: i redirect lato server (loader/action) vanno solo
+ad admin.shopify.com (host fisso) o a percorsi relativi; `<Link>` e `navigate()`
+lato client usano percorsi fissi, salvo `navigate('/products/issues?' + query)`
+in `app/routes/products.issues.tsx` che costruisce solo la query. Nessun percorso
+arriva da input esterno.
 `deserializeErrors` richiede codice che lasci all'attaccante riscrivere gli
 errori catturati in SSR; gli ErrorBoundary dell'app li leggono soltanto.
 
@@ -131,7 +132,7 @@ installato.
 | --- | --- | --- | --- |
 | `@remix-run/dev` | high | catena Remix 2 + esbuild/vite | strumento di build |
 | `vite` 5.4.21 | high | GHSA-fx2h-pf6j-xcff (bypass di `server.fs.deny` su Windows), GHSA-4w7w-66w2-5vf9, GHSA-v6wh-96g9-6wx3 | copia annidata in `@vanilla-extract/integration` (via `@remix-run/dev`); il vite del progetto e' 6.4.3 e non e' segnalato |
-| `brace-expansion` 2.1.4 | high | GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p (high), GHSA-q2hr-2g5m-vwhr (moderate) | correzione disponibile (2.1.7): aggiornamento del lockfile in una PR a parte |
+| `brace-expansion` 2.1.4 | high | GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p (high), GHSA-q2hr-2g5m-vwhr (moderate) | correzione disponibile (2.1.7): aggiornamento del lockfile in una PR a parte. **Owner:** Stefano Ghisoni. **Obiettivo:** 2026-11-02 |
 | `esbuild` 0.17/0.19/0.21 | moderate | GHSA-67mh-4wv8-2f99 (dev server leggibile da altri siti) | copie annidate in `@remix-run/dev` e `@vanilla-extract/integration`; l'esbuild del progetto e' 0.28.2 |
 | `@vanilla-extract/integration`, `vite-node` 1.6.1 | moderate | via esbuild e vite | `@remix-run/dev` |
 | `vitest` 3.2.7, `@vitest/mocker`, `@vitest/ui` | moderate | GHSA-82fw-gwwq-j7x9 (lettura di file arbitrari via mock) | correzione solo in vitest 4.1.11 (major) |

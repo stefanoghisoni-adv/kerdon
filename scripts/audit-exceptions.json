@@ -15,7 +15,7 @@
     "scriverli, la vulnerabilita' non va accettata. La correzione di tutte le",
     "voci e' la migrazione a React Router 7: docs/migrazione-react-router-7.md.",
     "",
-    "Prova verificata il 2026-10-01 su main 63b1f63 (dettagli in SECURITY.md):",
+    "Prova verificata il 2026-10-02 su main 6abcef9 (dettagli in SECURITY.md):",
     "`npm run build`, poi `grep -o 'v3_singleFetch[^,}]*' build/server/assets/server-build-*.js`",
     "restituisce `v3_singleFetch\": false`."
   ],
@@ -53,7 +53,7 @@
       "advisory": ["GHSA-rxv8-25v2-qmq8", "GHSA-wrjc-x8rr-h8h6", "GHSA-337j-9hxr-rhxg", "GHSA-jjmj-jmhj-qwj2"],
       "avviso": "high per turbo-stream; in piu' react-router 6.30.4 (moderate: open redirect con backslash, deserializeErrors) e react-router-dom 6.30.4 (moderate: open redirect verso XSS)",
       "motivo": "react-router@6.30.4 e' l'ultima della linea 6 e le correzioni stanno solo in react-router >=7.18.0, che sotto Remix 2 non e' installabile: la linea 7 cambia identita' del pacchetto. Si chiude con la migrazione a React Router 7.",
-      "mitigazione": "turbo-stream: nel bundle client decodifica solo le risposte single fetch, che il server non produce (v3_singleFetch false). Open redirect (GHSA-wrjc-x8rr-h8h6, GHSA-jjmj-jmhj-qwj2): ogni <Link to>, navigate() e redirect() dell'app usa un percorso fisso scritto nel codice (unico caso dinamico: navigate('/products/issues?' + query) in app/routes/products.issues.tsx, che cambia solo la query); nessun percorso arriva da input esterno. deserializeErrors (GHSA-337j-9hxr-rhxg): serve codice applicativo che lasci all'attaccante riscrivere gli errori catturati in SSR; gli ErrorBoundary dell'app (root.tsx, useRouteError) non lo fanno.",
+      "mitigazione": "turbo-stream: nel bundle client decodifica solo le risposte single fetch, che il server non produce (v3_singleFetch false). Open redirect (GHSA-wrjc-x8rr-h8h6, GHSA-jjmj-jmhj-qwj2): i redirect lato server (loader/action) vanno solo ad admin.shopify.com (host fisso) o a percorsi relativi; <Link> e navigate() lato client usano percorsi fissi, salvo navigate('/products/issues?' + query) in app/routes/products.issues.tsx che costruisce solo la query. Nessun percorso arriva da input esterno. deserializeErrors (GHSA-337j-9hxr-rhxg): serve codice applicativo che lasci all'attaccante riscrivere gli errori catturati in SSR; gli ErrorBoundary dell'app (root.tsx, useRouteError) non lo fanno.",
       "owner": "Stefano Ghisoni",
       "scadenza": "2026-12-31"
     },
