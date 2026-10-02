@@ -119,12 +119,22 @@ describe('receiveShopifyWebhook con waitUntil', () => {
     expect(arg).toBeInstanceOf(Promise);
 
     // Verifica che sia la promise con .catch (quella che gestisce gli errori)
-    // Non e' la promise raw di processWebhookEvent, ma quella wrappata dal .catch
     expect(processWebhookEvent).toHaveBeenCalledTimes(1);
-    const rawPromise = processWebhookEvent.mock.results[0].value;
-    expect(arg).not.toBe(rawPromise); // diversa: arg e' rawPromise.catch(...)
+
+    // La promise passata a waitUntil non deve mai rigettare, nemmeno se
+    // processWebhookEvent fallisce. Testiamo che arg risolva sempre, mai rigetti.
+    let rejected = false;
+    const settled = arg.then(
+      () => 'resolved',
+      () => {
+        rejected = true;
+        return 'rejected';
+      },
+    );
 
     await settleWebhookWork();
+    expect(await settled).toBe('resolved');
+    expect(rejected).toBe(false);
   });
 
   it('avvia il processore anche senza waitUntil', async () => {
