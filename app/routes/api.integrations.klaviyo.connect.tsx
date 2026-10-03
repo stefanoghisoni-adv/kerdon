@@ -1,37 +1,23 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
-import { prisma } from '~/db.server';
-import { can } from '~/lib/authz/capabilities';
-import { shopCapabilities } from '~/lib/authz/shop-capabilities.server';
-import { dictionaryForShop } from '~/lib/i18n/server';
+import { requireCustomersSyncShop } from '~/lib/integrations/route-guard.server';
 import { readState, exchangeCode } from '~/lib/integrations/klaviyo/oauth.server';
 import { accountName } from '~/lib/integrations/klaviyo/api.server';
 import { saveConnection, markNeedsReconnect } from '~/lib/integrations/connections.server';
 import { KlaviyoAuthError, KlaviyoUnavailableError } from '~/lib/integrations/klaviyo/api.server';
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const shop = await requireCustomersSyncShop(request);
+  if (shop instanceof Response) return shop;
 
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-  if (!shop) {
-    return json({ error: 'Shop non trovato' }, { status: 404 });
-  }
-  if (!can(await shopCapabilities(shop), 'use_app')) {
-    return json(
-      {
-        error: (await dictionaryForShop(session.shop)).errors.suspended,
-        code: 'not_authorized',
-      },
-      { status: 403 },
-    );
+  let body: { code?: string; state?: string };
+  try {
+    body = (await request.json()) as { code?: string; state?: string };
+  } catch {
+    return json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
 
-  const body = (await request.json()) as { code?: string; state?: string };
   const { code, state } = body;
-
   if (!code || !state) {
     return json({ ok: false, error: 'missing_params' }, { status: 400 });
   }
@@ -48,10 +34,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // Questo previene che un attaccante usi il code di un'autorizzazione fatta
   // da un altro merchant.
   if (verified.shopId !== shop.id) {
-    return json(
-      { error: 'Lo state non appartiene a questo negozio' },
-      { status: 403 },
-    );
+    return json({ ok: false, error: 'shop_mismatch' }, { status: 403 });
   }
 
   try {
@@ -62,7 +45,7 @@ export async function action({ request }: ActionFunctionArgs) {
   } catch (e) {
     if (e instanceof KlaviyoUnavailableError) {
       // Klaviyo non raggiungibile: 503 senza toccare lo stato della connessione
-      return json({ error: 'unavailable' }, { status: 503 });
+      return json({ ok: false, error: 'unavailable' }, { status: 503 });
     }
     if (e instanceof KlaviyoAuthError) {
       // Klaviyo ha rifiutato il token: marca come needs_reconnect

@@ -1,24 +1,26 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { authenticate } from '~/shopify.server';
+import { requireShop } from '~/lib/integrations/route-guard.server';
 import { prisma } from '~/db.server';
 import { getIntegration } from '~/lib/integrations/registry';
 import { connectionStatus, disconnect } from '~/lib/integrations/connections.server';
 
+/**
+ * Stato e disconnessione integrazione.
+ *
+ * Usa requireShop (NON requireCustomersSyncShop): un merchant sospeso o con un
+ * piano downgraded deve poter vedere lo stato della connessione e scollegare
+ * l'integrazione. Questa è la sua via d'uscita, come per Supabase disconnect.
+ */
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
   const { provider } = params;
 
   if (!provider || !getIntegration(provider)) {
-    return json({ error: 'Provider non valido' }, { status: 404 });
+    return json({ error: 'invalid_provider' }, { status: 404 });
   }
 
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-  if (!shop) {
-    return json({ error: 'Shop non trovato' }, { status: 404 });
-  }
+  const shop = await requireShop(request);
+  if (shop instanceof Response) return shop;
 
   const { status, accountName } = await connectionStatus(shop.id);
 
@@ -62,21 +64,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
   const { provider } = params;
 
   if (!provider || !getIntegration(provider)) {
-    return json({ error: 'Provider non valido' }, { status: 404 });
+    return json({ error: 'invalid_provider' }, { status: 404 });
   }
 
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-  if (!shop) {
-    return json({ error: 'Shop non trovato' }, { status: 404 });
+  const shop = await requireShop(request);
+  if (shop instanceof Response) return shop;
+
+  let body: { intent?: string };
+  try {
+    body = (await request.json()) as { intent?: string };
+  } catch {
+    return json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
 
-  const body = (await request.json()) as { intent?: string };
   const { intent } = body;
 
   if (intent === 'disconnect') {
@@ -84,5 +87,5 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ ok: true });
   }
 
-  return json({ error: 'Intent non valido' }, { status: 400 });
+  return json({ ok: false, error: 'invalid_intent' }, { status: 400 });
 }

@@ -19,7 +19,7 @@ function closePage(message: Record<string, unknown>, appOrigin: string): Respons
   window.close();
 })();
 </script>
-<p>Puoi chiudere questa finestra.</p>
+<p>You can close this window. / Puoi chiudere questa finestra.</p>
 </body></html>`;
   return new Response(html, {
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
@@ -35,8 +35,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const state = url.searchParams.get('state');
 
   if (error) {
+    // Map Klaviyo errors to fixed codes, never forward raw values
+    const mappedError = error === 'access_denied' ? 'denied' : 'failed';
     return closePage(
-      { type: 'klaviyo-oauth', ok: false, error: error === 'access_denied' ? 'denied' : error },
+      { type: 'klaviyo-oauth', ok: false, error: mappedError },
       appOrigin,
     );
   }

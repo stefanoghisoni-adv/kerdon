@@ -83,7 +83,8 @@ import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { buildAuthorizeUrl, readState, exchangeCode } from '~/lib/integrations/klaviyo/oauth.server';
-import { accountName, KlaviyoUnavailableError } from '~/lib/integrations/klaviyo/api.server';
+import { accountName, KlaviyoAuthError, KlaviyoUnavailableError } from '~/lib/integrations/klaviyo/api.server';
+import { can } from '~/lib/authz/capabilities';
 import { saveConnection, disconnect, connectionStatus, markNeedsReconnect } from '~/lib/integrations/connections.server';
 import { getIntegration } from '~/lib/integrations/registry';
 
@@ -390,5 +391,173 @@ describe('api.integrations.$provider', () => {
     const data = await response.json() as any;
     expect(data.ok).toBe(true);
     expect(disconnect).toHaveBeenCalledWith('shop-1');
+  });
+
+  it('status e disconnect permessi su piano downgraded (no plan gate)', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Basic',
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({
+      id: 'klaviyo',
+      name: 'Klaviyo',
+    } as any);
+    vi.mocked(connectionStatus).mockResolvedValue({
+      status: 'connected',
+      accountName: 'Test Account',
+    });
+    vi.mocked(prisma.integrationImportRun.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.integrationConflict.count).mockResolvedValue(0);
+
+    // Loader (status) - deve funzionare anche senza customersSyncEnabled
+    const getRequest = new Request('https://example.com/api/integrations/klaviyo');
+    const getResponse = await providerLoader({ request: getRequest, params: { provider: 'klaviyo' }, context: {} });
+    expect(getResponse.status).toBe(200);
+
+    // Action (disconnect) - deve funzionare anche senza customersSyncEnabled
+    const postRequest = new Request('https://example.com/api/integrations/klaviyo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intent: 'disconnect' }),
+    });
+    const postResponse = await providerAction({ request: postRequest, params: { provider: 'klaviyo' }, context: {} });
+    expect(postResponse.status).toBe(200);
+  });
+});
+
+describe('Nuovi test da review round 1', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.SHOPIFY_APP_URL = 'https://example.com';
+    process.env.KLAVIYO_CLIENT_ID = 'test-client-id';
+    process.env.KLAVIYO_CLIENT_SECRET = 'test-client-secret';
+  });
+
+  it('oauth-url: 403 per shop sospeso', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(false); // Shop sospeso
+
+    const request = new Request('https://example.com/api/integrations/klaviyo/oauth-url');
+    const response = await oauthUrlLoader({ request, params: {}, context: {} });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('connect: 403 per piano senza customersSyncEnabled, exchangeCode mai chiamato', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Basic',
+    } as any);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: false,
+    } as any);
+
+    const request = new Request('https://example.com/api/integrations/klaviyo/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'test-code', state: 'test-state' }),
+    });
+    const response = await connectAction({ request, params: {}, context: {} });
+
+    expect(response.status).toBe(403);
+    expect(exchangeCode).not.toHaveBeenCalled();
+  });
+
+  it('connect: KlaviyoAuthError → 409 e markNeedsReconnect chiamato', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(true); // Shop non sospeso
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: true,
+    } as any);
+    vi.mocked(readState).mockReturnValue({
+      shopId: 'shop-1',
+      verifier: 'test-verifier',
+    });
+    vi.mocked(exchangeCode).mockRejectedValue(new KlaviyoAuthError('Token rifiutato'));
+
+    const request = new Request('https://example.com/api/integrations/klaviyo/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'test-code', state: 'valid-state' }),
+    });
+    const response = await connectAction({ request, params: {}, context: {} });
+
+    expect(response.status).toBe(409);
+    const data = await response.json() as any;
+    expect(data.ok).toBe(false);
+    expect(data.error).toBe('denied');
+    expect(markNeedsReconnect).toHaveBeenCalledWith('shop-1');
+  });
+
+  it('connect: JSON malformato → 400', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(true); // Shop non sospeso
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: true,
+    } as any);
+
+    const request = new Request('https://example.com/api/integrations/klaviyo/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not-valid-json{',
+    });
+    const response = await connectAction({ request, params: {}, context: {} });
+
+    expect(response.status).toBe(400);
+    const data = await response.json() as any;
+    expect(data.ok).toBe(false);
+    expect(data.error).toBe('invalid_json');
+  });
+
+  it('callback: XSS test con </script><script>alert(1)</script>', async () => {
+    const maliciousCode = '</script><script>alert(1)</script>';
+    const request = new Request(`https://example.com/auth/klaviyo/callback?code=${encodeURIComponent(maliciousCode)}&state=test-state`);
+    const response = await callbackLoader({ request, params: {}, context: {} });
+
+    const html = await response.text();
+    // Il raw </script><script> NON deve essere presente
+    expect(html).not.toContain('</script><script>');
+    // La forma escaped DEVE essere presente (come < ecc.)
+    expect(html).toContain('\\u003c'); // <
+    expect(html).toContain('\\u003e'); // >
+  });
+
+  it('callback: error non access_denied mappa a "failed"', async () => {
+    const request = new Request('https://example.com/auth/klaviyo/callback?error=server_error');
+    const response = await callbackLoader({ request, params: {}, context: {} });
+
+    const html = await response.text();
+    expect(html).toContain('"error"');
+    expect(html).toContain('"failed"');
+    expect(html).not.toContain('server_error'); // Raw error non deve passare
   });
 });
