@@ -43,13 +43,20 @@ export function normalizeEmail(v: string | null | undefined): string | null {
 
 /**
  * Normalizes a phone number to E.164 format (digits only, no '+').
+ *
+ * For stored digits (storedDigits: true):
+ * - Try parsing as international by adding '+' first
+ * - If invalid, fall back to national parsing with countryCode
+ *
+ * For raw values (default):
  * - Numbers starting with '+' or '00' are parsed as international
  * - Other numbers are parsed as national using the provided countryCode
- * - Returns null if the number is invalid or countryCode is missing for national numbers
+ * - Returns null if countryCode is missing for national numbers
  */
 export function normalizePhone(
   v: string | null | undefined,
-  countryCode: string | null
+  countryCode: string | null,
+  opts?: { storedDigits?: boolean }
 ): string | null {
   if (v === null || v === undefined) {
     return null;
@@ -60,8 +67,37 @@ export function normalizePhone(
     return null;
   }
 
+  // For stored digits: try international first, then fall back to national
+  if (opts?.storedDigits) {
+    try {
+      // Try parsing as international by adding '+'
+      const phoneNumber = parsePhoneNumber('+' + trimmed);
+
+      if (phoneNumber?.isValid()) {
+        return phoneNumber.number.substring(1); // E.164 without '+'
+      }
+    } catch {
+      // International parsing failed, fall through to national
+    }
+
+    // Fallback: try parsing as national with country code
+    if (countryCode) {
+      try {
+        const phoneNumber = parsePhoneNumber(trimmed, countryCode as any);
+
+        if (phoneNumber?.isValid()) {
+          return phoneNumber.number.substring(1);
+        }
+      } catch {
+        // National parsing also failed
+      }
+    }
+
+    return null;
+  }
+
+  // For raw values: check prefix first
   try {
-    // Check if the number starts with + or 00 (international format)
     const startsWithPlus = trimmed.startsWith('+');
     const startsWithDoubleZero = trimmed.startsWith('00');
 
@@ -71,12 +107,11 @@ export function normalizePhone(
         ? parsePhoneNumber(trimmed)
         : parsePhoneNumber('+' + trimmed.substring(2));
 
-      if (!phoneNumber || !phoneNumber.isValid()) {
-        return null;
+      if (phoneNumber?.isValid()) {
+        return phoneNumber.number.substring(1); // E.164 without '+'
       }
 
-      // Return E.164 format without the '+'
-      return phoneNumber.number.substring(1);
+      return null;
     } else {
       // Parse as national - requires country code
       if (!countryCode) {
@@ -85,12 +120,11 @@ export function normalizePhone(
 
       const phoneNumber = parsePhoneNumber(trimmed, countryCode as any);
 
-      if (!phoneNumber || !phoneNumber.isValid()) {
-        return null;
+      if (phoneNumber?.isValid()) {
+        return phoneNumber.number.substring(1);
       }
 
-      // Return E.164 format without the '+'
-      return phoneNumber.number.substring(1);
+      return null;
     }
   } catch (error) {
     // Invalid phone number
@@ -109,22 +143,22 @@ export function buildIndices(
   const byEmail = new Map<string, number[]>();
   const byPhone = new Map<string, number[]>();
 
-  customers.forEach((customer, index) => {
+  customers.forEach((customer) => {
     // Index by ID
-    byId.set(customer.shopifyCustomerId, index);
+    byId.set(customer.shopifyCustomerId, customer.shopifyCustomerId);
 
-    // Index by normalized email
+    // Index by normalized email - store customerIds directly
     const email = normalizeEmail(customer.email);
     if (email) {
       const existing = byEmail.get(email) || [];
-      byEmail.set(email, [...existing, index]);
+      byEmail.set(email, [...existing, customer.shopifyCustomerId]);
     }
 
-    // Index by normalized phone
-    const phone = normalizePhone(customer.phone, customer.countryCode);
+    // Index by normalized phone - store customerIds directly
+    const phone = normalizePhone(customer.phone, customer.countryCode, { storedDigits: true });
     if (phone) {
       const existing = byPhone.get(phone) || [];
-      byPhone.set(phone, [...existing, index]);
+      byPhone.set(phone, [...existing, customer.shopifyCustomerId]);
     }
   });
 
@@ -152,12 +186,7 @@ export function matchProfile(
 
   // Level 1: Try matching by ID
   if (p.shopifyCustomerId !== null) {
-    const customerIndex = idx.byId.get(p.shopifyCustomerId);
-    if (customerIndex !== undefined) {
-      // Get the actual customer ID from the candidates array position
-      // We need to reconstruct this from the map structure
-      // Actually, the byId map maps shopifyCustomerId to index,
-      // so we can return the shopifyCustomerId directly
+    if (idx.byId.has(p.shopifyCustomerId)) {
       return { customerId: p.shopifyCustomerId, level: 'id' };
     }
   }
@@ -168,16 +197,7 @@ export function matchProfile(
     const emailMatches = idx.byEmail.get(normalizedEmail);
     if (emailMatches) {
       if (emailMatches.length === 1) {
-        // Exactly one match - get the customer ID
-        const customerIndex = emailMatches[0];
-        // We need to get the shopifyCustomerId from the index
-        // The byId map has shopifyCustomerId as key and index as value
-        // So we need to find the key with this value
-        for (const [customerId, index] of idx.byId.entries()) {
-          if (index === customerIndex) {
-            return { customerId, level: 'email' };
-          }
-        }
+        return { customerId: emailMatches[0], level: 'email' };
       } else if (emailMatches.length >= 2) {
         hasAmbiguity = true;
       }
@@ -190,13 +210,7 @@ export function matchProfile(
     const phoneMatches = idx.byPhone.get(normalizedPhone);
     if (phoneMatches) {
       if (phoneMatches.length === 1) {
-        // Exactly one match - get the customer ID
-        const customerIndex = phoneMatches[0];
-        for (const [customerId, index] of idx.byId.entries()) {
-          if (index === customerIndex) {
-            return { customerId, level: 'phone' };
-          }
-        }
+        return { customerId: phoneMatches[0], level: 'phone' };
       } else if (phoneMatches.length >= 2) {
         hasAmbiguity = true;
       }

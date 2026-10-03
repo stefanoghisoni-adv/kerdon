@@ -49,6 +49,24 @@ describe('normalizePhone', () => {
     expect(normalizePhone(null, 'IT')).toBe(null);
     expect(normalizePhone(undefined, 'IT')).toBe(null);
   });
+
+  // Tests for storedDigits option (F1 fix)
+  it('parses stored digits with E.164 prefix (storedDigits: true)', () => {
+    expect(normalizePhone('393331234567', 'IT', { storedDigits: true })).toBe('393331234567');
+  });
+
+  it('parses stored digits without prefix using fallback (storedDigits: true)', () => {
+    expect(normalizePhone('3331234567', 'IT', { storedDigits: true })).toBe('393331234567');
+  });
+
+  it('parses Klaviyo national number with country code (default)', () => {
+    expect(normalizePhone('3331234567', 'IT')).toBe('393331234567');
+  });
+
+  it('returns null for Klaviyo national number without country (default)', () => {
+    // Without storedDigits, "3331234567" is NOT parsed as international French number
+    expect(normalizePhone('3331234567', null)).toBe(null);
+  });
 });
 
 describe('buildIndices', () => {
@@ -60,12 +78,12 @@ describe('buildIndices', () => {
 
     const indices = buildIndices(customers);
 
-    expect(indices.byId.get(1)).toBe(0);
-    expect(indices.byId.get(2)).toBe(1);
-    expect(indices.byEmail.get('test@example.com')).toEqual([0]);
-    expect(indices.byEmail.get('other@example.com')).toEqual([1]);
-    expect(indices.byPhone.get('393331234567')).toEqual([0]);
-    expect(indices.byPhone.get('393339876543')).toEqual([1]);
+    expect(indices.byId.get(1)).toBe(1);
+    expect(indices.byId.get(2)).toBe(2);
+    expect(indices.byEmail.get('test@example.com')).toEqual([1]);
+    expect(indices.byEmail.get('other@example.com')).toEqual([2]);
+    expect(indices.byPhone.get('393331234567')).toEqual([1]);
+    expect(indices.byPhone.get('393339876543')).toEqual([2]);
   });
 
   it('handles duplicate emails', () => {
@@ -76,7 +94,7 @@ describe('buildIndices', () => {
 
     const indices = buildIndices(customers);
 
-    expect(indices.byEmail.get('shared@example.com')).toEqual([0, 1]);
+    expect(indices.byEmail.get('shared@example.com')).toEqual([1, 2]);
   });
 
   it('handles duplicate phones', () => {
@@ -87,7 +105,7 @@ describe('buildIndices', () => {
 
     const indices = buildIndices(customers);
 
-    expect(indices.byPhone.get('393331234567')).toEqual([0, 1]);
+    expect(indices.byPhone.get('393331234567')).toEqual([1, 2]);
   });
 
   it('handles null emails and phones', () => {
@@ -97,7 +115,7 @@ describe('buildIndices', () => {
 
     const indices = buildIndices(customers);
 
-    expect(indices.byId.get(1)).toBe(0);
+    expect(indices.byId.get(1)).toBe(1);
     expect(indices.byEmail.size).toBe(0);
     expect(indices.byPhone.size).toBe(0);
   });
