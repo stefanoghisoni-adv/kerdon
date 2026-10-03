@@ -108,8 +108,8 @@ function validateAndFormat(
     return { ok: false, reason: 'invalid' };
   }
 
-  // Anno nel futuro
-  const currentYear = new Date().getFullYear();
+  // Anno nel futuro (usa UTC per evitare dipendenze dal fuso orario)
+  const currentYear = new Date().getUTCFullYear();
   if (y > currentYear) {
     return { ok: false, reason: 'invalid' };
   }
@@ -202,12 +202,48 @@ export function detectFormat(
 export type Decision = 'fill' | 'same' | 'conflict' | 'decided';
 
 /**
+ * Normalizza una data in formato ISO (YYYY-MM-DD).
+ *
+ * Accetta:
+ * - 'YYYY-MM-DD' (ISO, gia' normalizzato)
+ * - 'YYYYMMDD' (formato compatto del database merchant)
+ *
+ * Restituisce `null` se il formato non e' riconoscibile o la data non e' valida.
+ */
+function normalizeToISO(value: string): string | null {
+  const text = value.trim();
+  if (!text) return null;
+
+  // Gia' in formato ISO
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
+  }
+
+  // Formato compatto (YYYYMMDD)
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(text);
+  if (compact) {
+    return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  }
+
+  return null;
+}
+
+/**
  * Decide cosa fare quando il valore nel nostro database e quello di Klaviyo
  * non combaciano.
  *
+ * **Formati accettati:**
+ * - `ours`: 'YYYY-MM-DD' (ISO) o 'YYYYMMDD' (formato merchant)
+ * - `theirs`: 'YYYY-MM-DD' (ISO)
+ * - `prior.theirValue`: 'YYYY-MM-DD' (ISO)
+ *
+ * Entrambi i valori vengono normalizzati a ISO prima del confronto. Un valore
+ * `ours` non parsabile e' trattato come riempito-ma-diverso: diventa un
+ * conflitto, mai una sovrascrittura silenziosa.
+ *
  * **Regole:**
  * - `ours` vuoto (null o '') → `fill` (Klaviyo riempie il buco)
- * - Uguali → `same`
+ * - Uguali (dopo normalizzazione) → `same`
  * - `prior` non `open` e `prior.theirValue === theirs` → `decided` (merchant
  *   ha gia' scelto, e Klaviyo non e' cambiato: vale ancora quella scelta)
  * - Altrimenti → `conflict` (serve una decisione nuova)
@@ -220,8 +256,15 @@ export function decide(
   // Vuoto → riempi
   if (!ours || ours.trim() === '') return 'fill';
 
+  // Normalizza entrambi i lati per confrontare come con come
+  const oursNormalized = normalizeToISO(ours);
+  const theirsNormalized = normalizeToISO(theirs);
+
+  // ours non parsabile → e' riempito ma diverso, quindi conflitto
+  if (!oursNormalized) return 'conflict';
+
   // Uguali → nessun conflitto
-  if (ours === theirs) return 'same';
+  if (oursNormalized === theirsNormalized) return 'same';
 
   // Decisione gia' presa e Klaviyo non e' cambiato → vale ancora
   if (prior && prior.status !== 'open' && prior.theirValue === theirs) {
@@ -236,8 +279,40 @@ export function decide(
  * Converte una data ISO nel formato compatto del database del merchant.
  *
  * `YYYY-MM-DD` → `YYYYMMDD`
+ *
+ * **Precondizioni:** L'input deve essere in formato ISO rigoroso (YYYY-MM-DD)
+ * e rappresentare una data esistente. Su input malformato lancia un errore
+ * invece di restituire un valore corrotto.
+ *
+ * @throws {Error} Se l'input non e' in formato ISO o la data non esiste
  */
 export function toMerchantDate(iso: string): string {
-  const [year, month, day] = iso.split('-');
-  return `${year}${month.padStart(2, '0')}${day.padStart(2, '0')}`;
+  // Valida il formato ISO
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) {
+    throw new Error(
+      `toMerchantDate: input must be in ISO format (YYYY-MM-DD), got: ${iso}`
+    );
+  }
+
+  const [, year, month, day] = match;
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+
+  // Valida che la data esista
+  if (m < 1 || m > 12 || d < 1 || d > 31) {
+    throw new Error(`toMerchantDate: invalid date components: ${iso}`);
+  }
+
+  const date = new Date(Date.UTC(y, m - 1, d));
+  if (
+    date.getUTCFullYear() !== y ||
+    date.getUTCMonth() !== m - 1 ||
+    date.getUTCDate() !== d
+  ) {
+    throw new Error(`toMerchantDate: date does not exist: ${iso}`);
+  }
+
+  return `${year}${month}${day}`;
 }

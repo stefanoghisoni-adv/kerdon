@@ -173,8 +173,26 @@ describe('parseDate', () => {
     });
 
     it('returns invalid for future year', () => {
-      const futureYear = new Date().getFullYear() + 1;
+      const futureYear = new Date().getUTCFullYear() + 1;
       expect(parseDate(`${futureYear}-12-25`, 'auto')).toEqual({
+        ok: false,
+        reason: 'invalid',
+      });
+    });
+
+    it('uses UTC for future year check (timezone-independent)', () => {
+      // Verifica che il controllo dell'anno futuro usi UTC, non il fuso locale.
+      // Se il server e' in UTC-5 e sono le 23:00 del 31 dic 2026 (ancora 2026
+      // in UTC), '2027-06-15' deve essere rifiutato comunque.
+      const currentUTCYear = new Date().getUTCFullYear();
+      const currentYear = currentUTCYear; // Stesso anno in UTC
+      const nextYear = currentUTCYear + 1;
+
+      // L'anno corrente in UTC deve essere accettato
+      expect(parseDate(`${currentYear}-06-15`, 'auto').ok).toBe(true);
+
+      // L'anno successivo in UTC deve essere rifiutato
+      expect(parseDate(`${nextYear}-06-15`, 'auto')).toEqual({
         ok: false,
         reason: 'invalid',
       });
@@ -345,6 +363,26 @@ describe('decide', () => {
       })
     ).toBe('same');
   });
+
+  it('normalizes ours (YYYYMMDD) and theirs (ISO) before comparing - same', () => {
+    expect(decide('19901225', '1990-12-25', null)).toBe('same');
+  });
+
+  it('normalizes ours (YYYYMMDD) and theirs (ISO) before comparing - conflict', () => {
+    expect(decide('19901225', '1990-12-26', null)).toBe('conflict');
+  });
+
+  it('returns conflict when ours is unparseable', () => {
+    expect(decide('not-a-date', '1990-12-25', null)).toBe('conflict');
+  });
+
+  it('normalizes ours in fill vs conflict decision', () => {
+    // ours e' vuoto → fill
+    expect(decide('', '1990-12-25', null)).toBe('fill');
+
+    // ours e' riempito ma non parsabile → conflict, non fill
+    expect(decide('invalid', '1990-12-25', null)).toBe('conflict');
+  });
 });
 
 describe('toMerchantDate', () => {
@@ -352,11 +390,45 @@ describe('toMerchantDate', () => {
     expect(toMerchantDate('1990-12-25')).toBe('19901225');
   });
 
-  it('converts YYYY-M-D to YYYYMMDD with padding', () => {
-    expect(toMerchantDate('1990-1-5')).toBe('19900105');
-  });
-
   it('handles dates with leading zeros', () => {
     expect(toMerchantDate('1990-01-05')).toBe('19900105');
+  });
+
+  describe('input validation', () => {
+    it('throws on non-ISO format (DD/MM/YYYY)', () => {
+      expect(() => toMerchantDate('25/12/1990')).toThrow(
+        /must be in ISO format/
+      );
+    });
+
+    it('throws on malformed strings', () => {
+      expect(() => toMerchantDate('not-a-date')).toThrow(
+        /must be in ISO format/
+      );
+    });
+
+    it('throws on compact format (YYYYMMDD)', () => {
+      expect(() => toMerchantDate('19901225')).toThrow(
+        /must be in ISO format/
+      );
+    });
+
+    it('throws on invalid date (30 Feb)', () => {
+      expect(() => toMerchantDate('1990-02-30')).toThrow(/date does not exist/);
+    });
+
+    it('throws on invalid month', () => {
+      expect(() => toMerchantDate('1990-13-25')).toThrow(/invalid date components/);
+    });
+
+    it('throws on invalid day', () => {
+      expect(() => toMerchantDate('1990-12-32')).toThrow(/invalid date components/);
+    });
+
+    it('throws on single-digit components without leading zero', () => {
+      expect(() => toMerchantDate('1990-1-5')).toThrow(
+        /must be in ISO format/
+      );
+    });
   });
 });
