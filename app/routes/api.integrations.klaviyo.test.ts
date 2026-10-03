@@ -25,6 +25,10 @@ vi.mock('~/db.server', () => ({
     integrationConflict: {
       count: vi.fn(),
     },
+    integrationFieldMapping: {
+      upsert: vi.fn(),
+      findUnique: vi.fn(),
+    },
   },
 }));
 
@@ -48,6 +52,7 @@ vi.mock('~/lib/integrations/klaviyo/oauth.server', () => ({
 
 vi.mock('~/lib/integrations/klaviyo/api.server', () => ({
   accountName: vi.fn(),
+  sampleProperties: vi.fn(),
   KlaviyoAuthError: class KlaviyoAuthError extends Error {
     constructor(message = 'Klaviyo auth error') {
       super(message);
@@ -67,6 +72,7 @@ vi.mock('~/lib/integrations/connections.server', () => ({
   disconnect: vi.fn(),
   connectionStatus: vi.fn(),
   markNeedsReconnect: vi.fn(),
+  getAccessToken: vi.fn(),
 }));
 
 vi.mock('~/lib/integrations/registry', () => ({
@@ -83,9 +89,9 @@ import { authenticate } from '~/shopify.server';
 import { prisma } from '~/db.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { buildAuthorizeUrl, readState, exchangeCode } from '~/lib/integrations/klaviyo/oauth.server';
-import { accountName, KlaviyoAuthError, KlaviyoUnavailableError } from '~/lib/integrations/klaviyo/api.server';
+import { accountName, sampleProperties, KlaviyoAuthError, KlaviyoUnavailableError } from '~/lib/integrations/klaviyo/api.server';
 import { can } from '~/lib/authz/capabilities';
-import { saveConnection, disconnect, connectionStatus, markNeedsReconnect } from '~/lib/integrations/connections.server';
+import { saveConnection, disconnect, connectionStatus, markNeedsReconnect, getAccessToken } from '~/lib/integrations/connections.server';
 import { getIntegration } from '~/lib/integrations/registry';
 
 describe('api.integrations.klaviyo.oauth-url', () => {
@@ -559,5 +565,326 @@ describe('Nuovi test da review round 1', () => {
     expect(html).toContain('"error"');
     expect(html).toContain('"failed"');
     expect(html).not.toContain('server_error'); // Raw error non deve passare
+  });
+});
+
+
+describe('api.integrations.$provider - properties view', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('403 se il piano non ha customersSyncEnabled', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Basic',
+    } as any);
+    vi.mocked(can).mockReturnValue(true);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: false,
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo' } as any);
+
+    const request = new Request('https://example.com/api/integrations/klaviyo?view=properties');
+    const response = await providerLoader({ request, params: { provider: 'klaviyo' }, context: {} });
+
+    expect(response.status).toBe(403);
+    const data = await response.json() as any;
+    expect(data.error).toBe('plan_missing_customers_sync');
+  });
+
+  it('restituisce proprietà con date ambigue marcate', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(true);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: true,
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo' } as any);
+    vi.mocked(getAccessToken).mockResolvedValue('klaviyo-token-123');
+    vi.mocked(sampleProperties).mockResolvedValue({
+      keys: ['Birthday', 'SignupDate', 'InvalidDate'],
+      samples: {
+        Birthday: ['01/02/1990', '03/04/1985', '05/06/1992'],
+        SignupDate: ['2020-01-15', '2021-03-20'],
+        InvalidDate: ['not-a-date', 'xyz'],
+      },
+    });
+
+    const request = new Request('https://example.com/api/integrations/klaviyo?view=properties');
+    const response = await providerLoader({ request, params: { provider: 'klaviyo' }, context: {} });
+
+    expect(response.status).toBe(200);
+    const data = await response.json() as any;
+    expect(data.properties).toBeDefined();
+    expect(Array.isArray(data.properties)).toBe(true);
+
+    // Trova Birthday
+    const birthday = data.properties.find((p: any) => p.key === 'Birthday');
+    expect(birthday).toBeDefined();
+    expect(birthday.ambiguous).toBe(true);
+    expect(birthday.samples).toBeDefined();
+    expect(birthday.samples.length).toBe(3);
+
+    // Trova SignupDate
+    const signupDate = data.properties.find((p: any) => p.key === 'SignupDate');
+    expect(signupDate).toBeDefined();
+    expect(signupDate.ambiguous).toBe(false);
+    expect(signupDate.format).toBe('YMD');
+
+    // InvalidDate non dovrebbe esserci perché tutti i valori sono invalid
+    const invalidDate = data.properties.find((p: any) => p.key === 'InvalidDate');
+    expect(invalidDate).toBeUndefined();
+  });
+
+  it('401 Klaviyo → 409 e needs_reconnect', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(true);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: true,
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo' } as any);
+    vi.mocked(getAccessToken).mockRejectedValue(new KlaviyoAuthError());
+
+    const request = new Request('https://example.com/api/integrations/klaviyo?view=properties');
+    const response = await providerLoader({ request, params: { provider: 'klaviyo' }, context: {} });
+
+    expect(response.status).toBe(409);
+    const data = await response.json() as any;
+    expect(data.error).toBe('reconnect');
+    expect(markNeedsReconnect).toHaveBeenCalledWith('shop-1');
+  });
+
+  it('503 se Klaviyo non disponibile', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(true);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: true,
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo' } as any);
+    vi.mocked(getAccessToken).mockRejectedValue(new KlaviyoUnavailableError());
+
+    const request = new Request('https://example.com/api/integrations/klaviyo?view=properties');
+    const response = await providerLoader({ request, params: { provider: 'klaviyo' }, context: {} });
+
+    expect(response.status).toBe(503);
+    const data = await response.json() as any;
+    expect(data.error).toBe('unavailable');
+    expect(markNeedsReconnect).not.toHaveBeenCalled();
+  });
+});
+
+describe('api.integrations.$provider - save-mapping', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('403 se il piano non ha customersSyncEnabled', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Basic',
+    } as any);
+    vi.mocked(can).mockReturnValue(true);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: false,
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo' } as any);
+
+    const request = new Request('https://example.com/api/integrations/klaviyo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        intent: 'save-mapping',
+        sourceKey: 'Birthday',
+        targetField: 'birthdate',
+        dateFormat: 'DMY',
+      }),
+    });
+    const response = await providerAction({ request, params: { provider: 'klaviyo' }, context: {} });
+
+    expect(response.status).toBe(403);
+    const data = await response.json() as any;
+    expect(data.error).toBe('plan_missing_customers_sync');
+  });
+
+  it('400 se targetField non è birthdate', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(true);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: true,
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo' } as any);
+
+    const request = new Request('https://example.com/api/integrations/klaviyo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        intent: 'save-mapping',
+        sourceKey: 'Birthday',
+        targetField: 'email',
+        dateFormat: 'DMY',
+      }),
+    });
+    const response = await providerAction({ request, params: { provider: 'klaviyo' }, context: {} });
+
+    expect(response.status).toBe(400);
+    const data = await response.json() as any;
+    expect(data.ok).toBe(false);
+    expect(data.error).toBe('invalid_target_field');
+  });
+
+  it('400 se dateFormat non valido', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(true);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: true,
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo' } as any);
+
+    const request = new Request('https://example.com/api/integrations/klaviyo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        intent: 'save-mapping',
+        sourceKey: 'Birthday',
+        targetField: 'birthdate',
+        dateFormat: 'INVALID',
+      }),
+    });
+    const response = await providerAction({ request, params: { provider: 'klaviyo' }, context: {} });
+
+    expect(response.status).toBe(400);
+    const data = await response.json() as any;
+    expect(data.ok).toBe(false);
+    expect(data.error).toBe('invalid_date_format');
+  });
+
+  it('400 se ambiguous=true e dateFormat è auto', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(true);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: true,
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo' } as any);
+
+    const request = new Request('https://example.com/api/integrations/klaviyo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        intent: 'save-mapping',
+        sourceKey: 'Birthday',
+        targetField: 'birthdate',
+        dateFormat: 'auto',
+        ambiguous: true,
+      }),
+    });
+    const response = await providerAction({ request, params: { provider: 'klaviyo' }, context: {} });
+
+    expect(response.status).toBe(400);
+    const data = await response.json() as any;
+    expect(data.ok).toBe(false);
+    expect(data.error).toBe('ambiguous_requires_format');
+  });
+
+  it('salva mapping con successo', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({
+      id: 'shop-1',
+      shopDomain: 'test.myshopify.com',
+      currentPlan: 'Growth',
+    } as any);
+    vi.mocked(can).mockReturnValue(true);
+    vi.mocked(findPlanByName).mockResolvedValue({
+      customersSyncEnabled: true,
+    } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo' } as any);
+    vi.mocked(prisma.integrationFieldMapping.upsert).mockResolvedValue({} as any);
+
+    const request = new Request('https://example.com/api/integrations/klaviyo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        intent: 'save-mapping',
+        sourceKey: 'Birthday',
+        targetField: 'birthdate',
+        dateFormat: 'DMY',
+      }),
+    });
+    const response = await providerAction({ request, params: { provider: 'klaviyo' }, context: {} });
+
+    expect(response.status).toBe(200);
+    const data = await response.json() as any;
+    expect(data.ok).toBe(true);
+    expect(prisma.integrationFieldMapping.upsert).toHaveBeenCalledWith({
+      where: {
+        shopId_provider_targetField: {
+          shopId: 'shop-1',
+          provider: 'klaviyo',
+          targetField: 'birthdate',
+        },
+      },
+      create: {
+        shopId: 'shop-1',
+        provider: 'klaviyo',
+        sourceKey: 'Birthday',
+        targetField: 'birthdate',
+        dateFormat: 'DMY',
+      },
+      update: {
+        sourceKey: 'Birthday',
+        dateFormat: 'DMY',
+      },
+    });
   });
 });
