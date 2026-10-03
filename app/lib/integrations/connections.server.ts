@@ -122,14 +122,19 @@ async function refresh(shopId: string, row: TokenRow): Promise<string> {
     throw e;
   }
 
-  await prisma.integrationConnection.updateMany({
-    where: { shopId, provider: PROVIDER },
+  // Solo su una riga ancora collegata: se il merchant ha scollegato mentre il
+  // rinnovo era in volo, i token nuovi non devono ricomparire sulla riga.
+  const saved = await prisma.integrationConnection.updateMany({
+    where: { shopId, provider: PROVIDER, status: 'connected' },
     data: {
       accessToken: encrypt(tokens.accessToken),
       refreshToken: encrypt(tokens.refreshToken),
       expiresAt: tokens.expiresAt,
     },
   });
+  if (saved.count === 0) {
+    throw new KlaviyoAuthError('Klaviyo non piu collegato per questo negozio');
+  }
   return tokens.accessToken;
 }
 
@@ -142,7 +147,7 @@ async function refresh(shopId: string, row: TokenRow): Promise<string> {
 async function takeTurn(shopId: string, updatedAt: Date, now: number): Promise<boolean> {
   if (now - updatedAt.getTime() < TURN_TTL_MS) return false;
   const res = await prisma.integrationConnection.updateMany({
-    where: { shopId, provider: PROVIDER, updatedAt },
+    where: { shopId, provider: PROVIDER, status: 'connected', updatedAt },
     data: { updatedAt: new Date(now) },
   });
   return res.count === 1;
@@ -166,9 +171,14 @@ async function waitForNewToken(shopId: string): Promise<string | null> {
   return null;
 }
 
+/**
+ * Solo da `connected`: un negozio scollegato apposta resta scollegato, e uno
+ * gia' da ricollegare non ha niente da cambiare. Zero righe toccate = niente
+ * da fare.
+ */
 export async function markNeedsReconnect(shopId: string): Promise<void> {
   await prisma.integrationConnection.updateMany({
-    where: { shopId, provider: PROVIDER },
+    where: { shopId, provider: PROVIDER, status: 'connected' },
     data: { status: 'needs_reconnect' },
   });
 }

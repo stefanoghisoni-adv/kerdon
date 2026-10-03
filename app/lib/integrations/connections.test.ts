@@ -51,11 +51,12 @@ vi.mock('~/db.server', () => ({
         where,
         data,
       }: {
-        where: { shopId: string; provider: string; updatedAt?: Date };
+        where: { shopId: string; provider: string; status?: string; updatedAt?: Date };
         data: Partial<Riga>;
       }) => {
         const r = trova(where);
         if (!r) return { count: 0 };
+        if (where.status !== undefined && r.status !== where.status) return { count: 0 };
         if (where.updatedAt && r.updatedAt.getTime() !== where.updatedAt.getTime()) {
           return { count: 0 };
         }
@@ -216,6 +217,34 @@ describe('connessioni alle integrazioni', () => {
     const m = await istanza();
     await m.markNeedsReconnect('shop-1');
     expect(righe[0]).toMatchObject({ status: 'needs_reconnect', accessToken: 'enc(at-vecchio)' });
+  });
+
+  it('markNeedsReconnect su una riga scollegata la lascia disconnected', async () => {
+    righe = [{ ...rigaInScadenza(), status: 'disconnected', accessToken: null, refreshToken: null }];
+    const m = await istanza();
+    await m.markNeedsReconnect('shop-1');
+    expect(righe[0].status).toBe('disconnected');
+  });
+
+  it('un rinnovo che finisce dopo il disconnect non riscrive i token', async () => {
+    righe = [rigaInScadenza()];
+    const m = await istanza();
+    const { KlaviyoAuthError } = await import('./klaviyo/api.server');
+    let finisci: (v: unknown) => void = () => {};
+    refreshTokens.mockImplementationOnce(
+      () => new Promise((resolve) => (finisci = () => resolve(tokenNuovo()))),
+    );
+    const giro = m.getAccessToken('shop-1').catch((e) => e);
+    await vi.waitFor(() => expect(refreshTokens).toHaveBeenCalledTimes(1));
+    await m.disconnect('shop-1');
+    finisci(undefined);
+    expect(await giro).toBeInstanceOf(KlaviyoAuthError);
+    expect(righe[0]).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+      status: 'disconnected',
+    });
   });
 
   it('disconnect revoca il refresh token, azzera i token e lascia la riga', async () => {

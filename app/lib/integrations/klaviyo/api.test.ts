@@ -202,6 +202,23 @@ describe('API Klaviyo', () => {
     });
   });
 
+  describe('sampleProperties con chiavi pericolose', () => {
+    it('__proto__ e constructor sono chiavi qualunque, e niente lancia', async () => {
+      // Come arriva davvero: testo JSON, dove `__proto__` diventa una chiave propria.
+      const corpo = `{"data":[{"type":"profile","id":"p1","attributes":{"properties":{"__proto__":{"x":1},"constructor":"c1"}}},{"type":"profile","id":"p2","attributes":{"properties":{"__proto__":"p","constructor":"c2"}}}],"links":{"next":null}}`;
+      fetchMock.mockResolvedValueOnce(
+        new Response(corpo, { status: 200, headers: { 'content-type': 'application/vnd.api+json' } }),
+      );
+      const r = await sampleProperties('tok');
+      expect(r.keys).toEqual(['__proto__', 'constructor']);
+      expect(Object.prototype.hasOwnProperty.call(r.samples, '__proto__')).toBe(true);
+      expect(Object.getOwnPropertyDescriptor(r.samples, '__proto__')?.value).toEqual([{ x: 1 }, 'p']);
+      expect(r.samples.constructor).toEqual(['c1', 'c2']);
+      expect(Object.getPrototypeOf(r.samples)).toBe(Object.prototype);
+      expect(({} as Record<string, unknown>).x).toBeUndefined();
+    });
+  });
+
   describe('accountName', () => {
     it('legge il nome dell organizzazione', async () => {
       fetchMock.mockResolvedValueOnce(

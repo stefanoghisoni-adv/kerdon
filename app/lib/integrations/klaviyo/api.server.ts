@@ -261,8 +261,11 @@ export async function sampleProperties(
   token: string,
   max = 300,
 ): Promise<{ keys: string[]; samples: Record<string, unknown[]> }> {
-  const samples: Record<string, unknown[]> = {};
-  const seen: Record<string, Set<string>> = {};
+  // Map e non oggetti: le chiavi sono nomi scelti da chi scrive su Klaviyo, e
+  // un `__proto__` o un `constructor` in un oggetto letterale toccherebbe il
+  // prototipo invece di diventare una chiave come le altre.
+  const samples = new Map<string, unknown[]>();
+  const seen = new Map<string, Set<string>>();
   let read = 0;
   let cursor: string | null = null;
 
@@ -270,20 +273,28 @@ export async function sampleProperties(
     const page = await listProfiles(token, cursor);
     for (const profile of page.profiles.slice(0, max - read)) {
       for (const [key, value] of Object.entries(profile.properties)) {
-        samples[key] ??= [];
-        seen[key] ??= new Set();
-        if (isEmpty(value) || samples[key].length >= MAX_SAMPLES_PER_KEY) continue;
+        let values = samples.get(key);
+        let fingerprints = seen.get(key);
+        if (!values || !fingerprints) {
+          values = [];
+          fingerprints = new Set();
+          samples.set(key, values);
+          seen.set(key, fingerprints);
+        }
+        if (isEmpty(value) || values.length >= MAX_SAMPLES_PER_KEY) continue;
         const fingerprint = JSON.stringify(value);
-        if (seen[key].has(fingerprint)) continue;
-        seen[key].add(fingerprint);
-        samples[key].push(value);
+        if (fingerprints.has(fingerprint)) continue;
+        fingerprints.add(fingerprint);
+        values.push(value);
       }
     }
     read += Math.min(page.profiles.length, max - read);
     cursor = page.next;
   } while (cursor && read < max);
 
-  return { keys: Object.keys(samples).sort(), samples };
+  // `Object.fromEntries` definisce proprieta' proprie: anche `__proto__` resta
+  // una chiave qualunque.
+  return { keys: [...samples.keys()].sort(), samples: Object.fromEntries(samples) };
 }
 
 export async function accountName(token: string): Promise<string | null> {
