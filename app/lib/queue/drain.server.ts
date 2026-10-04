@@ -135,6 +135,9 @@ export const defaultHandlers: Record<SyncRequestType, Handler> = {
       runId: typeof payload?.runId === 'string' ? payload.runId : null,
       cursor: typeof payload?.cursor === 'string' ? payload.cursor : null,
       saveCursor: (cursor, runId) => enqueueImportContinuation(shopId, row.id, runId, cursor),
+      // La presa ha gia' contato questo tentativo: se e' l'ultimo, un errore
+      // manderebbe l'item in lettera morta.
+      lastAttempt: isExhausted(row.attempts),
     });
   },
 };

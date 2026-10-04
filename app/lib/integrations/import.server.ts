@@ -223,6 +223,11 @@ export interface ImportOptions {
   signal?: AbortSignal;
   /** Chiamata quando il giro si ferma per tempo: deve accodarne il seguito. */
   saveCursor: (cursor: string, runId: string) => Promise<void>;
+  /**
+   * L'ultimo tentativo concesso dalla coda. Solo qui Klaviyo indisponibile
+   * chiude il giro: prima, l'errore risale e la coda ritenta.
+   */
+  lastAttempt?: boolean;
   /** Iniettabili per le prove. */
   budgetMs?: number;
   clock?: () => number;
@@ -240,12 +245,14 @@ interface PriorConflict {
  * - paused: tempo finito o interruzione; il cursore e' salvato sul giro. Per
  *   tempo, il seguito e' accodato con `saveCursor`; per interruzione esterna
  *   la coda riprende lo stesso item, che riparte dal cursore salvato.
- * - interrupted: Klaviyo ha rifiutato il token o non risponde, oppure manca
- *   qualcosa per continuare (piano, associazione, campo scrivibile). Il giro
- *   resta chiuso; il merchant ne chiede uno nuovo.
+ * - interrupted: Klaviyo ha rifiutato il token, oppure non risponde anche
+ *   all'ultimo tentativo della coda, oppure manca qualcosa per continuare
+ *   (piano, associazione, campo scrivibile). Il giro resta chiuso; il
+ *   merchant ne chiede uno nuovo.
  *
- * Gli altri errori (Shopify, database del merchant) si sollevano: la coda
- * ritenta l'item, che riparte dall'ultima pagina chiusa.
+ * Gli altri errori (Klaviyo indisponibile prima dell'ultimo tentativo,
+ * Shopify, database del merchant) si sollevano: la coda ritenta l'item, che
+ * riparte dall'ultima pagina chiusa.
  */
 export async function processIntegrationImport(
   shopId: string,
@@ -339,10 +346,15 @@ export async function processIntegrationImport(
       await finish('interrupted');
       return 'interrupted';
     }
-    if (error instanceof KlaviyoUnavailableError) {
+    if (error instanceof KlaviyoUnavailableError && opts.lastAttempt) {
+      // Ultimo tentativo della coda: il giro si chiude qui, con cursore e
+      // contatori dell'ultima pagina chiusa, invece di finire in lettera morta.
       await finish('interrupted');
       return 'interrupted';
     }
+    // Klaviyo indisponibile (429 esauriti, rinnovo del token gia' in corso) e
+    // ogni altro errore: l'item torna in coda col suo ritardo e riparte dal
+    // cursore salvato sul giro, che resta 'running'.
     throw error;
   }
 

@@ -115,7 +115,7 @@ vi.mock('~/lib/queue/trigger.server', () => ({ triggerSyncDrain: vi.fn() }));
 import { processIntegrationImport, requestImport } from './import.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { listProfiles, KlaviyoAuthError, KlaviyoUnavailableError } from '~/lib/integrations/klaviyo/api.server';
-import { markNeedsReconnect, connectionStatus } from '~/lib/integrations/connections.server';
+import { markNeedsReconnect, connectionStatus, getAccessToken } from '~/lib/integrations/connections.server';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import { enqueueSyncRequest } from '~/lib/queue/queue-store.server';
 
@@ -140,6 +140,30 @@ function cliente(id: number, email: string, dob: string | null) {
 }
 
 const PAGINA_2 = 'https://a.klaviyo.com/api/profiles?page%5Bcursor%5D=due';
+
+/** I contatori dopo la pagina 1 dei profili di prova. */
+const CONTATORI_PAGINA_1 = {
+  matchedById: 0,
+  matchedByEmail: 4,
+  matchedByPhone: 0,
+  filled: 1,
+  same: 1,
+  conflicts: 1,
+  decided: 1,
+  skippedNoMatch: 1,
+  skippedAmbiguous: 0,
+  unreadable: 0,
+  notWritten: 0,
+};
+
+/** La pagina 2 che risponde 429 fino a esaurire i tentativi. */
+function pagina2Indisponibile() {
+  const pagina1 = (listProfiles as any).getMockImplementation();
+  (listProfiles as any).mockImplementation(async (t: string, cursor: string | null) => {
+    if (cursor === null) return pagina1(t, cursor);
+    throw new KlaviyoUnavailableError();
+  });
+}
 
 function nuovoRun(over: Record<string, unknown> = {}) {
   const run = {
@@ -208,35 +232,56 @@ beforeEach(() => {
         next: PAGINA_2,
       };
     }
-    throw new KlaviyoUnavailableError();
+    return { profiles: [], next: null };
   });
 });
 
 describe('processIntegrationImport', () => {
-  it('seconda pagina con 429 esaurito: run interrotto con i contatori della prima', async () => {
+  it('seconda pagina con 429 esaurito, non all ultimo tentativo: torna in coda dal cursore della prima', async () => {
+    pagina2Indisponibile();
     nuovoRun();
 
-    const esito = await processIntegrationImport('shop-1', opzioni());
+    await expect(processIntegrationImport('shop-1', opzioni())).rejects.toBeInstanceOf(KlaviyoUnavailableError);
+
+    const run = stato.runs[0];
+    expect(run.status).toBe('running');
+    expect(run.finishedAt).toBeNull();
+    expect(run.cursor).toBe(PAGINA_2);
+    expect(run.counters).toEqual(CONTATORI_PAGINA_1);
+    expect(markNeedsReconnect).not.toHaveBeenCalled();
+
+    // Il tentativo dopo riparte dalla pagina 2, non dalla prima.
+    (listProfiles as any).mockClear();
+    (listProfiles as any).mockResolvedValue({ profiles: [], next: null });
+    expect(await processIntegrationImport('shop-1', opzioni())).toBe('completed');
+    expect((listProfiles as any).mock.calls.map((c: unknown[]) => c[1])).toEqual([PAGINA_2]);
+    expect(run.counters).toEqual(CONTATORI_PAGINA_1);
+  });
+
+  it('seconda pagina con 429 esaurito all ultimo tentativo: run interrotto con i contatori della prima', async () => {
+    pagina2Indisponibile();
+    nuovoRun();
+
+    const esito = await processIntegrationImport('shop-1', opzioni({ lastAttempt: true }));
 
     expect(esito).toBe('interrupted');
     const run = stato.runs[0];
     expect(run.status).toBe('interrupted');
     expect(run.finishedAt).toBeInstanceOf(Date);
     expect(run.cursor).toBe(PAGINA_2);
-    expect(run.counters).toEqual({
-      matchedById: 0,
-      matchedByEmail: 4,
-      matchedByPhone: 0,
-      filled: 1,
-      same: 1,
-      conflicts: 1,
-      decided: 1,
-      skippedNoMatch: 1,
-      skippedAmbiguous: 0,
-      unreadable: 0,
-      notWritten: 0,
-    });
+    expect(run.counters).toEqual(CONTATORI_PAGINA_1);
   });
+
+  it('rinnovo del token gia in corso altrove: il giro resta in piedi e la coda ritenta', async () => {
+    (getAccessToken as any).mockRejectedValueOnce(new KlaviyoUnavailableError('Rinnovo del token Klaviyo gia in corso'));
+    nuovoRun();
+
+    await expect(processIntegrationImport('shop-1', opzioni())).rejects.toBeInstanceOf(KlaviyoUnavailableError);
+    expect(stato.runs[0]).toMatchObject({ status: 'running', finishedAt: null });
+    expect(listProfiles).not.toHaveBeenCalled();
+    expect(markNeedsReconnect).not.toHaveBeenCalled();
+  });
+
 
   it('campo vuoto: una sola scrittura su Shopify, nel campo scelto, in formato ISO', async () => {
     nuovoRun();

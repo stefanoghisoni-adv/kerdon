@@ -440,6 +440,23 @@ describe('l import dalle integrazioni', () => {
     expect(ctx.cursor).toBe('https://a.klaviyo.com/api/profiles?p=2');
     expect(typeof ctx.lease.assertHeld).toBe('function');
     expect(ctx.signal).toBeInstanceOf(AbortSignal);
+    expect(ctx.lastAttempt).toBe(false);
+  });
+
+  it('all ultimo tentativo glielo dice: Klaviyo indisponibile chiude il giro invece di finire in lettera morta', async () => {
+    const coda = codaInMemoria([
+      riga({
+        type: 'integration-import',
+        shopId: 'shop-1',
+        // La presa porta i tentativi a MAX_ATTEMPTS: e' l'ultimo.
+        attempts: MAX_ATTEMPTS - 1,
+        payload: { runId: 'run-1', cursor: null },
+      }),
+    ]);
+
+    await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
+
+    expect((processIntegrationImport as any).mock.calls[0][1].lastAttempt).toBe(true);
   });
 
   it('fermo per tempo: il seguito si accoda legato a questo item', async () => {
