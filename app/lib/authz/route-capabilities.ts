@@ -142,6 +142,11 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
     capability: 'use_app',
     via: 'requireCustomersSyncShop',
   },
+  'api.integrations.conflicts': {
+    guard: 'capability',
+    capability: 'use_app',
+    via: 'requireCustomersSyncShop',
+  },
   'api.integrations.klaviyo.connect': {
     guard: 'capability',
     capability: 'use_app',
