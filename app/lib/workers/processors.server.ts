@@ -360,7 +360,7 @@ async function fetchExistingCustomers(
  * basta, come prima. Meglio una colonna che non si aggiorna che una mutation
  * rifiutata a ogni giro del cron.
  */
-async function resolveBirthdateTarget(
+export async function resolveBirthdateTarget(
   shopifyClient: ShopifyAPIClient,
   configured: MetafieldKey | null,
   canWriteCustomers: boolean,

@@ -134,6 +134,15 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
   'api.tracking.setup': { guard: 'capability', capability: 'use_app' },
   'api.tracking.verify': { guard: 'capability', capability: 'use_app' },
 
+  // --- Integrazioni -----------------------------------------------------
+  // L'import scrive sui clienti: negozio operativo e piano con i clienti, come
+  // il collegamento (app/lib/integrations/route-guard.server.ts).
+  'api.integrations.$provider.import': {
+    guard: 'capability',
+    capability: 'use_app',
+    via: 'requireCustomersSyncShop',
+  },
+
   // --- Collegamento Supabase: i gesti che creano o collegano -------------
   'api.supabase.create-project': { guard: 'capability', capability: 'use_app', via: 'can(' },
   'api.supabase.create-tables': { guard: 'capability', capability: 'use_app', via: 'can(' },
