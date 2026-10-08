@@ -42,6 +42,41 @@ interface PropertiesData {
   error?: string;
 }
 
+/**
+ * Decides what dateFormat to use when a property is selected.
+ *
+ * I3 FIX: Pure function extracted for testing.
+ *
+ * Rules:
+ * - Non-ambiguous: use property's detected format
+ * - Ambiguous with saved mapping for this property: use saved format
+ * - Ambiguous without saved mapping: return '' (require explicit choice)
+ */
+export function decideDateFormat({
+  property,
+  savedMapping,
+  currentFormat,
+}: {
+  property: Property | undefined;
+  savedMapping: { sourceKey: string; dateFormat: string } | null;
+  currentFormat: DateFormat | '';
+}): DateFormat | '' {
+  if (!property) return currentFormat;
+
+  // Non-ambiguous: use detected format
+  if (!property.ambiguous) {
+    return property.format;
+  }
+
+  // Ambiguous with saved mapping for this exact property: use saved format
+  if (savedMapping && savedMapping.sourceKey === property.key) {
+    return (savedMapping.dateFormat as DateFormat) ?? 'auto';
+  }
+
+  // Ambiguous without saved mapping: require explicit choice
+  return '';
+}
+
 export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
   const t = useT();
   const revalidator = useRevalidator();
@@ -111,17 +146,22 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     }
   }, [mappingIdentity, mapping]);
 
-  // Update format when property changes
+  // I3 FIX: Update format when property changes (track previous sourceKey to avoid reset loop)
+  const prevSourceKeyRef = useRef<string>('');
+
   useEffect(() => {
-    const property = properties.find((p) => p.key === selectedProperty);
-    if (property && !property.ambiguous) {
-      setDateFormat(property.format);
-    } else if (property && property.ambiguous) {
-      // For ambiguous properties without a saved mapping, require explicit choice
-      if (!mapping || mapping.sourceKey !== selectedProperty) {
-        setDateFormat('');
-      }
-      // Keep current format if we have a saved mapping for this property
+    // Only act when sourceKey actually changes
+    if (selectedProperty !== prevSourceKeyRef.current) {
+      prevSourceKeyRef.current = selectedProperty;
+
+      const property = properties.find((p) => p.key === selectedProperty);
+      const newFormat = decideDateFormat({
+        property,
+        savedMapping: mapping ?? null,
+        currentFormat: dateFormat,
+      });
+
+      setDateFormat(newFormat);
     }
   }, [selectedProperty, properties, mapping, dateFormat]);
 
@@ -145,17 +185,27 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     }
   }, [oauthFetcher]);
 
-  // Navigate popup to OAuth URL after fetch
+  // I6+I10 FIX: Navigate popup to OAuth URL after fetch
   useEffect(() => {
-    if (oauthFetcher.data?.url && popupRef.current) {
-      popupRef.current.location.href = oauthFetcher.data.url;
+    if (oauthFetcher.data?.url && popupRef.current && !popupRef.current.closed) {
+      try {
+        popupRef.current.location.href = oauthFetcher.data.url;
+      } catch (e) {
+        // Navigation failed
+        popupRef.current.close();
+        popupRef.current = null;
+        setOauthError('failed');
+      }
     }
   }, [oauthFetcher.data]);
 
-  // Close popup and show error if OAuth URL fetch fails
+  // I6+I10 FIX: Close popup and show error on ANY oauth-url fetch failure
   useEffect(() => {
-    if (oauthFetcher.state === 'idle' && !oauthFetcher.data && popupRef.current) {
-      // Fetch failed or was cancelled
+    // Failure = idle state after a load with no data, or data without url
+    const failed =
+      (oauthFetcher.state === 'idle' && oauthFetcher.data !== undefined && !oauthFetcher.data.url);
+
+    if (failed && popupRef.current) {
       popupRef.current.close();
       popupRef.current = null;
       setOauthError('failed');
@@ -200,11 +250,16 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
         revalidator.revalidate();
         statusFetcher.load('/api/integrations/klaviyo');
         setOauthError(null);
+        // Clear properties error and reload properties after reconnect
+        setPropertiesError(null);
+        if (propertiesFetcher.state === 'idle') {
+          propertiesFetcher.load('/api/integrations/klaviyo?view=properties');
+        }
       } else {
         setOauthError(connectFetcher.data.error ?? 'unknown');
       }
     }
-  }, [connectFetcher.data, revalidator, statusFetcher]);
+  }, [connectFetcher.data, revalidator, statusFetcher, propertiesFetcher]);
 
   const handleSaveMapping = useCallback(() => {
     const property = properties.find((p) => p.key === selectedProperty);
@@ -275,19 +330,35 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     }
   }, [disconnectFetcher.data, statusFetcher]);
 
-  // Retry popup open from banner action (I6 fix)
+  // I6+I10 FIX: Retry popup open from banner action
   const handleRetryPopup = useCallback(() => {
-    if (!oauthFetcher.data?.url) return;
+    // Synchronously open blank popup
+    const popup = window.open('', 'klaviyo-oauth', 'width=600,height=700');
 
-    const popup = window.open(oauthFetcher.data.url, 'klaviyo-oauth', 'width=600,height=700');
-    if (popup) {
-      popupRef.current = popup;
-      setPopupBlocked(false);
+    if (!popup) {
+      // Still blocked
+      return;
     }
-  }, [oauthFetcher.data]);
 
-  // Loading state (I13 fix)
-  const isLoadingStatus = statusFetcher.state === 'loading' && !statusFetcher.data;
+    popupRef.current = popup;
+    setPopupBlocked(false);
+
+    // Load URL if we have it, or fetch it
+    if (oauthFetcher.data?.url) {
+      try {
+        popup.location.href = oauthFetcher.data.url;
+      } catch (e) {
+        popup.close();
+        popupRef.current = null;
+        setOauthError('failed');
+      }
+    } else if (oauthFetcher.state === 'idle') {
+      oauthFetcher.load('/api/integrations/klaviyo/oauth-url');
+    }
+  }, [oauthFetcher]);
+
+  // I13 FIX: Show spinner whenever !statusFetcher.data (covers first frame)
+  const isLoadingStatus = !statusFetcher.data;
 
   if (isLoadingStatus) {
     return (

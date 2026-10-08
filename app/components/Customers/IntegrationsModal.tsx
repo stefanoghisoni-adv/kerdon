@@ -263,32 +263,35 @@ export function IntegrationsModal({
 
             <InlineGrid columns={{ xs: 2, md: 4 }} gap="400">
               {filteredIntegrations.map((integration) => (
-                /* I9 FIX: Polaris clickable pattern - Card with onClick */
+                /* I9 FIX: Card with Thumbnail + Button variant="plain" (controller ruling) */
                 <Box key={integration.id}>
-                  <div
-                    onClick={() => handleSelect(integration)}
-                    style={{
-                      cursor: integration.status === 'coming_soon' ? 'default' : 'pointer',
-                    }}
-                  >
-                    <Card>
-                      <BlockStack gap="200" inlineAlign="center">
-                        {integration.logo && (
-                          <Thumbnail
-                            source={integration.logo}
-                            alt={integration.name}
-                            size="large"
-                          />
-                        )}
-                        <Text as="p" variant="bodyMd" fontWeight="semibold" alignment="center">
-                          {integration.name}
-                        </Text>
-                        {integration.status === 'coming_soon' && (
+                  <Card>
+                    <BlockStack gap="200" inlineAlign="center">
+                      {integration.logo && (
+                        <Thumbnail
+                          source={integration.logo}
+                          alt={integration.name}
+                          size="large"
+                        />
+                      )}
+                      {integration.status === 'coming_soon' ? (
+                        <>
+                          <Text as="p" variant="bodyMd" fontWeight="semibold" alignment="center">
+                            {integration.name}
+                          </Text>
                           <Badge tone="info">{t.customers.integrationsModal.comingSoon}</Badge>
-                        )}
-                      </BlockStack>
-                    </Card>
-                  </div>
+                        </>
+                      ) : (
+                        <Button
+                          variant="plain"
+                          onClick={() => handleSelect(integration)}
+                          textAlign="center"
+                        >
+                          {integration.name}
+                        </Button>
+                      )}
+                    </BlockStack>
+                  </Card>
                 </Box>
               ))}
             </InlineGrid>
