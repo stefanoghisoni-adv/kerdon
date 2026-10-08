@@ -35,6 +35,8 @@ interface StatusData {
   status: 'connected' | 'not_connected' | 'needs_reconnect';
   accountName?: string | null;
   mapping: { sourceKey: string; dateFormat: string } | null;
+  /** Un import e' in corso adesso. */
+  running?: boolean;
 }
 
 interface PropertiesData {
@@ -353,6 +355,8 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
       handledDisconnectRef.current = disconnectFetcher.data;
 
       if (disconnectFetcher.data.ok) {
+        // La card della pagina si aggiorna da sola: il POST del fetcher fa
+        // gia' rivalidare a Remix i loader della pagina.
         statusFetcher.load('/api/integrations/klaviyo');
         setSelectedProperty('');
         setDateFormat('');
@@ -557,8 +561,8 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
 
           <Button
             onClick={() => handleImport()}
-            loading={importFetcher.state === 'submitting'}
-            disabled={!mapping}
+            loading={importFetcher.state !== 'idle' || statusFetcher.data?.running === true}
+            disabled={!mapping || statusFetcher.data?.running === true}
           >
             {t.customers.integrations.importData}
           </Button>

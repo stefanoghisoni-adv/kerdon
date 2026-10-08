@@ -6,49 +6,45 @@
 
 import { describe, it, expect } from 'vitest';
 import { integrationRowState, buildConflictsUrl } from './IntegrationsCard';
+import { it as it_ } from '~/lib/i18n/it';
+import { en } from '~/lib/i18n/en';
 
 describe('integrationRowState', () => {
-  it('collegata con ultimo import riuscito → success badge, showImport true', () => {
-    const state = integrationRowState('connected', {
-      status: 'completed',
-      finishedAt: '2026-10-01T10:00:00Z',
-      counters: { filled: 10, conflicts: 2 },
-    });
-    expect(state.badge).toBe('success');
-    expect(state.tone).toBe('Collegata');
-    expect(state.showImport).toBe(true);
+  const MAPPING = { sourceKey: 'birthday', dateFormat: 'auto' };
+
+  it('collegata con un campo associato → success, «Importa dati» visibile anche senza import precedenti', () => {
+    const state = integrationRowState('connected', MAPPING);
+    expect(state).toEqual({ badge: 'success', label: 'statusConnected', showImport: true });
   });
 
-  it('collegata senza import mai eseguito → success badge, showImport true', () => {
+  it('collegata senza campo associato → success, niente «Importa dati»', () => {
     const state = integrationRowState('connected', null);
-    expect(state.badge).toBe('success');
-    expect(state.tone).toBe('Collegata');
-    expect(state.showImport).toBe(true);
+    expect(state).toEqual({ badge: 'success', label: 'statusConnected', showImport: false });
   });
 
-  it('non collegata → attention badge, showImport false', () => {
-    const state = integrationRowState('not_connected', null);
-    expect(state.badge).toBe('attention');
-    expect(state.tone).toBe('Da collegare');
-    expect(state.showImport).toBe(false);
-  });
-
-  it('needs_reconnect → warning badge, showImport false', () => {
-    const state = integrationRowState('needs_reconnect', null);
-    expect(state.badge).toBe('warning');
-    expect(state.tone).toBe('Riconnetti');
-    expect(state.showImport).toBe(false);
-  });
-
-  it('collegata con import interrotto → success badge, showImport true', () => {
-    const state = integrationRowState('connected', {
-      status: 'interrupted',
-      finishedAt: '2026-10-01T10:00:00Z',
-      counters: { filled: 5, conflicts: 1 },
+  it('non collegata → attention, niente import', () => {
+    expect(integrationRowState('not_connected', MAPPING)).toEqual({
+      badge: 'attention',
+      label: 'statusNotConnected',
+      showImport: false,
     });
-    expect(state.badge).toBe('success');
-    expect(state.tone).toBe('Collegata');
-    expect(state.showImport).toBe(true);
+  });
+
+  it('da ricollegare → warning, niente import', () => {
+    expect(integrationRowState('needs_reconnect', MAPPING)).toEqual({
+      badge: 'warning',
+      label: 'statusNeedsReconnect',
+      showImport: false,
+    });
+  });
+
+  it('le etichette dei badge esistono in italiano e in inglese', () => {
+    for (const label of ['statusConnected', 'statusNotConnected', 'statusNeedsReconnect'] as const) {
+      expect(typeof it_.customers.integrations[label]).toBe('string');
+      expect(typeof en.customers.integrations[label]).toBe('string');
+    }
+    expect(it_.customers.integrations.statusConnected).toBe('Collegata');
+    expect(en.customers.integrations.statusConnected).toBe('Connected');
   });
 });
 

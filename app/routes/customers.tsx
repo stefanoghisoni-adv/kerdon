@@ -307,6 +307,7 @@ interface CustomersPageView {
       finishedAt: string | null;
       counters: { filled?: number; conflicts?: number; [key: string]: unknown };
     } | null;
+    running: boolean;
     openConflicts: number;
   }> | null;
   conflicts: Array<{
@@ -1127,6 +1128,19 @@ function CustomersContent({
               onManage={handleManage}
             />
           </BlockStack>
+          </InlineGrid>
+        )}
+
+        {/* Senza tabella (report non letto, piano senza clienti, negozio non
+            collegato) la card resta: dice lo stato del collegamento o invita
+            all'upgrade, e quelle informazioni non dipendono dal report. */}
+        {unavailable !== null && (
+          <InlineGrid columns={{ xs: 1, md: 3 }} gap="400" alignItems="start">
+            <IntegrationsCard
+              integrations={integrations}
+              upgradePlan={upgradePlan}
+              onManage={handleManage}
+            />
           </InlineGrid>
         )}
 

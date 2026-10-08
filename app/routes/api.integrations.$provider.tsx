@@ -4,6 +4,7 @@ import { requireShop, requireCustomersSyncShop } from '~/lib/integrations/route-
 import { prisma } from '~/db.server';
 import { getIntegration } from '~/lib/integrations/registry';
 import { connectionStatus, disconnect, getAccessToken, markNeedsReconnect } from '~/lib/integrations/connections.server';
+import { importInProgress } from '~/lib/integrations/import.server';
 import { sampleProperties, KlaviyoAuthError, KlaviyoUnavailableError } from '~/lib/integrations/klaviyo/api.server';
 import { parseDate, detectFormat } from '~/lib/integrations/values';
 import type { DateFormat } from '~/lib/integrations/values';
@@ -125,11 +126,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     },
   });
 
+  const running = await importInProgress(shop.id, provider as 'klaviyo');
+
   return json({
     status,
     accountName,
     mapping,
     lastRun,
+    running,
     openConflicts,
   });
 }

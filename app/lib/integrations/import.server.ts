@@ -99,6 +99,26 @@ function readCounters(raw: unknown): ImportCounters {
 class AlreadyRunning extends Error {}
 
 /**
+ * C'e' un import in corso per questo negozio? Stessa regola di `requestImport`:
+ * l'ultimo giro e' 'running' e o e' partito da meno di 15 minuti, o ha ancora
+ * lavoro in coda. Un giro fermo non conta: il pulsante deve tornare usabile,
+ * e la richiesta successiva lo chiude.
+ */
+export async function importInProgress(shopId: string, provider: Provider): Promise<boolean> {
+  const last = await prisma.integrationImportRun.findFirst({
+    where: { shopId, provider },
+    orderBy: { startedAt: 'desc' },
+  });
+  if (last?.status !== 'running') return false;
+  if (Date.now() - last.startedAt.getTime() < STALE_RUN_MS) return true;
+  const pending = await prisma.syncRequest.findFirst({
+    where: { shopId, type: TYPE, status: { in: ['queued', 'processing'] } },
+    select: { id: true },
+  });
+  return pending !== null;
+}
+
+/**
  * Chiede un import. Non lo esegue: crea il giro e lo mette in coda.
  *
  * Un giro solo per negozio. Due difese, perche' ognuna copre un caso diverso:

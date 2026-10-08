@@ -501,7 +501,7 @@ export const en: typeof it = {
     },
     privacyNotice: {
       title: "We've updated our privacy policy",
-      body: "It now covers the Klaviyo import: if you connect your account, Kerdon reads its profiles only when you ask, to fill in missing dates of birth. Differing dates are left for you to decide, the tokens are stored encrypted, and nothing is written to Klaviyo.",
+      body: "It now covers the Klaviyo import: if you connect your account, Kerdon reads its profiles only when you ask, to fill in missing dates of birth. Differing dates are left for you to decide, access to your Klaviyo account is kept secure, and nothing is written to Klaviyo.",
       link: "Read the privacy policy",
       acknowledge: "Got it",
       saveFailed: "We couldn't save your confirmation. Please try again shortly.",
@@ -988,6 +988,7 @@ export const en: typeof it = {
       conflicts: (n: number) =>
         n === 1 ? '1 different value from Klaviyo' : `${n} different values from Klaviyo`,
       importData: "Import data",
+      importRunning: "Import in progress. Reopen this page in a few minutes to see the results.",
       reconnect: "Reconnect",
       statusConnected: "Connected",
       statusNotConnected: "Not connected",

@@ -23,6 +23,7 @@ import { loadCustomersReport, type CustomersReport } from './customers.server';
 import { customerMetafieldsUrl } from '~/utils/admin-page';
 import type { ServerTiming } from '~/lib/timing/server-timing';
 import { connectionStatus } from '~/lib/integrations/connections.server';
+import { importInProgress } from '~/lib/integrations/import.server';
 import { prisma } from '~/db.server';
 
 export interface CustomerDefinition {
@@ -78,6 +79,8 @@ export interface IntegrationStatus {
     finishedAt: string | null;
     counters: { filled?: number; conflicts?: number; [key: string]: unknown };
   } | null;
+  /** Un import e' in corso adesso: il pulsante resta fermo e lo dice. */
+  running: boolean;
   openConflicts: number;
 }
 
@@ -224,7 +227,9 @@ export function startCustomersPageData(opts: {
       },
     });
 
-    return [{ provider, status, accountName, mapping, lastRun, openConflicts }];
+    const running = await importInProgress(opts.shop.id, provider);
+
+    return [{ provider, status, accountName, mapping, lastRun, running, openConflicts }];
   }).catch((error) => {
     console.warn(
       '[customers] integrazioni non leggibili:',

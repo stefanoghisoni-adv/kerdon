@@ -382,6 +382,28 @@ describe('api.integrations.$provider', () => {
       counters: { imported: 10, skipped: 2 },
     });
     expect(data.openConflicts).toBe(3);
+    expect(data.running).toBe(false);
+  });
+
+  it('un import partito adesso: running true', async () => {
+    vi.mocked(authenticate.admin).mockResolvedValue({
+      session: { shop: 'test.myshopify.com', accessToken: 'token' },
+    } as any);
+    vi.mocked(prisma.shop.findUnique).mockResolvedValue({ id: 'shop-1', shopDomain: 'test.myshopify.com' } as any);
+    vi.mocked(getIntegration).mockReturnValue({ id: 'klaviyo', name: 'Klaviyo' } as any);
+    vi.mocked(connectionStatus).mockResolvedValue({ status: 'connected', accountName: 'Test Account' });
+    vi.mocked(prisma.integrationImportRun.findFirst).mockResolvedValue({
+      status: 'running',
+      startedAt: new Date(),
+      finishedAt: null,
+      counters: {},
+    } as any);
+    vi.mocked(prisma.integrationConflict.count).mockResolvedValue(0);
+
+    const request = new Request('https://example.com/api/integrations/klaviyo');
+    const response = await providerLoader({ request, params: { provider: 'klaviyo' }, context: {} });
+    const data = (await response.json()) as any;
+    expect(data.running).toBe(true);
   });
 
   it('disconnect chiama disconnect(shopId)', async () => {

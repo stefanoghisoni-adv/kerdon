@@ -120,7 +120,7 @@ vi.mock('~/lib/queue/queue-store.server', () => ({
 }));
 vi.mock('~/lib/queue/trigger.server', () => ({ triggerSyncDrain: vi.fn() }));
 
-import { processIntegrationImport, requestImport } from './import.server';
+import { importInProgress, processIntegrationImport, requestImport } from './import.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { listProfiles, KlaviyoAuthError, KlaviyoUnavailableError } from '~/lib/integrations/klaviyo/api.server';
 import { markNeedsReconnect, connectionStatus, getAccessToken } from '~/lib/integrations/connections.server';
@@ -558,5 +558,25 @@ describe('requestImport', () => {
   it('nessuna associazione salvata: no_mapping', async () => {
     stato.mapping = null;
     expect(await requestImport('shop-1', 'klaviyo')).toEqual({ queued: false, reason: 'no_mapping' });
+  });
+});
+
+describe('importInProgress', () => {
+  it('nessun giro, o ultimo giro concluso: no', async () => {
+    expect(await importInProgress('shop-1', 'klaviyo')).toBe(false);
+    nuovoRun({ status: 'completed' });
+    expect(await importInProgress('shop-1', 'klaviyo')).toBe(false);
+  });
+
+  it('giro running recente: si', async () => {
+    nuovoRun();
+    expect(await importInProgress('shop-1', 'klaviyo')).toBe(true);
+  });
+
+  it('giro running vecchio senza lavoro in coda: no (e fermo); con lavoro in coda: si', async () => {
+    nuovoRun({ startedAt: new Date(Date.now() - 16 * 60_000) });
+    expect(await importInProgress('shop-1', 'klaviyo')).toBe(false);
+    stato.pendingRequests.push({ shopId: 'shop-1', type: 'integration-import', status: 'queued' });
+    expect(await importInProgress('shop-1', 'klaviyo')).toBe(true);
   });
 });

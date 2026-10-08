@@ -588,7 +588,7 @@ export const it = {
     // alla versione, a ogni modifica sostanziale.
     privacyNotice: {
       title: "Abbiamo aggiornato l'informativa sulla privacy",
-      body: "Ora descrive l'importazione da Klaviyo: se colleghi il tuo account, Kerdon ne legge i profili solo quando glielo chiedi, per completare le date di nascita mancanti. Le date diverse restano da decidere a te, i token sono conservati cifrati e su Klaviyo non viene scritto niente.",
+      body: "Ora descrive l'importazione da Klaviyo: se colleghi il tuo account, Kerdon ne legge i profili solo quando glielo chiedi, per completare le date di nascita mancanti. Le date diverse restano da decidere a te, l'accesso al tuo account Klaviyo è custodito in modo sicuro e su Klaviyo non viene scritto niente.",
       link: "Leggi l'informativa",
       acknowledge: "Ho capito",
       saveFailed: "Non siamo riusciti a registrare la conferma. Riprova tra poco.",
@@ -1267,6 +1267,8 @@ export const it = {
       conflicts: (n: number) =>
         n === 1 ? '1 dato diverso da Klaviyo' : `${n} dati diversi da Klaviyo`,
       importData: "Importa dati",
+      /** Accanto al pulsante mentre un import e' in corso. */
+      importRunning: "Import in corso. Riapri questa pagina tra qualche minuto per vedere i risultati.",
       reconnect: "Riconnetti",
       statusConnected: "Collegata",
       statusNotConnected: "Da collegare",

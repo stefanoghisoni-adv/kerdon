@@ -39,6 +39,8 @@ export interface IntegrationStatus {
     finishedAt: string | null;
     counters: { filled?: number; conflicts?: number; [key: string]: unknown };
   } | null;
+  /** Un import e' in corso adesso. */
+  running?: boolean;
   openConflicts: number;
 }
 
@@ -64,31 +66,47 @@ export function buildConflictsUrl(currentSearch: string): string {
   return `?${params.toString()}`;
 }
 
+type StatusLabel = 'statusConnected' | 'statusNotConnected' | 'statusNeedsReconnect';
+
 interface RowState {
   badge: 'success' | 'attention' | 'warning';
-  tone: string;
+  /** La chiave della traduzione dell'etichetta del badge. */
+  label: StatusLabel;
   showImport: boolean;
 }
 
 /**
  * Funzione pura che decide lo stato visivo di una riga integrazione.
  *
- * @param status Stato della connessione
- * @param lastRun Ultimo import (se esiste)
- * @returns Lo stato visivo: badge, tone (label del badge), showImport
+ * «Importa dati» c'e' appena l'integrazione e' collegata e ha un campo
+ * associato: il primo import parte anche da qui, non solo dal modal.
  */
 export function integrationRowState(
   status: 'connected' | 'not_connected' | 'needs_reconnect',
-  lastRun: { status: string; finishedAt: string | null; counters: unknown } | null,
+  mapping: { sourceKey: string; dateFormat: string } | null,
 ): RowState {
   if (status === 'not_connected') {
-    return { badge: 'attention', tone: 'Da collegare', showImport: false };
+    return { badge: 'attention', label: 'statusNotConnected', showImport: false };
   }
   if (status === 'needs_reconnect') {
-    return { badge: 'warning', tone: 'Riconnetti', showImport: false };
+    return { badge: 'warning', label: 'statusNeedsReconnect', showImport: false };
   }
-  // connected: sempre success, showImport true
-  return { badge: 'success', tone: 'Collegata', showImport: true };
+  return { badge: 'success', label: 'statusConnected', showImport: mapping !== null };
+}
+
+/** Il titolo della card con «Gestisci» a destra. */
+function CardHeader({ onManage }: { onManage?: (provider: 'klaviyo') => void }) {
+  const t = useT();
+  return (
+    <InlineStack align="space-between" blockAlign="center" wrap={false}>
+      <Text as="h2" variant="headingMd">
+        {t.customers.integrations.title}
+      </Text>
+      <Button onClick={() => onManage?.('klaviyo')} variant="plain">
+        {t.customers.integrations.manage}
+      </Button>
+    </InlineStack>
+  );
 }
 
 export function IntegrationsCard({
@@ -123,14 +141,7 @@ export function IntegrationsCard({
     return (
       <Card>
         <BlockStack gap="300">
-          <InlineStack gap="200" blockAlign="center" wrap={false}>
-            <Text as="h2" variant="headingMd">
-              {t.customers.integrations.title}
-            </Text>
-            <Button onClick={() => onManage?.('klaviyo')} variant="plain">
-              {t.customers.integrations.manage}
-            </Button>
-          </InlineStack>
+          <CardHeader onManage={onManage} />
           <Text as="p" tone="subdued">
             {t.customers.integrations.noIntegrations}
           </Text>
@@ -142,14 +153,7 @@ export function IntegrationsCard({
   return (
     <Card>
       <BlockStack gap="300">
-        <InlineStack gap="200" blockAlign="center" wrap={false}>
-          <Text as="h2" variant="headingMd">
-            {t.customers.integrations.title}
-          </Text>
-          <Button onClick={() => onManage?.('klaviyo')} variant="plain">
-            {t.customers.integrations.manage}
-          </Button>
-        </InlineStack>
+        <CardHeader onManage={onManage} />
         <Scrollable style={{ maxHeight: SCROLLABLE_MAX_HEIGHT }} focusable>
           <BlockStack gap="300">
             {integrations.map((integration) => (
@@ -176,13 +180,14 @@ interface IntegrationRowProps {
 function IntegrationRow({ integration, onManage, locale }: IntegrationRowProps) {
   const t = useT();
   const [searchParams] = useSearchParams();
-  const { provider, status, lastRun, openConflicts } = integration;
+  const { provider, status, mapping, lastRun, openConflicts } = integration;
 
   // I8 FIX: Use shared import hook
   const { importFetcher, handleImport, importReason } = useIntegrationImport(provider);
 
-  const rowState = integrationRowState(status, lastRun);
-  const isImporting = importFetcher.state !== 'idle';
+  const rowState = integrationRowState(status, mapping);
+  const running = integration.running === true;
+  const isImporting = importFetcher.state !== 'idle' || running;
   const conflictsUrl = buildConflictsUrl(searchParams.toString());
 
   // needs_reconnect: banner warning
@@ -201,7 +206,7 @@ function IntegrationRow({ integration, onManage, locale }: IntegrationRowProps) 
             <Text as="span" variant="bodyMd" fontWeight="semibold">
               {provider.charAt(0).toUpperCase() + provider.slice(1)}
             </Text>
-            <Badge tone={rowState.badge}>{rowState.tone}</Badge>
+            <Badge tone={rowState.badge}>{t.customers.integrations[rowState.label]}</Badge>
           </InlineStack>
         </BlockStack>
       </InlineStack>
@@ -219,29 +224,38 @@ function IntegrationRow({ integration, onManage, locale }: IntegrationRowProps) 
         </Banner>
       )}
 
-      {rowState.showImport && lastRun && (
+      {(lastRun || openConflicts > 0 || rowState.showImport) && (
         <BlockStack gap="100">
-          <Text as="p" variant="bodySm" tone="subdued">
-            {t.customers.integrations.lastImport(
-              formatDate(lastRun.finishedAt, locale),
-              (lastRun.counters.filled as number) ?? 0,
-            )}
-          </Text>
+          {lastRun && (
+            <Text as="p" variant="bodySm" tone="subdued">
+              {t.customers.integrations.lastImport(
+                formatDate(lastRun.finishedAt, locale),
+                (lastRun.counters.filled as number) ?? 0,
+              )}
+            </Text>
+          )}
           {openConflicts > 0 && (
             <Link url={conflictsUrl}>
               {t.customers.integrations.conflicts(openConflicts)}
             </Link>
           )}
-          <InlineStack gap="200" blockAlign="center">
-            <Button
-              onClick={handleImport}
-              loading={isImporting}
-              disabled={isImporting}
-              size="slim"
-            >
-              {t.customers.integrations.importData}
-            </Button>
-          </InlineStack>
+          {rowState.showImport && (
+            <InlineStack gap="200" blockAlign="center">
+              <Button
+                onClick={handleImport}
+                loading={isImporting}
+                disabled={isImporting}
+                size="slim"
+              >
+                {t.customers.integrations.importData}
+              </Button>
+            </InlineStack>
+          )}
+          {running && (
+            <Text as="p" variant="bodySm" tone="subdued">
+              {t.customers.integrations.importRunning}
+            </Text>
+          )}
         </BlockStack>
       )}
 
