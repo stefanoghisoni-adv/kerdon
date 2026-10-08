@@ -84,14 +84,23 @@ describe('customers loader - campo integrations', () => {
     });
 
     const request = new Request('http://localhost/customers');
-    await loader({ request, params: {}, context: {} } as never);
+    const result = await loader({ request, params: {}, context: {} } as never);
+
+    // defer() restituisce un oggetto con la proprietà data accessibile
+    const loaderData = (result as any).data;
 
     // startCustomersPageData NON chiamato quando customersIncluded = false
-    // Quindi integrations resta null (non viene fetchato)
     expect(startCustomersPageData).not.toHaveBeenCalled();
+
+    // data.data è sincrono (non una Promise) quando !customersIncluded
+    expect(loaderData.data).toBeDefined();
+    expect(loaderData.data).not.toBeInstanceOf(Promise);
+
+    // integrations deve essere null
+    expect(loaderData.data.integrations).toBe(null);
   });
 
-  it('piano con clienti: startCustomersPageData chiamato (integrations fetchato)', async () => {
+  it('piano con clienti: integrations presente (fetchato via startCustomersPageData)', async () => {
     findPlanByName.mockResolvedValue({
       planName: 'growth',
       customersSyncEnabled: true,
@@ -113,15 +122,30 @@ describe('customers loader - campo integrations', () => {
     });
 
     const request = new Request('http://localhost/customers');
-    await loader({ request, params: {}, context: {} } as never);
+    const result = await loader({ request, params: {}, context: {} } as never);
+
+    // defer() restituisce un oggetto con la proprietà data accessibile
+    const loaderData = (result as any).data;
 
     // startCustomersPageData chiamato con i parametri giusti
-    // Questo significa che integrations viene fetchato dentro startCustomersPageData
     expect(startCustomersPageData).toHaveBeenCalledWith(
       expect.objectContaining({
         shopDomain: 'test-shop.myshopify.com',
         shop: expect.objectContaining({ id: 'shop-1' }),
       }),
     );
+
+    // data.data è una Promise quando customersIncluded = true (deferred)
+    expect(loaderData.data).toBeInstanceOf(Promise);
+
+    // Resolve della Promise per verificare che integrations sia presente
+    const pageData = await loaderData.data;
+    expect(pageData).toHaveProperty('integrations');
+    expect(Array.isArray(pageData.integrations)).toBe(true);
+    expect(pageData.integrations).toHaveLength(1);
+    expect(pageData.integrations[0]).toMatchObject({
+      provider: 'klaviyo',
+      status: 'not_connected',
+    });
   });
 });
