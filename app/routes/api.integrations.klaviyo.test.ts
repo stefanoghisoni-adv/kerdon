@@ -161,6 +161,17 @@ describe('auth.klaviyo.callback', () => {
     expect(saveConnection).not.toHaveBeenCalled();
   });
 
+  it('la pagina col codice non si mette in cache e non passa il referrer', async () => {
+    // Il codice OAuth e' nell'URL: niente cache (browser o proxy) e niente
+    // Referer verso eventuali risorse esterne.
+    for (const q of ['code=test-code&state=test-state', 'error=access_denied', '']) {
+      const request = new Request(`https://example.com/auth/klaviyo/callback?${q}`);
+      const response = await callbackLoader({ request, params: {}, context: {} });
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(response.headers.get('Referrer-Policy')).toBe('no-referrer');
+    }
+  });
+
   it('forward code e state a opener via postMessage', async () => {
     const request = new Request('https://example.com/auth/klaviyo/callback?code=test-code&state=test-state');
     const response = await callbackLoader({ request, params: {}, context: {} });

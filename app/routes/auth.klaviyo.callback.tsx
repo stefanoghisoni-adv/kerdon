@@ -22,7 +22,13 @@ function closePage(message: Record<string, unknown>, appOrigin: string): Respons
 <p>You can close this window. / Puoi chiudere questa finestra.</p>
 </body></html>`;
   return new Response(html, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      // Il codice OAuth viaggia nell'URL di questa pagina: non va tenuto in
+      // nessuna cache ne' passato come Referer.
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+    },
   });
 }
 
