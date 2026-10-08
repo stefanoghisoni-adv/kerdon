@@ -59,6 +59,7 @@ import {
 import { BirthdateStatusRow } from '~/components/Customers/BirthdateStatusRow';
 import { ExtraFieldsCard } from '~/components/Customers/ExtraFieldsCard';
 import { IntegrationsCard } from '~/components/Customers/IntegrationsCard';
+import { IntegrationsModal } from '~/components/Customers/IntegrationsModal';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   BIRTHDATE_METAFIELD_KEY,
@@ -363,6 +364,20 @@ function CustomersContent({
   // ricerca, che lavora sulle stesse righe.
   const [onlyIssues, setOnlyIssues] = useState(false);
   const [query, setQuery] = useState('');
+
+  // Modal «Gestisci» integrazioni
+  const [integrationsModalOpen, setIntegrationsModalOpen] = useState(false);
+  const [preselectedProvider, setPreselectedProvider] = useState<'klaviyo' | null>(null);
+
+  const handleManage = (provider: 'klaviyo') => {
+    setPreselectedProvider(provider);
+    setIntegrationsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIntegrationsModalOpen(false);
+    setPreselectedProvider(null);
+  };
 
   // Il periodo invece sta nell'indirizzo: cambiarlo vuol dire chiedere al
   // database altri ordini, e il caricamento lo legge da li'. Si toccano solo
@@ -738,10 +753,17 @@ function CustomersContent({
             <IntegrationsCard
               integrations={integrations}
               upgradePlan={upgradePlan}
+              onManage={handleManage}
             />
           </BlockStack>
           </InlineGrid>
         )}
+
+        <IntegrationsModal
+          open={integrationsModalOpen}
+          onClose={handleCloseModal}
+          preselected={preselectedProvider}
+        />
     </>
   );
 }
