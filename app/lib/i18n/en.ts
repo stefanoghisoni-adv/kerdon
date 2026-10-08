@@ -1001,6 +1001,32 @@ export const en: typeof it = {
         plan: "Upgrade your plan to import customer data.",
       },
     },
+    conflicts: {
+      /** Tab label with conflict count. */
+      tabAll: "All",
+      tabConflicts: (n: number) => `Different values from Klaviyo (${n})`,
+      /** Column in conflicts view. */
+      birthdateColumn: "Birthdate",
+      /** Format: "Ours: <date> · Klaviyo: <date>". */
+      ourValue: (date: string) => `Ours: ${date}`,
+      theirValue: (date: string) => `Klaviyo: ${date}`,
+      /** Row actions. */
+      keepOurs: "Keep ours",
+      useTheirs: "Use Klaviyo",
+      /** Bulk actions. */
+      bulkKeepOurs: "Keep ours",
+      bulkUseTheirs: "Use Klaviyo",
+      /** Success toast. */
+      resolved: (n: number) =>
+        n === 1 ? '1 date updated' : `${n} dates updated`,
+      /** Banner for rows not written. */
+      notWrittenWarning: (n: number) =>
+        n === 1
+          ? 'Could not update 1 customer. Please try again.'
+          : `Could not update ${n} customers. Please try again.`,
+      /** Empty table in conflicts view. */
+      noConflicts: "No different values to resolve.",
+    },
     integrationsModal: {
       backToAll: "All integrations",
       searchLabel: "Search integrations",

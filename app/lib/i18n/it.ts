@@ -1280,6 +1280,32 @@ export const it = {
         plan: "Aggiorna il piano per importare i dati dei clienti.",
       },
     },
+    conflicts: {
+      /** Tab label con conteggio conflitti. */
+      tabAll: "Tutti",
+      tabConflicts: (n: number) => `Dati diversi da Klaviyo (${n})`,
+      /** Colonna nella vista conflitti. */
+      birthdateColumn: "Data di nascita",
+      /** Formato: "Nostra: <data> · Klaviyo: <data>". */
+      ourValue: (date: string) => `Nostra: ${date}`,
+      theirValue: (date: string) => `Klaviyo: ${date}`,
+      /** Azioni di riga. */
+      keepOurs: "Tieni il nostro",
+      useTheirs: "Usa Klaviyo",
+      /** Azioni bulk. */
+      bulkKeepOurs: "Tieni il nostro",
+      bulkUseTheirs: "Usa Klaviyo",
+      /** Toast di successo. */
+      resolved: (n: number) =>
+        n === 1 ? '1 data aggiornata' : `${n} date aggiornate`,
+      /** Banner per righe non scritte. */
+      notWrittenWarning: (n: number) =>
+        n === 1
+          ? 'Non è stato possibile aggiornare 1 cliente. Riprova.'
+          : `Non è stato possibile aggiornare ${n} clienti. Riprova.`,
+      /** Tabella vuota nella vista conflitti. */
+      noConflicts: "Nessun dato diverso da risolvere.",
+    },
     integrationsModal: {
       backToAll: "Tutte le integrazioni",
       searchLabel: "Cerca integrazioni",
