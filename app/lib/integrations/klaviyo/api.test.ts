@@ -123,6 +123,25 @@ describe('API Klaviyo', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
+    it('Retry-After di 30 s: si aspetta (e il tetto)', async () => {
+      fetchMock
+        .mockResolvedValueOnce(risposta(429, {}, { 'Retry-After': '30' }))
+        .mockResolvedValueOnce(risposta(200, pagina([])));
+      await listProfiles('tok', null, { sleep });
+      expect(sleep).toHaveBeenCalledWith(30_000);
+    });
+
+    it('Retry-After oltre i 30 s: KlaviyoUnavailableError subito, senza aspettare', async () => {
+      // Aspettare minuti dentro una tappa della coda la farebbe staccare a
+      // meta': meglio cedere subito e lasciare che la coda ritenti piu' tardi.
+      fetchMock.mockResolvedValueOnce(risposta(429, {}, { 'Retry-After': '31' }));
+      await expect(listProfiles('tok', null, { sleep })).rejects.toBeInstanceOf(
+        KlaviyoUnavailableError,
+      );
+      expect(sleep).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('senza Retry-After aspetta 1, 2, 4, 8 s', async () => {
       fetchMock
         .mockResolvedValueOnce(risposta(500, {}))

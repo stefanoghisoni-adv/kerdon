@@ -36,10 +36,18 @@ const MAX_ATTEMPTS = 5;
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000];
 
 /**
+ * Il massimo che si aspetta per un singolo `Retry-After`. Una tappa della coda
+ * dura pochi minuti: una pausa piu' lunga la farebbe staccare a meta' pagina.
+ * Se Klaviyo chiede di piu', si cede subito e ritenta la coda, piu' tardi.
+ */
+export const MAX_RETRY_AFTER_MS = 30_000;
+
+/**
  * Una GET verso Klaviyo con i tentativi.
  *
  * 429 e 5xx (e la rete giu') si ritentano: si aspetta quanto dice
- * `Retry-After` (secondi, come da documentazione) oppure 1/2/4/8 s. Al quinto
+ * `Retry-After` (secondi, come da documentazione, al massimo 30: oltre si cede
+ * subito) oppure 1/2/4/8 s. Al quinto
  * tentativo andato male: `KlaviyoUnavailableError`. 401/403 non si ritentano.
  */
 async function klaviyoGet(token: string, url: string, sleep: Sleep): Promise<unknown> {
@@ -73,6 +81,9 @@ async function klaviyoGet(token: string, url: string, sleep: Sleep): Promise<unk
     const retryAfter = Number(res?.headers.get('Retry-After'));
     const wait =
       Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : BACKOFF_MS[attempt];
+    if (wait > MAX_RETRY_AFTER_MS) {
+      throw new KlaviyoUnavailableError(`Klaviyo chiede di attendere ${Math.ceil(wait / 1000)} s`);
+    }
     await sleep(wait);
   }
   throw new KlaviyoUnavailableError(`Klaviyo non risponde dopo ${MAX_ATTEMPTS} tentativi`);
