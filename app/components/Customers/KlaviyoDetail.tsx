@@ -45,9 +45,10 @@ interface PropertiesData {
 /**
  * Decides what dateFormat to use when a property is selected.
  *
- * I3 FIX: Pure function extracted for testing.
+ * I3 FIX Round 3: Added sourceKeyChanged parameter.
  *
  * Rules:
+ * - Source key unchanged: keep current format (user's choice persists)
  * - Non-ambiguous: use property's detected format
  * - Ambiguous with saved mapping for this property: use saved format
  * - Ambiguous without saved mapping: return '' (require explicit choice)
@@ -56,12 +57,19 @@ export function decideDateFormat({
   property,
   savedMapping,
   currentFormat,
+  sourceKeyChanged,
 }: {
   property: Property | undefined;
   savedMapping: { sourceKey: string; dateFormat: string } | null;
   currentFormat: DateFormat | '';
+  sourceKeyChanged: boolean;
 }): DateFormat | '' {
   if (!property) return currentFormat;
+
+  // Source key unchanged: keep current format (user has made a choice)
+  if (!sourceKeyChanged) {
+    return currentFormat;
+  }
 
   // Non-ambiguous: use detected format
   if (!property.ambiguous) {
@@ -146,24 +154,28 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     }
   }, [mappingIdentity, mapping]);
 
-  // I3 FIX: Update format when property changes (track previous sourceKey to avoid reset loop)
+  // I3 FIX Round 3: Simplified - decideDateFormat now handles the sourceKeyChanged logic
   const prevSourceKeyRef = useRef<string>('');
 
   useEffect(() => {
-    // Only act when sourceKey actually changes
-    if (selectedProperty !== prevSourceKeyRef.current) {
+    const sourceKeyChanged = selectedProperty !== prevSourceKeyRef.current;
+    if (sourceKeyChanged) {
       prevSourceKeyRef.current = selectedProperty;
-
-      const property = properties.find((p) => p.key === selectedProperty);
-      const newFormat = decideDateFormat({
-        property,
-        savedMapping: mapping ?? null,
-        currentFormat: dateFormat,
-      });
-
-      setDateFormat(newFormat);
     }
+
+    const property = properties.find((p) => p.key === selectedProperty);
+    const newFormat = decideDateFormat({
+      property,
+      savedMapping: mapping ?? null,
+      currentFormat: dateFormat,
+      sourceKeyChanged,
+    });
+
+    setDateFormat(newFormat);
   }, [selectedProperty, properties, mapping, dateFormat]);
+
+  // I6 FIX Round 3: Track OAuth attempt to prevent stale URL navigation
+  const oauthAttemptRef = useRef(0);
 
   // OAuth flow: open blank popup synchronously, then navigate after fetch
   const handleConnect = useCallback(() => {
@@ -179,15 +191,24 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     setPopupBlocked(false);
     setOauthError(null);
 
-    // Now fetch the URL
-    if (oauthFetcher.state === 'idle') {
-      oauthFetcher.load('/api/integrations/klaviyo/oauth-url');
-    }
+    // Increment attempt counter and fetch fresh URL
+    oauthAttemptRef.current += 1;
+    oauthFetcher.load('/api/integrations/klaviyo/oauth-url');
   }, [oauthFetcher]);
 
-  // I6+I10 FIX: Navigate popup to OAuth URL after fetch
+  // I6 FIX Round 3: Navigate popup only for current attempt's response
+  const lastNavigatedAttemptRef = useRef(0);
+
   useEffect(() => {
-    if (oauthFetcher.data?.url && popupRef.current && !popupRef.current.closed) {
+    // Only navigate if we have a URL, a popup, and this response belongs to current attempt
+    if (
+      oauthFetcher.data?.url &&
+      popupRef.current &&
+      !popupRef.current.closed &&
+      lastNavigatedAttemptRef.current < oauthAttemptRef.current
+    ) {
+      lastNavigatedAttemptRef.current = oauthAttemptRef.current;
+
       try {
         popupRef.current.location.href = oauthFetcher.data.url;
       } catch (e) {
@@ -199,17 +220,28 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     }
   }, [oauthFetcher.data]);
 
-  // I6+I10 FIX: Close popup and show error on ANY oauth-url fetch failure
-  useEffect(() => {
-    // Failure = idle state after a load with no data, or data without url
-    const failed =
-      (oauthFetcher.state === 'idle' && oauthFetcher.data !== undefined && !oauthFetcher.data.url);
+  // Minor FIX: Detect oauth-url load finishing without usable response
+  const prevOauthStateRef = useRef<'idle' | 'loading' | 'submitting'>('idle');
 
-    if (failed && popupRef.current) {
-      popupRef.current.close();
-      popupRef.current = null;
-      setOauthError('failed');
+  useEffect(() => {
+    const currentState = oauthFetcher.state;
+    const wasLoading = prevOauthStateRef.current === 'loading';
+    const nowIdle = currentState === 'idle';
+
+    // Attempt finished (loading → idle)
+    if (wasLoading && nowIdle) {
+      // Check if we got a usable URL
+      const hasUsableUrl = oauthFetcher.data?.url;
+
+      if (!hasUsableUrl && popupRef.current) {
+        // Load failed or returned no URL - close popup and warn
+        popupRef.current.close();
+        popupRef.current = null;
+        setOauthError('failed');
+      }
     }
+
+    prevOauthStateRef.current = currentState;
   }, [oauthFetcher.state, oauthFetcher.data]);
 
   // Listen for OAuth callback
@@ -324,13 +356,15 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
         statusFetcher.load('/api/integrations/klaviyo');
         setSelectedProperty('');
         setDateFormat('');
+        // Minor FIX: Reset mapping identity ref so reconnect re-applies saved mapping
+        lastMappingIdentityRef.current = null;
       } else {
         setDisconnectError(disconnectFetcher.data.error ?? 'unknown');
       }
     }
   }, [disconnectFetcher.data, statusFetcher]);
 
-  // I6+I10 FIX: Retry popup open from banner action
+  // I6 FIX Round 3: Retry always fetches fresh URL
   const handleRetryPopup = useCallback(() => {
     // Synchronously open blank popup
     const popup = window.open('', 'klaviyo-oauth', 'width=600,height=700');
@@ -343,18 +377,9 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     popupRef.current = popup;
     setPopupBlocked(false);
 
-    // Load URL if we have it, or fetch it
-    if (oauthFetcher.data?.url) {
-      try {
-        popup.location.href = oauthFetcher.data.url;
-      } catch (e) {
-        popup.close();
-        popupRef.current = null;
-        setOauthError('failed');
-      }
-    } else if (oauthFetcher.state === 'idle') {
-      oauthFetcher.load('/api/integrations/klaviyo/oauth-url');
-    }
+    // Always trigger fresh load (never reuse old URL)
+    oauthAttemptRef.current += 1;
+    oauthFetcher.load('/api/integrations/klaviyo/oauth-url');
   }, [oauthFetcher]);
 
   // I13 FIX: Show spinner whenever !statusFetcher.data (covers first frame)
