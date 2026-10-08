@@ -501,7 +501,7 @@ export const en: typeof it = {
     },
     privacyNotice: {
       title: "We've updated our privacy policy",
-      body: "It now lists, one by one, the cookies that visitor recognition uses on your store, with their duration and purpose, so you can copy them straight into your own cookie policy.",
+      body: "It now covers the Klaviyo import: if you connect your account, Kerdon reads its profiles only when you ask, to fill in missing dates of birth. Differing dates are left for you to decide, the tokens are stored encrypted, and nothing is written to Klaviyo.",
       link: "Read the privacy policy",
       acknowledge: "Got it",
       saveFailed: "We couldn't save your confirmation. Please try again shortly.",

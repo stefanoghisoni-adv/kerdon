@@ -43,6 +43,13 @@ applicaAmbienteDiProva();
 const { startDatabase, resetDatabase, stopDatabase } = await import('./database');
 const { installShiftableClock, advanceBy, resetClock, currentShift } = await import('./clock');
 const { resetFinti, stato } = await import('./fakes/state');
+const { installaRete } = await import('./fakes/rete');
+const { rispondiKlaviyo, indirizzoVeroKlaviyo } = await import('./fakes/klaviyo.server');
+
+// Klaviyo, l'Admin API di Shopify via HTTP e il database del merchant: le
+// chiamate verso di loro le risponde un finto, il codice dell'app che le fa
+// resta quello vero. Prima di caricare qualunque modulo dell'app.
+installaRete(`http://127.0.0.1:${PORTA}`);
 
 process.env.DATABASE_URL = await startDatabase(PORTA_DB);
 installShiftableClock();
@@ -56,7 +63,14 @@ installShiftableClock();
  * `loader` e l'`action` VERI vedano una richiesta HTTP vera e rispondano una
  * Response vera — e per quello basta chiamarli.
  */
-const ROTTE: { pattern: RegExp; modulo: string; tipo: 'loader' | 'action'; parametri?: string[] }[] = [
+const ROTTE: {
+  pattern: RegExp;
+  modulo: string;
+  tipo: 'loader' | 'action';
+  parametri?: string[];
+  /** Loader per GET, action per il resto, come in Remix. Solo dove la prova usa tutti e due. */
+  perMetodo?: boolean;
+}[] = [
   { pattern: /^\/billing\/callback$/, modulo: '/app/routes/billing.callback.tsx', tipo: 'loader' },
   { pattern: /^\/api\/supabase\/disconnect$/, modulo: '/app/routes/api.supabase.disconnect.tsx', tipo: 'action' },
   { pattern: /^\/api\/plan\/limits$/, modulo: '/app/routes/api.plan.limits.tsx', tipo: 'loader' },
@@ -75,6 +89,39 @@ const ROTTE: { pattern: RegExp; modulo: string; tipo: 'loader' | 'action'; param
   },
   // Le azioni della pagina Spedizioni: salvataggio tariffe e packaging.
   { pattern: /^\/spedizioni$/, modulo: '/app/routes/spedizioni.tsx', tipo: 'action' },
+  // Le integrazioni (Klaviyo): collegamento, associazione, import e conflitti.
+  // La pagina di ritorno dell'autorizzazione e' di primo livello, nel popup:
+  // la apre il browser, come in produzione.
+  { pattern: /^\/auth\/klaviyo\/callback$/, modulo: '/app/routes/auth.klaviyo.callback.tsx', tipo: 'loader' },
+  {
+    pattern: /^\/api\/integrations\/klaviyo\/oauth-url$/,
+    modulo: '/app/routes/api.integrations.klaviyo.oauth-url.tsx',
+    tipo: 'loader',
+  },
+  {
+    pattern: /^\/api\/integrations\/klaviyo\/connect$/,
+    modulo: '/app/routes/api.integrations.klaviyo.connect.tsx',
+    tipo: 'action',
+  },
+  {
+    pattern: /^\/api\/integrations\/conflicts$/,
+    modulo: '/app/routes/api.integrations.conflicts.tsx',
+    tipo: 'action',
+    perMetodo: true,
+  },
+  {
+    pattern: /^\/api\/integrations\/([^/]+)\/import$/,
+    modulo: '/app/routes/api.integrations.$provider.import.tsx',
+    tipo: 'action',
+    parametri: ['provider'],
+  },
+  {
+    pattern: /^\/api\/integrations\/([^/]+)$/,
+    modulo: '/app/routes/api.integrations.$provider.tsx',
+    tipo: 'loader',
+    parametri: ['provider'],
+    perMetodo: true,
+  },
 ];
 
 const vite: ViteDevServer = await createViteServer({
@@ -215,11 +262,17 @@ const server = http.createServer((req, res) => {
               if (Array.isArray(corpo.graphql)) s.graphql = corpo.graphql as typeof s.graphql;
               if (Array.isArray(corpo.sessioni)) s.sessioni = corpo.sessioni as string[];
               if (corpo.eliminazione) s.eliminazione = corpo.eliminazione as typeof s.eliminazione;
+              if (corpo.klaviyo) Object.assign(s.klaviyo, corpo.klaviyo as Partial<typeof s.klaviyo>);
+              if (corpo.databaseMerchant) {
+                s.databaseMerchant = corpo.databaseMerchant as typeof s.databaseMerchant;
+              }
               return json(res, { ok: true });
             }
             return json(res, {
               graphqlLog: s.graphqlLog,
               eliminazioniChieste: s.eliminazioniChieste,
+              adminLog: s.adminLog,
+              klaviyoRichieste: s.klaviyo.richieste,
             });
           }
 
@@ -237,6 +290,18 @@ const server = http.createServer((req, res) => {
               return json(res, { error: `modello/operazione sconosciuti: ${modello}.${operazione}` }, 400);
             }
             return json(res, { data: await delegato[operazione](corpo.args) });
+          }
+
+          // La coda, drenata quando lo dice la prova: il drenaggio VERO, con i
+          // gestori veri, sulla corsia veloce del negozio indicato.
+          case '/__test/drain': {
+            const modulo = (await vite.ssrLoadModule('/app/lib/queue/drain.server.ts')) as {
+              drainSyncRequests: (opts: { shopId?: string | null }) => Promise<unknown>;
+            };
+            const esito = await modulo.drainSyncRequests({
+              shopId: typeof corpo.shopId === 'string' ? corpo.shopId : null,
+            });
+            return json(res, { esito });
           }
 
           // Due lavorazioni che chiedono insieme il lucchetto dello stesso
@@ -290,6 +355,15 @@ const server = http.createServer((req, res) => {
         }
       }
 
+      // ---- Klaviyo finto, raggiunto dal browser ---------------------------
+      // La prova devia qui la pagina di autorizzazione (`context.route`): il
+      // popup la apre, e da qui torna alla pagina di ritorno vera dell'app.
+      if (url.pathname.startsWith('/__fake/klaviyo/')) {
+        const vero = indirizzoVeroKlaviyo(url);
+        if (!vero) return json(res, { error: 'indirizzo Klaviyo non riconosciuto' }, 404);
+        return await rispondi(res, await rispondiKlaviyo(await richiestaWeb(req), vero));
+      }
+
       // ---- Le pagine del banco di prova ----------------------------------
       if (url.pathname === '/' || url.pathname.endsWith('.html')) {
         const nome = url.pathname === '/' ? '/e2e/harness/index.html' : url.pathname;
@@ -312,8 +386,11 @@ const server = http.createServer((req, res) => {
           string,
           (args: { request: Request; params: Record<string, string>; context: unknown }) => Promise<Response>
         >;
-        const funzione = modulo[rotta.tipo];
-        if (!funzione) return json(res, { error: `${rotta.modulo} non esporta ${rotta.tipo}` }, 500);
+        // Le rotte segnate `perMetodo` (le integrazioni): decide il metodo,
+        // come in Remix. Le altre restano col tipo scritto nell'elenco.
+        const tipo = rotta.perMetodo ? (req.method === 'GET' ? 'loader' : 'action') : rotta.tipo;
+        const funzione = modulo[tipo];
+        if (!funzione) return json(res, { error: `${rotta.modulo} non esporta ${tipo}` }, 500);
 
         try {
           const risposta = await funzione({ request: await richiestaWeb(req), params, context: {} });

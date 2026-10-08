@@ -1,7 +1,7 @@
 # Kerdon — Informativa sulla privacy
 
-**Ultimo aggiornamento:** 02-10-2026
-**Versione:** 1.5
+**Ultimo aggiornamento:** 08-10-2026
+**Versione:** 1.6
 
 > Traduzione di cortesia. Il testo che vincola le parti è la versione inglese,
 > `privacy-policy.md`; in caso di discrepanza prevale quella.
@@ -24,7 +24,7 @@ Kerdon si installa nel tuo negozio Shopify e copia una parte dei dati del negozi
 
 ### 3.1 Dati del negozio e dell'account
 
-Il dominio del negozio Shopify e il dominio principale, il fuso orario, la valuta di fatturazione, il piano attivo, la lingua preferita e i token di accesso che permettono all'app di dialogare con Shopify per tuo conto. I token sono conservati cifrati.
+Il dominio del negozio Shopify e il dominio principale, il fuso orario, la valuta di fatturazione, il piano attivo, la lingua preferita e i token di accesso che permettono all'app di dialogare con Shopify per tuo conto e, se lo colleghi, con il tuo account Klaviyo (vedi 3.3). I token sono conservati cifrati.
 
 ### 3.2 Catalogo prodotti
 
@@ -40,7 +40,11 @@ Tratta inoltre l'**indirizzo predefinito** del cliente — via, città, CAP, reg
 
 **La data di nascita.** Shopify non la espone come campo dell'anagrafica: vive in un metafield del cliente. L'app legge il campo che indichi tu — il campo standard di Shopify `facts.birth_date`, oppure un metafield di tipo data che esiste già nel tuo negozio — e ne copia il valore nel tuo database. Dalla tab Clienti puoi anche chiedere all'app di attivare per te la definizione standard `facts.birth_date`: è a questo che serve il permesso di scrittura sui clienti che l'app richiede all'installazione.
 
-**La data di nascita viene anche riscritta verso Shopify.** Quando nel tuo database la data c'è e il metafield su Shopify è vuoto, l'app scrive quel valore dentro il metafield da cui legge. Vale solo per i clienti che hanno prestato il consenso al marketing, solo se hai indicato un campo da cui leggere la data, e solo se quel campo è di tipo data. L'app non riscrive mai un valore che su Shopify esiste già, non scrive niente se ciò che trova nel tuo database non è una data, e non tocca nessun altro campo dell'anagrafica del cliente: non crea clienti, non ne modifica nome, email, telefono o indirizzo. È comunque la scrittura di un dato personale verso Shopify, ed è dichiarata qui perché è tale.
+**La data di nascita viene anche riscritta verso Shopify.** Quando nel tuo database la data c'è e il metafield su Shopify è vuoto, l'app scrive quel valore dentro il metafield da cui legge. Vale solo per i clienti che hanno prestato il consenso al marketing, solo se hai indicato un campo da cui leggere la data, e solo se quel campo è di tipo data. In questa riscrittura l'app non sovrascrive mai un valore che su Shopify esiste già, non scrive niente se ciò che trova nel tuo database non è una data, e non tocca nessun altro campo dell'anagrafica del cliente: non crea clienti, non ne modifica nome, email, telefono o indirizzo. È comunque la scrittura di un dato personale verso Shopify, ed è dichiarata qui perché è tale.
+
+**La data di nascita può arrivare anche da Klaviyo.** Se colleghi il tuo account Klaviyo dalla tab Clienti, l'app legge i profili che vi sono conservati per tuo conto, e solo quando glielo chiedi: per mostrarti quali proprietà dei profili contengono una data, così da scegliere quella con la data di nascita, e per eseguire un'importazione quando la avvii. Ogni profilo viene abbinato a un cliente del tuo database per ID cliente Shopify, indirizzo email o numero di telefono, e possono essere abbinati solo i clienti che hanno prestato il consenso al marketing. Se la data di nascita di quel cliente è vuota, l'app scrive la data letta da Klaviyo nel metafield di Shopify descritto sopra. Se ne contiene già una diversa, l'app non sceglie: elenca il cliente sotto «Dati diversi da Klaviyo» e non cambia niente finché non decidi tu, un cliente alla volta o più insieme, se tenere la tua data o usare quella di Klaviyo. Usare quella di Klaviyo è l'unico caso in cui l'app sostituisce una data di nascita che su Shopify esiste già, e avviene solo con quella tua decisione.
+
+Di ogni profilo l'app non tiene altro che quella data: indirizzo email, numero di telefono, paese e le altre proprietà vengono letti per trovare l'abbinamento e poi scartati. **L'app non scrive niente su Klaviyo**: il suo accesso si limita alla lettura dei profili e del nome dell'account. Scollegando Klaviyo i token di accesso vengono cancellati dal nostro database e revocati presso Klaviyo.
 
 **L'identificativo esterno.** Lo scrive il riconoscimento dei visitatori descritto al punto 3.5: quando un browser viene collegato a un cliente, sulla riga di quel cliente finisce l'identificativo del browser da cui sta navigando in quel momento.
 
@@ -117,14 +121,15 @@ Di chi naviga l'app **non** tratta l'indirizzo IP e **non** registra le pagine v
 
 ### 3.6 Registri operativi
 
-Per far funzionare l'app e assisterti conserviamo, nel nostro database: un record di ogni sincronizzazione (tipo, esito, orari e quanti record sono stati aggiunti, aggiornati o rimossi), voci a livello di prodotto che indicano quali prodotti sono cambiati, gli addebiti di fatturazione e i registri di accesso all'interfaccia di lettura, con il solo esito e stato HTTP.
+Per far funzionare l'app e assisterti conserviamo, nel nostro database: un record di ogni sincronizzazione (tipo, esito, orari e quanti record sono stati aggiunti, aggiornati o rimossi) e di ogni importazione da Klaviyo (esito, orari e conteggi), voci a livello di prodotto che indicano quali prodotti sono cambiati, gli addebiti di fatturazione e i registri di accesso all'interfaccia di lettura, con il solo esito e stato HTTP.
 
-Quanto ai **clienti**, ciò che teniamo è in larghissima parte fatto di conteggi: la sincronizzazione non copia nel nostro database nomi, indirizzi email o numeri di telefono. Ci sono però quattro casi in cui un riferimento a una singola persona resta scritto da noi, e vanno detti:
+Quanto ai **clienti**, ciò che teniamo è in larghissima parte fatto di conteggi: la sincronizzazione non copia nel nostro database nomi, indirizzi email o numeri di telefono. Ci sono però cinque casi in cui un riferimento a una singola persona resta scritto da noi, e vanno detti:
 
 - **Riparazioni in sospeso.** Quando un'operazione che riguarda un singolo cliente non riesce — marcare chi ha ritirato il consenso, riscrivere la data di nascita su Shopify — resta una riga con l'identificativo Shopify di quel cliente e, per la data di nascita, il valore da riscrivere. Sparisce quando l'operazione riesce, o quando viene abbandonata dopo i tentativi previsti.
 - **Richieste privacy in lavorazione.** Il messaggio firmato che Shopify ci consegna contiene l'identificativo della persona, e viene conservato finché la richiesta non si chiude. Resta più a lungo solo quando una richiesta si blocca e deve essere portata a termine a mano: senza, non si saprebbe più di chi si tratta.
 - **Esportazioni per il diritto di accesso.** Contengono i dati della persona e restano sui nostri sistemi al massimo 30 giorni: vedi il punto 8.
 - **Revoche del consenso al riconoscimento.** L'identificativo del browser e, quando la revoca ne nomina uno, l'identificativo del cliente restano cifrati sulla riga della revoca finché non è stata applicata. Poi vengono azzerati, e resta la sola prova — non leggibile — che una revoca c'era stata.
+- **Differenze con Klaviyo.** Quando un'importazione da Klaviyo trova un cliente la cui data di nascita è diversa dalla tua (vedi 3.3), una riga conserva l'identificativo Shopify di quel cliente, la tua data e quella di Klaviyo e, dopo che hai deciso, quale delle due hai scelto. La decisione resta perché l'importazione successiva non ti chieda di nuovo la stessa cosa sulla stessa data. La riga viene cancellata insieme al cliente quando arriva una richiesta di cancellazione (sezione 8), e insieme al negozio quando Shopify ci chiede di cancellarlo.
 
 ## 4. Dove risiedono i dati
 
@@ -147,6 +152,7 @@ L'app se ne accorge in due modi: quando una lettura del tuo database fallisce, e
 | Fornitore | Finalità | Ubicazione |
 |---|---|---|
 | Shopify | Origine dei dati di negozio, prodotti, clienti e ordini; fatturazione | Secondo i termini di Shopify |
+| Klaviyo | Solo se lo colleghi: il tuo account di email marketing, da cui l'app legge i profili dei clienti quando le chiedi di importare le date di nascita. L'app non vi scrive niente | Secondo i termini di Klaviyo |
 | Supabase | Il tuo database e il nostro | Unione Europea |
 | Vercel | Hosting dell'applicazione | Unione Europea |
 | Upstash | Cache dei conteggi che l'app ti mostra — prodotti pronti, clienti e simili — e, se attivati, contatori anti-abuso delle scritture (identificativo interno del negozio, identificativo della chiave, finestra temporale; nessun dato personale) | Unione Europea |
@@ -159,7 +165,7 @@ Quello che l'app fa è portare i dati **nel tuo database** e metterli a tua disp
 
 ## 6. Sicurezza
 
-I token di accesso e le chiavi del database sono cifrati a riposo con AES-256-GCM. La chiave privilegiata del tuo database non viene mai inviata a un browser.
+I token di accesso e le chiavi del database sono cifrati a riposo con AES-256-GCM. Vale anche per i token di Klaviyo, che danno accesso in sola lettura. La chiave privilegiata del tuo database non viene mai inviata a un browser.
 
 Le tabelle create dall'app nel tuo database hanno la row-level security attiva e nessuna policy pubblica: con una chiave pubblica non sono leggibili.
 
@@ -175,7 +181,7 @@ Le richieste provenienti da Shopify sono verificate per firma prima di essere es
 
 I dati nel **tuo** database restano per il tempo che decidi tu. L'app non li cancella a scadenza, con una sola eccezione: le righe dei browser mai collegati a un cliente, che vengono cancellate dopo 90 giorni dall'ultimo avvistamento. I dati di spedizione e logistica del punto 3.4 fanno parte dell'ordine che descrivono: restano finché resta l'ordine, e se ne vanno quando l'ordine viene cancellato su Shopify.
 
-**Nel nostro database**: i registri di accesso all'interfaccia di lettura si conservano 12 mesi, poi vengono cancellati; le esportazioni preparate per una richiesta di accesso al massimo 30 giorni; le righe di riparazione e le richieste privacy fino alla loro chiusura, come descritto al punto 3.6. Gli eventi webhook consegnati da Shopify vengono cancellati 7 giorni dopo essere stati conclusi. Una revoca del consenso al riconoscimento viene cancellata 7 giorni dopo essere stata applicata; se una revoca resta bloccata e non viene mai applicata, il suo contenuto cifrato viene azzerato dopo 30 giorni e resta la sola prova, non leggibile, che una revoca c'era stata.
+**Nel nostro database**: i registri di accesso all'interfaccia di lettura si conservano 12 mesi, poi vengono cancellati; le esportazioni preparate per una richiesta di accesso al massimo 30 giorni; le righe di riparazione e le richieste privacy fino alla loro chiusura, e le differenze con Klaviyo fino alla cancellazione di quel cliente o del tuo negozio, come descritto al punto 3.6. Gli eventi webhook consegnati da Shopify vengono cancellati 7 giorni dopo essere stati conclusi. Una revoca del consenso al riconoscimento viene cancellata 7 giorni dopo essere stata applicata; se una revoca resta bloccata e non viene mai applicata, il suo contenuto cifrato viene azzerato dopo 30 giorni e resta la sola prova, non leggibile, che una revoca c'era stata.
 
 **Quando disinstalli l'app**, i tuoi dati restano dove sono — nel tuo database, che rimane tuo — e la nostra sessione con il negozio termina. Conserviamo i nostri registri operativi e di fatturazione per il tempo richiesto dagli obblighi contabili e di legge.
 
@@ -189,7 +195,7 @@ Shopify ci inoltra automaticamente le richieste privacy dei clienti, e l'app vi 
 
 **Richiesta di accesso** — l'app raccoglie dal tuo database ciò che di quella persona è stato scritto: la sua riga fra i clienti, i suoi ordini — dati di spedizione e logistica compresi — e le righe di quegli ordini, e i browser collegati a lei. L'esportazione viene preparata e messa a tua disposizione dentro l'app, dove la scarichi con la tua sessione di amministratore: non finisce su nessun indirizzo pubblico. **Resta sui nostri sistemi al massimo 30 giorni**, poi viene cancellata da sola.
 
-**Richiesta di cancellazione** — la riga del cliente viene eliminata in via definitiva dal tuo database, e con lei le righe dei browser collegati a quella persona. Gli **ordini non vengono cancellati**: sono scritture contabili che sei tenuto a conservare, e cancellarle cambierebbe il tuo fatturato. Vengono privati di ciò che riporta alla persona — identificativo del cliente, nome e cognome, e il paese di spedizione, l'unica voce presa dal suo indirizzo — e non sono più collegati alla persona nel tuo database. Vengono anche marcati con la data della cancellazione (`customer_redacted_at`): da quel momento nessun aggiornamento successivo da Shopify può rimettere dentro quei dati. Gli altri dati logistici del punto 3.4 descrivono il pacco, non la persona, e restano sull'ordine, e il costo logistico già calcolato resta com'era, perché i tuoi costi e il tuo profitto continuino a tornare. L'operazione viene registrata nei tuoi log.
+**Richiesta di cancellazione** — la riga del cliente viene eliminata in via definitiva dal tuo database, e con lei le righe dei browser collegati a quella persona. Gli **ordini non vengono cancellati**: sono scritture contabili che sei tenuto a conservare, e cancellarle cambierebbe il tuo fatturato. Vengono privati di ciò che riporta alla persona — identificativo del cliente, nome e cognome, e il paese di spedizione, l'unica voce presa dal suo indirizzo — e non sono più collegati alla persona nel tuo database. Vengono anche marcati con la data della cancellazione (`customer_redacted_at`): da quel momento nessun aggiornamento successivo da Shopify può rimettere dentro quei dati. Gli altri dati logistici del punto 3.4 descrivono il pacco, non la persona, e restano sull'ordine, e il costo logistico già calcolato resta com'era, perché i tuoi costi e il tuo profitto continuino a tornare. Nel nostro database vengono cancellate le eventuali differenze con Klaviyo registrate per quel cliente (3.6). L'operazione viene registrata nei tuoi log.
 
 Se un cliente si rivolge direttamente a te, puoi anche cancellarne il record da solo: il database è tuo.
 

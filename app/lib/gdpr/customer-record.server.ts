@@ -38,6 +38,10 @@
 //                       scrivere, ma le vecchie sono li')
 //     sync_jobs.errors  il JSON di un fallimento poteva portarsi dentro il
 //                       customer_id in chiaro
+//     integration_conflicts  shopify_customer_id + la data di nascita nostra
+//                       e quella letta da Klaviyo. Al `shop/redact` se ne va
+//                       per cascata da `shops`, come le altre tabelle
+//                       integration_*, che non portano dati delle persone
 //     customer_data_access_logs  niente: per come e' fatto, quel registro
 //                       tiene esito e stato HTTP e nient'altro
 //
@@ -340,6 +344,35 @@ export async function eraseCustomerFromAppDatabase(
       rows: 0,
       detail: error instanceof Error ? error.message : 'errore sconosciuto',
     });
+  }
+
+  // I conflitti con Klaviyo: ognuno porta la data di nascita della persona due
+  // volte, la nostra e quella letta da Klaviyo. Si cancellano, decisi o no:
+  // una decisione presa su una persona che ha chiesto la cancellazione non
+  // serve piu' a niente. Solo quelli di questo negozio: la stessa persona su un
+  // altro negozio e' un altro titolare, con un'altra richiesta.
+  const conflictCustomerId = /^\d+$/.test(customerId) ? BigInt(customerId) : null;
+  if (conflictCustomerId === null) {
+    steps.push({
+      table: 'integration_conflicts',
+      outcome: 'skipped',
+      rows: 0,
+      detail: 'id cliente non numerico: nessuna riga puo corrispondere',
+    });
+  } else {
+    try {
+      const removed = await prisma.integrationConflict.deleteMany({
+        where: { shopId, customerId: { in: [conflictCustomerId] } },
+      });
+      steps.push({ table: 'integration_conflicts', outcome: 'deleted', rows: removed.count });
+    } catch (error) {
+      steps.push({
+        table: 'integration_conflicts',
+        outcome: 'failed',
+        rows: 0,
+        detail: error instanceof Error ? error.message : 'errore sconosciuto',
+      });
+    }
   }
 
   // Il registro degli accessi non ha niente da cancellare, ed e' un pregio del

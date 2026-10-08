@@ -16,10 +16,10 @@
  * stesso commit anche la frase dell'avviso (`dashboard.privacyNotice` nei
  * dizionari): dice cosa cambia in QUESTA versione.
  */
-export const PRIVACY_POLICY_VERSION = '1.5';
+export const PRIVACY_POLICY_VERSION = '1.6';
 
 /** La data in testa ai documenti, nella stessa forma (`GG-MM-AAAA`). */
-export const PRIVACY_POLICY_DATE = '02-10-2026';
+export const PRIVACY_POLICY_DATE = '08-10-2026';
 
 /**
  * Confronta due versioni a numeri (`1.4`, `1.10`): negativo, zero o positivo.

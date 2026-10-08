@@ -588,7 +588,7 @@ export const it = {
     // alla versione, a ogni modifica sostanziale.
     privacyNotice: {
       title: "Abbiamo aggiornato l'informativa sulla privacy",
-      body: "Ora elenca uno per uno i cookie che il riconoscimento dei visitatori usa sul tuo negozio, con durata e finalità: puoi riportarli così come sono nella tua cookie policy.",
+      body: "Ora descrive l'importazione da Klaviyo: se colleghi il tuo account, Kerdon ne legge i profili solo quando glielo chiedi, per completare le date di nascita mancanti. Le date diverse restano da decidere a te, i token sono conservati cifrati e su Klaviyo non viene scritto niente.",
       link: "Leggi l'informativa",
       acknowledge: "Ho capito",
       saveFailed: "Non siamo riusciti a registrare la conferma. Riprova tra poco.",

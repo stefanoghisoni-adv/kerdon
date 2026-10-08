@@ -1,7 +1,7 @@
 # Kerdon — Privacy Policy
 
-**Last updated:** 02-10-2026
-**Version:** 1.5
+**Last updated:** 08-10-2026
+**Version:** 1.6
 
 ## 1. Who we are
 
@@ -21,7 +21,7 @@ Kerdon installs into your Shopify store and copies part of your store's data int
 
 ### 3.1 Store and account information
 
-Your Shopify store domain and primary domain, time zone, billing currency, the app plan you are on, your language preference, and the access tokens that let the app talk to Shopify on your behalf. Access tokens are stored encrypted.
+Your Shopify store domain and primary domain, time zone, billing currency, the app plan you are on, your language preference, and the access tokens that let the app talk to Shopify on your behalf — and, if you connect it, to your Klaviyo account (see 3.3). Access tokens are stored encrypted.
 
 ### 3.2 Product catalogue
 
@@ -37,7 +37,11 @@ It also processes the customer's **default address** — street, city, postcode,
 
 **The date of birth.** Shopify does not expose it as a customer field: it lives in a customer metafield. The app reads the field you point it at — Shopify's standard `facts.birth_date` field, or a date metafield that already exists in your store — and copies its value into your database. From the Customers tab you can also ask the app to enable the standard `facts.birth_date` definition for you: that is what the customer write permission the app requests at install is for.
 
-**The date of birth is also written back to Shopify.** Where your database holds a date and the Shopify metafield is empty, the app writes that value into the very metafield it reads from. This applies only to customers who have given marketing consent, only if you have pointed the app at a field to read the date from, and only if that field is a date field. The app never overwrites a value Shopify already holds, writes nothing when what it finds in your database is not a date, and touches no other field on the customer record: it does not create customers and does not change their name, email, phone or address. It is still the writing of personal data back to Shopify, and it is declared here because that is what it is.
+**The date of birth is also written back to Shopify.** Where your database holds a date and the Shopify metafield is empty, the app writes that value into the very metafield it reads from. This applies only to customers who have given marketing consent, only if you have pointed the app at a field to read the date from, and only if that field is a date field. In this write-back the app never overwrites a value Shopify already holds, writes nothing when what it finds in your database is not a date, and touches no other field on the customer record: it does not create customers and does not change their name, email, phone or address. It is still the writing of personal data back to Shopify, and it is declared here because that is what it is.
+
+**The date of birth can also come from Klaviyo.** If you connect your Klaviyo account from the Customers tab, the app reads the profiles held there on your behalf, and only when you ask it to: to show you which profile properties hold a date, so that you can pick the one with the date of birth, and to run an import when you start one. Each profile is matched to a customer in your database by Shopify customer ID, email address or phone number, and only customers who have given marketing consent can be matched. Where that customer's date of birth is empty, the app writes the date read from Klaviyo into the Shopify metafield described above. Where it already holds a different date, the app does not choose: it lists the customer under "Different values from Klaviyo" and changes nothing until you decide, one customer at a time or several together, whether to keep your date or use Klaviyo's. Using Klaviyo's is the only case in which the app replaces a date of birth Shopify already holds, and it happens only on that decision of yours.
+
+Of each profile the app keeps nothing but that date: the email address, phone number, country and other properties are read to find the match and then discarded. **The app writes nothing to Klaviyo**: its access is limited to reading profiles and the account name. Disconnecting Klaviyo deletes the access tokens from our database and revokes them at Klaviyo.
 
 **The external identifier.** It is written by the visitor recognition described in 3.5: when a browser is linked to a customer, that customer's row records the identifier of the browser the person is browsing from at that moment.
 
@@ -114,14 +118,15 @@ The app does **not** process the visitor's IP address and does **not** record th
 
 ### 3.6 Operational records
 
-To run and support the app we keep, in our own database: a record of each synchronisation (type, outcome, timestamps, and how many records were added, updated or removed), product-level entries identifying which products changed, your billing charges, and access records for the read interface (outcome and HTTP status only).
+To run and support the app we keep, in our own database: a record of each synchronisation (type, outcome, timestamps, and how many records were added, updated or removed) and of each Klaviyo import (outcome, timestamps and counts), product-level entries identifying which products changed, your billing charges, and access records for the read interface (outcome and HTTP status only).
 
-What we keep about **customers** is very largely counts: the synchronisation does not copy names, email addresses or phone numbers into our database. There are, however, four cases where a reference to an individual is written on our side, and they belong here:
+What we keep about **customers** is very largely counts: the synchronisation does not copy names, email addresses or phone numbers into our database. There are, however, five cases where a reference to an individual is written on our side, and they belong here:
 
 - **Pending repairs.** When an operation concerning a single customer fails — marking someone who has withdrawn consent, writing a date of birth back to Shopify — a row remains holding that customer's Shopify identifier and, for the date of birth, the value still to be written. It goes when the operation succeeds, or when it is given up after the retries allowed.
 - **Privacy requests being worked on.** The signed message Shopify delivers to us holds the person's identifier, and it is kept until the request closes. It stays longer only where a request is stuck and has to be finished by hand: without it, nobody would know who it concerned.
 - **Exports for access requests.** They contain the person's data and stay on our systems for at most 30 days: see section 8.
 - **Withdrawals of recognition consent.** The browser identifier and, where the withdrawal names one, the customer identifier stay encrypted on the withdrawal row until it has been applied. They are then cleared, leaving only the — unreadable — proof that a withdrawal was made.
+- **Differences with Klaviyo.** When a Klaviyo import finds a customer whose date of birth differs from yours (see 3.3), a row holds that customer's Shopify identifier, your date and Klaviyo's, and, once you have decided, which of the two you chose. The decision is kept so that the next import does not ask you again about the same date. The row is deleted with that customer when an erasure request arrives (section 8), and with your store when Shopify asks us to erase it.
 
 ## 4. Where the data is stored
 
@@ -144,6 +149,7 @@ The app notices in two ways: when a read of your database fails, and through a p
 | Provider | Purpose | Location |
 |---|---|---|
 | Shopify | Source of store, product, customer and order data; billing | As per Shopify's own terms |
+| Klaviyo | Only if you connect it: your email marketing account, from which the app reads customer profiles when you ask it to import dates of birth. The app writes nothing to it | As per Klaviyo's own terms |
 | Supabase | Your database, and our own database | European Union |
 | Vercel | Application hosting | European Union |
 | Upstash | Cache of the counts the app shows you — products ready, customers, and the like — and, when enabled, anti-abuse counters for writes (internal store identifier, key identifier, time window; no personal data) | European Union |
@@ -156,7 +162,7 @@ What the app does is put the data **in your own database** and make it available
 
 ## 6. Security
 
-Access tokens and database keys are encrypted at rest with AES-256-GCM. The privileged key to your database is never sent to a browser.
+Access tokens and database keys are encrypted at rest with AES-256-GCM. That includes the Klaviyo tokens, which give read access only. The privileged key to your database is never sent to a browser.
 
 Tables created by the app in your database have row-level security enabled with no public policies: they cannot be read with a public key.
 
@@ -172,7 +178,7 @@ Requests from Shopify are verified by signature before being acted upon.
 
 Data in **your** database is kept for as long as you decide. The app does not delete it on a schedule, with one exception: rows for browsers never linked to a customer are deleted 90 days after they were last seen. The shipping and logistics data in 3.4 is part of the order it describes: it stays as long as the order does, and goes when the order is deleted in Shopify.
 
-**In our own database**: access records for the read interface are kept for 12 months and then deleted; exports prepared for an access request for at most 30 days; repair rows and privacy requests until they close, as described in 3.6. Webhook events delivered by Shopify are deleted 7 days after they complete. A withdrawal of recognition consent is deleted 7 days after it has been applied; where one gets stuck and is never applied, its encrypted content is cleared after 30 days and only the unreadable proof of it remains.
+**In our own database**: access records for the read interface are kept for 12 months and then deleted; exports prepared for an access request for at most 30 days; repair rows and privacy requests until they close, and differences with Klaviyo until that customer's erasure or your store's, as described in 3.6. Webhook events delivered by Shopify are deleted 7 days after they complete. A withdrawal of recognition consent is deleted 7 days after it has been applied; where one gets stuck and is never applied, its encrypted content is cleared after 30 days and only the unreadable proof of it remains.
 
 **When you uninstall the app**, your data stays where it is — in your database, which remains yours — and our session with your store ends. We keep our operational and billing records for as long as required for accounting and legal purposes.
 
@@ -186,7 +192,7 @@ Shopify forwards customer privacy requests to us automatically, and the app answ
 
 **Access request** — the app collects from your database what has been written about that person: their customer row, their orders — shipping and logistics data included — and those orders' lines, and the browsers linked to them. The export is prepared and made available to you inside the app, where you download it with your admin session: it is never placed at a public address. **It stays on our systems for at most 30 days**, then deletes itself.
 
-**Erasure request** — the customer's row is permanently deleted from your database, along with the rows of the browsers linked to that person. **Orders are not deleted**: they are accounting records you are required to keep, and deleting them would change your revenue. They are stripped of what leads back to the person — customer identifier, first and last name, and the shipping country, the only item taken from their address — and are no longer linked to the person in your database. They are also marked with the date of the erasure (`customer_redacted_at`): from then on, no later update from Shopify can put those details back. The other logistics data in 3.4 describes the parcel, not the person, and stays on the order, and the logistics cost already calculated for it is kept as it is, so that your costs and profit still add up. The action is recorded in your logs.
+**Erasure request** — the customer's row is permanently deleted from your database, along with the rows of the browsers linked to that person. **Orders are not deleted**: they are accounting records you are required to keep, and deleting them would change your revenue. They are stripped of what leads back to the person — customer identifier, first and last name, and the shipping country, the only item taken from their address — and are no longer linked to the person in your database. They are also marked with the date of the erasure (`customer_redacted_at`): from then on, no later update from Shopify can put those details back. The other logistics data in 3.4 describes the parcel, not the person, and stays on the order, and the logistics cost already calculated for it is kept as it is, so that your costs and profit still add up. In our own database, any differences with Klaviyo recorded for that customer (3.6) are deleted. The action is recorded in your logs.
 
 If a customer contacts you directly, you can also delete their record yourself: it is your database.
 

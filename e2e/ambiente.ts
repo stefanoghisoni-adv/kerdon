@@ -24,11 +24,16 @@ export const AMBIENTE_DI_PROVA: Record<string, string> = {
   SHOPIFY_APP_URL: BASE,
   SHOPIFY_SCOPES:
     'read_products,read_inventory,write_inventory,read_customers,write_customers,read_publications,read_themes,read_orders,read_all_orders,read_shipping,read_returns',
-  ENCRYPTION_SECRET: 'chiave-di-cifratura-solo-per-le-prove-e2e',
+  // 64 caratteri esadecimali, come li pretende `utils/crypto.server`: con un
+  // valore di un'altra forma ogni cifratura solleva, e la prima a farlo e' lo
+  // `state` del collegamento a Klaviyo. Il valore e' inventato e vale solo qui.
+  ENCRYPTION_SECRET: 'e2e0000000000000000000000000000000000000000000000000000000000e2e',
   SESSION_SECRET: 'sessione-solo-per-le-prove-e2e',
   CRON_SECRET: 'cron-solo-per-le-prove-e2e',
   SUPABASE_OAUTH_CLIENT_ID: 'client-id-di-prova',
   SUPABASE_OAUTH_CLIENT_SECRET: 'client-secret-di-prova',
+  KLAVIYO_CLIENT_ID: 'klaviyo-client-id-di-prova',
+  KLAVIYO_CLIENT_SECRET: 'klaviyo-client-secret-di-prova',
 };
 
 /**

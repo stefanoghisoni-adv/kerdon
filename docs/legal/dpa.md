@@ -1,7 +1,7 @@
 # Data Processing Agreement (DPA) — Kerdon
 
-Last updated: 2 October 2026
-Version: 1.5
+Last updated: 8 October 2026
+Version: 1.6
 
 > This agreement is accepted together with the terms of service, when the app is
 > installed.
@@ -25,7 +25,9 @@ merchant's instruction.
 
 Kerdon synchronises the catalogue, customer and order data of the merchant's
 Shopify store into a database project held by the merchant, keeps that copy
-current, and computes profitability figures from it.
+current, and computes profitability figures from it. Where the merchant connects
+its Klaviyo account, Kerdon also completes customers' dates of birth from the
+profiles held there, as described in section 2.
 
 The agreement lasts as long as the app is installed and ends on uninstall.
 
@@ -39,6 +41,19 @@ merchant's request, and a **customer's date of birth** — the value held in the
 merchant's database, written into the customer metafield Kerdon reads it from,
 where that metafield is empty and the customer has given marketing consent. No
 other field of the customer record is created or changed.
+
+Where the merchant connects its **Klaviyo** account, Kerdon reads the customer
+profiles held there on the merchant's behalf and only on the merchant's command —
+to show which profile properties hold a date, and to run an import the merchant
+starts — in order to complete customers' dates of birth. Each profile is matched
+to a customer in the merchant's database, among those who have given marketing
+consent, by Shopify identifier, email address or telephone number. An empty date
+of birth is filled in the same customer metafield described above. A different
+date already present is not changed: the customer is listed for the merchant to
+decide, and the Klaviyo value is written only if the merchant chooses it, which
+is the only case in which an existing date of birth on Shopify is replaced.
+**Kerdon writes nothing to Klaviyo**: its access is limited to reading profiles
+and the account name.
 
 Where the merchant enables the feature, Kerdon also processes **visitor
 recognition** for the store, described in section 3.
@@ -119,6 +134,14 @@ at most 30 days; `Secure`, `HttpOnly`, `SameSite=Lax`). The former name
 `corew_eid` is no longer written. Section 3.5 of the privacy policy lists them in
 full, with purpose, duration and content.
 
+**Data read from Klaviyo** (only where the merchant connects its account, and
+only when the merchant asks): profile identifier, email address, telephone
+number, country, external identifier and the profile properties, read to match
+each profile to a customer and to find the date of birth in the property the
+merchant has chosen. Only that date is kept — on Shopify, or, where it differs
+from the merchant's, in Kerdon's database as described in section 9 — and the
+rest is discarded once read.
+
 **Explicit exclusions**: no payment data; no email address, telephone number,
 note or address — other than the shipping country above — is requested or stored
 from orders;
@@ -168,10 +191,17 @@ The catalogue and customer database does **not** appear in this table: it is hel
 by the merchant, who has a direct contractual relationship with its own provider.
 Kerdon accesses it on the merchant's instruction.
 
+Klaviyo does not appear in it either, for the same reason: it is the merchant's
+own email marketing provider, with which the merchant has its own relationship.
+Kerdon reads from it on the merchant's instruction, only when the merchant asks,
+and writes nothing to it.
+
 ## 6. Security measures
 
 - Encryption in transit (HTTPS/TLS) on every communication
-- Encryption of secrets at rest with AES-256-GCM
+- Encryption of secrets at rest with AES-256-GCM, Klaviyo access tokens included
+- Read-only access to the merchant's Klaviyo account, limited to profiles and the
+  account name; on disconnection the tokens are deleted and revoked at Klaviyo
 - Encryption at rest and encrypted backups on the application's database
 - Row Level Security enabled on all of the application's tables, with no public
   access policies
@@ -237,7 +267,8 @@ date of the erasure (`customer_redacted_at`); a guard in the merchant's database
 prevents any later write from restoring those fields. The other shipping and
 logistics data describes the parcel rather than the person, and stays on the
 order, with its logistics cost unchanged, so that the merchant's costs remain
-correct.
+correct. In Kerdon's database, any differences with Klaviyo recorded for that
+customer (section 9) are deleted.
 
 ## 9. On termination
 
@@ -249,13 +280,16 @@ merchant is the holder, and which the merchant may delete at any time from its
 own project.
 
 That data passes through Kerdon's infrastructure as it is written or read back,
-and in four limited cases it remains written there: pending repairs, which carry
+and in five limited cases it remains written there: pending repairs, which carry
 a customer's Shopify identifier and, for the date of birth, the value still to be
 written back; the signed message of a privacy request, until that request closes;
 the export prepared for an access request, for at most 30 days; and the browser
 identifier and customer identifier on a consent withdrawal, encrypted and cleared
-as soon as the withdrawal is applied. None of the four outlives its reason to
-exist.
+as soon as the withdrawal is applied; and the differences found by a Klaviyo
+import, which carry a customer's Shopify identifier, the merchant's date of birth
+and Klaviyo's, and the merchant's decision between the two, kept so that the next
+import does not ask again, and deleted with that customer's erasure or with the
+store's. None of the five outlives its reason to exist.
 
 ## 10. Transfers outside the EU
 

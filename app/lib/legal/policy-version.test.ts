@@ -78,7 +78,11 @@ describe('confrontaVersioni', () => {
 
 describe('avvisoInformativaDovuto', () => {
   const prima = new Date('2026-09-01T10:00:00Z');
-  const dopo = new Date('2026-10-02T08:00:00Z');
+  // Il mattino del giorno della versione in vigore, ricavato dalla costante: con
+  // una data scritta a mano la prova si rompeva a ogni nuova versione, pur
+  // essendo la regola rimasta la stessa.
+  const [g, m, a] = PRIVACY_POLICY_DATE.split('-').map(Number);
+  const dopo = new Date(Date.UTC(a, m - 1, g, 8));
 
   it('si mostra a un negozio installato prima, che non ha mai visto avvisi', () => {
     expect(avvisoInformativaDovuto({ seenVersion: null, installedAt: prima })).toBe(true);
@@ -104,8 +108,9 @@ describe('avvisoInformativaDovuto', () => {
   });
 
   it('una nuova installazione dopo la versione vale come averla accettata', () => {
-    // Visto 1.4, poi disinstallato e reinstallato dopo la 1.5 con una NUOVA riga
-    // (installedAt = reinstall date): installando ha accettato la 1.5, e il
+    // Visto 1.4, poi disinstallato e reinstallato dopo la versione in vigore con
+    // una NUOVA riga (installedAt = reinstall date): installando ha accettato
+    // quella, e il
     // vecchio "Ho capito" non lo rende un negozio da avvisare.
     expect(avvisoInformativaDovuto({ seenVersion: '1.4', installedAt: dopo })).toBe(false);
   });
