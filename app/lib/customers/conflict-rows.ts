@@ -32,6 +32,7 @@ export interface ConflictRow {
   ours: string | null;
   theirs: string;
   provider: string;
+  [key: string]: unknown; // Per compatibilita' con useIndexResourceState
 }
 
 /**

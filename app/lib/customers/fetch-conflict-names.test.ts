@@ -31,7 +31,7 @@ describe('fetchConflictCustomerNames', () => {
     expect(runQueryRows).not.toHaveBeenCalled();
   });
 
-  it('carica nomi ed email dal database del merchant', async () => {
+  it('carica nomi ed email dalla tabella customers del merchant', async () => {
     vi.mocked(getValidAccessToken).mockResolvedValue('token-123');
     vi.mocked(runQueryRows).mockResolvedValue([
       { customer_id: 1, first_name: 'Mario', email: 'mario@example.com' },
@@ -44,7 +44,7 @@ describe('fetchConflictCustomerNames', () => {
     expect(runQueryRows).toHaveBeenCalledWith(
       'token-123',
       'ref-1',
-      expect.stringContaining('FROM orders o'),
+      expect.stringContaining('FROM customers'),
     );
 
     expect(result).toEqual(
@@ -126,5 +126,75 @@ describe('fetchConflictCustomerNames', () => {
     expect(result.get(2)).toEqual({ firstName: 'Luigi', email: 'luigi@example.com' });
     expect(result.has(1)).toBe(false);
     expect(result.has(3)).toBe(false);
+  });
+
+  it('valida IDs internamente: scarta float, negativi, NaN e duplicati (I3a)', async () => {
+    vi.mocked(getValidAccessToken).mockResolvedValue('token-123');
+    vi.mocked(runQueryRows).mockResolvedValue([
+      { customer_id: 1, first_name: 'Mario', email: 'mario@example.com' },
+      { customer_id: 5, first_name: 'Luigi', email: 'luigi@example.com' },
+    ]);
+
+    // Bad IDs: float (1.5), negative (-3), NaN, string cast as any
+    const badIds = [
+      1,
+      1.5,
+      -3,
+      NaN,
+      'invalid' as any,
+      5,
+      1, // duplicate
+    ];
+
+    const result = await fetchConflictCustomerNames('shop-1', 'ref-1', badIds);
+
+    // Solo 1 e 5 sono validi (deduplica 1)
+    const callArgs = vi.mocked(runQueryRows).mock.calls[0];
+    const sql = callArgs[2];
+
+    // SQL deve contenere solo IDs validi deduplica: 1, 5
+    expect(sql).toContain('ANY(ARRAY[1, 5])');
+    expect(sql).not.toContain('1.5');
+    expect(sql).not.toContain('-3');
+    expect(sql).not.toContain('NaN');
+    expect(sql).not.toContain('invalid');
+
+    expect(result).toEqual(
+      new Map([
+        [1, { firstName: 'Mario', email: 'mario@example.com' }],
+        [5, { firstName: 'Luigi', email: 'luigi@example.com' }],
+      ]),
+    );
+  });
+
+  it('restituisce Map vuota quando tutti gli IDs sono invalidi (I3a)', async () => {
+    // Tutti bad IDs → no query
+    const result = await fetchConflictCustomerNames('shop-1', 'ref-1', [
+      1.5,
+      -3,
+      NaN,
+      'bad' as any,
+    ]);
+
+    expect(result).toEqual(new Map());
+    expect(getValidAccessToken).not.toHaveBeenCalled();
+    expect(runQueryRows).not.toHaveBeenCalled();
+  });
+
+  it('normalizza customer_id string da Management API a number (I3a)', async () => {
+    vi.mocked(getValidAccessToken).mockResolvedValue('token-123');
+    // Management API può ritornare int8 come string
+    vi.mocked(runQueryRows).mockResolvedValue([
+      { customer_id: '1', first_name: 'Mario', email: 'mario@example.com' },
+      { customer_id: '2', first_name: 'Luigi', email: 'luigi@example.com' },
+    ]);
+
+    const result = await fetchConflictCustomerNames('shop-1', 'ref-1', [1, 2]);
+
+    // Map keyed con number, non string
+    expect(result.get(1)).toEqual({ firstName: 'Mario', email: 'mario@example.com' });
+    expect(result.get(2)).toEqual({ firstName: 'Luigi', email: 'luigi@example.com' });
+    expect(result.get('1' as any)).toBeUndefined();
+    expect(result.get('2' as any)).toBeUndefined();
   });
 });

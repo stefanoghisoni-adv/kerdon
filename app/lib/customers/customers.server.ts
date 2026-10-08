@@ -288,9 +288,13 @@ async function ensureReportTables(token: string, ref: string, shopId: string): P
  * Usato per arricchire i conflitti con nome/email anche quando il cliente e'
  * fuori dal periodo scelto (quindi non in `rows`).
  *
+ * Valida gli IDs internamente: mantiene solo interi positivi, deduplica.
+ * Legge dalla tabella customers (non orders): un cliente senza ordini deve
+ * comunque avere nome ed email se presente nella tabella.
+ *
  * @param shopId L'ID del negozio
  * @param ref Il riferimento Supabase del merchant
- * @param customerIds Array di customer ID (gia' validati come interi positivi)
+ * @param customerIds Array di customer ID (vengono validati internamente)
  * @returns Map di customerId → {firstName, email}
  */
 export async function fetchConflictCustomerNames(
@@ -298,38 +302,45 @@ export async function fetchConflictCustomerNames(
   ref: string,
   customerIds: number[],
 ): Promise<Map<number, { firstName: string | null; email: string | null }>> {
-  if (customerIds.length === 0) return new Map();
+  // Valida IDs internamente: solo interi positivi safe, deduplica (I3a)
+  const validIds = Array.from(
+    new Set(
+      customerIds.filter((id) => Number.isSafeInteger(id) && id > 0),
+    ),
+  );
+
+  // Empty dopo filtering → return senza query
+  if (validIds.length === 0) return new Map();
 
   try {
     const token = await getValidAccessToken(shopId);
 
-    // IDs are already validated as integers, safe to interpolate directly
-    // (no SQL injection risk since validation ensures they're safe integers)
-    const idsString = customerIds.join(', ');
+    // IDs validati: safe per interpolazione diretta
+    const idsString = validIds.join(', ');
 
-    // Query sicura: IDs già validati come interi positivi dal chiamante
+    // Query dalla tabella customers direttamente (I3a: clienti senza ordini
+    // devono comunque avere nome/email se presenti in customers)
     const sql = `
-      SELECT DISTINCT
-        o.shopify_customer_id::bigint AS customer_id,
-        MAX(o.customer_first_name) AS first_name,
-        MAX(c.email_address) AS email
-      FROM orders o
-      LEFT JOIN customers c ON c.shopify_customer_id = o.shopify_customer_id
-      WHERE o.shopify_customer_id = ANY(ARRAY[${idsString}])
-      GROUP BY o.shopify_customer_id
+      SELECT
+        shopify_customer_id AS customer_id,
+        first_name,
+        email_address AS email
+      FROM customers
+      WHERE shopify_customer_id = ANY(ARRAY[${idsString}])
     `;
 
     interface NameRow {
-      customer_id: number;
+      customer_id: number | string; // Management API può ritornare int8 come string
       first_name: string | null;
       email: string | null;
     }
 
     const rows = await runQueryRows<NameRow>(token, ref, sql);
 
+    // Key con Number(r.customer_id): Management API può ritornare int8 come string
     return new Map(
       rows.map((r) => [
-        r.customer_id,
+        Number(r.customer_id),
         { firstName: r.first_name, email: r.email },
       ]),
     );

@@ -178,29 +178,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
           }),
         ),
       ]).then(async ([pageData, rawConflicts]) => {
-        // Arricchisce i conflitti con nome ed email dal database del merchant (I3)
-        // Valida IDs come interi positivi (no SQL injection)
-        const conflictCustomerIds = rawConflicts
-          .map((c) => c.customerId)
-          .filter((id) => Number.isSafeInteger(id) && id > 0);
-
+        // Fetch nomi dal database del merchant (I3b: validazione interna)
         const ref = shop.supabaseConfig?.supabaseProjectRef;
-        if (conflictCustomerIds.length === 0 || !ref) {
-          return { ...pageData, conflicts: rawConflicts };
+        if (!ref) {
+          return { ...pageData, conflicts: rawConflicts, conflictNames: [] };
         }
 
-        // Fetch nomi dal database del merchant usando helper testato
+        const conflictCustomerIds = rawConflicts.map((c) => c.customerId);
         const nameMap = await timing.measure('conflict-names', () =>
           fetchConflictCustomerNames(shop.id, ref, conflictCustomerIds),
         );
 
-        // Arricchisce i conflitti con i nomi trovati
-        const enrichedConflicts = rawConflicts.map((c) => {
-          const names = nameMap.get(c.customerId);
-          return names ? { ...c, firstName: names.firstName, email: names.email } : c;
-        });
+        // Converte Map in array per JSON serialization
+        const conflictNames = Array.from(nameMap.entries()).map(([customerId, names]) => ({
+          customerId,
+          ...names,
+        }));
 
-        return { ...pageData, conflicts: enrichedConflicts };
+        // Passa rawConflicts e conflictNames: conflictRows fa il merge (I3b)
+        return { ...pageData, conflicts: rawConflicts, conflictNames };
       })
     : {
         report: { rows: [], currency: 'EUR', lifetimeCustomers: 0, unavailable: 'plan_required' },
@@ -211,6 +207,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // Le integrazioni: null se il piano non include clienti.
         integrations: null,
         conflicts: [],
+        conflictNames: [],
       };
 
   return defer(
@@ -320,6 +317,11 @@ interface CustomersPageView {
     provider: 'klaviyo';
     firstName?: string | null;
     email?: string | null;
+  }>;
+  conflictNames: Array<{
+    customerId: number;
+    firstName: string | null;
+    email: string | null;
   }>;
 }
 
@@ -449,6 +451,7 @@ function CustomersContent({
   const birthdate = view.birthdate;
   const integrations = view.integrations;
   const conflicts = view.conflicts;
+  const conflictNames = view.conflictNames;
   const t = useT();
   const locale = useLocale();
   // Quale riga ha appena chiesto "Risolvi problemi": la pagina dei prodotti
@@ -571,16 +574,25 @@ function CustomersContent({
   // Paginazione separata per la vista conflitti (I2)
   const [conflictsPage, setConflictsPage] = useState(1);
 
-  // I conflitti sono già arricchiti con nome/email dal loader (I3)
-  // Usa i dati direttamente senza merge con rows
-  const conflictRowsData = conflicts.map((c) => ({
-    customerId: c.customerId,
-    firstName: c.firstName ?? null,
-    email: c.email ?? null,
-    ours: c.ours,
-    theirs: c.theirs,
-    provider: c.provider,
-  }));
+  // Usa conflictRows per il merge (I3b: funzione testata invece di inline)
+  // Converte conflictNames array in CustomerData[] per conflictRows
+  const customerDataFromNames = (conflictNames ?? []).map(
+    ({ customerId, firstName, email }) => ({
+      customerId,
+      firstName,
+      email,
+      // Campi richiesti da CustomerData ma non usati da conflictRows
+      lastName: null,
+      orders: 0,
+      profit: 0,
+      coveredLines: 0,
+      totalLines: 0,
+      currency: 'EUR',
+      synced: false,
+      phone: null,
+    }),
+  );
+  const conflictRowsData = conflictRows(conflicts, customerDataFromNames);
 
   const paginatedConflicts = pageSlice(conflictRowsData, conflictsPage, CUSTOMERS_PER_PAGE);
   const conflictsTotalPages = pageCount(conflictRowsData.length, CUSTOMERS_PER_PAGE);
@@ -886,10 +898,12 @@ function CustomersContent({
                       {
                         content: t.customers.conflicts.bulkKeepOurs,
                         onAction: () => handleBulkResolve('kept_ours'),
+                        disabled: resolving,
                       },
                       {
                         content: t.customers.conflicts.bulkUseTheirs,
                         onAction: () => handleBulkResolve('used_theirs'),
+                        disabled: resolving,
                       },
                     ]
                   : undefined
