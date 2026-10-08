@@ -281,3 +281,63 @@ async function ensureReportTables(token: string, ref: string, shopId: string): P
     );
   }
 }
+
+/**
+ * Carica nomi ed email per i customer ID specificati dal database del merchant.
+ *
+ * Usato per arricchire i conflitti con nome/email anche quando il cliente e'
+ * fuori dal periodo scelto (quindi non in `rows`).
+ *
+ * @param shopId L'ID del negozio
+ * @param ref Il riferimento Supabase del merchant
+ * @param customerIds Array di customer ID (gia' validati come interi positivi)
+ * @returns Map di customerId → {firstName, email}
+ */
+export async function fetchConflictCustomerNames(
+  shopId: string,
+  ref: string,
+  customerIds: number[],
+): Promise<Map<number, { firstName: string | null; email: string | null }>> {
+  if (customerIds.length === 0) return new Map();
+
+  try {
+    const token = await getValidAccessToken(shopId);
+
+    // IDs are already validated as integers, safe to interpolate directly
+    // (no SQL injection risk since validation ensures they're safe integers)
+    const idsString = customerIds.join(', ');
+
+    // Query sicura: IDs già validati come interi positivi dal chiamante
+    const sql = `
+      SELECT DISTINCT
+        o.shopify_customer_id::bigint AS customer_id,
+        MAX(o.customer_first_name) AS first_name,
+        MAX(c.email_address) AS email
+      FROM orders o
+      LEFT JOIN customers c ON c.shopify_customer_id = o.shopify_customer_id
+      WHERE o.shopify_customer_id = ANY(ARRAY[${idsString}])
+      GROUP BY o.shopify_customer_id
+    `;
+
+    interface NameRow {
+      customer_id: number;
+      first_name: string | null;
+      email: string | null;
+    }
+
+    const rows = await runQueryRows<NameRow>(token, ref, sql);
+
+    return new Map(
+      rows.map((r) => [
+        r.customer_id,
+        { firstName: r.first_name, email: r.email },
+      ]),
+    );
+  } catch (error) {
+    console.warn(
+      '[customers] nomi conflitti non leggibili dal database del merchant:',
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+    return new Map();
+  }
+}

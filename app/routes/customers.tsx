@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
-import { Await, useFetcher, useLoaderData, useNavigation, useRevalidator, useSearchParams } from '@remix-run/react';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Await, useLoaderData, useNavigation, useRevalidator, useSearchParams } from '@remix-run/react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Badge,
   Banner,
@@ -33,6 +33,7 @@ import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-forma
 import { BASE_CURRENCY } from '~/lib/billing/money';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import type { CustomersReport } from '~/lib/customers/customers.server';
+import { fetchConflictCustomerNames } from '~/lib/customers/customers.server';
 import {
   startCustomersPageData,
   type BirthdateData,
@@ -177,39 +178,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
           }),
         ),
       ]).then(async ([pageData, rawConflicts]) => {
-        // Arricchisce i conflitti con nome ed email dal database del merchant
-        // (non dalla lista period-filtrata, ma dalla tabella customers).
-        const conflictCustomerIds = rawConflicts.map((c) => c.customerId);
-        let enrichedConflicts: typeof rawConflicts = rawConflicts;
+        // Arricchisce i conflitti con nome ed email dal database del merchant (I3)
+        // Valida IDs come interi positivi (no SQL injection)
+        const conflictCustomerIds = rawConflicts
+          .map((c) => c.customerId)
+          .filter((id) => Number.isSafeInteger(id) && id > 0);
 
-        if (conflictCustomerIds.length > 0) {
-          try {
-            // Lettura dal database del merchant per nome ed email
-            const customerNames = await timing.measure('conflict-names', () =>
-              prisma.$queryRaw<Array<{ customer_id: string; first_name: string | null; email: string | null }>>`
-                SELECT customer_id, first_name, email
-                FROM customers
-                WHERE shop_domain = ${session.shop}
-                  AND customer_id IN (${conflictCustomerIds.join(',')})
-              `.catch(() => [] as Array<{ customer_id: string; first_name: string | null; email: string | null }>),
-            );
-
-            const nameMap = new Map(
-              customerNames.map((c) => [Number(c.customer_id), { firstName: c.first_name, email: c.email }]),
-            );
-
-            enrichedConflicts = rawConflicts.map((c) => {
-              const names = nameMap.get(c.customerId);
-              return names ? { ...c, firstName: names.firstName, email: names.email } : c;
-            });
-          } catch (error) {
-            console.warn(
-              '[customers] nomi conflitti non leggibili:',
-              error instanceof Error ? error.message : 'errore sconosciuto',
-            );
-            // Fallback: conflitti senza nome/email
-          }
+        const ref = shop.supabaseConfig?.supabaseProjectRef;
+        if (conflictCustomerIds.length === 0 || !ref) {
+          return { ...pageData, conflicts: rawConflicts };
         }
+
+        // Fetch nomi dal database del merchant usando helper testato
+        const nameMap = await timing.measure('conflict-names', () =>
+          fetchConflictCustomerNames(shop.id, ref, conflictCustomerIds),
+        );
+
+        // Arricchisce i conflitti con i nomi trovati
+        const enrichedConflicts = rawConflicts.map((c) => {
+          const names = nameMap.get(c.customerId);
+          return names ? { ...c, firstName: names.firstName, email: names.email } : c;
+        });
 
         return { ...pageData, conflicts: enrichedConflicts };
       })
@@ -476,18 +465,11 @@ function CustomersContent({
   const openConflictsCount = conflicts.length;
   const currentView = effectiveView(searchParams, openConflictsCount);
 
-  // Fetcher per le azioni di risoluzione conflitti
-  const resolveFetcher = useFetcher<{
-    ok: boolean;
-    resolved?: number;
-    notWritten?: number[];
-  }>();
-
   // Revalidator per aggiornare i dati dopo la risoluzione
   const revalidator = useRevalidator();
 
-  // Tracking delle risposte già gestite per evitare loop infiniti
-  const handledResponseRef = useRef<unknown>(null);
+  // Stato per le risoluzioni conflitti (I5: explicit fetch, no useFetcher)
+  const [resolving, setResolving] = useState(false);
 
   // Il filtro sta in uno stato e non nell'indirizzo: non ricarica niente —
   // le righe sono gia' tutte qui — e passare dal server per nascondere delle
@@ -570,62 +552,10 @@ function CustomersContent({
   // trovato nulla.
   const noSearchResults = query.trim().length > 0 && matching.length === 0;
 
-  // Gestione delle risposte del fetcher per conflitti
+  // Stato per Banner errori (I5)
   const [showNotWrittenBanner, setShowNotWrittenBanner] = useState(false);
   const [notWrittenCount, setNotWrittenCount] = useState(0);
   const [genericError, setGenericError] = useState(false);
-  const [lastChoice, setLastChoice] = useState<'kept_ours' | 'used_theirs'>('used_theirs');
-
-  useEffect(() => {
-    if (resolveFetcher.data && resolveFetcher.data !== handledResponseRef.current) {
-      handledResponseRef.current = resolveFetcher.data;
-      const data = resolveFetcher.data;
-
-      if (data.ok) {
-        const resolved = data.resolved ?? 0;
-        const notWritten = data.notWritten ?? [];
-
-        // Toast di successo con copy diverso per kept_ours vs used_theirs (minor fix)
-        if (typeof window !== 'undefined' && window.shopify?.toast) {
-          const message =
-            lastChoice === 'kept_ours'
-              ? t.customers.conflicts.resolvedKeptOurs(resolved)
-              : t.customers.conflicts.resolvedUsedTheirs(resolved);
-          window.shopify.toast.show(message);
-        }
-
-        // Banner per clienti non scritti (I5: solo da notWritten.length)
-        if (notWritten.length > 0) {
-          setNotWrittenCount(notWritten.length);
-          setShowNotWrittenBanner(true);
-          setGenericError(false);
-        } else {
-          setShowNotWrittenBanner(false);
-        }
-
-        // Ricarica i dati anche con resolved=0 (minor fix)
-        revalidator.revalidate();
-      } else {
-        // Errore generico per !ok (I5)
-        setGenericError(true);
-        setShowNotWrittenBanner(true);
-      }
-    }
-  }, [resolveFetcher.data, revalidator, t, lastChoice]);
-
-  // Gestione errori di rete/fetch (I5: submitting/loading → idle senza data)
-  useEffect(() => {
-    if (
-      resolveFetcher.state === 'idle' &&
-      !resolveFetcher.data &&
-      handledResponseRef.current === null &&
-      resolveFetcher.formData
-    ) {
-      // Network error: il fetcher è tornato idle dopo submit ma senza data
-      setGenericError(true);
-      setShowNotWrittenBanner(true);
-    }
-  }, [resolveFetcher.state, resolveFetcher.data, resolveFetcher.formData]);
 
   // Funzioni per gestire il cambio di tab
   const handleTabChange = (selectedTabIndex: number) => {
@@ -661,43 +591,108 @@ function CustomersContent({
     allResourcesSelected,
     handleSelectionChange,
     clearSelection,
-  } = useIndexResourceState(paginatedConflicts);
+  } = useIndexResourceState(paginatedConflicts, {
+    resourceIDResolver: (r) => String(r.customerId),
+  });
 
   // Reset pagina conflitti quando si cambia vista (I2)
   useEffect(() => {
     setConflictsPage(1);
   }, [currentView]);
 
+  // Clamp conflictsPage a conflictsTotalPages (minor fix)
+  useEffect(() => {
+    if (conflictsTotalPages > 0 && conflictsPage > conflictsTotalPages) {
+      setConflictsPage(conflictsTotalPages);
+    }
+  }, [conflictsTotalPages, conflictsPage]);
+
   // Reset selezione quando si cambia vista o pagina (I1)
   useEffect(() => {
     clearSelection();
   }, [currentView, conflictsPage, clearSelection]);
 
-  // Reset selezione dopo risoluzione (I1)
-  useEffect(() => {
-    if (resolveFetcher.state === 'idle' && resolveFetcher.data?.ok) {
-      clearSelection();
-    }
-  }, [resolveFetcher.state, resolveFetcher.data, clearSelection]);
+  // Funzioni per risolvere conflitti con explicit fetch (I5)
+  const resolveConflicts = useCallback(
+    async (customerIds: number[], choice: 'kept_ours' | 'used_theirs') => {
+      if (customerIds.length === 0) return;
 
-  // Funzioni per risolvere conflitti (singoli e bulk)
-  const handleResolveConflict = (customerId: number, choice: 'kept_ours' | 'used_theirs') => {
-    setLastChoice(choice);
-    resolveFetcher.submit(
-      { customerIds: [customerId], choice },
-      { method: 'post', action: '/api/integrations/conflicts', encType: 'application/json' },
-    );
-  };
+      // Reset genericError all'inizio di ogni tentativo (I5)
+      setGenericError(false);
+      setResolving(true);
 
-  const handleBulkResolve = (choice: 'kept_ours' | 'used_theirs') => {
-    const selectedIds = selectedResources.map(Number);
-    if (selectedIds.length === 0) return;
-    setLastChoice(choice);
-    resolveFetcher.submit(
-      { customerIds: selectedIds, choice },
-      { method: 'post', action: '/api/integrations/conflicts', encType: 'application/json' },
-    );
-  };
+      try {
+        const response = await fetch('/api/integrations/conflicts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customerIds, choice }),
+        });
+
+        const data = (await response.json()) as {
+          ok: boolean;
+          resolved?: number;
+          notWritten?: number[];
+        };
+
+        if (data.ok) {
+          const resolved = data.resolved ?? 0;
+          const notWritten = data.notWritten ?? [];
+
+          // Toast con copy diverso per kept_ours vs used_theirs
+          if (typeof window !== 'undefined' && window.shopify?.toast) {
+            const message =
+              choice === 'kept_ours'
+                ? t.customers.conflicts.resolvedKeptOurs(resolved)
+                : t.customers.conflicts.resolvedUsedTheirs(resolved);
+            window.shopify.toast.show(message);
+          }
+
+          // Banner per notWritten (I5)
+          if (notWritten.length > 0) {
+            setNotWrittenCount(notWritten.length);
+            setShowNotWrittenBanner(true);
+            setGenericError(false);
+          } else {
+            setShowNotWrittenBanner(false);
+          }
+
+          // Clear selection e revalidate
+          clearSelection();
+          revalidator.revalidate();
+        } else {
+          // Errore generico per !ok (I5)
+          setGenericError(true);
+          setShowNotWrittenBanner(true);
+        }
+      } catch (error) {
+        // Network error (I5)
+        console.warn(
+          '[customers] errore nella risoluzione conflitti:',
+          error instanceof Error ? error.message : 'errore sconosciuto',
+        );
+        setGenericError(true);
+        setShowNotWrittenBanner(true);
+      } finally {
+        setResolving(false);
+      }
+    },
+    [clearSelection, revalidator, t],
+  );
+
+  const handleResolveConflict = useCallback(
+    (customerId: number, choice: 'kept_ours' | 'used_theirs') => {
+      resolveConflicts([customerId], choice);
+    },
+    [resolveConflicts],
+  );
+
+  const handleBulkResolve = useCallback(
+    (choice: 'kept_ours' | 'used_theirs') => {
+      const selectedIds = selectedResources.map(Number);
+      resolveConflicts(selectedIds, choice);
+    },
+    [resolveConflicts, selectedResources],
+  );
 
   // Preparazione tabs
   const tabs = [
@@ -965,14 +960,14 @@ function CustomersContent({
                             <Button
                               size="slim"
                               onClick={() => handleResolveConflict(row.customerId, 'kept_ours')}
-                              disabled={resolveFetcher.state !== 'idle'}
+                              disabled={resolving}
                             >
                               {t.customers.conflicts.keepOurs}
                             </Button>
                             <Button
                               size="slim"
                               onClick={() => handleResolveConflict(row.customerId, 'used_theirs')}
-                              disabled={resolveFetcher.state !== 'idle'}
+                              disabled={resolving}
                             >
                               {t.customers.conflicts.useTheirs}
                             </Button>
