@@ -2,7 +2,7 @@
 //
 // Modal «Gestisci» per le integrazioni: catalogo + dettaglio.
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Modal,
   TextField,
@@ -12,8 +12,9 @@ import {
   Text,
   Badge,
   Button,
-  InlineStack,
   Thumbnail,
+  OptionList,
+  Box,
 } from '@shopify/polaris';
 import { ArrowLeftIcon } from '@shopify/polaris-icons';
 import { useT } from '~/lib/i18n/context';
@@ -25,6 +26,7 @@ import {
   type IntegrationEntry,
 } from '~/lib/integrations/registry';
 import type { DateFormat } from '~/lib/integrations/values';
+import { parseDate } from '~/lib/integrations/values';
 import { KlaviyoDetail } from './KlaviyoDetail';
 
 export interface IntegrationsModalProps {
@@ -44,21 +46,35 @@ export interface PreviewLine {
   display: string;
 }
 
+export type OAuthMessageValidation =
+  | {
+      ok: true;
+      data: { code: string; state: string };
+    }
+  | {
+      ok: false;
+      error?: string;
+    };
+
 /**
- * Converts sample date values to human-readable preview lines.
+ * Converts sample date values to human-readable preview lines using the given format.
  *
- * Takes up to 5 samples, skips those with null parsed dates, and formats
- * the parsed ISO dates as "15 Mar 1990".
+ * I2 FIX: Re-parses each raw value with parseDate(raw, format) to respect
+ * the merchant's format choice. Takes up to 5 successfully parsed samples.
  */
 export function previewLines(samples: Sample[], format: DateFormat): PreviewLine[] {
   const MAX_PREVIEWS = 5;
 
   return samples
-    .filter((s) => s.parsed !== null)
+    .map((s) => {
+      const parsed = parseDate(s.raw, format);
+      return parsed.ok ? { raw: s.raw, parsed: parsed.date } : null;
+    })
+    .filter((item): item is { raw: string; parsed: string } => item !== null)
     .slice(0, MAX_PREVIEWS)
-    .map((s) => ({
-      raw: s.raw,
-      display: formatDateForDisplay(s.parsed!),
+    .map((item) => ({
+      raw: item.raw,
+      display: formatDateForDisplay(item.parsed),
     }));
 }
 
@@ -84,7 +100,9 @@ function formatDateForDisplay(iso: string): string {
  *
  * Rules:
  * - sourceKey must not be empty
- * - If ambiguous, dateFormat must be DMY or MDY (not auto or YMD)
+ * - If ambiguous, dateFormat must be DMY or MDY (not auto, YMD, or empty string)
+ *
+ * I3 FIX: Handles empty string for dateFormat (when ambiguous property requires explicit choice).
  */
 export function canSaveMapping({
   sourceKey,
@@ -93,10 +111,10 @@ export function canSaveMapping({
 }: {
   sourceKey: string;
   ambiguous: boolean;
-  dateFormat: DateFormat;
+  dateFormat: DateFormat | '';
 }): boolean {
   if (!sourceKey || sourceKey.trim() === '') return false;
-  if (ambiguous && (dateFormat === 'auto' || dateFormat === 'YMD')) return false;
+  if (ambiguous && (dateFormat === '' || dateFormat === 'auto' || dateFormat === 'YMD')) return false;
   return true;
 }
 
@@ -104,32 +122,53 @@ export function canSaveMapping({
  * Validates an OAuth callback message.
  *
  * Security rules (controller-mandated):
+ * - popupWindow must not be null
  * - event.origin must match appOrigin
  * - event.source must match the popup window
+ * - data must be a non-null object
  * - data.type must be 'klaviyo-oauth'
- * - data.code and data.state must be present
+ * - For success: data.code and data.state must be present
+ * - For error: data.ok === false and data.error present
  *
- * Returns true if all checks pass, false otherwise.
+ * Returns { ok: true, data } for success or { ok: false, error } for known errors.
+ * Returns { ok: false } (no error) when security checks fail (ignore silently).
+ *
+ * I5 FIX: Accepts error-shaped messages under the same origin+source checks.
+ * I14 FIX: Rejects when popupRef is null, and when data is not a non-null object.
  */
 export function isValidOAuthMessage(
   event: MessageEvent,
   popupWindow: Window | null,
   appOrigin: string,
-): boolean {
+): OAuthMessageValidation {
+  // I14: Reject when popupRef is null
+  if (popupWindow === null) return { ok: false };
+
   // Check origin
-  if (event.origin !== appOrigin) return false;
+  if (event.origin !== appOrigin) return { ok: false };
 
   // Check source
-  if (event.source !== popupWindow) return false;
+  if (event.source !== popupWindow) return { ok: false };
 
-  // Check data shape
-  const data = event.data as { type?: string; code?: string; state?: string; ok?: boolean };
-  if (data.type !== 'klaviyo-oauth') return false;
+  // I14: Harden data check (reject non-object or null)
+  const data = event.data;
+  if (typeof data !== 'object' || data === null) return { ok: false };
 
-  // Must have code and state (success messages only)
-  if (!data.code || !data.state) return false;
+  // Check type
+  if (data.type !== 'klaviyo-oauth') return { ok: false };
 
-  return true;
+  // I5: Accept error messages
+  if (data.ok === false && typeof data.error === 'string') {
+    return { ok: false, error: data.error };
+  }
+
+  // Success message: must have code and state
+  if (typeof data.code === 'string' && typeof data.state === 'string') {
+    return { ok: true, data: { code: data.code, state: data.state } };
+  }
+
+  // Unknown shape
+  return { ok: false };
 }
 
 export function IntegrationsModal({
@@ -173,6 +212,15 @@ export function IntegrationsModal({
     setSelectedIntegration(integration);
   }, []);
 
+  // I9 FIX: OptionList for categories
+  const categoryOptions = [
+    { value: 'all', label: t.customers.integrationsModal.allCategory },
+    ...categories.map((cat) => ({
+      value: cat,
+      label: t.customers.integrationsModal.categories[cat],
+    })),
+  ];
+
   return (
     <Modal
       open={open}
@@ -205,40 +253,25 @@ export function IntegrationsModal({
               autoComplete="off"
             />
 
-            {/* Category navigation - simplified for now, can be enhanced with Navigation component */}
-            <InlineStack gap="200">
-              <Button
-                variant={selectedCategory === 'all' ? 'primary' : 'secondary'}
-                onClick={() => setSelectedCategory('all')}
-                size="slim"
-              >
-                {t.customers.integrationsModal.allCategory}
-              </Button>
-              {categories.map((cat) => (
-                <Button
-                  key={cat}
-                  variant={selectedCategory === cat ? 'primary' : 'secondary'}
-                  onClick={() => setSelectedCategory(cat)}
-                  size="slim"
-                >
-                  {t.customers.integrationsModal.categories[cat]}
-                </Button>
-              ))}
-            </InlineStack>
+            {/* I9 FIX: OptionList instead of Buttons */}
+            <OptionList
+              title={t.customers.integrationsModal.categoryLabel}
+              options={categoryOptions}
+              selected={[selectedCategory]}
+              onChange={(selected) => setSelectedCategory(selected[0] as IntegrationCategory | 'all')}
+            />
 
             <InlineGrid columns={{ xs: 2, md: 4 }} gap="400">
               {filteredIntegrations.map((integration) => (
-                <Card key={integration.id}>
-                  <BlockStack gap="200">
-                    <button
-                      onClick={() => handleSelect(integration)}
-                      disabled={integration.status === 'coming_soon'}
-                      style={{
-                        all: 'unset',
-                        cursor: integration.status === 'coming_soon' ? 'default' : 'pointer',
-                        width: '100%',
-                      }}
-                    >
+                /* I9 FIX: Polaris clickable pattern - Card with onClick */
+                <Box key={integration.id}>
+                  <div
+                    onClick={() => handleSelect(integration)}
+                    style={{
+                      cursor: integration.status === 'coming_soon' ? 'default' : 'pointer',
+                    }}
+                  >
+                    <Card>
                       <BlockStack gap="200" inlineAlign="center">
                         {integration.logo && (
                           <Thumbnail
@@ -254,9 +287,9 @@ export function IntegrationsModal({
                           <Badge tone="info">{t.customers.integrationsModal.comingSoon}</Badge>
                         )}
                       </BlockStack>
-                    </button>
-                  </BlockStack>
-                </Card>
+                    </Card>
+                  </div>
+                </Box>
               ))}
             </InlineGrid>
 

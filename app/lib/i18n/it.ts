@@ -1284,6 +1284,7 @@ export const it = {
       backToAll: "Tutte le integrazioni",
       searchLabel: "Cerca integrazioni",
       searchPlaceholder: "Cerca un'integrazione\u2026",
+      categoryLabel: "Categoria",
       allCategory: "Tutti",
       categories: {
         crm: "CRM",
@@ -1302,6 +1303,7 @@ export const it = {
       fieldMappingTitle: "Associazione campi",
       klaviyoPropertyLabel: "Propriet\u00e0 Klaviyo",
       selectProperty: "Seleziona una propriet\u00e0",
+      selectFormat: "Scegli il formato",
       kerdonFieldLabel: "Campo Kerdon",
       birthdate: "Data di nascita",
       dateFormatLabel: "Formato data",
@@ -1315,8 +1317,14 @@ export const it = {
         unavailable: "Klaviyo non \u00e8 raggiungibile. Riprova fra poco.",
         unknown: "Errore sconosciuto. Riprova.",
       },
+      errors: {
+        propertiesReconnect: "Riconnetti Klaviyo per caricare le propriet\u00e0.",
+        propertiesUnavailable: "Klaviyo non \u00e8 raggiungibile. Riprova fra poco.",
+        saveFailed: "Salvataggio non riuscito. Riprova.",
+        disconnectFailed: "Disconnessione non riuscita. Riprova.",
+      },
       popupBlocked: "Il popup \u00e8 stato bloccato dal browser.",
-      openInNewTab: "Apri in una nuova scheda",
+      retryPopup: "Riprova",
     },
   },
 

@@ -12,11 +12,13 @@ import {
   Select,
   List,
   InlineStack,
+  Spinner,
 } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
 import type { DateFormat } from '~/lib/integrations/values';
 import { previewLines, canSaveMapping, isValidOAuthMessage } from './IntegrationsModal';
 import type { Sample } from './IntegrationsModal';
+import { useIntegrationImport } from './useIntegrationImport';
 
 export interface KlaviyoDetailProps {
   onClose: () => void;
@@ -37,6 +39,7 @@ interface StatusData {
 
 interface PropertiesData {
   properties: Property[];
+  error?: string;
 }
 
 export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
@@ -48,15 +51,21 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
   const oauthFetcher = useFetcher<{ url: string }>();
   const connectFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const propertiesFetcher = useFetcher<PropertiesData>();
-  const saveMappingFetcher = useFetcher<{ ok: boolean }>();
-  const disconnectFetcher = useFetcher<{ ok: boolean }>();
-  const importFetcher = useFetcher<{ queued?: boolean; reason?: string }>();
+  const saveMappingFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const disconnectFetcher = useFetcher<{ ok: boolean; error?: string }>();
+
+  // Shared import hook
+  const { importFetcher, handleImport, importReason } = useIntegrationImport('klaviyo');
 
   // Local state
   const [selectedProperty, setSelectedProperty] = useState('');
-  const [dateFormat, setDateFormat] = useState<DateFormat>('auto');
+  const [dateFormat, setDateFormat] = useState<DateFormat | ''>('');
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [popupBlocked, setPopupBlocked] = useState(false);
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  const [propertiesError, setPropertiesError] = useState<string | null>(null);
+  const [saveMappingError, setSaveMappingError] = useState<string | null>(null);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const popupRef = useRef<Window | null>(null);
 
   // Load status on mount
@@ -78,13 +87,29 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     }
   }, [status, propertiesFetcher]);
 
-  // Initialize selected property and format from mapping
+  // Handle properties load errors
   useEffect(() => {
-    if (mapping) {
-      setSelectedProperty(mapping.sourceKey);
-      setDateFormat((mapping.dateFormat as DateFormat) ?? 'auto');
+    if (propertiesFetcher.data?.error) {
+      const error = propertiesFetcher.data.error;
+      if (error === 'reconnect') {
+        setPropertiesError('reconnect');
+      } else if (error === 'unavailable') {
+        setPropertiesError('unavailable');
+      }
     }
-  }, [mapping]);
+  }, [propertiesFetcher.data]);
+
+  // Initialize selected property and format from mapping (once per mapping identity)
+  const mappingIdentity = mapping ? `${mapping.sourceKey}:${mapping.dateFormat}` : null;
+  const lastMappingIdentityRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (mappingIdentity && mappingIdentity !== lastMappingIdentityRef.current) {
+      lastMappingIdentityRef.current = mappingIdentity;
+      setSelectedProperty(mapping!.sourceKey);
+      setDateFormat((mapping!.dateFormat as DateFormat) ?? 'auto');
+    }
+  }, [mappingIdentity, mapping]);
 
   // Update format when property changes
   useEffect(() => {
@@ -92,68 +117,92 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     if (property && !property.ambiguous) {
       setDateFormat(property.format);
     } else if (property && property.ambiguous) {
-      // Keep current format or set to DMY if auto
-      if (dateFormat === 'auto' || dateFormat === 'YMD') {
-        setDateFormat('DMY');
+      // For ambiguous properties without a saved mapping, require explicit choice
+      if (!mapping || mapping.sourceKey !== selectedProperty) {
+        setDateFormat('');
       }
+      // Keep current format if we have a saved mapping for this property
     }
-  }, [selectedProperty, properties]);
+  }, [selectedProperty, properties, mapping, dateFormat]);
 
-  // OAuth flow
+  // OAuth flow: open blank popup synchronously, then navigate after fetch
   const handleConnect = useCallback(() => {
+    // Open blank popup immediately (synchronously in click handler)
+    const popup = window.open('', 'klaviyo-oauth', 'width=600,height=700');
+
+    if (!popup) {
+      setPopupBlocked(true);
+      return;
+    }
+
+    popupRef.current = popup;
+    setPopupBlocked(false);
+    setOauthError(null);
+
+    // Now fetch the URL
     if (oauthFetcher.state === 'idle') {
       oauthFetcher.load('/api/integrations/klaviyo/oauth-url');
     }
   }, [oauthFetcher]);
 
+  // Navigate popup to OAuth URL after fetch
   useEffect(() => {
-    if (oauthFetcher.data?.url) {
-      const url = oauthFetcher.data.url;
-      const popup = window.open(url, 'klaviyo-oauth', 'width=600,height=700');
-
-      if (!popup) {
-        setPopupBlocked(true);
-        return;
-      }
-
-      popupRef.current = popup;
-      setPopupBlocked(false);
-      setOauthError(null);
+    if (oauthFetcher.data?.url && popupRef.current) {
+      popupRef.current.location.href = oauthFetcher.data.url;
     }
   }, [oauthFetcher.data]);
+
+  // Close popup and show error if OAuth URL fetch fails
+  useEffect(() => {
+    if (oauthFetcher.state === 'idle' && !oauthFetcher.data && popupRef.current) {
+      // Fetch failed or was cancelled
+      popupRef.current.close();
+      popupRef.current = null;
+      setOauthError('failed');
+    }
+  }, [oauthFetcher.state, oauthFetcher.data]);
 
   // Listen for OAuth callback
   useEffect(() => {
     const appOrigin = window.location.origin;
 
     const handleMessage = (event: MessageEvent) => {
-      if (!isValidOAuthMessage(event, popupRef.current, appOrigin)) {
-        return;
+      const validationResult = isValidOAuthMessage(event, popupRef.current, appOrigin);
+
+      if (validationResult.ok) {
+        // Success: send code + state to backend
+        connectFetcher.submit(
+          { code: validationResult.data.code, state: validationResult.data.state },
+          { method: 'POST', action: '/api/integrations/klaviyo/connect', encType: 'application/json' }
+        );
+        popupRef.current = null;
+      } else if (!validationResult.ok && 'error' in validationResult && validationResult.error) {
+        // Error from OAuth flow
+        setOauthError(validationResult.error);
+        popupRef.current = null;
       }
-
-      const data = event.data as { code: string; state: string };
-
-      // Send code + state to backend
-      connectFetcher.submit(
-        { code: data.code, state: data.state },
-        { method: 'POST', action: '/api/integrations/klaviyo/connect', encType: 'application/json' }
-      );
-
-      popupRef.current = null;
+      // Otherwise ignore (origin/source mismatch, etc.)
     };
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [connectFetcher]);
 
+  // Track handled connect responses to avoid infinite reloads (C1 fix)
+  const handledConnectRef = useRef<typeof connectFetcher.data>(null);
+
   // Reload data after successful connection
   useEffect(() => {
-    if (connectFetcher.data?.ok) {
-      revalidator.revalidate();
-      statusFetcher.load('/api/integrations/klaviyo');
-      setOauthError(null);
-    } else if (connectFetcher.data && !connectFetcher.data.ok) {
-      setOauthError(connectFetcher.data.error ?? 'unknown');
+    if (connectFetcher.data && connectFetcher.data !== handledConnectRef.current) {
+      handledConnectRef.current = connectFetcher.data;
+
+      if (connectFetcher.data.ok) {
+        revalidator.revalidate();
+        statusFetcher.load('/api/integrations/klaviyo');
+        setOauthError(null);
+      } else {
+        setOauthError(connectFetcher.data.error ?? 'unknown');
+      }
     }
   }, [connectFetcher.data, revalidator, statusFetcher]);
 
@@ -161,6 +210,7 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     const property = properties.find((p) => p.key === selectedProperty);
     if (!property) return;
 
+    setSaveMappingError(null);
     saveMappingFetcher.submit(
       {
         intent: 'save-mapping',
@@ -173,38 +223,79 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     );
   }, [selectedProperty, dateFormat, properties, saveMappingFetcher]);
 
+  // Track handled save-mapping responses
+  const handledSaveMappingRef = useRef<typeof saveMappingFetcher.data>(null);
+
   // Reload after saving mapping
   useEffect(() => {
-    if (saveMappingFetcher.data?.ok) {
-      statusFetcher.load('/api/integrations/klaviyo');
-      onClose();
+    if (saveMappingFetcher.data && saveMappingFetcher.data !== handledSaveMappingRef.current) {
+      handledSaveMappingRef.current = saveMappingFetcher.data;
+
+      if (saveMappingFetcher.data.ok) {
+        statusFetcher.load('/api/integrations/klaviyo');
+        onClose();
+      } else {
+        setSaveMappingError(saveMappingFetcher.data.error ?? 'unknown');
+      }
     }
   }, [saveMappingFetcher.data, statusFetcher, onClose]);
 
-  const handleDisconnect = useCallback(() => {
-    if (window.confirm(t.customers.klaviyoDetail.disconnectConfirm)) {
-      disconnectFetcher.submit(
-        { intent: 'disconnect' },
-        { method: 'POST', action: '/api/integrations/klaviyo', encType: 'application/json' }
-      );
-    }
-  }, [disconnectFetcher, t]);
+  const handleDisconnectClick = useCallback(() => {
+    setShowDisconnectConfirm(true);
+  }, []);
+
+  const handleDisconnectConfirm = useCallback(() => {
+    setShowDisconnectConfirm(false);
+    setDisconnectError(null);
+    disconnectFetcher.submit(
+      { intent: 'disconnect' },
+      { method: 'POST', action: '/api/integrations/klaviyo', encType: 'application/json' }
+    );
+  }, [disconnectFetcher]);
+
+  const handleDisconnectCancel = useCallback(() => {
+    setShowDisconnectConfirm(false);
+  }, []);
+
+  // Track handled disconnect responses to avoid infinite reloads (C1 fix)
+  const handledDisconnectRef = useRef<typeof disconnectFetcher.data>(null);
 
   // Reload after disconnect
   useEffect(() => {
-    if (disconnectFetcher.data?.ok) {
-      statusFetcher.load('/api/integrations/klaviyo');
-      setSelectedProperty('');
-      setDateFormat('auto');
+    if (disconnectFetcher.data && disconnectFetcher.data !== handledDisconnectRef.current) {
+      handledDisconnectRef.current = disconnectFetcher.data;
+
+      if (disconnectFetcher.data.ok) {
+        statusFetcher.load('/api/integrations/klaviyo');
+        setSelectedProperty('');
+        setDateFormat('');
+      } else {
+        setDisconnectError(disconnectFetcher.data.error ?? 'unknown');
+      }
     }
   }, [disconnectFetcher.data, statusFetcher]);
 
-  const handleImport = useCallback(() => {
-    importFetcher.submit(
-      {},
-      { method: 'POST', action: '/api/integrations/klaviyo/import' }
+  // Retry popup open from banner action (I6 fix)
+  const handleRetryPopup = useCallback(() => {
+    if (!oauthFetcher.data?.url) return;
+
+    const popup = window.open(oauthFetcher.data.url, 'klaviyo-oauth', 'width=600,height=700');
+    if (popup) {
+      popupRef.current = popup;
+      setPopupBlocked(false);
+    }
+  }, [oauthFetcher.data]);
+
+  // Loading state (I13 fix)
+  const isLoadingStatus = statusFetcher.state === 'loading' && !statusFetcher.data;
+
+  if (isLoadingStatus) {
+    return (
+      <BlockStack gap="400" inlineAlign="center">
+        <Spinner size="small" />
+      </BlockStack>
     );
-  }, [importFetcher]);
+  }
 
   // Not connected
   if (status === 'not_connected' || status === 'needs_reconnect') {
@@ -219,13 +310,14 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
         )}
 
         {popupBlocked && (
-          <Banner tone="warning">
-            {t.customers.klaviyoDetail.popupBlocked}{' '}
-            {oauthFetcher.data?.url && (
-              <a href={oauthFetcher.data.url} target="_blank" rel="noopener noreferrer">
-                {t.customers.klaviyoDetail.openInNewTab}
-              </a>
-            )}
+          <Banner
+            tone="warning"
+            action={{
+              content: t.customers.klaviyoDetail.retryPopup,
+              onAction: handleRetryPopup,
+            }}
+          >
+            {t.customers.klaviyoDetail.popupBlocked}
           </Banner>
         )}
 
@@ -244,11 +336,11 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
 
   // Connected
   const selectedProp = properties.find((p) => p.key === selectedProperty);
-  const previews = selectedProp ? previewLines(selectedProp.samples, dateFormat) : [];
+  const previews = selectedProp ? previewLines(selectedProp.samples, dateFormat as DateFormat) : [];
   const canSave = canSaveMapping({
     sourceKey: selectedProperty,
     ambiguous: selectedProp?.ambiguous ?? false,
-    dateFormat,
+    dateFormat: dateFormat as DateFormat,
   });
 
   return (
@@ -257,16 +349,54 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
         {t.customers.klaviyoDetail.accountLabel}: {accountName}
       </Text>
 
-      <InlineStack align="end">
-        <Button
-          variant="plain"
-          tone="critical"
-          onClick={handleDisconnect}
-          loading={disconnectFetcher.state === 'submitting'}
+      {propertiesError && (
+        <Banner tone="warning">
+          {propertiesError === 'reconnect'
+            ? t.customers.klaviyoDetail.errors.propertiesReconnect
+            : t.customers.klaviyoDetail.errors.propertiesUnavailable}
+        </Banner>
+      )}
+
+      {saveMappingError && (
+        <Banner tone="warning" onDismiss={() => setSaveMappingError(null)}>
+          {t.customers.klaviyoDetail.errors.saveFailed}
+        </Banner>
+      )}
+
+      {disconnectError && (
+        <Banner tone="warning" onDismiss={() => setDisconnectError(null)}>
+          {t.customers.klaviyoDetail.errors.disconnectFailed}
+        </Banner>
+      )}
+
+      {showDisconnectConfirm && (
+        <Banner
+          tone="warning"
+          action={{
+            content: t.common.confirm,
+            onAction: handleDisconnectConfirm,
+          }}
+          secondaryAction={{
+            content: t.common.cancel,
+            onAction: handleDisconnectCancel,
+          }}
         >
-          {t.customers.klaviyoDetail.disconnect}
-        </Button>
-      </InlineStack>
+          {t.customers.klaviyoDetail.disconnectConfirm}
+        </Banner>
+      )}
+
+      {!showDisconnectConfirm && (
+        <InlineStack align="end">
+          <Button
+            variant="plain"
+            tone="critical"
+            onClick={handleDisconnectClick}
+            loading={disconnectFetcher.state === 'submitting'}
+          >
+            {t.customers.klaviyoDetail.disconnect}
+          </Button>
+        </InlineStack>
+      )}
 
       <BlockStack gap="300">
         <Text as="h3" variant="headingSm">
@@ -281,6 +411,7 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
           ]}
           value={selectedProperty}
           onChange={setSelectedProperty}
+          disabled={propertiesFetcher.state === 'loading'}
         />
 
         <Select
@@ -294,6 +425,7 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
           <Select
             label={t.customers.klaviyoDetail.dateFormatLabel}
             options={[
+              { label: t.customers.klaviyoDetail.selectFormat, value: '' },
               { label: 'DD/MM/YYYY', value: 'DMY' },
               { label: 'MM/DD/YYYY', value: 'MDY' },
             ]}
@@ -328,7 +460,7 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
           </Button>
 
           <Button
-            onClick={handleImport}
+            onClick={() => handleImport()}
             loading={importFetcher.state === 'submitting'}
             disabled={!mapping}
           >
@@ -336,11 +468,11 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
           </Button>
         </InlineStack>
 
-        {importFetcher.data?.queued === false && importFetcher.data.reason && (
+        {importReason && (
           <Banner tone="warning">
             {t.customers.integrations.importReasons[
-              importFetcher.data.reason as keyof typeof t.customers.integrations.importReasons
-            ] ?? importFetcher.data.reason}
+              importReason as keyof typeof t.customers.integrations.importReasons
+            ] ?? importReason}
           </Banner>
         )}
       </BlockStack>

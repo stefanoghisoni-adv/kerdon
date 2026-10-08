@@ -4,8 +4,9 @@
 // (oggi solo Klaviyo), il loro stato di connessione, l'ultimo import e i conflitti
 // da risolvere.
 
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { useSearchParams } from '@remix-run/react';
 import type { ReactNode } from 'react';
+import { useIntegrationImport } from './useIntegrationImport';
 import {
   Badge,
   Banner,
@@ -175,28 +176,17 @@ interface IntegrationRowProps {
 function IntegrationRow({ integration, onManage, locale }: IntegrationRowProps) {
   const t = useT();
   const [searchParams] = useSearchParams();
-  const importFetcher = useFetcher<{ queued?: boolean; reason?: string }>();
   const { provider, status, lastRun, openConflicts } = integration;
+
+  // I8 FIX: Use shared import hook
+  const { importFetcher, handleImport, importReason } = useIntegrationImport(provider);
 
   const rowState = integrationRowState(status, lastRun);
   const isImporting = importFetcher.state !== 'idle';
   const conflictsUrl = buildConflictsUrl(searchParams.toString());
 
-  const handleImport = () => {
-    importFetcher.submit(
-      {},
-      { method: 'POST', action: `/api/integrations/${provider}/import` },
-    );
-  };
-
   // needs_reconnect: banner warning
   const showReconnectBanner = status === 'needs_reconnect';
-
-  // Import reason da mostrare
-  const importReason =
-    importFetcher.data?.queued === false && importFetcher.data.reason
-      ? importFetcher.data.reason
-      : null;
 
   return (
     <BlockStack gap="200">

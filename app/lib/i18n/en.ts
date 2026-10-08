@@ -1005,6 +1005,7 @@ export const en: typeof it = {
       backToAll: "All integrations",
       searchLabel: "Search integrations",
       searchPlaceholder: "Search for an integration…",
+      categoryLabel: "Category",
       allCategory: "All",
       categories: {
         crm: "CRM",
@@ -1023,6 +1024,7 @@ export const en: typeof it = {
       fieldMappingTitle: "Field mapping",
       klaviyoPropertyLabel: "Klaviyo property",
       selectProperty: "Select a property",
+      selectFormat: "Choose format",
       kerdonFieldLabel: "Kerdon field",
       birthdate: "Birthdate",
       dateFormatLabel: "Date format",
@@ -1036,8 +1038,14 @@ export const en: typeof it = {
         unavailable: "Klaviyo is unreachable. Try again shortly.",
         unknown: "Unknown error. Please try again.",
       },
+      errors: {
+        propertiesReconnect: "Reconnect Klaviyo to load properties.",
+        propertiesUnavailable: "Klaviyo is unreachable. Try again shortly.",
+        saveFailed: "Save failed. Please try again.",
+        disconnectFailed: "Disconnect failed. Please try again.",
+      },
       popupBlocked: "The popup was blocked by your browser.",
-      openInNewTab: "Open in a new tab",
+      retryPopup: "Retry",
     },
   },
 
