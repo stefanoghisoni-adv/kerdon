@@ -31,13 +31,23 @@ vi.mock('~/db.server', () => ({
         });
       }),
       updateMany: vi.fn(async ({ where, data }: any) => {
-        const idsToUpdate = where.id?.in || [];
+        let updated = 0;
         h.conflicts.forEach((c: any) => {
-          if (idsToUpdate.includes(c.id)) {
-            Object.assign(c, data);
-          }
+          // Handle both single id and array of ids
+          const idMatch = where.id
+            ? (where.id.in && where.id.in.includes(c.id)) || where.id === c.id
+            : true;
+
+          if (!idMatch) return;
+
+          // Check conditional fields (status, theirValue)
+          if (where.status && c.status !== where.status) return;
+          if (where.theirValue && c.theirValue !== where.theirValue) return;
+
+          Object.assign(c, data);
+          updated++;
         });
-        return { count: idsToUpdate.length };
+        return { count: updated };
       }),
     },
   },
@@ -60,6 +70,8 @@ vi.mock('~/lib/customers/birthdate-metafield', () => ({
 vi.mock('~/lib/sync/customers-write-access', () => ({
   hasCustomerWriteAccess: vi.fn((scopes: string) => scopes.includes('write_customers')),
 }));
+
+import { prisma } from '~/db.server';
 
 describe('conflicts.server', () => {
   const shopId = 'test-shop-id';
@@ -343,6 +355,79 @@ describe('conflicts.server', () => {
 
       const conflicts = h.conflicts.filter((c) => c.shopId === shopId);
       expect(conflicts.every((c) => c.status === 'open')).toBe(true);
+    });
+
+    it('does not close conflict with kept_ours if theirs value changed', async () => {
+      // Simulate a conflict whose theirs value changes between read and update
+      // by having updateMany return count: 0 (no rows updated)
+      vi.mocked(prisma.integrationConflict.updateMany).mockResolvedValueOnce({
+        count: 0,
+      } as any);
+
+      const result = await resolveConflicts(shopId, [123], 'kept_ours');
+
+      // The update should check for the original theirValue
+      expect(prisma.integrationConflict.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: '1',
+          status: 'open',
+          theirValue: '1990-01-02',
+        },
+        data: {
+          status: 'kept_ours',
+          decidedAt: expect.any(Date),
+        },
+      });
+
+      // If the value changed (count: 0), resolved should be 0
+      expect(result.resolved).toBe(0);
+      expect(result.notWritten).toEqual([]);
+    });
+
+    it('does not close conflict with used_theirs if theirs value changed', async () => {
+      // Mock the second findMany call (the re-read) to return a changed theirValue
+      vi.mocked(prisma.integrationConflict.findMany)
+        .mockResolvedValueOnce([
+          // First call: initial read
+          {
+            id: '1',
+            shopId,
+            provider: 'klaviyo',
+            customerId: 123n,
+            targetField: 'birthdate',
+            ourValue: '1990-01-01',
+            theirValue: '1990-01-02',
+            status: 'open',
+            decidedAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ])
+        .mockResolvedValueOnce([
+          // Second call: re-read shows changed value
+          {
+            id: '1',
+            shopId,
+            provider: 'klaviyo',
+            customerId: 123n,
+            targetField: 'birthdate',
+            ourValue: '1990-01-01',
+            theirValue: '1990-01-03', // Changed from '1990-01-02'
+            status: 'open',
+            decidedAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ]);
+
+      const result = await resolveConflicts(shopId, [123], 'used_theirs');
+
+      // Should not write to Shopify because value changed
+      expect(h.mockSetBirthdates).not.toHaveBeenCalled();
+
+      // Should report as notWritten
+      expect(result.resolved).toBe(0);
+      expect(result.notWritten).toEqual([123]);
     });
   });
 });

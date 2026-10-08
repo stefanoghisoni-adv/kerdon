@@ -38,7 +38,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const { customerIds, choice } = body;
 
-  if (!Array.isArray(customerIds) || !customerIds.every((id) => typeof id === 'number')) {
+  if (
+    !Array.isArray(customerIds) ||
+    !customerIds.every((id) => Number.isSafeInteger(id) && id > 0)
+  ) {
     return json({ ok: false, error: 'invalid_customer_ids' }, { status: 400 });
   }
 

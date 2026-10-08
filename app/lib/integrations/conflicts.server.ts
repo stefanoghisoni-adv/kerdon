@@ -4,6 +4,7 @@
 // in blocco. `used_theirs` scrive su Shopify (chi fallisce resta `open`);
 // `kept_ours` chiude senza scrivere.
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '~/db.server';
 import { birthdateMetafieldOf } from '~/lib/customers/birthdate-metafield';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
@@ -30,15 +31,12 @@ export async function listConflicts(
   shopId: string,
   opts?: { status?: 'open' },
 ): Promise<ConflictRow[]> {
-  const whereClause: any = {
+  const whereClause: Prisma.IntegrationConflictWhereInput = {
     shopId,
     provider: 'klaviyo',
     targetField: 'birthdate',
+    ...(opts?.status === 'open' && { status: 'open' }),
   };
-
-  if (opts?.status === 'open') {
-    whereClause.status = 'open';
-  }
 
   const conflicts = await prisma.integrationConflict.findMany({
     where: whereClause,
@@ -105,19 +103,26 @@ export async function resolveConflicts(
   const notWritten: number[] = [];
 
   if (choice === 'kept_ours') {
-    // Chiudi i conflitti senza scrivere
+    // Chiudi i conflitti senza scrivere, ma solo se il valore non e' cambiato
     const now = new Date();
-    await prisma.integrationConflict.updateMany({
-      where: {
-        id: { in: conflicts.map((c) => c.id) },
-      },
-      data: {
-        status: 'kept_ours',
-        decidedAt: now,
-      },
-    });
+    const updates = await Promise.all(
+      conflicts.map((c) =>
+        prisma.integrationConflict.updateMany({
+          where: {
+            id: c.id,
+            status: 'open',
+            theirValue: c.theirValue,
+          },
+          data: {
+            status: 'kept_ours',
+            decidedAt: now,
+          },
+        }),
+      ),
+    );
 
-    return { resolved: conflicts.length, notWritten: [] };
+    const resolved = updates.reduce((sum, result) => sum + result.count, 0);
+    return { resolved, notWritten: [] };
   }
 
   // choice === 'used_theirs': scriviamo su Shopify
@@ -143,8 +148,30 @@ export async function resolveConflicts(
     };
   }
 
-  // Prepara le scritture
-  const entries = conflicts.map((c) => ({
+  // Ri-leggi i conflitti per verificare che i valori non siano cambiati
+  const freshConflicts = await prisma.integrationConflict.findMany({
+    where: {
+      id: { in: conflicts.map((c) => c.id) },
+      status: 'open',
+    },
+  });
+
+  // Filtra i conflitti il cui valore e' cambiato
+  const unchanged = conflicts.filter((original) => {
+    const fresh = freshConflicts.find((f) => f.id === original.id);
+    return fresh && fresh.theirValue === original.theirValue;
+  });
+
+  if (unchanged.length === 0) {
+    // Tutti i valori sono cambiati: nessuno da scrivere
+    return {
+      resolved: 0,
+      notWritten: conflicts.map((c) => Number(c.customerId)),
+    };
+  }
+
+  // Prepara le scritture solo per i valori invariati
+  const entries = unchanged.map((c) => ({
     customerId: Number(c.customerId),
     date: c.theirValue,
   }));
@@ -155,23 +182,33 @@ export async function resolveConflicts(
   // Raccogli i falliti
   const failed = new Set(result.failed.map((f) => f.customerId));
 
-  // Chiudi i riusciti
-  const succeeded = conflicts.filter((c) => !failed.has(Number(c.customerId)));
-  if (succeeded.length > 0) {
-    const now = new Date();
-    await prisma.integrationConflict.updateMany({
-      where: {
-        id: { in: succeeded.map((c) => c.id) },
-      },
-      data: {
-        status: 'used_theirs',
-        decidedAt: now,
-      },
-    });
-  }
+  // Chiudi solo i riusciti, condizionale sul valore non cambiato
+  const toClose = unchanged.filter((c) => !failed.has(Number(c.customerId)));
+  const now = new Date();
+  const updates = await Promise.all(
+    toClose.map((c) =>
+      prisma.integrationConflict.updateMany({
+        where: {
+          id: c.id,
+          status: 'open',
+          theirValue: c.theirValue,
+        },
+        data: {
+          status: 'used_theirs',
+          decidedAt: now,
+        },
+      }),
+    ),
+  );
 
-  // I falliti restano open
+  const resolved = updates.reduce((sum, result) => sum + result.count, 0);
+
+  // I falliti e i cambiati restano open
+  const changed = conflicts.filter(
+    (c) => !unchanged.find((u) => u.id === c.id),
+  );
   notWritten.push(...result.failed.map((f) => f.customerId));
+  notWritten.push(...changed.map((c) => Number(c.customerId)));
 
-  return { resolved: succeeded.length, notWritten };
+  return { resolved, notWritten };
 }

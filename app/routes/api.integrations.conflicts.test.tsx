@@ -140,6 +140,20 @@ describe('api.integrations.conflicts', () => {
       expect(data).toEqual({ ok: false, error: 'invalid_customer_ids' });
     });
 
+    it('rejects float customer IDs', async () => {
+      const request = new Request('https://test.com/api/integrations/conflicts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerIds: [123, 456.5, 789], choice: 'kept_ours' }),
+      });
+
+      const response = await action({ request, params: {}, context: {} });
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data).toEqual({ ok: false, error: 'invalid_customer_ids' });
+    });
+
     it('rejects invalid choice', async () => {
       const request = new Request('https://test.com/api/integrations/conflicts', {
         method: 'POST',
