@@ -1289,20 +1289,31 @@ export const it = {
       /** Formato: "Nostra: <data> · Klaviyo: <data>". */
       ourValue: (date: string) => `Nostra: ${date}`,
       theirValue: (date: string) => `Klaviyo: ${date}`,
+      /** Data non indicata nel nostro sistema. */
+      notSet: "non indicata",
       /** Azioni di riga. */
       keepOurs: "Tieni il nostro",
       useTheirs: "Usa Klaviyo",
       /** Azioni bulk. */
       bulkKeepOurs: "Tieni il nostro",
       bulkUseTheirs: "Usa Klaviyo",
-      /** Toast di successo. */
-      resolved: (n: number) =>
-        n === 1 ? '1 data aggiornata' : `${n} date aggiornate`,
+      /** Toast di successo per kept_ours. */
+      resolvedKeptOurs: (n: number) =>
+        n === 0 ? 'Nessun conflitto da risolvere'
+        : n === 1 ? '1 conflitto risolto'
+        : `${n} conflitti risolti`,
+      /** Toast di successo per used_theirs. */
+      resolvedUsedTheirs: (n: number) =>
+        n === 0 ? 'Nessun conflitto da aggiornare'
+        : n === 1 ? '1 data aggiornata'
+        : `${n} date aggiornate`,
       /** Banner per righe non scritte. */
       notWrittenWarning: (n: number) =>
         n === 1
           ? 'Non è stato possibile aggiornare 1 cliente. Riprova.'
           : `Non è stato possibile aggiornare ${n} clienti. Riprova.`,
+      /** Banner per errore generico. */
+      genericError: "Non è stato possibile completare l'operazione. Riprova.",
       /** Tabella vuota nella vista conflitti. */
       noConflicts: "Nessun dato diverso da risolvere.",
     },

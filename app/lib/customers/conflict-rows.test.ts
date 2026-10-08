@@ -3,7 +3,7 @@
 // Test per le funzioni pure di gestione dei conflitti nella tabella Clienti.
 
 import { describe, it, expect } from 'vitest';
-import { conflictRows, parseViewParam } from './conflict-rows';
+import { conflictRows, parseViewParam, effectiveView } from './conflict-rows';
 
 describe('parseViewParam', () => {
   it('restituisce "all" quando view non è presente', () => {
@@ -24,6 +24,31 @@ describe('parseViewParam', () => {
   it('preserva altri parametri', () => {
     const params = new URLSearchParams('from=2024-01-01&to=2024-12-31&view=conflicts');
     expect(parseViewParam(params)).toBe('conflicts');
+    // Verifica che gli altri parametri siano ancora presenti
+    expect(params.get('from')).toBe('2024-01-01');
+    expect(params.get('to')).toBe('2024-12-31');
+  });
+});
+
+describe('effectiveView', () => {
+  it('restituisce "conflicts" quando richiesto e ci sono conflitti', () => {
+    const params = new URLSearchParams('view=conflicts');
+    expect(effectiveView(params, 5)).toBe('conflicts');
+  });
+
+  it('restituisce "all" quando richiesto conflicts ma non ci sono conflitti', () => {
+    const params = new URLSearchParams('view=conflicts');
+    expect(effectiveView(params, 0)).toBe('all');
+  });
+
+  it('restituisce "all" quando view=all', () => {
+    const params = new URLSearchParams('view=all');
+    expect(effectiveView(params, 5)).toBe('all');
+  });
+
+  it('restituisce "all" quando view non è presente', () => {
+    const params = new URLSearchParams('');
+    expect(effectiveView(params, 5)).toBe('all');
   });
 });
 
@@ -129,6 +154,28 @@ describe('conflictRows', () => {
         email: 'nessunnome@example.com',
         ours: '1990-01-01',
         theirs: '1990-01-02',
+        provider: 'klaviyo',
+      },
+    ]);
+  });
+
+  it('gestisce ours: null (data non indicata nel nostro sistema)', () => {
+    const conflicts = [
+      { customerId: 1, field: 'birthdate', ours: null, theirs: '1990-01-01', provider: 'klaviyo' },
+    ];
+    const customers = [
+      { customerId: 1, firstName: 'Mario', email: 'mario@example.com' },
+    ];
+
+    const result = conflictRows(conflicts, customers);
+
+    expect(result).toEqual([
+      {
+        customerId: 1,
+        firstName: 'Mario',
+        email: 'mario@example.com',
+        ours: null,
+        theirs: '1990-01-01',
         provider: 'klaviyo',
       },
     ]);

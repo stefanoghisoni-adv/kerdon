@@ -8,7 +8,7 @@
 export interface RawConflict {
   customerId: number;
   field: string;
-  ours: string;
+  ours: string | null;
   theirs: string;
   provider: string;
 }
@@ -29,7 +29,7 @@ export interface ConflictRow {
   customerId: number;
   firstName: string | null;
   email: string | null;
-  ours: string;
+  ours: string | null;
   theirs: string;
   provider: string;
 }
@@ -43,6 +43,22 @@ export interface ConflictRow {
 export function parseViewParam(params: URLSearchParams): 'all' | 'conflicts' {
   const view = params.get('view');
   return view === 'conflicts' ? 'conflicts' : 'all';
+}
+
+/**
+ * Vista effettiva: la vista conflitti si mostra solo se richiesta E ci sono conflitti.
+ * Altrimenti, si mostra «Tutti» per evitare dead-end.
+ *
+ * @param params URLSearchParams dalla query string
+ * @param openConflictsCount Numero di conflitti aperti
+ * @returns 'all' | 'conflicts'
+ */
+export function effectiveView(
+  params: URLSearchParams,
+  openConflictsCount: number,
+): 'all' | 'conflicts' {
+  const requested = parseViewParam(params);
+  return requested === 'conflicts' && openConflictsCount > 0 ? 'conflicts' : 'all';
 }
 
 /**

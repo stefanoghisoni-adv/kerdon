@@ -1010,20 +1010,31 @@ export const en: typeof it = {
       /** Format: "Ours: <date> · Klaviyo: <date>". */
       ourValue: (date: string) => `Ours: ${date}`,
       theirValue: (date: string) => `Klaviyo: ${date}`,
+      /** Date not set in our system. */
+      notSet: "not set",
       /** Row actions. */
       keepOurs: "Keep ours",
       useTheirs: "Use Klaviyo",
       /** Bulk actions. */
       bulkKeepOurs: "Keep ours",
       bulkUseTheirs: "Use Klaviyo",
-      /** Success toast. */
-      resolved: (n: number) =>
-        n === 1 ? '1 date updated' : `${n} dates updated`,
+      /** Success toast for kept_ours. */
+      resolvedKeptOurs: (n: number) =>
+        n === 0 ? 'No conflicts to resolve'
+        : n === 1 ? '1 conflict resolved'
+        : `${n} conflicts resolved`,
+      /** Success toast for used_theirs. */
+      resolvedUsedTheirs: (n: number) =>
+        n === 0 ? 'No conflicts to update'
+        : n === 1 ? '1 date updated'
+        : `${n} dates updated`,
       /** Banner for rows not written. */
       notWrittenWarning: (n: number) =>
         n === 1
           ? 'Could not update 1 customer. Please try again.'
           : `Could not update ${n} customers. Please try again.`,
+      /** Banner for generic error. */
+      genericError: "Could not complete the operation. Please try again.",
       /** Empty table in conflicts view. */
       noConflicts: "No different values to resolve.",
     },
