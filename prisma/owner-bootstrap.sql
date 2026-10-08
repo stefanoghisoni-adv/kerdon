@@ -1027,7 +1027,7 @@ CREATE UNIQUE INDEX "integration_connections_shop_id_provider_key" ON "integrati
 CREATE UNIQUE INDEX "integration_field_mappings_shop_id_provider_target_field_key" ON "integration_field_mappings"("shop_id", "provider", "target_field");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "integration_conflicts_shop_id_provider_shopify_customer_id_target_field_key" ON "integration_conflicts"("shop_id", "provider", "shopify_customer_id", "target_field");
+CREATE UNIQUE INDEX "integration_conflicts_shop_provider_customer_field_key" ON "integration_conflicts"("shop_id", "provider", "shopify_customer_id", "target_field");
 
 -- CreateIndex
 CREATE INDEX "integration_conflicts_shop_id_status_idx" ON "integration_conflicts"("shop_id", "status");

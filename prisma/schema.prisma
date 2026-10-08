@@ -1812,7 +1812,7 @@ model IntegrationConflict {
   updatedAt        DateTime  @updatedAt @map("updated_at")
   shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-  @@unique([shopId, provider, customerId, targetField])
+  @@unique([shopId, provider, customerId, targetField], map: "integration_conflicts_shop_provider_customer_field_key")
   @@index([shopId, status])
   @@map("integration_conflicts")
 }
