@@ -1258,6 +1258,28 @@ export const it = {
       label: "Conserva per",
       option: (days: number) => `${days} giorni`,
     },
+    integrations: {
+      title: "Integrazioni",
+      manage: "Gestisci",
+      noIntegrations: "Collega integrazioni per importare dati dei clienti da altre piattaforme.",
+      lastImport: (date: string, filled: number) =>
+        `Ultimo import: ${date} \u00b7 ${filled} ${filled === 1 ? 'campo completato' : 'campi completati'}`,
+      conflicts: (n: number) =>
+        n === 1 ? '1 dato diverso da Klaviyo' : `${n} dati diversi da Klaviyo`,
+      importData: "Importa dati",
+      reconnect: "Riconnetti",
+      statusConnected: "Collegata",
+      statusNotConnected: "Da collegare",
+      statusNeedsReconnect: "Riconnetti",
+      /** Motivi per cui l'import non parte. */
+      importReasons: {
+        already_running: "Un import \u00e8 gi\u00e0 in corso.",
+        no_mapping: "Configura quale campo importare prima di avviare l'import.",
+        not_connected: "Collega l'integrazione per importare i dati.",
+        no_write_access: "L'app non ha i permessi per scrivere i dati dei clienti. Riapri l'app per concederli.",
+        plan: "Aggiorna il piano per importare i dati dei clienti.",
+      },
+    },
   },
 
   // La proposta di configurazione avanzata, in dashboard.

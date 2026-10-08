@@ -979,6 +979,28 @@ export const en: typeof it = {
       label: "Keep for",
       option: (days: number) => `${days} days`,
     },
+    integrations: {
+      title: "Integrations",
+      manage: "Manage",
+      noIntegrations: "Connect integrations to import customer data from other platforms.",
+      lastImport: (date: string, filled: number) =>
+        `Last import: ${date} \u00b7 ${filled} ${filled === 1 ? 'field filled' : 'fields filled'}`,
+      conflicts: (n: number) =>
+        n === 1 ? '1 different value from Klaviyo' : `${n} different values from Klaviyo`,
+      importData: "Import data",
+      reconnect: "Reconnect",
+      statusConnected: "Connected",
+      statusNotConnected: "Not connected",
+      statusNeedsReconnect: "Reconnect",
+      /** Reasons why import doesn't start. */
+      importReasons: {
+        already_running: "An import is already running.",
+        no_mapping: "Configure which field to import before starting the import.",
+        not_connected: "Connect the integration to import data.",
+        no_write_access: "The app doesn't have permission to write customer data. Reopen the app to grant it.",
+        plan: "Upgrade your plan to import customer data.",
+      },
+    },
   },
 
   advancedSetup: {

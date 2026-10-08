@@ -22,6 +22,8 @@ import {
 import { loadCustomersReport, type CustomersReport } from './customers.server';
 import { customerMetafieldsUrl } from '~/utils/admin-page';
 import type { ServerTiming } from '~/lib/timing/server-timing';
+import { connectionStatus } from '~/lib/integrations/connections.server';
+import { prisma } from '~/db.server';
 
 export interface CustomerDefinition {
   key: string;
@@ -66,10 +68,25 @@ export interface BirthdateData {
   dismissedFor: string | null;
 }
 
+export interface IntegrationStatus {
+  provider: 'klaviyo';
+  status: 'connected' | 'not_connected' | 'needs_reconnect';
+  accountName?: string | null;
+  mapping: { sourceKey: string; dateFormat: string } | null;
+  lastRun: {
+    status: 'completed' | 'interrupted';
+    finishedAt: string | null;
+    counters: { filled?: number; conflicts?: number; [key: string]: unknown };
+  } | null;
+  openConflicts: number;
+}
+
 export interface CustomersPageData {
   report: CustomersReport;
   /** Il riquadro del campo "Data di nascita". */
   birthdate: BirthdateData;
+  /** Le integrazioni disponibili. null se il piano non include clienti. */
+  integrations: IntegrationStatus[] | null;
 }
 
 /**
@@ -155,10 +172,71 @@ export function startCustomersPageData(opts: {
     },
   );
 
-  return Promise.all([report, birthdate]).then(([r, b]) => {
+  // Le integrazioni disponibili (oggi solo Klaviyo).
+  const integrations: Promise<IntegrationStatus[]> = measure('integrations', async () => {
+    const provider = 'klaviyo' as const;
+    const { status: rawStatus, accountName } = await connectionStatus(opts.shop.id);
+
+    // Mappa lo status da connectionStatus a quello atteso da IntegrationStatus
+    const status: 'connected' | 'not_connected' | 'needs_reconnect' =
+      rawStatus === 'connected'
+        ? 'connected'
+        : rawStatus === 'needs_reconnect'
+        ? 'needs_reconnect'
+        : 'not_connected';
+
+    const mappingRow = await prisma.integrationFieldMapping.findUnique({
+      where: {
+        shopId_provider_targetField: {
+          shopId: opts.shop.id,
+          provider,
+          targetField: 'birthdate',
+        },
+      },
+    });
+
+    const mapping = mappingRow
+      ? { sourceKey: mappingRow.sourceKey, dateFormat: mappingRow.dateFormat ?? 'auto' }
+      : null;
+
+    const lastRunRow = await prisma.integrationImportRun.findFirst({
+      where: {
+        shopId: opts.shop.id,
+        provider,
+        status: { in: ['completed', 'interrupted'] },
+      },
+      orderBy: { startedAt: 'desc' },
+    });
+
+    const lastRun = lastRunRow
+      ? {
+          status: lastRunRow.status as 'completed' | 'interrupted',
+          finishedAt: lastRunRow.finishedAt?.toISOString() ?? null,
+          counters: lastRunRow.counters as { filled?: number; conflicts?: number; [key: string]: unknown },
+        }
+      : null;
+
+    const openConflicts = await prisma.integrationConflict.count({
+      where: {
+        shopId: opts.shop.id,
+        provider,
+        status: 'open',
+      },
+    });
+
+    return [{ provider, status, accountName, mapping, lastRun, openConflicts }];
+  }).catch((error) => {
+    console.warn(
+      '[customers] integrazioni non leggibili:',
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+    return [];
+  });
+
+  return Promise.all([report, birthdate, integrations]).then(([r, b, i]) => {
     // Queste fasi finiscono dopo che la risposta e' partita, quindi non
     // possono stare nell'header: si scrivono nei log, una riga per apertura.
     if (opts.timing) console.info('[customers] tempi:', opts.timing.summary());
-    return { report: r, birthdate: b };
+    return { report: r, birthdate: b, integrations: i };
   });
 }

@@ -58,6 +58,7 @@ import {
 } from '~/components/Customers/BirthdateMetafieldCard';
 import { BirthdateStatusRow } from '~/components/Customers/BirthdateStatusRow';
 import { ExtraFieldsCard } from '~/components/Customers/ExtraFieldsCard';
+import { IntegrationsCard } from '~/components/Customers/IntegrationsCard';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   BIRTHDATE_METAFIELD_KEY,
@@ -166,6 +167,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // sincronizza i clienti: senza, il campo non arriverebbe da nessuna
         // parte e il merchant lo compilerebbe per niente.
         birthdate: null,
+        // Le integrazioni: null se il piano non include clienti.
+        integrations: null,
       };
 
   return defer(
@@ -204,6 +207,18 @@ function customerHeadings(t: ReturnType<typeof useT>): IndexTableProps['headings
 interface CustomersPageView {
   report: CustomersReport;
   birthdate: BirthdateData | null;
+  integrations: Array<{
+    provider: 'klaviyo';
+    status: 'connected' | 'not_connected' | 'needs_reconnect';
+    accountName?: string | null;
+    mapping: { sourceKey: string; dateFormat: string } | null;
+    lastRun: {
+      status: 'completed' | 'interrupted';
+      finishedAt: string | null;
+      counters: { filled?: number; conflicts?: number; [key: string]: unknown };
+    } | null;
+    openConflicts: number;
+  }> | null;
 }
 
 /**
@@ -330,6 +345,7 @@ function CustomersContent({
 }) {
   const { rows, currency, unavailable, lifetimeCustomers } = view.report;
   const birthdate = view.birthdate;
+  const integrations = view.integrations;
   const t = useT();
   const locale = useLocale();
   // Quale riga ha appena chiesto "Risolvi problemi": la pagina dei prodotti
@@ -713,11 +729,18 @@ function CustomersContent({
             <TablePagination total={matching.length} page={page} onPage={setPage} perPage={CUSTOMERS_PER_PAGE} />
           </Card>
 
-          {birthdate && notice.view === 'status' && (
-            <ExtraFieldsCard>
-              <BirthdateStatusRow active={birthdate.state === 'in_use'} onOpen={notice.open} />
-            </ExtraFieldsCard>
-          )}
+          <BlockStack gap="400">
+            {birthdate && notice.view === 'status' && (
+              <ExtraFieldsCard>
+                <BirthdateStatusRow active={birthdate.state === 'in_use'} onOpen={notice.open} />
+              </ExtraFieldsCard>
+            )}
+            <IntegrationsCard
+              integrations={integrations}
+              upgradePlan={upgradePlan}
+              scrollHeight="200px"
+            />
+          </BlockStack>
           </InlineGrid>
         )}
     </>
