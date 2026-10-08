@@ -1630,6 +1630,135 @@ export class ShopifyAPIClient {
   }
 
   /**
+   * Riempie la data di nascita SOLO dove Shopify non ne ha ancora una.
+   *
+   * E' la scrittura dell'import da un provider esterno: "vuoto" lo dice il
+   * database del merchant, che puo' essere indietro rispetto a Shopify. Con
+   * `compareDigest: null` e' Shopify stesso a garantire che il metafield non
+   * esista al momento della scrittura; se esiste, la riga torna in `present`
+   * e chi chiama decide (di solito: rilegge il valore e apre un conflitto).
+   * Sovrascrivere resta compito di `setCustomerBirthdates`, usata solo quando
+   * il merchant sceglie esplicitamente il valore del provider.
+   *
+   * `metafieldsSet` e' atomico: con un solo rifiuto nel lotto non si salva
+   * niente. Chi e' stato rifiutato esce dal lotto, il resto si rimanda.
+   */
+  async fillCustomerBirthdatesIfAbsent(
+    entries: readonly { customerId: number; date: string }[],
+    field: { namespace: string; key: string; type: string } = BIRTHDATE_METAFIELD,
+  ): Promise<{
+    written: number[];
+    present: number[];
+    failed: { customerId: number; reason: string }[];
+  }> {
+    const written: number[] = [];
+    const present: number[] = [];
+    const failed: { customerId: number; reason: string }[] = [];
+    const BATCH = 25;
+
+    for (let i = 0; i < entries.length; i += BATCH) {
+      let batch = entries.slice(i, i + BATCH);
+      // Termina: ogni giro o esce, o toglie almeno un cliente dal lotto.
+      while (batch.length > 0) {
+        const data = await this.graphql<{
+          metafieldsSet: {
+            metafields: { id: string }[] | null;
+            userErrors: { field: string[] | null; message: string; code: string | null }[];
+          } | null;
+        }>(
+          `mutation FillCustomerBirthdates($metafields: [MetafieldsSetInput!]!) {
+            metafieldsSet(metafields: $metafields) {
+              metafields { id }
+              userErrors { field message code }
+            }
+          }`,
+          {
+            metafields: batch.map((entry) => ({
+              ownerId: `gid://shopify/Customer/${entry.customerId}`,
+              namespace: field.namespace,
+              key: field.key,
+              type: field.type,
+              value: entry.date,
+              compareDigest: null,
+            })),
+          },
+        );
+
+        const userErrors = data.metafieldsSet?.userErrors ?? [];
+        if (userErrors.length === 0) {
+          for (const entry of batch) written.push(entry.customerId);
+          break;
+        }
+
+        const out = new Set<number>();
+        let wholeBatch: string | null = null;
+        for (const error of userErrors) {
+          const indice = indiceDelRifiuto(error.field);
+          const entry = indice !== null ? batch[indice] : undefined;
+          if (!entry) {
+            wholeBatch = error.message;
+            continue;
+          }
+          if (out.has(entry.customerId)) continue;
+          out.add(entry.customerId);
+          // Il metafield c'e' gia': il confronto col digest null non regge.
+          if (error.code === 'STALE_OBJECT' || error.code === 'INVALID_COMPARE_DIGEST') {
+            present.push(entry.customerId);
+          } else {
+            failed.push({ customerId: entry.customerId, reason: error.message });
+          }
+        }
+        if (wholeBatch !== null) {
+          for (const entry of batch) {
+            if (!out.has(entry.customerId)) failed.push({ customerId: entry.customerId, reason: wholeBatch });
+          }
+          break;
+        }
+        batch = batch.filter((entry) => !out.has(entry.customerId));
+      }
+    }
+
+    return { written, present, failed };
+  }
+
+  /**
+   * La data di nascita che Shopify tiene ADESSO per alcuni clienti.
+   *
+   * Un cliente che non torna (cancellato, non leggibile) manca dalla mappa;
+   * uno senza metafield c'e' con `null`.
+   */
+  async getCustomerBirthdateValues(
+    customerIds: readonly number[],
+    field: { namespace: string; key: string } = BIRTHDATE_METAFIELD,
+  ): Promise<Map<number, string | null>> {
+    const values = new Map<number, string | null>();
+    const CHUNK = 100;
+    for (let i = 0; i < customerIds.length; i += CHUNK) {
+      const chunk = customerIds.slice(i, i + CHUNK);
+      const data = await this.graphql<{
+        nodes: ({ id: string; metafield: { value: string } | null } | null)[];
+      }>(
+        `query CustomerBirthdateValues($ids: [ID!]!, $namespace: String!, $key: String!) {
+          nodes(ids: $ids) {
+            ... on Customer { id metafield(namespace: $namespace, key: $key) { value } }
+          }
+        }`,
+        {
+          ids: chunk.map((id) => `gid://shopify/Customer/${id}`),
+          namespace: field.namespace,
+          key: field.key,
+        },
+      );
+      for (const node of data.nodes ?? []) {
+        const id = gidToId(node?.id);
+        if (id === null || !node) continue;
+        values.set(id, node.metafield?.value ?? null);
+      }
+    }
+    return values;
+  }
+
+  /**
    * Un ordine con TUTTE le sue righe, e il bit che dice se ci siamo riusciti.
    *
    * Le righe si esauriscono qui dentro: `lines_complete` a `true` e' l'unica

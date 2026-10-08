@@ -94,6 +94,11 @@ prova.describe('integrazione Klaviyo', () => {
           match: 'SetCustomerBirthdates',
           body: { data: { metafieldsSet: { metafields: [{ id: 'gid://shopify/Metafield/1' }], userErrors: [] } } },
         },
+        // L'import riempie solo dove Shopify non ha gia' la data.
+        {
+          match: 'FillCustomerBirthdates',
+          body: { data: { metafieldsSet: { metafields: [{ id: 'gid://shopify/Metafield/1' }], userErrors: [] } } },
+        },
       ],
       databaseMerchant: {
         customers: [
@@ -214,9 +219,12 @@ prova.describe('integrazione Klaviyo', () => {
     expect(giro?.status).toBe('completed');
     expect(giro?.counters).toMatchObject({ filled: 1, conflicts: 1, skippedNoMatch: 2 });
 
-    // Il cliente vuoto e' stato riempito su Shopify, e solo lui.
+    // Il cliente vuoto e' stato riempito su Shopify, e solo lui; e solo se
+    // Shopify non aveva gia' una data (compareDigest null). Nessuna
+    // sovrascrittura durante l'import.
     const dopoImport = await cosaHannoVisto(request);
-    const scritture = dopoImport.adminLog.filter((c) => c.query.includes('SetCustomerBirthdates'));
+    expect(dopoImport.adminLog.filter((c) => c.query.includes('SetCustomerBirthdates'))).toEqual([]);
+    const scritture = dopoImport.adminLog.filter((c) => c.query.includes('FillCustomerBirthdates'));
     expect(scritture.map((c) => c.variables)).toEqual([
       {
         metafields: [
@@ -226,6 +234,7 @@ prova.describe('integrazione Klaviyo', () => {
             key: 'birth_date',
             type: 'date',
             value: '1988-12-25',
+            compareDigest: null,
           },
         ],
       },

@@ -54,7 +54,15 @@ vi.mock('~/db.server', () => {
         })),
     ),
     $executeRaw: vi.fn(
-      async (_s: TemplateStringsArray, _id: string, _shop: string, _provider: string, customerId: string, ours: string | null, theirs: string) => {
+      async (s: TemplateStringsArray, ...args: any[]) => {
+        if (s.join('').includes('DELETE')) {
+          // closeOpenConflicts: (shop, provider, ids)
+          for (const id of args[2] as string[]) {
+            if (stato.conflicts.get(Number(id))?.status === 'open') stato.conflicts.delete(Number(id));
+          }
+          return 1;
+        }
+        const [, , , customerId, ours, theirs] = args as [string, string, string, string, string | null, string];
         const prima = stato.conflicts.get(Number(customerId));
         if (prima && prima.status !== 'open' && prima.theirValue === theirs) return 1;
         stato.conflicts.set(Number(customerId), { status: 'open', theirValue: theirs, ourValue: ours, decidedAt: null });
@@ -121,7 +129,8 @@ import { enqueueSyncRequest } from '~/lib/queue/queue-store.server';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const setCustomerBirthdates = vi.fn();
+const fillIfAbsent = vi.fn();
+const getCustomerBirthdateValues = vi.fn(async () => new Map<number, string | null>());
 
 function profilo(id: string, email: string, birthday: unknown) {
   return { id, email, phone: null, countryCode: null, shopifyCustomerId: null, properties: { birthday } };
@@ -217,8 +226,15 @@ beforeEach(() => {
   stato.conflicts.set(4, { status: 'kept_ours', theirValue: '1971-02-02', ourValue: '19700101', decidedAt: new Date() });
   (findPlanByName as any).mockResolvedValue({ customersSyncEnabled: true, maxCustomers: 4 });
   (connectionStatus as any).mockResolvedValue({ status: 'connected', accountName: 'Acme' });
-  setCustomerBirthdates.mockImplementation(async (entries: unknown[]) => ({ written: entries.length, errors: [], failed: [] }));
-  (ShopifyAPIClient.forShop as any).mockResolvedValue({ setCustomerBirthdates });
+  fillIfAbsent.mockImplementation(async (entries: Array<{ customerId: number }>) => ({
+    written: entries.map((e) => e.customerId),
+    present: [],
+    failed: [],
+  }));
+  (ShopifyAPIClient.forShop as any).mockResolvedValue({
+    fillCustomerBirthdatesIfAbsent: fillIfAbsent,
+    getCustomerBirthdateValues,
+  });
   (listProfiles as any).mockImplementation(async (_t: string, cursor: string | null) => {
     if (cursor === null) {
       return {
@@ -287,8 +303,8 @@ describe('processIntegrationImport', () => {
     nuovoRun();
     await processIntegrationImport('shop-1', opzioni());
 
-    expect(setCustomerBirthdates).toHaveBeenCalledTimes(1);
-    expect(setCustomerBirthdates).toHaveBeenCalledWith([{ customerId: 1, date: '1985-04-23' }], {
+    expect(fillIfAbsent).toHaveBeenCalledTimes(1);
+    expect(fillIfAbsent).toHaveBeenCalledWith([{ customerId: 1, date: '1985-04-23' }], {
       namespace: 'facts',
       key: 'birth_date',
       type: 'date',
@@ -320,7 +336,7 @@ describe('processIntegrationImport', () => {
     nuovoRun();
     await processIntegrationImport('shop-1', opzioni());
 
-    const scritti = setCustomerBirthdates.mock.calls.flatMap((c) => c[0] as Array<{ customerId: number }>);
+    const scritti = fillIfAbsent.mock.calls.flatMap((c) => c[0] as Array<{ customerId: number }>);
     expect(scritti.map((e) => e.customerId)).not.toContain(5);
     expect(stato.conflicts.has(5)).toBe(false);
   });
@@ -330,12 +346,12 @@ describe('processIntegrationImport', () => {
     nuovoRun();
     await processIntegrationImport('shop-1', opzioni());
 
-    const scritti = setCustomerBirthdates.mock.calls.flatMap((c) => c[0] as Array<{ customerId: number }>);
+    const scritti = fillIfAbsent.mock.calls.flatMap((c) => c[0] as Array<{ customerId: number }>);
     expect(scritti.map((e) => e.customerId).sort()).toEqual([1, 5]);
   });
 
   it('scrittura rifiutata da Shopify: contata come non scritta', async () => {
-    setCustomerBirthdates.mockResolvedValue({ written: 0, errors: ['no'], failed: [{ customerId: 1, reason: 'no' }] });
+    fillIfAbsent.mockResolvedValue({ written: [], present: [], failed: [{ customerId: 1, reason: 'no' }] });
     nuovoRun();
     await processIntegrationImport('shop-1', opzioni());
 
@@ -356,7 +372,7 @@ describe('processIntegrationImport', () => {
 
     expect(stato.runs[0]).toMatchObject({ status: 'completed' });
     expect(stato.runs[0].counters).toMatchObject({ unreadable: 1, skippedAmbiguous: 1, filled: 0 });
-    expect(setCustomerBirthdates).not.toHaveBeenCalled();
+    expect(fillIfAbsent).not.toHaveBeenCalled();
   });
 
   it('Klaviyo rifiuta il token: da ricollegare e run interrotto', async () => {
@@ -397,6 +413,82 @@ describe('processIntegrationImport', () => {
     expect(await processIntegrationImport('shop-1', opzioni({ signal: controller.signal, saveCursor }))).toBe('paused');
     expect(saveCursor).not.toHaveBeenCalled();
     expect(stato.runs[0].cursor).toBe(PAGINA_2);
+  });
+
+  it('la scrittura dell\'import passa sempre dal riempire-solo-se-vuoto, mai dalla sovrascrittura', async () => {
+    nuovoRun();
+    await processIntegrationImport('shop-1', opzioni());
+    const client = await (ShopifyAPIClient.forShop as any).mock.results[0].value;
+    expect(client.setCustomerBirthdates).toBeUndefined();
+    expect(fillIfAbsent).toHaveBeenCalled();
+  });
+
+  it('Shopify ha gia una data diversa (tabella del merchant indietro): conflitto col valore di Shopify, nessuna scrittura', async () => {
+    fillIfAbsent.mockResolvedValue({ written: [], present: [1], failed: [] });
+    getCustomerBirthdateValues.mockResolvedValue(new Map([[1, '1984-01-01']]));
+    nuovoRun();
+    await processIntegrationImport('shop-1', opzioni());
+
+    expect(getCustomerBirthdateValues).toHaveBeenCalledWith([1], { namespace: 'facts', key: 'birth_date', type: 'date' });
+    expect(stato.conflicts.get(1)).toMatchObject({ status: 'open', ourValue: '1984-01-01', theirValue: '1985-04-23' });
+    expect(stato.runs[0].counters).toMatchObject({ filled: 0, conflicts: 2, notWritten: 0 });
+  });
+
+  it('Shopify ha gia la stessa data: uguale, nessun conflitto', async () => {
+    fillIfAbsent.mockResolvedValue({ written: [], present: [1], failed: [] });
+    getCustomerBirthdateValues.mockResolvedValue(new Map([[1, '1985-04-23']]));
+    nuovoRun();
+    await processIntegrationImport('shop-1', opzioni());
+
+    expect(stato.conflicts.has(1)).toBe(false);
+    expect(stato.runs[0].counters).toMatchObject({ filled: 0, same: 2 });
+  });
+
+  it('Shopify ha gia il metafield ma non si riesce a rileggerlo: non scritto', async () => {
+    fillIfAbsent.mockResolvedValue({ written: [], present: [1], failed: [] });
+    getCustomerBirthdateValues.mockResolvedValue(new Map());
+    nuovoRun();
+    await processIntegrationImport('shop-1', opzioni());
+
+    expect(stato.conflicts.has(1)).toBe(false);
+    expect(stato.runs[0].counters).toMatchObject({ filled: 0, notWritten: 1 });
+  });
+
+  it('conflitto aperto ma ora i valori combaciano: si chiude', async () => {
+    stato.conflicts.set(2, { status: 'open', theirValue: '1991-01-01', ourValue: '1990-01-01', decidedAt: null });
+    nuovoRun();
+    await processIntegrationImport('shop-1', opzioni());
+    expect(stato.conflicts.has(2)).toBe(false);
+  });
+
+  it('conflitto aperto e il buco ora riempito: si chiude', async () => {
+    stato.conflicts.set(1, { status: 'open', theirValue: '1985-04-23', ourValue: '1980-01-01', decidedAt: null });
+    nuovoRun();
+    await processIntegrationImport('shop-1', opzioni());
+    expect(stato.conflicts.has(1)).toBe(false);
+  });
+
+  it('conflitto aperto e Klaviyo ha svuotato il campo: si chiude', async () => {
+    stato.conflicts.set(3, { status: 'open', theirValue: '1981-01-01', ourValue: '1980-05-05', decidedAt: null });
+    (listProfiles as any).mockResolvedValue({ profiles: [profilo('k3', 'diverso@x.it', '')], next: null });
+    nuovoRun();
+    await processIntegrationImport('shop-1', opzioni());
+    expect(stato.conflicts.has(3)).toBe(false);
+  });
+
+  it('una decisione gia presa non si cancella anche se i valori ora combaciano', async () => {
+    stato.conflicts.set(2, { status: 'kept_ours', theirValue: '1991-01-01', ourValue: '1990-01-01', decidedAt: new Date() });
+    nuovoRun();
+    await processIntegrationImport('shop-1', opzioni());
+    expect(stato.conflicts.get(2)?.status).toBe('kept_ours');
+  });
+
+  it('giro di un altro negozio: non si tocca e non se ne apre uno nuovo', async () => {
+    nuovoRun({ shopId: 'shop-2' });
+    expect(await processIntegrationImport('shop-1', opzioni())).toBe('completed');
+    expect(listProfiles).not.toHaveBeenCalled();
+    expect(stato.runs).toHaveLength(1);
+    expect(stato.runs[0].status).toBe('running');
   });
 
   it('run gia chiuso: niente da fare', async () => {

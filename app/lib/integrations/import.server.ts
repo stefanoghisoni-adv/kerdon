@@ -272,6 +272,9 @@ export async function processIntegrationImport(
   let run = opts.runId
     ? await prisma.integrationImportRun.findUnique({ where: { id: opts.runId } })
     : null;
+  // Un giro di un altro negozio: l'item e' corrotto. Non lo si tocca e non se
+  // ne apre uno nuovo — sarebbe un import che questo merchant non ha chiesto.
+  if (run && run.shopId !== shopId) return 'completed';
   if (!run) {
     run = await prisma.integrationImportRun.create({
       data: {
@@ -375,6 +378,9 @@ export async function processIntegrationImport(
     const conflicts = new Map<number, { ours: string | null; theirs: string }>();
 
     const matched: Array<{ customerId: number; theirs: string }> = [];
+    // Abbinati con il campo vuoto su Klaviyo: un loro conflitto aperto non ha
+    // piu' ragione di esistere.
+    const emptied = new Set<number>();
     for (const profile of page.profiles) {
       const match = matchProfile(profile, idx);
       if ('skipped' in match) {
@@ -393,16 +399,22 @@ export async function processIntegrationImport(
       if (!parsed.ok) {
         // Vuoto su Klaviyo: non c'e' niente da importare, non e' un problema.
         if (parsed.reason !== 'empty') pageCounters.unreadable++;
+        else emptied.add(match.customerId);
         continue;
       }
       matched.push({ customerId: match.customerId, theirs: parsed.date });
     }
 
-    const prior = await loadPriorConflicts(
-      shopId,
-      provider,
-      [...new Set(matched.map((m) => m.customerId))],
-    );
+    const prior = await loadPriorConflicts(shopId, provider, [
+      ...new Set([...matched.map((m) => m.customerId), ...emptied]),
+    ]);
+
+    // Conflitti aperti che questa pagina rende superati: i due valori ora
+    // combaciano, il buco e' stato riempito, o Klaviyo il valore non ce l'ha
+    // piu'. Si cancellano (vedi `closeOpenConflicts`).
+    const toClose = new Set<number>();
+    const isOpen = (customerId: number) => prior.get(customerId)?.status === 'open';
+    for (const customerId of emptied) if (isOpen(customerId)) toClose.add(customerId);
 
     for (const { customerId, theirs } of matched) {
       const current = fills.get(customerId) ?? ours.get(customerId) ?? null;
@@ -411,6 +423,9 @@ export async function processIntegrationImport(
         fills.set(customerId, theirs);
       } else if (decision === 'same') {
         pageCounters.same++;
+        // Uguale a un valore che stiamo per scrivere: si chiude solo se la
+        // scrittura va (piu' sotto).
+        if (isOpen(customerId) && !fills.has(customerId)) toClose.add(customerId);
       } else if (decision === 'decided') {
         pageCounters.decided++;
       } else {
@@ -423,21 +438,55 @@ export async function processIntegrationImport(
     await opts.lease?.assertHeld();
 
     if (fills.size > 0) {
+      // "Vuoto" lo dice la tabella del merchant, che puo' essere indietro
+      // rispetto a Shopify: si scrive solo dove Shopify non ha ancora la data
+      // (compare-and-set). Sovrascrivere e' solo di «Usa Klaviyo».
       const entries = [...fills].map(([customerId, date]) => ({ customerId, date }));
-      const result = await shopify.setCustomerBirthdates(entries, target);
-      const failed = new Set(result.failed.map((f) => f.customerId));
-      pageCounters.notWritten += failed.size;
-      pageCounters.filled += entries.length - failed.size;
-      // Chi e' stato scritto conta come pieno per le pagine dopo: un secondo
-      // profilo dello stesso cliente si confronta col valore appena messo.
-      for (const { customerId, date } of entries) {
-        if (!failed.has(customerId)) ours.set(customerId, date);
+      const result = await shopify.fillCustomerBirthdatesIfAbsent(entries, target);
+      pageCounters.notWritten += result.failed.length;
+      pageCounters.filled += result.written.length;
+      for (const customerId of result.written) {
+        ours.set(customerId, fills.get(customerId)!);
+        if (isOpen(customerId)) toClose.add(customerId);
+      }
+
+      // Shopify la data ce l'aveva gia': si rilegge e si decide su quella,
+      // come se la tabella del merchant fosse stata aggiornata.
+      if (result.present.length > 0) {
+        const current = await shopify.getCustomerBirthdateValues(result.present, target);
+        for (const customerId of result.present) {
+          const theirs = fills.get(customerId)!;
+          if (!current.has(customerId)) {
+            // Non riletto (cliente sparito nel frattempo): non scritto.
+            pageCounters.notWritten++;
+            continue;
+          }
+          const shopifyValue = current.get(customerId) ?? null;
+          ours.set(customerId, shopifyValue);
+          const decision = decide(shopifyValue, theirs, prior.get(customerId) ?? null);
+          if (decision === 'same') {
+            pageCounters.same++;
+            if (isOpen(customerId)) toClose.add(customerId);
+          } else if (decision === 'decided') {
+            pageCounters.decided++;
+          } else if (decision === 'conflict') {
+            pageCounters.conflicts++;
+            conflicts.set(customerId, { ours: shopifyValue, theirs });
+            prior.set(customerId, { status: 'open', theirValue: theirs });
+          } else {
+            // Il metafield esiste ma e' vuoto: non lo si tocca lo stesso, la
+            // garanzia e' "mai sopra un metafield esistente".
+            pageCounters.notWritten++;
+          }
+        }
       }
     }
 
     for (const [customerId, { ours: ourValue, theirs }] of conflicts) {
+      toClose.delete(customerId);
       await upsertConflict(shopId, provider, customerId, ourValue, theirs);
     }
+    await closeOpenConflicts(shopId, provider, [...toClose]);
 
     for (const k of COUNTER_KEYS) counters[k] += pageCounters[k];
     cursor = page.next;
@@ -544,6 +593,33 @@ async function loadPriorConflicts(
     });
   }
   return prior;
+}
+
+/**
+ * Chiude i conflitti APERTI che non hanno piu' ragione di esistere.
+ *
+ * Si cancellano invece di segnarli in un altro stato: 'kept_ours' e
+ * 'used_theirs' dicono "il merchant ha scelto", e qui non ha scelto nessuno;
+ * uno stato nuovo andrebbe insegnato a elenco, conteggi ed export. Un
+ * conflitto che non c'e' piu' semplicemente non si mostra; se i valori
+ * tornano a divergere, il giro dopo ne apre uno nuovo. Le decisioni gia' prese
+ * non si toccano: il filtro su 'open' e' nell'SQL, perche' il merchant puo'
+ * decidere fra la lettura e questa cancellazione.
+ */
+async function closeOpenConflicts(
+  shopId: string,
+  provider: Provider,
+  customerIds: number[],
+): Promise<void> {
+  if (customerIds.length === 0) return;
+  const ids = customerIds.map(String);
+  await prisma.$executeRaw`
+    DELETE FROM integration_conflicts
+     WHERE shop_id = ${shopId}
+       AND provider = ${provider}
+       AND target_field = 'birthdate'
+       AND status = 'open'
+       AND shopify_customer_id = ANY(${ids}::bigint[])`;
 }
 
 /**

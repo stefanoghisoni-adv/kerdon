@@ -189,7 +189,8 @@ const PAGINE: Record<string, { profiles: ReturnType<typeof profilo>[]; next: str
   },
 };
 
-const setCustomerBirthdates = vi.fn();
+const fillIfAbsent = vi.fn();
+const getCustomerBirthdateValues = vi.fn(async () => new Map<number, string | null>());
 const pagineLette: Array<string | null> = [];
 
 async function nuovoGiro(): Promise<string> {
@@ -217,7 +218,7 @@ async function conflitti() {
 }
 
 const scritti = () =>
-  setCustomerBirthdates.mock.calls.flatMap((c) => c[0] as Array<{ customerId: number; date: string }>);
+  fillIfAbsent.mock.calls.flatMap((c) => c[0] as Array<{ customerId: number; date: string }>);
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -248,12 +249,15 @@ beforeEach(async () => {
     cliente(4, 'quattro@x.it', '19700101'),
     cliente(5, 'cinque@x.it', '19660606'),
   ];
-  setCustomerBirthdates.mockImplementation(async (entries: unknown[]) => ({
-    written: entries.length,
-    errors: [],
+  fillIfAbsent.mockImplementation(async (entries: Array<{ customerId: number }>) => ({
+    written: entries.map((e) => e.customerId),
+    present: [],
     failed: [],
   }));
-  (ShopifyAPIClient.forShop as any).mockResolvedValue({ setCustomerBirthdates });
+  (ShopifyAPIClient.forShop as any).mockResolvedValue({
+    fillCustomerBirthdatesIfAbsent: fillIfAbsent,
+    getCustomerBirthdateValues,
+  });
   (listProfiles as any).mockImplementation(async (_t: string, cursor: string | null) => {
     pagineLette.push(cursor);
     return PAGINE[cursor ?? 'primo'];
@@ -366,10 +370,10 @@ describe('import interrotto e ripreso su Postgres', { timeout: 30_000 }, () => {
     // La prima scrittura della pagina 2 su Shopify salta: l'item solleva e la
     // coda lo ritenta.
     let chiamate = 0;
-    setCustomerBirthdates.mockImplementation(async (entries: unknown[]) => {
+    fillIfAbsent.mockImplementation(async (entries: Array<{ customerId: number }>) => {
       chiamate++;
       if (chiamate === 2) throw new Error('Shopify 502');
-      return { written: entries.length, errors: [], failed: [] };
+      return { written: entries.map((e) => e.customerId), present: [], failed: [] };
     });
     const opts = {
       cursor: null,
@@ -414,5 +418,25 @@ describe('import interrotto e ripreso su Postgres', { timeout: 30_000 }, () => {
       { cliente: 4, our_value: '1970-01-01', their_value: '1972-03-03', status: 'open', decided_at: null },
     ]);
     expect((await giro(runId)).counters).toMatchObject({ decided: 1, conflicts: 1 });
+  });
+
+  it('conflitto aperto superato (valori ora uguali): cancellato dall SQL vero; uno deciso resta', async () => {
+    // Cliente 5: noi 1966-06-06, Klaviyo 1966-06-06 -> uguali. Il conflitto
+    // aperto di prima non ha piu' ragione di esistere.
+    await h.db.query(
+      `INSERT INTO integration_conflicts
+         (id, shop_id, provider, shopify_customer_id, target_field, our_value, their_value, status, updated_at)
+       VALUES ($1, 'shop-1', 'klaviyo', 5, 'birthdate', '1966-06-06', '1967-01-01', 'open', NOW())`,
+      [randomUUID()],
+    );
+    const runId = await nuovoGiro();
+    await processIntegrationImport('shop-1', {
+      cursor: null,
+      runId,
+      lease: { assertHeld: async () => undefined },
+      saveCursor: async () => undefined,
+    });
+
+    expect((await conflitti()).map((c: any) => c.cliente)).toEqual([2, 4]);
   });
 });
