@@ -4,7 +4,7 @@
 // (oggi solo Klaviyo), il loro stato di connessione, l'ultimo import e i conflitti
 // da risolvere.
 
-import { useFetcher } from '@remix-run/react';
+import { useFetcher, useSearchParams } from '@remix-run/react';
 import type { ReactNode } from 'react';
 import {
   Badge,
@@ -21,6 +21,12 @@ import {
 import { useT } from '~/lib/i18n/context';
 import { useLocale } from '~/lib/i18n/context';
 import { PlanUpgradeAction } from '~/components/Dashboard/PlanUpgradeAction';
+
+/**
+ * Altezza massima dello Scrollable per evitare che la card cresca oltre lo
+ * schermo con molte integrazioni. ExtraFieldsCard non ha altezza fissa.
+ */
+const SCROLLABLE_MAX_HEIGHT = '200px';
 
 export interface IntegrationStatus {
   provider: 'klaviyo';
@@ -42,8 +48,19 @@ export interface IntegrationsCardProps {
   upgradePlan: string | null;
   /** Callback per aprire il modal di gestione (Task 11). */
   onManage?: (provider: 'klaviyo') => void;
-  /** Altezza fissa dello Scrollable, uguale a ExtraFieldsCard. */
-  scrollHeight?: string;
+}
+
+/**
+ * Costruisce l'URL per il link ai conflitti, preservando i parametri esistenti
+ * e impostando view=conflicts.
+ *
+ * @param currentSearch La query string corrente (da useSearchParams o location.search)
+ * @returns L'URL relativo con view=conflicts e gli altri parametri preservati
+ */
+export function buildConflictsUrl(currentSearch: string): string {
+  const params = new URLSearchParams(currentSearch);
+  params.set('view', 'conflicts');
+  return `?${params.toString()}`;
 }
 
 interface RowState {
@@ -77,24 +94,18 @@ export function IntegrationsCard({
   integrations,
   upgradePlan,
   onManage,
-  scrollHeight = '200px',
 }: IntegrationsCardProps) {
   const t = useT();
   const locale = useLocale();
 
-  // Piano senza clienti: invito all'upgrade
+  // Piano senza clienti: stesso invito all'upgrade della pagina Clienti
   if (integrations === null && upgradePlan) {
     return (
       <Card>
         <BlockStack gap="300">
-          <InlineStack gap="200" blockAlign="center" wrap={false}>
-            <Text as="h2" variant="headingMd">
-              {t.customers.integrations.title}
-            </Text>
-            <Button onClick={() => {}} variant="plain">
-              {t.customers.integrations.manage}
-            </Button>
-          </InlineStack>
+          <Text as="h2" variant="headingMd">
+            {t.customers.integrations.title}
+          </Text>
           <Banner tone="info">
             <Text as="p">
               <PlanUpgradeAction plan={upgradePlan} />
@@ -138,7 +149,7 @@ export function IntegrationsCard({
             {t.customers.integrations.manage}
           </Button>
         </InlineStack>
-        <Scrollable style={{ maxHeight: scrollHeight }} focusable>
+        <Scrollable style={{ maxHeight: SCROLLABLE_MAX_HEIGHT }} focusable>
           <BlockStack gap="300">
             {integrations.map((integration) => (
               <IntegrationRow
@@ -163,11 +174,13 @@ interface IntegrationRowProps {
 
 function IntegrationRow({ integration, onManage, locale }: IntegrationRowProps) {
   const t = useT();
+  const [searchParams] = useSearchParams();
   const importFetcher = useFetcher<{ queued?: boolean; reason?: string }>();
   const { provider, status, lastRun, openConflicts } = integration;
 
   const rowState = integrationRowState(status, lastRun);
   const isImporting = importFetcher.state !== 'idle';
+  const conflictsUrl = buildConflictsUrl(searchParams.toString());
 
   const handleImport = () => {
     importFetcher.submit(
@@ -225,7 +238,7 @@ function IntegrationRow({ integration, onManage, locale }: IntegrationRowProps) 
             )}
           </Text>
           {openConflicts > 0 && (
-            <Link url="?view=conflicts">
+            <Link url={conflictsUrl}>
               {t.customers.integrations.conflicts(openConflicts)}
             </Link>
           )}

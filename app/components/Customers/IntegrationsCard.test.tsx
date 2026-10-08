@@ -1,10 +1,11 @@
 // app/components/Customers/IntegrationsCard.test.tsx
 //
 // Test della funzione pura `integrationRowState` che decide lo stato visivo
-// di una riga integrazione, e della card stessa.
+// di una riga integrazione, e di `buildConflictsUrl` che costruisce l'URL
+// preservando i parametri esistenti.
 
 import { describe, it, expect } from 'vitest';
-import { integrationRowState } from './IntegrationsCard';
+import { integrationRowState, buildConflictsUrl } from './IntegrationsCard';
 
 describe('integrationRowState', () => {
   it('collegata con ultimo import riuscito → success badge, showImport true', () => {
@@ -48,5 +49,33 @@ describe('integrationRowState', () => {
     expect(state.badge).toBe('success');
     expect(state.tone).toBe('Collegata');
     expect(state.showImport).toBe(true);
+  });
+});
+
+describe('buildConflictsUrl', () => {
+  it('query string vuota → aggiunge view=conflicts', () => {
+    const url = buildConflictsUrl('');
+    expect(url).toBe('?view=conflicts');
+  });
+
+  it('parametri esistenti → li preserva e aggiunge view=conflicts', () => {
+    const url = buildConflictsUrl('from=2026-01-01&to=2026-01-31');
+    expect(url).toContain('from=2026-01-01');
+    expect(url).toContain('to=2026-01-31');
+    expect(url).toContain('view=conflicts');
+  });
+
+  it('view già presente → la sovrascrive con conflicts', () => {
+    const url = buildConflictsUrl('view=all&from=2026-01-01');
+    expect(url).toContain('from=2026-01-01');
+    expect(url).toContain('view=conflicts');
+    expect(url).not.toContain('view=all');
+  });
+
+  it('query string con ? iniziale → funziona lo stesso', () => {
+    const url = buildConflictsUrl('?from=2026-01-01&to=2026-01-31');
+    expect(url).toContain('from=2026-01-01');
+    expect(url).toContain('to=2026-01-31');
+    expect(url).toContain('view=conflicts');
   });
 });

@@ -738,7 +738,6 @@ function CustomersContent({
             <IntegrationsCard
               integrations={integrations}
               upgradePlan={upgradePlan}
-              scrollHeight="200px"
             />
           </BlockStack>
           </InlineGrid>
