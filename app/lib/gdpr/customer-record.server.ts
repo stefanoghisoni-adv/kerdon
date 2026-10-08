@@ -243,11 +243,73 @@ export interface CustomerDataPackage {
    * persona" e' esattamente cio' che di lei abbiamo dedotto.
    */
   browsers: Record<string, unknown>[];
+  /**
+   * Le differenze con Klaviyo registrate per la persona: l'unica parte che non
+   * sta nel database del merchant ma nel nostro. La data di Klaviyo di un
+   * conflitto ancora aperto, o chiuso con «Tieni il nostro», non esiste da
+   * nessun'altra parte: senza questa voce la persona non la vedrebbe mai.
+   */
+  integration_conflicts: Record<string, unknown>[];
 }
 
 /** Un'esportazione vuota, la risposta giusta quando non teniamo nulla. */
 export function emptyCustomerDataPackage(): CustomerDataPackage {
-  return { customer: null, orders: [], order_lines: [], browsers: [] };
+  return { customer: null, orders: [], order_lines: [], browsers: [], integration_conflicts: [] };
+}
+
+/**
+ * I conflitti con le integrazioni (Klaviyo) di una persona, per l'esportazione.
+ *
+ * Solo quelli di questo negozio: la stessa persona su un altro negozio e' un
+ * altro titolare. I nomi delle chiavi sono quelli che legge chi riceve il file,
+ * non le colonne: `provider_value` e' il valore letto dal fornitore indicato in
+ * `provider`. Una lettura fallita e' un passo fallito, e l'esportazione non
+ * parte: incompleta direbbe che il resto non esiste.
+ */
+export async function collectIntegrationConflicts(
+  shopId: string,
+  customerId: string,
+): Promise<{ rows: Record<string, unknown>[]; step: GdprStep }> {
+  const table = 'integration_conflicts';
+  if (!/^\d+$/.test(customerId)) {
+    return {
+      rows: [],
+      step: { table, outcome: 'skipped', rows: 0, detail: 'id cliente non numerico: nessuna riga puo corrispondere' },
+    };
+  }
+  try {
+    const found = await prisma.integrationConflict.findMany({
+      where: { shopId, customerId: { in: [BigInt(customerId)] } },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        provider: true,
+        targetField: true,
+        ourValue: true,
+        theirValue: true,
+        status: true,
+        decidedAt: true,
+      },
+    });
+    const rows = found.map((c) => ({
+      provider: c.provider,
+      field: c.targetField,
+      our_value: c.ourValue,
+      provider_value: c.theirValue,
+      status: c.status,
+      decided_at: c.decidedAt ? new Date(c.decidedAt).toISOString() : null,
+    }));
+    return { rows, step: { table, outcome: 'read', rows: rows.length } };
+  } catch (error) {
+    return {
+      rows: [],
+      step: {
+        table,
+        outcome: 'failed',
+        rows: 0,
+        detail: error instanceof Error ? error.message : 'errore sconosciuto',
+      },
+    };
+  }
 }
 
 // LA RACCOLTA PER UNA RICHIESTA DI ACCESSO STA IN `subject-snapshot.server`.

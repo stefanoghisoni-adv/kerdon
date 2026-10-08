@@ -31,7 +31,10 @@ questa versione.
   date e la decisione presa, conservate perché l'importazione successiva non
   richieda la stessa cosa; cancellate con `customers/redact` di quel cliente
   (informativa sezione 8, DPA sezione 8) e, per cascata da `shops`, con
-  `shop/redact`.
+  `shop/redact`. Escono anche nell'esportazione per il diritto di accesso
+  (`customers/data_request`, chiave `integration_conflicts`; informativa
+  sezione 8, DPA sezione 8), perché la data di Klaviyo di un conflitto aperto o
+  tenuto con «Tieni il nostro» non esiste da nessun'altra parte.
 - Klaviyo nella tabella «Who else is involved» dell'informativa come fonte dei
   dati, sul modello di Shopify. Nel DPA non è un sub-responsabile: come il
   database del merchant, è un fornitore del merchant, e la sezione 5 lo dice

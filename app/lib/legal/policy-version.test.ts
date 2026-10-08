@@ -110,8 +110,7 @@ describe('avvisoInformativaDovuto', () => {
   it('una nuova installazione dopo la versione vale come averla accettata', () => {
     // Visto 1.4, poi disinstallato e reinstallato dopo la versione in vigore con
     // una NUOVA riga (installedAt = reinstall date): installando ha accettato
-    // quella, e il
-    // vecchio "Ho capito" non lo rende un negozio da avvisare.
+    // quella, e il vecchio "Ho capito" non lo rende un negozio da avvisare.
     expect(avvisoInformativaDovuto({ seenVersion: '1.4', installedAt: dopo })).toBe(false);
   });
 

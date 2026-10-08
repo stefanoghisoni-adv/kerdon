@@ -254,7 +254,9 @@ Shopify provides.
 
 **Access**: Kerdon collects from the merchant's database the customer's row,
 their orders — shipping and logistics data included — and those orders' lines, and the rows of the browsers linked to
-them. The resulting export contains personal data and is held on Kerdon's
+them, together with the differences with Klaviyo that Kerdon's database holds
+for that customer (section 9): the merchant's date of birth, Klaviyo's, the
+decision taken and its date. The resulting export contains personal data and is held on Kerdon's
 systems, where the merchant downloads it inside the app with their own admin
 session, **for at most 30 days**; it is deleted when that period expires.
 

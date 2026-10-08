@@ -262,8 +262,10 @@ Kerdon dà seguito alle richieste di accesso e cancellazione che riceve
 attraverso i canali previsti da Shopify.
 
 **Accesso**: Kerdon raccoglie dal database del merchant la riga del cliente, i
-suoi ordini — dati di spedizione e logistica compresi — e le relative righe, e le righe dei browser a lui collegati.
-L'esportazione così ottenuta contiene dati personali e viene conservata sui
+suoi ordini — dati di spedizione e logistica compresi — e le relative righe, e le righe dei browser a lui collegati,
+insieme alle differenze con Klaviyo che il database di Kerdon conserva per quel
+cliente (punto 9): la data di nascita del merchant, quella di Klaviyo, la
+decisione presa e la sua data. L'esportazione così ottenuta contiene dati personali e viene conservata sui
 sistemi di Kerdon, dove il merchant la scarica dentro l'app con la propria
 sessione di amministratore, **per un massimo di 30 giorni**; alla scadenza viene
 cancellata.

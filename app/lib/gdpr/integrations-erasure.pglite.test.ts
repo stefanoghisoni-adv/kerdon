@@ -35,6 +35,22 @@ vi.mock('~/db.server', () => ({
     syncJobEvent: { deleteMany: async () => ({ count: 0 }) },
     syncJob: { findMany: async () => [], update: async () => ({}) },
     integrationConflict: {
+      // L'esportazione: stessa forma della cancellazione, negozio + clienti.
+      findMany: async ({ where }: any) => {
+        const keys = Object.keys(where ?? {}).sort().join(',');
+        if (keys !== 'customerId,shopId' || !Array.isArray(where.customerId?.in)) {
+          throw new Error('condizione non prevista');
+        }
+        const { rows } = await h.db.query(
+          `SELECT provider, target_field AS "targetField", our_value AS "ourValue",
+                  their_value AS "theirValue", status, decided_at AS "decidedAt"
+             FROM integration_conflicts
+            WHERE shop_id = $1 AND shopify_customer_id = ANY($2::bigint[])
+            ORDER BY created_at`,
+          [where.shopId, where.customerId.in.map(String)],
+        );
+        return rows;
+      },
       // La sola forma che la cancellazione usa: negozio + elenco di clienti.
       // Una condizione diversa fa fallire la prova invece di essere ignorata.
       deleteMany: async ({ where }: any) => {
@@ -53,7 +69,11 @@ vi.mock('~/db.server', () => ({
   },
 }));
 
-import { eraseCustomerFromAppDatabase, stepsFailed } from './customer-record.server';
+import {
+  collectIntegrationConflicts,
+  eraseCustomerFromAppDatabase,
+  stepsFailed,
+} from './customer-record.server';
 
 const MIGRATION = readFileSync(
   join(process.cwd(), 'prisma/migrations/20261003120000_integrations/migration.sql'),
@@ -101,6 +121,28 @@ describe('customers/redact: i conflitti della persona', () => {
     expect(rows).toEqual([
       { shop_id: 'shop-1', c: '5000' },
       { shop_id: 'shop-2', c: '4021' },
+    ]);
+  });
+});
+
+describe('customers/data_request: i conflitti della persona', () => {
+  it('escono i suoi, non quelli di altri clienti o di altri negozi', async () => {
+    await conflitto('shop-1', 4021, '1988-12-25');
+    await conflitto('shop-1', 5000, '1975-06-01');
+    await conflitto('shop-2', 4021, '2001-01-01');
+
+    const { rows, step } = await collectIntegrationConflicts('shop-1', '4021');
+
+    expect(step).toMatchObject({ table: 'integration_conflicts', outcome: 'read', rows: 1 });
+    expect(rows).toEqual([
+      {
+        provider: 'klaviyo',
+        field: 'birthdate',
+        our_value: '1990-01-01',
+        provider_value: '1988-12-25',
+        status: 'open',
+        decided_at: null,
+      },
     ]);
   });
 });
