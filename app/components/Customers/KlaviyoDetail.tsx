@@ -21,7 +21,7 @@ import {
 } from '@shopify/polaris';
 import { useT, useLocale } from '~/lib/i18n/context';
 import type { DateFormat } from '~/lib/integrations/values';
-import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions } from './IntegrationsModal';
+import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions, type FooterAction } from './IntegrationsModal';
 import type { Sample } from './IntegrationsModal';
 import { useIntegrationImport } from './useIntegrationImport';
 import { buildConflictsUrl, tileState, type IntegrationStatus } from './IntegrationsCard';
@@ -34,8 +34,8 @@ export interface KlaviyoDetailProps {
   onClose: () => void;
   /** Callback per esporre le azioni al footer della modal. */
   onActionsChange: (
-    primary: { content: string; loading?: boolean; disabled?: boolean; onAction: () => void } | undefined,
-    secondary: Array<{ content: string; loading?: boolean; disabled?: boolean; onAction: () => void }>
+    primary: FooterAction | undefined,
+    secondary: FooterAction[]
   ) => void;
 }
 
@@ -450,6 +450,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
 
   // Esponi le azioni del footer usando buildFooterActions (PRIMA di ogni early return)
   useEffect(() => {
+    const statusLoading = !statusFetcher.data;
     const connectLoading = oauthFetcher.state === 'loading' || connectFetcher.state === 'submitting';
     const saving = saveMappingFetcher.state === 'submitting';
     const importing = importFetcher.state !== 'idle';
@@ -457,6 +458,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
     const hasMapping = !!mapping;
 
     const actions = buildFooterActions({
+      statusLoading,
       status,
       canSave,
       hasMapping,
@@ -475,6 +477,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
 
     onActionsChange(actions.primary, actions.secondary);
   }, [
+    statusFetcher.data,
     status,
     canSave,
     mapping,
@@ -552,9 +555,8 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
       }
     : undefined;
 
-  const state = klaviyoEntry && integrationStatus
-    ? tileState(klaviyoEntry, integrationStatus)
-    : { label: 'tileInstalled' as const, tone: 'success' as const, clickable: true };
+  // Stato passato isLoadingStatus: entrambi sono definiti
+  const state = tileState(klaviyoEntry!, integrationStatus!);
 
   // Formatta la data dell'ultimo import con il locale del merchant
   const lastRunDate = statusFetcher.data?.lastRun?.finishedAt

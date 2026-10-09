@@ -982,7 +982,6 @@ export const en: typeof it = {
     },
     integrations: {
       title: "Integrations",
-      noIntegrations: "Connect integrations to import customer data from other platforms.",
       lastImport: (date: string, filled: number) =>
         `Last import: ${date} \u00b7 ${filled} ${filled === 1 ? 'field filled' : 'fields filled'}`,
       conflicts: (n: number) =>
@@ -1044,7 +1043,6 @@ export const en: typeof it = {
     klaviyoDetail: {
       benefitText: "Import customer birthdates from Klaviyo to fill in missing data.",
       connect: "Connect Klaviyo",
-      accountLabel: "Account",
       disconnect: "Disconnect",
       disconnectConfirm: "Disconnect Klaviyo? Already imported data and conflicts remain, but you won't be able to import new data.",
       fieldMappingTitle: "Field mapping",

@@ -9,6 +9,7 @@ describe('buildFooterActions', () => {
   };
 
   const baseInput = {
+    statusLoading: false,
     canSave: true,
     hasMapping: true,
     running: false,
@@ -21,6 +22,17 @@ describe('buildFooterActions', () => {
     importLabel: 'Import',
     ...mockCallbacks,
   };
+
+  it('statusLoading: no actions', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        statusLoading: true,
+        status: 'not_connected',
+      });
+
+      expect(result.primary).toBeUndefined();
+      expect(result.secondary).toEqual([]);
+  });
 
   it('not_connected: primary Collega, no secondary', () => {
       const result = buildFooterActions({

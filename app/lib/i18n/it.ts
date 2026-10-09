@@ -1261,7 +1261,6 @@ export const it = {
     },
     integrations: {
       title: "Integrazioni",
-      noIntegrations: "Collega integrazioni per importare dati dei clienti da altre piattaforme.",
       lastImport: (date: string, filled: number) =>
         `Ultimo import: ${date} \u00b7 ${filled} ${filled === 1 ? 'campo completato' : 'campi completati'}`,
       conflicts: (n: number) =>
@@ -1324,7 +1323,6 @@ export const it = {
     klaviyoDetail: {
       benefitText: "Importa le date di nascita dei tuoi clienti da Klaviyo per completare i dati mancanti.",
       connect: "Collega Klaviyo",
-      accountLabel: "Account",
       disconnect: "Scollega",
       disconnectConfirm: "Scollegare Klaviyo? I dati gi\u00e0 importati e i conflitti restano, ma non potrai pi\u00f9 importare nuovi dati.",
       fieldMappingTitle: "Associazione campi",

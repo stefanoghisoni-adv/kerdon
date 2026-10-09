@@ -118,6 +118,7 @@ export type FooterAction = {
 };
 
 export interface FooterActionsInput {
+  statusLoading: boolean;
   status: 'connected' | 'not_connected' | 'needs_reconnect';
   canSave: boolean;
   hasMapping: boolean;
@@ -143,6 +144,7 @@ export function buildFooterActions(input: FooterActionsInput): {
   secondary: FooterAction[];
 } {
   const {
+    statusLoading,
     status,
     canSave,
     hasMapping,
@@ -158,6 +160,14 @@ export function buildFooterActions(input: FooterActionsInput): {
     saveLabel,
     importLabel,
   } = input;
+
+  // Mentre lo status carica: nessuna azione (evita «Collega» per un merchant gia collegato)
+  if (statusLoading) {
+    return {
+      primary: undefined,
+      secondary: [],
+    };
+  }
 
   if (status === 'not_connected') {
     return {
@@ -210,13 +220,13 @@ export function IntegrationsModal({
   const title = integration?.name ?? '';
 
   // Azioni per il footer della modal (esposte da KlaviyoDetail)
-  const [primaryAction, setPrimaryAction] = useState<{ content: string; loading?: boolean; disabled?: boolean; onAction: () => void } | undefined>(undefined);
-  const [secondaryActions, setSecondaryActions] = useState<Array<{ content: string; loading?: boolean; disabled?: boolean; onAction: () => void }>>([]);
+  const [primaryAction, setPrimaryAction] = useState<FooterAction | undefined>(undefined);
+  const [secondaryActions, setSecondaryActions] = useState<FooterAction[]>([]);
 
   // Callback stabile per esporre azioni (evita loop infinito nelle dipendenze)
   const handleActionsChange = useCallback((
-    primary: { content: string; loading?: boolean; disabled?: boolean; onAction: () => void } | undefined,
-    secondary: Array<{ content: string; loading?: boolean; disabled?: boolean; onAction: () => void }>
+    primary: FooterAction | undefined,
+    secondary: FooterAction[]
   ) => {
     setPrimaryAction(primary);
     setSecondaryActions(secondary);
@@ -236,7 +246,7 @@ export function IntegrationsModal({
       onClose={onClose}
       title={title}
       primaryAction={primaryAction}
-      secondaryActions={secondaryActions}
+      secondaryActions={secondaryActions.length ? secondaryActions : undefined}
     >
       {integration?.id === 'klaviyo' && (
         <KlaviyoDetail
