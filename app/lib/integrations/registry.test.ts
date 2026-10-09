@@ -1,11 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   INTEGRATIONS,
-  categoriesInUse,
-  searchIntegrations,
   getIntegration,
-  IntegrationCategory,
-  IntegrationEntry,
 } from './registry';
 
 describe('integrations registry', () => {
@@ -26,100 +22,6 @@ describe('integrations registry', () => {
       expect(omnisend?.name).toBe('Omnisend');
       expect(omnisend?.category).toBe('crm');
       expect(omnisend?.logo).toBe('');
-    });
-  });
-
-  describe('categoriesInUse()', () => {
-    it('returns crm category', () => {
-      const categories = categoriesInUse();
-      expect(categories).toEqual(['crm']);
-    });
-
-    it('returns categories in order: crm, database, csv', () => {
-      // Create a test list with all categories
-      const testList = [
-        {
-          id: 'omnisend' as const,
-          name: 'CSV',
-          category: 'csv' as const,
-          logo: '',
-          status: 'available' as const,
-        },
-        {
-          id: 'klaviyo' as const,
-          name: 'Database',
-          category: 'database' as const,
-          logo: '',
-          status: 'available' as const,
-        },
-        {
-          id: 'omnisend' as const,
-          name: 'CRM',
-          category: 'crm' as const,
-          logo: '',
-          status: 'available' as const,
-        },
-      ] as const satisfies readonly IntegrationEntry[];
-      const categories = categoriesInUse(testList);
-      expect(categories).toEqual(['crm', 'database', 'csv']);
-    });
-
-    it('only includes categories that have entries', () => {
-      const testList = [
-        {
-          id: 'omnisend' as const,
-          name: 'CSV',
-          category: 'csv' as const,
-          logo: '',
-          status: 'available' as const,
-        },
-      ] as const satisfies readonly IntegrationEntry[];
-      const categories = categoriesInUse(testList);
-      expect(categories).toEqual(['csv']);
-    });
-  });
-
-  describe('searchIntegrations()', () => {
-    it('finds klaviyo when searching KLAV in all categories', () => {
-      const results = searchIntegrations('KLAV', 'all');
-      expect(results).toHaveLength(1);
-      expect(results[0].id).toBe('klaviyo');
-    });
-
-    it('case insensitive search finds klaviyo', () => {
-      const results = searchIntegrations('klaviyo', 'all');
-      expect(results).toHaveLength(1);
-      expect(results[0].id).toBe('klaviyo');
-    });
-
-    it('returns empty array when searching in database category', () => {
-      const results = searchIntegrations('', 'database');
-      expect(results).toHaveLength(0);
-    });
-
-    it('returns empty array for non-matching query', () => {
-      const results = searchIntegrations('xyz', 'all');
-      expect(results).toHaveLength(0);
-    });
-
-    it('filters by category', () => {
-      const results = searchIntegrations('', 'crm');
-      expect(results.length).toBeGreaterThan(0);
-      expect(results.every((i) => i.category === 'crm')).toBe(true);
-    });
-
-    it('supports accent-insensitive search', () => {
-      const testList = [
-        {
-          id: 'omnisend' as const,
-          name: 'Intégration',
-          category: 'crm' as const,
-          logo: '',
-          status: 'available' as const,
-        },
-      ] as const satisfies readonly IntegrationEntry[];
-      const results = searchIntegrations('integration', 'all', testList);
-      expect(results).toHaveLength(1);
     });
   });
 

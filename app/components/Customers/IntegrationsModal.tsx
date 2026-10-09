@@ -1,29 +1,12 @@
 // app/components/Customers/IntegrationsModal.tsx
 //
-// Modal «Gestisci» per le integrazioni: catalogo + dettaglio.
+// Modal di configurazione per la singola integrazione.
 
-import { useState, useEffect, useCallback } from 'react';
-import {
-  Modal,
-  TextField,
-  BlockStack,
-  InlineGrid,
-  Card,
-  Text,
-  Badge,
-  Button,
-  Thumbnail,
-  OptionList,
-  Box,
-} from '@shopify/polaris';
-import { ArrowLeftIcon } from '@shopify/polaris-icons';
-import { useT } from '~/lib/i18n/context';
+import { useEffect, useState, useCallback } from 'react';
+import { Modal } from '@shopify/polaris';
 import {
   INTEGRATIONS,
-  categoriesInUse,
-  searchIntegrations,
-  type IntegrationCategory,
-  type IntegrationEntry,
+  type IntegrationId,
 } from '~/lib/integrations/registry';
 import type { DateFormat } from '~/lib/integrations/values';
 import { parseDate } from '~/lib/integrations/values';
@@ -36,8 +19,8 @@ import {
 export interface IntegrationsModalProps {
   open: boolean;
   onClose: () => void;
-  /** Provider preselected (for «Riconnetti» or «Gestisci» from a row). */
-  preselected?: 'klaviyo' | null;
+  /** Provider dell'integrazione da configurare. */
+  preselected?: IntegrationId | null;
 }
 
 export interface Sample {
@@ -127,139 +110,150 @@ export function isValidOAuthMessage(
   return isValidPopupMessage(event, popupWindow, appOrigin, 'klaviyo-oauth');
 }
 
+export type FooterAction = {
+  content: string;
+  loading?: boolean;
+  disabled?: boolean;
+  onAction: () => void;
+};
+
+export interface FooterActionsInput {
+  statusLoading: boolean;
+  status: 'connected' | 'not_connected' | 'needs_reconnect';
+  canSave: boolean;
+  hasMapping: boolean;
+  running: boolean;
+  saving: boolean;
+  importing: boolean;
+  connectLoading: boolean;
+  onSave: () => void;
+  onImport: () => void;
+  onConnect: () => void;
+  connectLabel: string;
+  reconnectLabel: string;
+  saveLabel: string;
+  importLabel: string;
+}
+
+/**
+ * Costruisce le azioni del footer della modal in base allo stato.
+ * Funzione pura per testing.
+ */
+export function buildFooterActions(input: FooterActionsInput): {
+  primary: FooterAction | undefined;
+  secondary: FooterAction[];
+} {
+  const {
+    statusLoading,
+    status,
+    canSave,
+    hasMapping,
+    running,
+    saving,
+    importing,
+    connectLoading,
+    onSave,
+    onImport,
+    onConnect,
+    connectLabel,
+    reconnectLabel,
+    saveLabel,
+    importLabel,
+  } = input;
+
+  // Mentre lo status carica: nessuna azione (evita «Collega» per un merchant gia collegato)
+  if (statusLoading) {
+    return {
+      primary: undefined,
+      secondary: [],
+    };
+  }
+
+  if (status === 'not_connected') {
+    return {
+      primary: {
+        content: connectLabel,
+        loading: connectLoading,
+        onAction: onConnect,
+      },
+      secondary: [],
+    };
+  }
+
+  if (status === 'needs_reconnect') {
+    return {
+      primary: {
+        content: reconnectLabel,
+        loading: connectLoading,
+        onAction: onConnect,
+      },
+      secondary: [],
+    };
+  }
+
+  // connected
+  return {
+    primary: {
+      content: saveLabel,
+      loading: saving,
+      disabled: !canSave,
+      onAction: onSave,
+    },
+    secondary: [
+      {
+        content: importLabel,
+        loading: importing || running,
+        disabled: !hasMapping || running,
+        onAction: onImport,
+      },
+    ],
+  };
+}
+
 export function IntegrationsModal({
   open,
   onClose,
   preselected,
 }: IntegrationsModalProps) {
-  const t = useT();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<IntegrationCategory | 'all'>('all');
-  const [selectedIntegration, setSelectedIntegration] = useState<IntegrationEntry | null>(null);
+  // Trova l'integrazione dal provider preselezionato
+  const integration = preselected ? INTEGRATIONS.find((i) => i.id === preselected) : null;
+  const title = integration?.name ?? '';
 
-  // Preselect integration if provided
-  useEffect(() => {
-    if (open && preselected) {
-      const integration = INTEGRATIONS.find((i) => i.id === preselected);
-      if (integration) {
-        setSelectedIntegration(integration);
-      }
-    }
-  }, [open, preselected]);
+  // Azioni per il footer della modal (esposte da KlaviyoDetail)
+  const [primaryAction, setPrimaryAction] = useState<FooterAction | undefined>(undefined);
+  const [secondaryActions, setSecondaryActions] = useState<FooterAction[]>([]);
 
-  // Reset state when modal closes
+  // Callback stabile per esporre azioni (evita loop infinito nelle dipendenze)
+  const handleActionsChange = useCallback((
+    primary: FooterAction | undefined,
+    secondary: FooterAction[]
+  ) => {
+    setPrimaryAction(primary);
+    setSecondaryActions(secondary);
+  }, []);
+
+  // Reset actions when modal closes
   useEffect(() => {
     if (!open) {
-      setSearchQuery('');
-      setSelectedCategory('all');
-      setSelectedIntegration(null);
+      setPrimaryAction(undefined);
+      setSecondaryActions([]);
     }
   }, [open]);
-
-  const categories = categoriesInUse();
-  const filteredIntegrations = searchIntegrations(searchQuery, selectedCategory);
-
-  const handleBack = useCallback(() => {
-    setSelectedIntegration(null);
-  }, []);
-
-  const handleSelect = useCallback((integration: IntegrationEntry) => {
-    if (integration.status === 'coming_soon') return;
-    setSelectedIntegration(integration);
-  }, []);
-
-  // I9 FIX: OptionList for categories
-  const categoryOptions = [
-    { value: 'all', label: t.customers.integrationsModal.allCategory },
-    ...categories.map((cat) => ({
-      value: cat,
-      label: t.customers.integrationsModal.categories[cat],
-    })),
-  ];
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={selectedIntegration ? selectedIntegration.name : t.customers.integrations.title}
-      size="large"
+      title={title}
+      primaryAction={primaryAction}
+      secondaryActions={secondaryActions.length ? secondaryActions : undefined}
     >
-      <Modal.Section>
-        {selectedIntegration ? (
-          <BlockStack gap="400">
-            <Button
-              variant="plain"
-              icon={ArrowLeftIcon}
-              onClick={handleBack}
-            >
-              {t.customers.integrationsModal.backToAll}
-            </Button>
-            {selectedIntegration.id === 'klaviyo' && (
-              <KlaviyoDetail onClose={onClose} />
-            )}
-          </BlockStack>
-        ) : (
-          <BlockStack gap="400">
-            <TextField
-              label={t.customers.integrationsModal.searchLabel}
-              labelHidden
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder={t.customers.integrationsModal.searchPlaceholder}
-              autoComplete="off"
-            />
-
-            {/* I9 FIX: OptionList instead of Buttons */}
-            <OptionList
-              title={t.customers.integrationsModal.categoryLabel}
-              options={categoryOptions}
-              selected={[selectedCategory]}
-              onChange={(selected) => setSelectedCategory(selected[0] as IntegrationCategory | 'all')}
-            />
-
-            <InlineGrid columns={{ xs: 2, md: 4 }} gap="400">
-              {filteredIntegrations.map((integration) => (
-                /* I9 FIX: Card with Thumbnail + Button variant="plain" (controller ruling) */
-                <Box key={integration.id}>
-                  <Card>
-                    <BlockStack gap="200" inlineAlign="center">
-                      {integration.logo && (
-                        <Thumbnail
-                          source={integration.logo}
-                          alt={integration.name}
-                          size="large"
-                        />
-                      )}
-                      {integration.status === 'coming_soon' ? (
-                        <>
-                          <Text as="p" variant="bodyMd" fontWeight="semibold" alignment="center">
-                            {integration.name}
-                          </Text>
-                          <Badge tone="info">{t.customers.integrationsModal.comingSoon}</Badge>
-                        </>
-                      ) : (
-                        <Button
-                          variant="plain"
-                          onClick={() => handleSelect(integration)}
-                          textAlign="center"
-                        >
-                          {integration.name}
-                        </Button>
-                      )}
-                    </BlockStack>
-                  </Card>
-                </Box>
-              ))}
-            </InlineGrid>
-
-            {filteredIntegrations.length === 0 && (
-              <Text as="p" tone="subdued" alignment="center">
-                {t.customers.integrationsModal.noResults}
-              </Text>
-            )}
-          </BlockStack>
-        )}
-      </Modal.Section>
+      {integration?.id === 'klaviyo' && (
+        <KlaviyoDetail
+          onClose={onClose}
+          onActionsChange={handleActionsChange}
+        />
+      )}
     </Modal>
   );
 }

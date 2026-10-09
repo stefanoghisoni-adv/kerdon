@@ -31,6 +31,7 @@ import { prisma } from '~/db.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-format';
 import { BASE_CURRENCY } from '~/lib/billing/money';
+import type { IntegrationId } from '~/lib/integrations/registry';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import type { CustomersReport } from '~/lib/customers/customers.server';
 import { fetchConflictCustomerNames } from '~/lib/customers/customers.server';
@@ -484,9 +485,9 @@ function CustomersContent({
 
   // Modal «Gestisci» integrazioni
   const [integrationsModalOpen, setIntegrationsModalOpen] = useState(false);
-  const [preselectedProvider, setPreselectedProvider] = useState<'klaviyo' | null>(null);
+  const [preselectedProvider, setPreselectedProvider] = useState<IntegrationId | null>(null);
 
-  const handleManage = (provider: 'klaviyo') => {
+  const handleManage = (provider: IntegrationId) => {
     setPreselectedProvider(provider);
     setIntegrationsModalOpen(true);
   };

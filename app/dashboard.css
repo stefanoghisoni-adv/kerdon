@@ -616,6 +616,15 @@
   transform: translateY(0.5px);
 }
 
+/* Logo integrazione non disponibile: opacita' ridotta e scala di grigi.
+   Applicato solo al logo (Thumbnail), non all'intero riquadro. I testi sono
+   gia' grigi tramite Text tone="disabled" di Polaris. */
+.integration-logo-disabled {
+  display: inline-block;
+  opacity: 0.5;
+  filter: grayscale(100%);
+}
+
 /* Il pulsante che aspetta qualche secondo prima di potersi premere.
    Il testo vero resta nel pulsante anche mentre il conto scorre — e' lui a
    dargli la larghezza — ma si fa trasparente, e il numero gli sta sopra

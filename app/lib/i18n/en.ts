@@ -982,8 +982,6 @@ export const en: typeof it = {
     },
     integrations: {
       title: "Integrations",
-      manage: "Manage",
-      noIntegrations: "Connect integrations to import customer data from other platforms.",
       lastImport: (date: string, filled: number) =>
         `Last import: ${date} \u00b7 ${filled} ${filled === 1 ? 'field filled' : 'fields filled'}`,
       conflicts: (n: number) =>
@@ -991,9 +989,11 @@ export const en: typeof it = {
       importData: "Import data",
       importRunning: "Import in progress. Reopen this page in a few minutes to see the results.",
       reconnect: "Reconnect",
-      statusConnected: "Connected",
-      statusNotConnected: "Not connected",
-      statusNeedsReconnect: "Reconnect",
+      /** Integration tile states. */
+      tileInstalled: "Installed",
+      tileNotConnected: "Not connected",
+      tileNeedsAttention: "Needs attention",
+      tileNotAvailable: "Not available",
       /** Reasons why import doesn't start. */
       importReasons: {
         already_running: "An import is already running.",
@@ -1040,24 +1040,9 @@ export const en: typeof it = {
       /** Empty table in conflicts view. */
       noConflicts: "No different values to resolve.",
     },
-    integrationsModal: {
-      backToAll: "All integrations",
-      searchLabel: "Search integrations",
-      searchPlaceholder: "Search for an integration…",
-      categoryLabel: "Category",
-      allCategory: "All",
-      categories: {
-        crm: "CRM",
-        database: "Database",
-        csv: "CSV",
-      },
-      comingSoon: "Coming soon",
-      noResults: "No integrations found",
-    },
     klaviyoDetail: {
       benefitText: "Import customer birthdates from Klaviyo to fill in missing data.",
       connect: "Connect Klaviyo",
-      accountLabel: "Account",
       disconnect: "Disconnect",
       disconnectConfirm: "Disconnect Klaviyo? Already imported data and conflicts remain, but you won't be able to import new data.",
       fieldMappingTitle: "Field mapping",

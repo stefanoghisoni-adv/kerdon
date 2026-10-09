@@ -1261,8 +1261,6 @@ export const it = {
     },
     integrations: {
       title: "Integrazioni",
-      manage: "Gestisci",
-      noIntegrations: "Collega integrazioni per importare dati dei clienti da altre piattaforme.",
       lastImport: (date: string, filled: number) =>
         `Ultimo import: ${date} \u00b7 ${filled} ${filled === 1 ? 'campo completato' : 'campi completati'}`,
       conflicts: (n: number) =>
@@ -1271,9 +1269,11 @@ export const it = {
       /** Accanto al pulsante mentre un import e' in corso. */
       importRunning: "Import in corso. Riapri questa pagina tra qualche minuto per vedere i risultati.",
       reconnect: "Riconnetti",
-      statusConnected: "Collegata",
-      statusNotConnected: "Da collegare",
-      statusNeedsReconnect: "Riconnetti",
+      /** Stati dei riquadri integrazione. */
+      tileInstalled: "Installata",
+      tileNotConnected: "Da collegare",
+      tileNeedsAttention: "Richiede attenzione",
+      tileNotAvailable: "Non disponibile",
       /** Motivi per cui l'import non parte. */
       importReasons: {
         already_running: "Un import \u00e8 gi\u00e0 in corso.",
@@ -1320,24 +1320,9 @@ export const it = {
       /** Tabella vuota nella vista conflitti. */
       noConflicts: "Nessun dato diverso da risolvere.",
     },
-    integrationsModal: {
-      backToAll: "Tutte le integrazioni",
-      searchLabel: "Cerca integrazioni",
-      searchPlaceholder: "Cerca un'integrazione\u2026",
-      categoryLabel: "Categoria",
-      allCategory: "Tutti",
-      categories: {
-        crm: "CRM",
-        database: "Database",
-        csv: "CSV",
-      },
-      comingSoon: "In arrivo",
-      noResults: "Nessuna integrazione trovata",
-    },
     klaviyoDetail: {
       benefitText: "Importa le date di nascita dei tuoi clienti da Klaviyo per completare i dati mancanti.",
       connect: "Collega Klaviyo",
-      accountLabel: "Account",
       disconnect: "Scollega",
       disconnectConfirm: "Scollegare Klaviyo? I dati gi\u00e0 importati e i conflitti restano, ma non potrai pi\u00f9 importare nuovi dati.",
       fieldMappingTitle: "Associazione campi",

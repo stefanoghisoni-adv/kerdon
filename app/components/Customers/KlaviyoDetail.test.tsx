@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideDateFormat } from './KlaviyoDetail';
+import { decideDateFormat, shouldShowAccountName } from './KlaviyoDetail';
 
 describe('decideDateFormat', () => {
   const ambiguousProperty = {
@@ -105,5 +105,31 @@ describe('decideDateFormat', () => {
         sourceKeyChanged: false,
       })
     ).toBe('MDY');
+  });
+});
+
+describe('shouldShowAccountName', () => {
+  it('returns true for non-empty account name', () => {
+    expect(shouldShowAccountName('My Account')).toBe(true);
+  });
+
+  it('returns false for null', () => {
+    expect(shouldShowAccountName(null)).toBe(false);
+  });
+
+  it('returns false for undefined', () => {
+    expect(shouldShowAccountName(undefined)).toBe(false);
+  });
+
+  it('returns false for empty string', () => {
+    expect(shouldShowAccountName('')).toBe(false);
+  });
+
+  it('returns false for whitespace-only string', () => {
+    expect(shouldShowAccountName('   ')).toBe(false);
+  });
+
+  it('returns true for account name with surrounding spaces', () => {
+    expect(shouldShowAccountName('  My Account  ')).toBe(true);
   });
 });
