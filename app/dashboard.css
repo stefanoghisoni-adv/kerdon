@@ -616,6 +616,12 @@
   transform: translateY(0.5px);
 }
 
+/* Riquadro integrazione non disponibile: logo spento (opacita' ridotta e scala di grigi). */
+.integration-tile-disabled .Polaris-Thumbnail {
+  opacity: 0.5;
+  filter: grayscale(100%);
+}
+
 /* Il pulsante che aspetta qualche secondo prima di potersi premere.
    Il testo vero resta nel pulsante anche mentre il conto scorre — e' lui a
    dargli la larghezza — ma si fa trasparente, e il numero gli sta sopra

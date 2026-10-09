@@ -982,7 +982,6 @@ export const en: typeof it = {
     },
     integrations: {
       title: "Integrations",
-      manage: "Manage",
       noIntegrations: "Connect integrations to import customer data from other platforms.",
       lastImport: (date: string, filled: number) =>
         `Last import: ${date} \u00b7 ${filled} ${filled === 1 ? 'field filled' : 'fields filled'}`,
@@ -991,9 +990,11 @@ export const en: typeof it = {
       importData: "Import data",
       importRunning: "Import in progress. Reopen this page in a few minutes to see the results.",
       reconnect: "Reconnect",
-      statusConnected: "Connected",
-      statusNotConnected: "Not connected",
-      statusNeedsReconnect: "Reconnect",
+      /** Integration tile states. */
+      tileInstalled: "Installed",
+      tileNotConnected: "Not connected",
+      tileNeedsAttention: "Needs attention",
+      tileNotAvailable: "Not available",
       /** Reasons why import doesn't start. */
       importReasons: {
         already_running: "An import is already running.",

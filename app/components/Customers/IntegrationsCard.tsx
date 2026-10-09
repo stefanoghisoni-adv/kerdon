@@ -1,33 +1,32 @@
 // app/components/Customers/IntegrationsCard.tsx
 //
 // La card «Integrazioni» nella tab Clienti: mostra le integrazioni disponibili
-// (oggi solo Klaviyo), il loro stato di connessione, l'ultimo import e i conflitti
-// da risolvere.
+// come riquadri cliccabili, con logo e stato visivo (installata, da collegare,
+// richiede attenzione, non disponibile).
 
-import { useSearchParams } from '@remix-run/react';
 import type { ReactNode } from 'react';
-import { useIntegrationImport } from './useIntegrationImport';
 import {
-  Badge,
   Banner,
   BlockStack,
-  Button,
+  Box,
   Card,
   InlineStack,
-  Link,
   Scrollable,
   Text,
   Thumbnail,
+  UnstyledButton,
 } from '@shopify/polaris';
+import { AppsIcon } from '@shopify/polaris-icons';
 import { useT } from '~/lib/i18n/context';
-import { useLocale } from '~/lib/i18n/context';
 import { PlanUpgradeAction } from '~/components/Dashboard/PlanUpgradeAction';
+import { INTEGRATIONS, type IntegrationEntry, type IntegrationId } from '~/lib/integrations/registry';
 
 /**
  * Altezza massima dello Scrollable per evitare che la card cresca oltre lo
- * schermo con molte integrazioni. ExtraFieldsCard non ha altezza fissa.
+ * schermo con molte integrazioni. Alzata rispetto a prima (200px) per far
+ * stare 2 riquadri interi senza scroll.
  */
-const SCROLLABLE_MAX_HEIGHT = '200px';
+const SCROLLABLE_MAX_HEIGHT = '400px';
 
 export interface IntegrationStatus {
   provider: 'klaviyo';
@@ -50,7 +49,7 @@ export interface IntegrationsCardProps {
   /** Se il piano non include la sincronizzazione clienti, nome del piano da proporre. */
   upgradePlan: string | null;
   /** Callback per aprire il modal di gestione (Task 11). */
-  onManage?: (provider: 'klaviyo') => void;
+  onManage?: (provider: IntegrationId) => void;
 }
 
 /**
@@ -66,47 +65,51 @@ export function buildConflictsUrl(currentSearch: string): string {
   return `?${params.toString()}`;
 }
 
-type StatusLabel = 'statusConnected' | 'statusNotConnected' | 'statusNeedsReconnect';
+type TileStateKey = 'tileInstalled' | 'tileNotConnected' | 'tileNeedsAttention' | 'tileNotAvailable';
 
-interface RowState {
-  badge: 'success' | 'attention' | 'warning';
-  /** La chiave della traduzione dell'etichetta del badge. */
-  label: StatusLabel;
-  showImport: boolean;
+interface TileState {
+  /** La chiave della traduzione dell'etichetta dello stato. */
+  label: TileStateKey;
+  /** Il tono del testo dello stato. */
+  tone: 'success' | 'subdued' | 'caution' | 'disabled';
+  /** Se il riquadro e' cliccabile. */
+  clickable: boolean;
 }
 
 /**
- * Funzione pura che decide lo stato visivo di una riga integrazione.
+ * Funzione pura che decide lo stato visivo di un riquadro integrazione.
  *
- * «Importa dati» c'e' appena l'integrazione e' collegata e ha un campo
- * associato: il primo import parte anche da qui, non solo dal modal.
+ * - Non disponibile: coming_soon, non cliccabile, tutto grigio.
+ * - Da collegare: disponibile ma non collegata, cliccabile.
+ * - Installata: collegata senza problemi (no needs_reconnect, no conflitti aperti).
+ * - Richiede attenzione: needs_reconnect OPPURE collegata con conflitti aperti.
  */
-export function integrationRowState(
-  status: 'connected' | 'not_connected' | 'needs_reconnect',
-  mapping: { sourceKey: string; dateFormat: string } | null,
-): RowState {
-  if (status === 'not_connected') {
-    return { badge: 'attention', label: 'statusNotConnected', showImport: false };
+export function tileState(
+  entry: IntegrationEntry,
+  integration?: IntegrationStatus,
+): TileState {
+  // Voce non disponibile (coming_soon)
+  if (entry.status === 'coming_soon') {
+    return { label: 'tileNotAvailable', tone: 'disabled', clickable: false };
   }
-  if (status === 'needs_reconnect') {
-    return { badge: 'warning', label: 'statusNeedsReconnect', showImport: false };
-  }
-  return { badge: 'success', label: 'statusConnected', showImport: mapping !== null };
-}
 
-/** Il titolo della card con «Gestisci» a destra. */
-function CardHeader({ onManage }: { onManage?: (provider: 'klaviyo') => void }) {
-  const t = useT();
-  return (
-    <InlineStack align="space-between" blockAlign="center" wrap={false}>
-      <Text as="h2" variant="headingMd">
-        {t.customers.integrations.title}
-      </Text>
-      <Button onClick={() => onManage?.('klaviyo')} variant="plain">
-        {t.customers.integrations.manage}
-      </Button>
-    </InlineStack>
-  );
+  // Voce disponibile senza stato dal loader → da collegare
+  if (!integration || integration.status === 'not_connected') {
+    return { label: 'tileNotConnected', tone: 'subdued', clickable: true };
+  }
+
+  // Needs reconnect → richiede attenzione
+  if (integration.status === 'needs_reconnect') {
+    return { label: 'tileNeedsAttention', tone: 'caution', clickable: true };
+  }
+
+  // Collegata con conflitti aperti → richiede attenzione
+  if (integration.openConflicts > 0) {
+    return { label: 'tileNeedsAttention', tone: 'caution', clickable: true };
+  }
+
+  // Collegata senza problemi → installata
+  return { label: 'tileInstalled', tone: 'success', clickable: true };
 }
 
 export function IntegrationsCard({
@@ -115,7 +118,6 @@ export function IntegrationsCard({
   onManage,
 }: IntegrationsCardProps) {
   const t = useT();
-  const locale = useLocale();
 
   // Piano senza clienti: stesso invito all'upgrade della pagina Clienti
   if (integrations === null && upgradePlan) {
@@ -136,34 +138,35 @@ export function IntegrationsCard({
     );
   }
 
-  // Nessuna integrazione collegata o disponibile
-  if (!integrations || integrations.length === 0) {
-    return (
-      <Card>
-        <BlockStack gap="300">
-          <CardHeader onManage={onManage} />
-          <Text as="p" tone="subdued">
-            {t.customers.integrations.noIntegrations}
-          </Text>
-        </BlockStack>
-      </Card>
-    );
+  // Mappa le integrazioni disponibili dal loader per provider
+  const integrationsByProvider = new Map<string, IntegrationStatus>();
+  if (integrations) {
+    for (const integration of integrations) {
+      integrationsByProvider.set(integration.provider, integration);
+    }
   }
 
   return (
     <Card>
       <BlockStack gap="300">
-        <CardHeader onManage={onManage} />
+        <Text as="h2" variant="headingMd">
+          {t.customers.integrations.title}
+        </Text>
         <Scrollable style={{ maxHeight: SCROLLABLE_MAX_HEIGHT }} focusable>
           <BlockStack gap="300">
-            {integrations.map((integration) => (
-              <IntegrationRow
-                key={integration.provider}
-                integration={integration}
-                onManage={onManage}
-                locale={locale}
-              />
-            ))}
+            {INTEGRATIONS.map((entry) => {
+              const integration = integrationsByProvider.get(entry.id);
+              const state = tileState(entry, integration);
+
+              return (
+                <IntegrationTile
+                  key={entry.id}
+                  entry={entry}
+                  state={state}
+                  onManage={onManage}
+                />
+              );
+            })}
           </BlockStack>
         </Scrollable>
       </BlockStack>
@@ -171,117 +174,68 @@ export function IntegrationsCard({
   );
 }
 
-interface IntegrationRowProps {
-  integration: IntegrationStatus;
-  onManage?: (provider: 'klaviyo') => void;
-  locale: string;
+interface IntegrationTileProps {
+  entry: IntegrationEntry;
+  state: TileState;
+  onManage?: (provider: IntegrationId) => void;
 }
 
-function IntegrationRow({ integration, onManage, locale }: IntegrationRowProps) {
+function IntegrationTile({ entry, state, onManage }: IntegrationTileProps) {
   const t = useT();
-  const [searchParams] = useSearchParams();
-  const { provider, status, mapping, lastRun, openConflicts } = integration;
 
-  // I8 FIX: Use shared import hook
-  const { importFetcher, handleImport, importReason } = useIntegrationImport(provider);
-
-  const rowState = integrationRowState(status, mapping);
-  const running = integration.running === true;
-  const isImporting = importFetcher.state !== 'idle' || running;
-  const conflictsUrl = buildConflictsUrl(searchParams.toString());
-
-  // needs_reconnect: banner warning
-  const showReconnectBanner = status === 'needs_reconnect';
-
-  return (
-    <BlockStack gap="200">
+  const tileContent = (
+    <Box
+      background="bg-surface"
+      borderRadius="300"
+      shadow="200"
+      padding="400"
+    >
       <InlineStack gap="300" blockAlign="center" wrap={false}>
-        <Thumbnail
-          source={`/integrations/${provider}.webp`}
-          alt={provider}
-          size="small"
-        />
+        {entry.logo ? (
+          <Thumbnail
+            source={entry.logo}
+            alt={entry.name}
+            size="medium"
+            transparent
+          />
+        ) : (
+          // Segnaposto per le voci senza logo (es. Omnisend)
+          <Thumbnail
+            source={AppsIcon}
+            alt={entry.name}
+            size="medium"
+            transparent
+          />
+        )}
         <BlockStack gap="100">
-          <InlineStack gap="200" blockAlign="center">
-            <Text as="span" variant="bodyMd" fontWeight="semibold">
-              {provider.charAt(0).toUpperCase() + provider.slice(1)}
-            </Text>
-            <Badge tone={rowState.badge}>{t.customers.integrations[rowState.label]}</Badge>
-          </InlineStack>
+          <Text
+            as="span"
+            variant="headingMd"
+            fontWeight="bold"
+            tone={state.tone === 'disabled' ? 'disabled' : undefined}
+          >
+            {entry.name}
+          </Text>
+          <Text as="span" tone={state.tone}>
+            {t.customers.integrations[state.label]}
+          </Text>
         </BlockStack>
       </InlineStack>
-
-      {showReconnectBanner && (
-        <Banner tone="warning">
-          <InlineStack gap="200" blockAlign="center">
-            <Text as="span">
-              {t.customers.integrations.importReasons.not_connected}
-            </Text>
-            <Button onClick={() => onManage?.(provider)} variant="plain">
-              {t.customers.integrations.reconnect}
-            </Button>
-          </InlineStack>
-        </Banner>
-      )}
-
-      {(lastRun || openConflicts > 0 || rowState.showImport) && (
-        <BlockStack gap="100">
-          {lastRun && (
-            <Text as="p" variant="bodySm" tone="subdued">
-              {t.customers.integrations.lastImport(
-                formatDate(lastRun.finishedAt, locale),
-                (lastRun.counters.filled as number) ?? 0,
-              )}
-            </Text>
-          )}
-          {openConflicts > 0 && (
-            <Link url={conflictsUrl}>
-              {t.customers.integrations.conflicts(openConflicts)}
-            </Link>
-          )}
-          {rowState.showImport && (
-            <InlineStack gap="200" blockAlign="center">
-              <Button
-                onClick={handleImport}
-                loading={isImporting}
-                disabled={isImporting}
-                size="slim"
-              >
-                {t.customers.integrations.importData}
-              </Button>
-            </InlineStack>
-          )}
-          {running && (
-            <Text as="p" variant="bodySm" tone="subdued">
-              {t.customers.integrations.importRunning}
-            </Text>
-          )}
-        </BlockStack>
-      )}
-
-      {importReason && (
-        <Banner tone="warning">
-          {t.customers.integrations.importReasons[
-            importReason as keyof typeof t.customers.integrations.importReasons
-          ] ?? importReason}
-        </Banner>
-      )}
-    </BlockStack>
+    </Box>
   );
-}
 
-function formatDate(dateStr: string | null, locale: string): string {
-  if (!dateStr) return '—';
-  try {
-    const date = new Date(dateStr);
-    return new Intl.DateTimeFormat(locale, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date);
-  } catch {
-    return '—';
+  // Voce non disponibile: niente UnstyledButton, logo con classe CSS per opacita'
+  if (!state.clickable) {
+    return <div className="integration-tile-disabled">{tileContent}</div>;
   }
+
+  // Voce cliccabile: UnstyledButton con aria-label accessibile
+  return (
+    <UnstyledButton
+      onClick={() => onManage?.(entry.id)}
+      ariaLabel={`${entry.name} - ${t.customers.integrations[state.label]}`}
+    >
+      {tileContent}
+    </UnstyledButton>
+  );
 }

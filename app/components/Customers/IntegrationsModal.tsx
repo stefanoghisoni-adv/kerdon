@@ -24,6 +24,7 @@ import {
   searchIntegrations,
   type IntegrationCategory,
   type IntegrationEntry,
+  type IntegrationId,
 } from '~/lib/integrations/registry';
 import type { DateFormat } from '~/lib/integrations/values';
 import { parseDate } from '~/lib/integrations/values';
@@ -37,7 +38,7 @@ export interface IntegrationsModalProps {
   open: boolean;
   onClose: () => void;
   /** Provider preselected (for «Riconnetti» or «Gestisci» from a row). */
-  preselected?: 'klaviyo' | null;
+  preselected?: IntegrationId | null;
 }
 
 export interface Sample {
