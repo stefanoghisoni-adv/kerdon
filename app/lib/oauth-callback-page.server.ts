@@ -29,19 +29,20 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>]/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
-export interface CallbackPageCopy {
-  /** Il nome del pulsante nell'app, per lingua: «Collega Supabase». */
-  connectLabel: { it: string; en: string };
-}
+/**
+ * Nessun nome di pulsante: nell'app il pulsante cambia etichetta secondo il
+ * punto in cui il merchant si e' fermato, e una frase che ne cita uno
+ * sbagliato lo farebbe cercare invano.
+ */
+const BACK =
+  'Torna su Kerdon e riprova il collegamento: da lì si completa in un clic. / ' +
+  'Go back to Kerdon and try connecting again: it finishes there in one click.';
 
 export function oauthCallbackPage(
   message: Record<string, unknown>,
   appOrigin: string,
-  copy: CallbackPageCopy,
 ): Response {
-  const back =
-    `Torna su Kerdon e clicca di nuovo «${copy.connectLabel.it}» per completare. / ` +
-    `Go back to Kerdon and click "${copy.connectLabel.en}" again to finish.`;
+  const back = BACK;
   const html = `<!doctype html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">

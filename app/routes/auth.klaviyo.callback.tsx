@@ -1,10 +1,8 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { oauthCallbackPage } from '~/lib/oauth-callback-page.server';
 
-const COPY = { connectLabel: { it: 'Collega Klaviyo', en: 'Connect Klaviyo' } };
-
 function closePage(message: Record<string, unknown>, appOrigin: string): Response {
-  return oauthCallbackPage(message, appOrigin, COPY);
+  return oauthCallbackPage(message, appOrigin);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

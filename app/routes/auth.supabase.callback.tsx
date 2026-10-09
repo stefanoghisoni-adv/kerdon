@@ -16,10 +16,8 @@ import { oauthCallbackPage } from '~/lib/oauth-callback-page.server';
  * del negozio della sessione. E' lo stesso disegno del ritorno da Klaviyo.
  */
 
-const COPY = { connectLabel: { it: 'Collega Supabase', en: 'Connect Supabase' } };
-
 function closePage(message: Record<string, unknown>, appOrigin: string): Response {
-  return oauthCallbackPage(message, appOrigin, COPY);
+  return oauthCallbackPage(message, appOrigin);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

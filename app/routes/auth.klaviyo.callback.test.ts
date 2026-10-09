@@ -26,8 +26,9 @@ describe('GET /auth/klaviyo/callback', () => {
 
   it('senza la finestra dell\'app non si chiude: spiega come completare', async () => {
     const html = await (await call('?code=c&state=s')).text();
-    expect(html).toContain('Torna su Kerdon e clicca di nuovo «Collega Klaviyo» per completare.');
-    expect(html).toContain('Go back to Kerdon and click "Connect Klaviyo" again to finish.');
+    expect(html).toContain('Torna su Kerdon e riprova il collegamento: da lì si completa in un clic.');
+    expect(html).toContain('Go back to Kerdon and try connecting again: it finishes there in one click.');
+    expect(html).not.toMatch(/«Collega|"Connect /);
     const script = html.slice(html.indexOf('<script>'), html.indexOf('</script>'));
     expect(script.split('window.close()').length - 1).toBe(1);
     expect(script.slice(script.indexOf('} else {'))).not.toContain('window.close');

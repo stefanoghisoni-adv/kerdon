@@ -111,8 +111,9 @@ describe('GET /auth/supabase/callback', () => {
     // arriva a nessuno: chiudere dicendo "fatto" lascerebbe il merchant
     // convinto di aver finito.
     const html = await (await call('?code=c&state=s')).text();
-    expect(html).toContain('Torna su Kerdon e clicca di nuovo «Collega Supabase» per completare.');
-    expect(html).toContain('Go back to Kerdon and click "Connect Supabase" again to finish.');
+    expect(html).toContain('Torna su Kerdon e riprova il collegamento: da lì si completa in un clic.');
+    expect(html).toContain('Go back to Kerdon and try connecting again: it finishes there in one click.');
+    expect(html).not.toMatch(/«Collega|"Connect /);
     // window.close() solo dentro il ramo con la finestra dell'app.
     const script = html.slice(html.indexOf('<script>'), html.indexOf('</script>'));
     expect(script).toMatch(/if \(window\.opener\) \{[^}]*postMessage[\s\S]*window\.close\(\);[\s\S]*\} else \{/);
