@@ -21,9 +21,9 @@ describe('getSelectedLabel', () => {
     expect(getSelectedLabel(options, 'xyz', 'Nessuna opzione')).toBe('Nessuna opzione');
   });
 
-  it('restituisce stringa vuota se nessun placeholder e value non corrisponde', () => {
-    expect(getSelectedLabel(options, '')).toBe('');
-    expect(getSelectedLabel(options, 'xyz')).toBe('');
+  it('restituisce la prima opzione se nessun placeholder e value non corrisponde', () => {
+    expect(getSelectedLabel(options, '')).toBe('Opzione A');
+    expect(getSelectedLabel(options, 'xyz')).toBe('Opzione A');
   });
 
   it('gestisce array vuoto', () => {

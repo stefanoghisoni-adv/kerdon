@@ -3,9 +3,8 @@
 // Menu a tendina costruito con i componenti Polaris (Button + Popover + OptionList)
 // al posto di <Select> nativo del browser.
 
-import { useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
-import { Button, Popover, OptionList, Box, Text, InlineError } from '@shopify/polaris';
-import { SelectIcon } from '@shopify/polaris-icons';
+import { useState, useCallback, useRef, useId, type ReactNode } from 'react';
+import { Button, Popover, OptionList, Labelled } from '@shopify/polaris';
 
 export interface PolarisSelectOption {
   label: string;
@@ -35,7 +34,7 @@ export interface PolarisSelectProps {
 }
 
 /**
- * Restituisce l'etichetta dell'opzione selezionata, oppure il placeholder.
+ * Restituisce l'etichetta dell'opzione selezionata, il placeholder, o la prima opzione.
  */
 export function getSelectedLabel(
   options: PolarisSelectOption[],
@@ -43,7 +42,10 @@ export function getSelectedLabel(
   placeholder?: string
 ): string {
   const selected = options.find((opt) => opt.value === value);
-  return selected ? selected.label : placeholder ?? '';
+  if (selected) return selected.label;
+  if (placeholder) return placeholder;
+  // Fallback alla prima opzione se value non corrisponde e nessun placeholder
+  return options.length > 0 ? options[0].label : '';
 }
 
 /**
@@ -61,10 +63,10 @@ export function mapOptionsForList(options: PolarisSelectOption[]) {
  * PolarisSelect: menu a tendina costruito con Polaris, senza <select> nativo.
  *
  * Accessibilità:
- * - Apertura con Enter/Space/ArrowDown
- * - Chiusura con Escape
+ * - Apertura con Enter/Space o click
+ * - Chiusura con Escape (fermato al popover per non chiudere Modal genitore)
  * - Focus torna al trigger dopo la selezione
- * - Label collegata al trigger tramite id/aria
+ * - Label collegata al trigger tramite Labelled
  */
 export function PolarisSelect({
   label,
@@ -78,8 +80,8 @@ export function PolarisSelect({
   error,
 }: PolarisSelectProps) {
   const [popoverActive, setPopoverActive] = useState(false);
-  const triggerId = useRef(`polaris-select-${Math.random().toString(36).slice(2, 11)}`).current;
-  const labelId = useRef(`polaris-select-label-${Math.random().toString(36).slice(2, 11)}`).current;
+  const triggerId = useId();
+  const triggerRef = useRef<HTMLDivElement>(null);
 
   const togglePopover = useCallback(() => {
     if (!disabled) {
@@ -89,60 +91,52 @@ export function PolarisSelect({
 
   const closePopover = useCallback(() => {
     setPopoverActive(false);
+    // Focus torna al trigger (il Button dentro il div wrapper)
+    if (triggerRef.current) {
+      const button = triggerRef.current.querySelector('button');
+      if (button) {
+        button.focus();
+      }
+    }
   }, []);
 
   const handleSelection = useCallback(
     (selected: string[]) => {
-      if (selected.length > 0 && onChange) {
+      // Skip se si riseleziona lo stesso valore
+      if (selected.length > 0 && selected[0] !== value && onChange) {
         onChange(selected[0]);
       }
       closePopover();
     },
-    [onChange, closePopover]
+    [onChange, closePopover, value]
   );
 
-  // Chiusura con Escape
-  useEffect(() => {
-    if (!popoverActive) return;
+  // Intercetta Escape nel popover per non chiudere la Modal genitore
+  const handlePopoverKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closePopover();
+    }
+  }, [closePopover]);
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        closePopover();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [popoverActive, closePopover]);
+  const handlePopoverKeyUp = useCallback((event: React.KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+    }
+  }, []);
 
   const selectedLabel = getSelectedLabel(options, value, placeholder);
   const listOptions = mapOptionsForList(options);
 
   const activator = (
-    <div>
-      {!labelHidden && (
-        <Box paddingBlockEnd="100">
-          <label htmlFor={triggerId} id={labelId}>
-            <Text as="span" variant="bodyMd" fontWeight="medium">
-              {label}
-            </Text>
-          </label>
-        </Box>
-      )}
-      {labelHidden && (
-        <label htmlFor={triggerId} id={labelId} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden' }}>
-          {label}
-        </label>
-      )}
+    <div ref={triggerRef}>
       <Button
         id={triggerId}
         onClick={togglePopover}
         disclosure="down"
-        icon={SelectIcon}
         fullWidth
         textAlign="start"
         disabled={disabled}
-        accessibilityLabel={typeof label === 'string' ? label : undefined}
       >
         {selectedLabel}
       </Button>
@@ -150,7 +144,13 @@ export function PolarisSelect({
   );
 
   return (
-    <Box>
+    <Labelled
+      id={triggerId}
+      label={label}
+      labelHidden={labelHidden}
+      helpText={helpText}
+      error={error}
+    >
       <Popover
         active={popoverActive}
         activator={activator}
@@ -159,24 +159,14 @@ export function PolarisSelect({
         preferredAlignment="left"
         fullWidth
       >
-        <OptionList
-          options={listOptions}
-          selected={[value]}
-          onChange={handleSelection}
-        />
+        <div onKeyDown={handlePopoverKeyDown} onKeyUp={handlePopoverKeyUp}>
+          <OptionList
+            options={listOptions}
+            selected={[value]}
+            onChange={handleSelection}
+          />
+        </div>
       </Popover>
-      {error && (
-        <Box paddingBlockStart="100">
-          <InlineError message={error} fieldID={triggerId} />
-        </Box>
-      )}
-      {!error && helpText && (
-        <Box paddingBlockStart="100">
-          <Text as="p" variant="bodyMd" tone="subdued">
-            {helpText}
-          </Text>
-        </Box>
-      )}
-    </Box>
+    </Labelled>
   );
 }
