@@ -501,7 +501,7 @@ export const en: typeof it = {
     },
     privacyNotice: {
       title: "We've updated our privacy policy",
-      body: "It now lists, one by one, the cookies that visitor recognition uses on your store, with their duration and purpose, so you can copy them straight into your own cookie policy.",
+      body: "It now covers the Klaviyo import: if you connect your account, Kerdon reads its profiles only when you ask, to fill in missing dates of birth. Differing dates are left for you to decide, access to your Klaviyo account is kept secure, and nothing is written to Klaviyo.",
       link: "Read the privacy policy",
       acknowledge: "Got it",
       saveFailed: "We couldn't save your confirmation. Please try again shortly.",
@@ -978,6 +978,112 @@ export const en: typeof it = {
         "People who browse without buying are still recognised when they come back, so the day they order you know where they first came from \u2014 even months later, even from another device. The longer you keep them, the further back you can trace; the shorter, the less room they take up in your database.",
       label: "Keep for",
       option: (days: number) => `${days} days`,
+    },
+    integrations: {
+      title: "Integrations",
+      manage: "Manage",
+      noIntegrations: "Connect integrations to import customer data from other platforms.",
+      lastImport: (date: string, filled: number) =>
+        `Last import: ${date} \u00b7 ${filled} ${filled === 1 ? 'field filled' : 'fields filled'}`,
+      conflicts: (n: number) =>
+        n === 1 ? '1 different value from Klaviyo' : `${n} different values from Klaviyo`,
+      importData: "Import data",
+      importRunning: "Import in progress. Reopen this page in a few minutes to see the results.",
+      reconnect: "Reconnect",
+      statusConnected: "Connected",
+      statusNotConnected: "Not connected",
+      statusNeedsReconnect: "Reconnect",
+      /** Reasons why import doesn't start. */
+      importReasons: {
+        already_running: "An import is already running.",
+        no_mapping: "Configure which field to import before starting the import.",
+        not_connected: "Connect the integration to import data.",
+        no_write_access: "The app doesn't have permission to write customer data. Reopen the app to grant it.",
+        plan: "Upgrade your plan to import customer data.",
+      },
+    },
+    conflicts: {
+      /** Tab label with conflict count. */
+      tabAll: "All",
+      tabConflicts: (n: number) => `Different values from Klaviyo (${n})`,
+      /** Column in conflicts view. */
+      birthdateColumn: "Birthdate",
+      /** Format: "Ours: <date> · Klaviyo: <date>". */
+      ourValue: (date: string) => `Ours: ${date}`,
+      theirValue: (date: string) => `Klaviyo: ${date}`,
+      /** Date not set in our system. */
+      notSet: "not set",
+      /** Row actions. */
+      keepOurs: "Keep ours",
+      useTheirs: "Use Klaviyo",
+      /** Bulk actions. */
+      bulkKeepOurs: "Keep ours",
+      bulkUseTheirs: "Use Klaviyo",
+      /** Success toast for kept_ours. */
+      resolvedKeptOurs: (n: number) =>
+        n === 0 ? 'No conflicts to resolve'
+        : n === 1 ? '1 conflict resolved'
+        : `${n} conflicts resolved`,
+      /** Success toast for used_theirs. */
+      resolvedUsedTheirs: (n: number) =>
+        n === 0 ? 'No conflicts to update'
+        : n === 1 ? '1 date updated'
+        : `${n} dates updated`,
+      /** Banner for rows not written. */
+      notWrittenWarning: (n: number) =>
+        n === 1
+          ? 'Could not update 1 customer. Please try again.'
+          : `Could not update ${n} customers. Please try again.`,
+      /** Banner for generic error. */
+      genericError: "Could not complete the operation. Please try again.",
+      /** Empty table in conflicts view. */
+      noConflicts: "No different values to resolve.",
+    },
+    integrationsModal: {
+      backToAll: "All integrations",
+      searchLabel: "Search integrations",
+      searchPlaceholder: "Search for an integration…",
+      categoryLabel: "Category",
+      allCategory: "All",
+      categories: {
+        crm: "CRM",
+        database: "Database",
+        csv: "CSV",
+      },
+      comingSoon: "Coming soon",
+      noResults: "No integrations found",
+    },
+    klaviyoDetail: {
+      benefitText: "Import customer birthdates from Klaviyo to fill in missing data.",
+      connect: "Connect Klaviyo",
+      accountLabel: "Account",
+      disconnect: "Disconnect",
+      disconnectConfirm: "Disconnect Klaviyo? Already imported data and conflicts remain, but you won't be able to import new data.",
+      fieldMappingTitle: "Field mapping",
+      klaviyoPropertyLabel: "Klaviyo property",
+      selectProperty: "Select a property",
+      selectFormat: "Choose format",
+      kerdonFieldLabel: "Kerdon field",
+      birthdate: "Birthdate",
+      dateFormatLabel: "Date format",
+      previewTitle: "Preview",
+      save: "Save",
+      oauthErrors: {
+        denied: "Authorization denied. Grant permissions to connect Klaviyo.",
+        failed: "Connection failed. Please try again.",
+        expired: "Session expired. Please try again.",
+        shop_mismatch: "Security error. Try again from your store.",
+        unavailable: "Klaviyo is unreachable. Try again shortly.",
+        unknown: "Unknown error. Please try again.",
+      },
+      errors: {
+        propertiesReconnect: "Reconnect Klaviyo to load properties.",
+        propertiesUnavailable: "Klaviyo is unreachable. Try again shortly.",
+        saveFailed: "Save failed. Please try again.",
+        disconnectFailed: "Disconnect failed. Please try again.",
+      },
+      popupBlocked: "The popup was blocked by your browser.",
+      retryPopup: "Retry",
     },
   },
 

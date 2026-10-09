@@ -1,7 +1,7 @@
 # Accordo sul trattamento dei dati (DPA) — Kerdon
 
-Ultimo aggiornamento: 2 ottobre 2026
-Versione: 1.5
+Ultimo aggiornamento: 8 ottobre 2026
+Versione: 1.6
 
 > Questo accordo si accetta insieme ai termini di servizio, all'installazione
 > dell'app.
@@ -23,7 +23,10 @@ Kerdon li tratta solo per erogare il servizio e solo su sua istruzione.
 
 Kerdon sincronizza i dati di catalogo, clientela e ordini del negozio Shopify
 del merchant verso un progetto database di cui il merchant è intestatario, ne
-mantiene aggiornata la copia e ne calcola indicatori di redditività.
+mantiene aggiornata la copia e ne calcola indicatori di redditività. Se il
+merchant collega il proprio account Klaviyo, Kerdon completa inoltre le date di
+nascita dei clienti a partire dai profili che vi sono conservati, come descritto
+al punto 2.
 
 L'accordo dura quanto l'installazione dell'app e termina con la disinstallazione.
 
@@ -38,6 +41,20 @@ sta nel database del merchant, riportato nel metafield del cliente da cui
 Kerdon lo legge, quando quel metafield è vuoto e il cliente ha prestato il
 consenso al marketing. Nessun altro campo dell'anagrafica del cliente viene
 creato o modificato.
+
+Se il merchant collega il proprio account **Klaviyo**, Kerdon legge i profili
+dei clienti che vi sono conservati per conto del merchant e solo su suo comando
+— per mostrare quali proprietà dei profili contengono una data, e per eseguire
+un'importazione che il merchant avvia — allo scopo di completare le date di
+nascita dei clienti. Ogni profilo viene abbinato a un cliente del database del
+merchant, fra quelli che hanno prestato il consenso al marketing, per
+identificativo Shopify, indirizzo email o numero di telefono. Una data di
+nascita vuota viene riempita nello stesso metafield del cliente descritto sopra.
+Una data diversa già presente non viene cambiata: il cliente viene elencato
+perché il merchant decida, e il valore di Klaviyo viene scritto solo se il
+merchant lo sceglie, che è l'unico caso in cui una data di nascita già presente
+su Shopify viene sostituita. **Kerdon non scrive niente su Klaviyo**: il suo
+accesso si limita alla lettura dei profili e del nome dell'account.
 
 Kerdon tratta inoltre, se il merchant attiva la funzione, il **riconoscimento
 dei visitatori** del negozio, descritto al punto 3.
@@ -121,6 +138,14 @@ termine la cancellazione; al massimo 30 giorni; `Secure`, `HttpOnly`,
 `SameSite=Lax`). Il nome di prima, `corew_eid`, non si scrive più. La sezione
 3.5 dell'informativa li elenca per intero, con finalità, durata e contenuto.
 
+**Dati letti da Klaviyo** (solo se il merchant collega il proprio account, e solo
+quando lo chiede): identificativo del profilo, indirizzo email, numero di
+telefono, paese, identificativo esterno e proprietà del profilo, letti per
+abbinare ogni profilo a un cliente e per trovare la data di nascita nella
+proprietà scelta dal merchant. Si conserva solo quella data — su Shopify o,
+quando è diversa da quella del merchant, nel database di Kerdon come descritto
+al punto 9 — e il resto viene scartato una volta letto.
+
 **Esclusioni esplicite**: nessun dato di pagamento; dagli ordini non viene
 chiesto né conservato alcun indirizzo email, numero di telefono, nota o
 indirizzo — salvo il paese di spedizione descritto sopra; nessuna etichetta del corriere viene
@@ -170,10 +195,17 @@ Il database di catalogo e clientela **non** compare in questa tabella: è
 intestato al merchant, che ha un rapporto contrattuale diretto con il proprio
 fornitore. Kerdon vi accede su sua istruzione.
 
+Per la stessa ragione non vi compare Klaviyo: è il fornitore di email marketing
+del merchant, con cui il merchant ha un proprio rapporto. Kerdon vi legge su
+istruzione del merchant, solo quando lo chiede, e non vi scrive niente.
+
 ## 6. Misure di sicurezza
 
 - Cifratura in transito (HTTPS/TLS) su ogni comunicazione
-- Cifratura dei segreti a riposo con AES-256-GCM
+- Cifratura dei segreti a riposo con AES-256-GCM, token di accesso a Klaviyo compresi
+- Accesso all'account Klaviyo del merchant in sola lettura, limitato ai profili e
+  al nome dell'account; allo scollegamento i token vengono cancellati e revocati
+  presso Klaviyo
 - Cifratura a riposo e backup cifrati sul database dell'applicazione
 - Row Level Security attiva su tutte le tabelle dell'applicazione, senza policy
   di accesso pubblico
@@ -230,8 +262,10 @@ Kerdon dà seguito alle richieste di accesso e cancellazione che riceve
 attraverso i canali previsti da Shopify.
 
 **Accesso**: Kerdon raccoglie dal database del merchant la riga del cliente, i
-suoi ordini — dati di spedizione e logistica compresi — e le relative righe, e le righe dei browser a lui collegati.
-L'esportazione così ottenuta contiene dati personali e viene conservata sui
+suoi ordini — dati di spedizione e logistica compresi — e le relative righe, e le righe dei browser a lui collegati,
+insieme alle differenze con Klaviyo che il database di Kerdon conserva per quel
+cliente (punto 9): la data di nascita del merchant, quella di Klaviyo, la
+decisione presa e la sua data. L'esportazione così ottenuta contiene dati personali e viene conservata sui
 sistemi di Kerdon, dove il merchant la scarica dentro l'app con la propria
 sessione di amministratore, **per un massimo di 30 giorni**; alla scadenza viene
 cancellata.
@@ -245,7 +279,9 @@ spedizione, e marcati con la data della cancellazione (`customer_redacted_at`);
 una guardia nel database del merchant impedisce a qualunque scrittura successiva
 di ripristinare quei campi. Gli altri dati di spedizione e logistica descrivono
 il pacco e non la persona, e restano sull'ordine, con il costo logistico
-invariato, perché i costi del merchant restino corretti.
+invariato, perché i costi del merchant restino corretti. Nel database di Kerdon
+vengono cancellate le eventuali differenze con Klaviyo registrate per quel
+cliente (punto 9).
 
 ## 9. Al termine
 
@@ -257,13 +293,18 @@ cancellate.
 intestatario, e li può cancellare in qualsiasi momento dal proprio progetto.
 
 Sull'infrastruttura di Kerdon quei dati transitano al momento in cui vengono
-scritti o riletti, e in quattro casi limitati vi restano scritti: le riparazioni
+scritti o riletti, e in cinque casi limitati vi restano scritti: le riparazioni
 in sospeso, che portano l'identificativo Shopify di un cliente e, per la data di
 nascita, il valore ancora da riscrivere; il messaggio firmato di una richiesta
 privacy, fino alla chiusura della richiesta; l'esportazione preparata per una
 richiesta di accesso, per un massimo di 30 giorni; l'identificativo del browser e
 quello del cliente su una revoca di consenso, cifrati e azzerati appena la revoca
-è applicata. Nessuno dei quattro sopravvive alla propria ragione d'essere.
+è applicata; le differenze trovate da un'importazione da Klaviyo, che portano
+l'identificativo Shopify di un cliente, la data di nascita del merchant e quella
+di Klaviyo, e la decisione del merchant fra le due, conservate perché
+l'importazione successiva non chieda di nuovo, e cancellate con la cancellazione
+di quel cliente o del negozio. Nessuno dei cinque sopravvive alla propria ragione
+d'essere.
 
 ## 10. Trasferimenti extra UE
 

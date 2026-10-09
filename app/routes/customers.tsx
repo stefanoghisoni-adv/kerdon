@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
-import { Await, useLoaderData, useNavigation, useSearchParams } from '@remix-run/react';
-import { Suspense, useEffect, useState } from 'react';
+import { Await, useLoaderData, useNavigation, useRevalidator, useSearchParams } from '@remix-run/react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Badge,
   Banner,
@@ -18,9 +18,11 @@ import {
   Page,
   SkeletonBodyText,
   Spinner,
+  Tabs,
   Text,
   TextField,
   Tooltip,
+  useIndexResourceState,
 } from '@shopify/polaris';
 import type { IndexTableProps } from '@shopify/polaris';
 import { AlertCircleIcon, CheckCircleIcon } from '@shopify/polaris-icons';
@@ -31,6 +33,7 @@ import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-forma
 import { BASE_CURRENCY } from '~/lib/billing/money';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import type { CustomersReport } from '~/lib/customers/customers.server';
+import { fetchConflictCustomerNames } from '~/lib/customers/customers.server';
 import {
   startCustomersPageData,
   type BirthdateData,
@@ -58,6 +61,8 @@ import {
 } from '~/components/Customers/BirthdateMetafieldCard';
 import { BirthdateStatusRow } from '~/components/Customers/BirthdateStatusRow';
 import { ExtraFieldsCard } from '~/components/Customers/ExtraFieldsCard';
+import { IntegrationsCard } from '~/components/Customers/IntegrationsCard';
+import { IntegrationsModal } from '~/components/Customers/IntegrationsModal';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   BIRTHDATE_METAFIELD_KEY,
@@ -70,6 +75,8 @@ import {
   requireShopCapability,
   shopCapabilityOutcome,
 } from '~/lib/authz/require-capability.server';
+import { listConflicts } from '~/lib/integrations/conflicts.server';
+import { conflictRows, effectiveView } from '~/lib/customers/conflict-rows';
 
 
 /**
@@ -159,13 +166,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
   //
   // Senza il piano non c'e' niente da attendere: si sa gia' cosa dire.
   const data: Promise<CustomersPageView> | CustomersPageView = customersIncluded
-    ? startCustomersPageData({ shopDomain: session.shop, shop, range, timing })
+    ? Promise.all([
+        startCustomersPageData({ shopDomain: session.shop, shop, range, timing }),
+        timing.measure('conflicts', () =>
+          listConflicts(shop.id, { status: 'open' }).catch((error) => {
+            console.warn(
+              '[customers] conflitti non leggibili:',
+              error instanceof Error ? error.message : 'errore sconosciuto',
+            );
+            return [];
+          }),
+        ),
+      ]).then(async ([pageData, rawConflicts]) => {
+        // Fetch nomi dal database del merchant (I3b: validazione interna)
+        const ref = shop.supabaseConfig?.supabaseProjectRef;
+        if (!ref) {
+          return { ...pageData, conflicts: rawConflicts, conflictNames: [] };
+        }
+
+        const conflictCustomerIds = rawConflicts.map((c) => c.customerId);
+        const nameMap = await timing.measure('conflict-names', () =>
+          fetchConflictCustomerNames(shop.id, ref, conflictCustomerIds),
+        );
+
+        // Converte Map in array per JSON serialization
+        const conflictNames = Array.from(nameMap.entries()).map(([customerId, names]) => ({
+          customerId,
+          ...names,
+        }));
+
+        // Passa rawConflicts e conflictNames: conflictRows fa il merge (I3b)
+        return { ...pageData, conflicts: rawConflicts, conflictNames };
+      })
     : {
         report: { rows: [], currency: 'EUR', lifetimeCustomers: 0, unavailable: 'plan_required' },
         // Il riquadro del campo "Data di nascita" c'e' solo con un piano che
         // sincronizza i clienti: senza, il campo non arriverebbe da nessuna
         // parte e il merchant lo compilerebbe per niente.
         birthdate: null,
+        // Le integrazioni: null se il piano non include clienti.
+        integrations: null,
+        conflicts: [],
+        conflictNames: [],
       };
 
   return defer(
@@ -200,10 +242,88 @@ function customerHeadings(t: ReturnType<typeof useT>): IndexTableProps['headings
   ];
 }
 
+/** Le intestazioni della tabella nella vista conflitti. */
+function conflictsHeadings(t: ReturnType<typeof useT>): IndexTableProps['headings'] {
+  return [
+    { title: t.customers.columns.customer },
+    { title: t.customers.conflicts.birthdateColumn },
+    { title: t.customers.columns.actions },
+  ];
+}
+
+/** Formatta una data ISO YYYY-MM-DD per la vista conflitti */
+function formatConflictDate(isoDate: string, locale: string): string {
+  try {
+    const [year, month, day] = isoDate.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    return new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    }).format(date);
+  } catch {
+    return isoDate;
+  }
+}
+
+/**
+ * Righe di riempimento per mantenere l'altezza costante della tabella.
+ * Estratto in componente per evitare duplicazione (I7).
+ */
+function FillerRows({ count, cols, start = 0 }: { count: number; cols: number; start?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <IndexTable.Row
+          key={`filler-${start + i}`}
+          id={`filler-${start + i}`}
+          position={start + i}
+          disabled
+        >
+          {Array.from({ length: cols }, (_, colIdx) => (
+            <IndexTable.Cell key={colIdx}>
+              <span aria-hidden="true" style={{ visibility: 'hidden' }}>
+                &nbsp;
+              </span>
+            </IndexTable.Cell>
+          ))}
+        </IndexTable.Row>
+      ))}
+    </>
+  );
+}
+
 /** Cio' che la pagina riceve quando i dati sono arrivati. */
 interface CustomersPageView {
   report: CustomersReport;
   birthdate: BirthdateData | null;
+  integrations: Array<{
+    provider: 'klaviyo';
+    status: 'connected' | 'not_connected' | 'needs_reconnect';
+    accountName?: string | null;
+    mapping: { sourceKey: string; dateFormat: string } | null;
+    lastRun: {
+      status: 'completed' | 'interrupted';
+      finishedAt: string | null;
+      counters: { filled?: number; conflicts?: number; [key: string]: unknown };
+    } | null;
+    running: boolean;
+    openConflicts: number;
+  }> | null;
+  conflicts: Array<{
+    customerId: number;
+    field: 'birthdate';
+    ours: string | null;
+    theirs: string;
+    provider: 'klaviyo';
+    firstName?: string | null;
+    email?: string | null;
+  }>;
+  conflictNames: Array<{
+    customerId: number;
+    firstName: string | null;
+    email: string | null;
+  }>;
 }
 
 /**
@@ -330,6 +450,9 @@ function CustomersContent({
 }) {
   const { rows, currency, unavailable, lifetimeCustomers } = view.report;
   const birthdate = view.birthdate;
+  const integrations = view.integrations;
+  const conflicts = view.conflicts;
+  const conflictNames = view.conflictNames;
   const t = useT();
   const locale = useLocale();
   // Quale riga ha appena chiesto "Risolvi problemi": la pagina dei prodotti
@@ -341,6 +464,17 @@ function CustomersContent({
       ? new URLSearchParams(navigation.location.search).get('customer')
       : null;
 
+  // Vista effettiva: conflicts solo se richiesto E ci sono conflitti aperti (I4)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openConflictsCount = conflicts.length;
+  const currentView = effectiveView(searchParams, openConflictsCount);
+
+  // Revalidator per aggiornare i dati dopo la risoluzione
+  const revalidator = useRevalidator();
+
+  // Stato per le risoluzioni conflitti (I5: explicit fetch, no useFetcher)
+  const [resolving, setResolving] = useState(false);
+
   // Il filtro sta in uno stato e non nell'indirizzo: non ricarica niente —
   // le righe sono gia' tutte qui — e passare dal server per nascondere delle
   // righe che si hanno gia' sarebbe un viaggio per nulla. Vale anche per la
@@ -348,11 +482,24 @@ function CustomersContent({
   const [onlyIssues, setOnlyIssues] = useState(false);
   const [query, setQuery] = useState('');
 
+  // Modal «Gestisci» integrazioni
+  const [integrationsModalOpen, setIntegrationsModalOpen] = useState(false);
+  const [preselectedProvider, setPreselectedProvider] = useState<'klaviyo' | null>(null);
+
+  const handleManage = (provider: 'klaviyo') => {
+    setPreselectedProvider(provider);
+    setIntegrationsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIntegrationsModalOpen(false);
+    setPreselectedProvider(null);
+  };
+
   // Il periodo invece sta nell'indirizzo: cambiarlo vuol dire chiedere al
   // database altri ordini, e il caricamento lo legge da li'. Si toccano solo
   // `from` e `to`: gli altri parametri (quelli con cui l'admin apre l'app)
   // restano dove sono. Ricerca e filtro restano quelli scelti.
-  const [searchParams, setSearchParams] = useSearchParams();
   const choosePeriod = (next: DateRange) => {
     const params = new URLSearchParams(searchParams);
     params.set('from', next.from);
@@ -409,6 +556,175 @@ function CustomersContent({
   // trovato nulla.
   const noSearchResults = query.trim().length > 0 && matching.length === 0;
 
+  // Stato per Banner errori (I5)
+  const [showNotWrittenBanner, setShowNotWrittenBanner] = useState(false);
+  const [notWrittenCount, setNotWrittenCount] = useState(0);
+  const [genericError, setGenericError] = useState(false);
+
+  // Funzioni per gestire il cambio di tab
+  const handleTabChange = (selectedTabIndex: number) => {
+    const params = new URLSearchParams(searchParams);
+    if (selectedTabIndex === 0) {
+      params.delete('view');
+    } else {
+      params.set('view', 'conflicts');
+    }
+    setSearchParams(params, { replace: true, preventScrollReset: true });
+  };
+
+  // Paginazione separata per la vista conflitti (I2)
+  const [conflictsPage, setConflictsPage] = useState(1);
+
+  // Usa conflictRows per il merge (I3b: funzione testata invece di inline)
+  // Converte conflictNames array in CustomerData[] per conflictRows
+  const customerDataFromNames = (conflictNames ?? []).map(
+    ({ customerId, firstName, email }) => ({
+      customerId,
+      firstName,
+      email,
+      // Campi richiesti da CustomerData ma non usati da conflictRows
+      lastName: null,
+      orders: 0,
+      profit: 0,
+      coveredLines: 0,
+      totalLines: 0,
+      currency: 'EUR',
+      synced: false,
+      phone: null,
+    }),
+  );
+  const conflictRowsData = conflictRows(conflicts, customerDataFromNames);
+
+  const paginatedConflicts = pageSlice(conflictRowsData, conflictsPage, CUSTOMERS_PER_PAGE);
+  const conflictsTotalPages = pageCount(conflictRowsData.length, CUSTOMERS_PER_PAGE);
+
+  // Selezione nella vista conflitti con useIndexResourceState (I1)
+  const {
+    selectedResources,
+    allResourcesSelected,
+    handleSelectionChange,
+    clearSelection,
+  } = useIndexResourceState(paginatedConflicts, {
+    resourceIDResolver: (r) => String(r.customerId),
+  });
+
+  // Reset pagina conflitti quando si cambia vista (I2)
+  useEffect(() => {
+    setConflictsPage(1);
+  }, [currentView]);
+
+  // Clamp conflictsPage a conflictsTotalPages (minor fix)
+  useEffect(() => {
+    if (conflictsTotalPages > 0 && conflictsPage > conflictsTotalPages) {
+      setConflictsPage(conflictsTotalPages);
+    }
+  }, [conflictsTotalPages, conflictsPage]);
+
+  // Reset selezione quando si cambia vista o pagina (I1)
+  useEffect(() => {
+    clearSelection();
+  }, [currentView, conflictsPage, clearSelection]);
+
+  // Funzioni per risolvere conflitti con explicit fetch (I5)
+  const resolveConflicts = useCallback(
+    async (customerIds: number[], choice: 'kept_ours' | 'used_theirs') => {
+      if (customerIds.length === 0) return;
+
+      // Reset genericError all'inizio di ogni tentativo (I5)
+      setGenericError(false);
+      setResolving(true);
+
+      try {
+        const response = await fetch('/api/integrations/conflicts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customerIds, choice }),
+        });
+
+        const data = (await response.json()) as {
+          ok: boolean;
+          resolved?: number;
+          notWritten?: number[];
+        };
+
+        if (data.ok) {
+          const resolved = data.resolved ?? 0;
+          const notWritten = data.notWritten ?? [];
+
+          // Toast con copy diverso per kept_ours vs used_theirs
+          if (typeof window !== 'undefined' && window.shopify?.toast) {
+            const message =
+              choice === 'kept_ours'
+                ? t.customers.conflicts.resolvedKeptOurs(resolved)
+                : t.customers.conflicts.resolvedUsedTheirs(resolved);
+            window.shopify.toast.show(message);
+          }
+
+          // Banner per notWritten (I5)
+          if (notWritten.length > 0) {
+            setNotWrittenCount(notWritten.length);
+            setShowNotWrittenBanner(true);
+            setGenericError(false);
+          } else {
+            setShowNotWrittenBanner(false);
+          }
+
+          // Clear selection e revalidate
+          clearSelection();
+          revalidator.revalidate();
+        } else {
+          // Errore generico per !ok (I5)
+          setGenericError(true);
+          setShowNotWrittenBanner(true);
+        }
+      } catch (error) {
+        // Network error (I5)
+        console.warn(
+          '[customers] errore nella risoluzione conflitti:',
+          error instanceof Error ? error.message : 'errore sconosciuto',
+        );
+        setGenericError(true);
+        setShowNotWrittenBanner(true);
+      } finally {
+        setResolving(false);
+      }
+    },
+    [clearSelection, revalidator, t],
+  );
+
+  const handleResolveConflict = useCallback(
+    (customerId: number, choice: 'kept_ours' | 'used_theirs') => {
+      resolveConflicts([customerId], choice);
+    },
+    [resolveConflicts],
+  );
+
+  const handleBulkResolve = useCallback(
+    (choice: 'kept_ours' | 'used_theirs') => {
+      const selectedIds = selectedResources.map(Number);
+      resolveConflicts(selectedIds, choice);
+    },
+    [resolveConflicts, selectedResources],
+  );
+
+  // Preparazione tabs
+  const tabs = [
+    {
+      id: 'all',
+      content: t.customers.conflicts.tabAll,
+    },
+  ];
+
+  // Aggiungi la tab "Dati diversi da Klaviyo" solo se ci sono conflitti
+  if (openConflictsCount > 0) {
+    tabs.push({
+      id: 'conflicts',
+      content: t.customers.conflicts.tabConflicts(openConflictsCount),
+    });
+  }
+
+  const selectedTabIndex = currentView === 'conflicts' && openConflictsCount > 0 ? 1 : 0;
+
   return (
     <>
         {unavailable === 'not_connected' && (
@@ -451,12 +767,23 @@ function CustomersContent({
             due non finiscono mai a schermo insieme. */}
         {birthdate && <BirthdateMetafieldCard {...birthdate} notice={notice} />}
 
-        {/* Due filtri, come nei prodotti non idonei: a sinistra, sopra la
-            tabella. "Richiedono un intervento" tiene solo le righe con la spia
-            gialla — quelle il cui profitto e' calcolato su prodotti senza
-            costo. Sono le uniche su cui c'e' qualcosa da fare, e in un elenco
-            lungo si perdono fra quelle a posto. */}
-        {unavailable === null && (
+        {/* Banner per errori nella risoluzione dei conflitti */}
+        {/* Banner per errori nella risoluzione dei conflitti (I5) */}
+        {showNotWrittenBanner && (
+          <Banner tone="warning" onDismiss={() => setShowNotWrittenBanner(false)}>
+            {genericError
+              ? t.customers.conflicts.genericError
+              : t.customers.conflicts.notWrittenWarning(notWrittenCount)}
+          </Banner>
+        )}
+
+        {/* Tabs: Tutti / Dati diversi da Klaviyo (solo se ci sono conflitti) */}
+        {unavailable === null && tabs.length > 1 && (
+          <Tabs tabs={tabs} selected={selectedTabIndex} onSelect={handleTabChange} />
+        )}
+
+        {/* Filtri e ricerca: solo nella vista "Tutti" (I6) */}
+        {unavailable === null && currentView === 'all' && (
           /* Filtri a sinistra e ricerca a destra, mezza riga ciascuno: la
              stessa forma dei prodotti non idonei, dove la ricerca finisce
              all'estrema destra senza doverla dimensionare a mano.
@@ -533,193 +860,295 @@ function CustomersContent({
             alignItems="start"
           >
           <Card padding="0">
-            <Box padding="400">
-              <BlockStack gap="100">
-                <Text as="p" tone="subdued">
-                  {t.customers.intro}
-                </Text>
-                {/* Il periodo lascia fuori qualcuno: si dice, e si dice come
-                    ritrovarli. */}
-                {periodHidesSome && (
-                  <Text as="p" tone="subdued" variant="bodySm">
-                    {t.customers.periodHint}
+            {currentView === 'all' && (
+              <Box padding="400">
+                <BlockStack gap="100">
+                  <Text as="p" tone="subdued">
+                    {t.customers.intro}
                   </Text>
-                )}
-              </BlockStack>
-            </Box>
+                  {/* Il periodo lascia fuori qualcuno: si dice, e si dice come
+                      ritrovarli. */}
+                  {periodHidesSome && (
+                    <Text as="p" tone="subdued" variant="bodySm">
+                      {t.customers.periodHint}
+                    </Text>
+                  )}
+                </BlockStack>
+              </Box>
+            )}
             {/* Le colonne non si riassestano a ogni lettera scritta nella
                 ricerca: le larghezze stanno in `dashboard.css`, dichiarate una
-                volta nell'ordine delle intestazioni qui sotto. */}
-            <div className="stable-columns stable-columns--customers">
+                volta nell'ordine delle intestazioni qui sotto.
+                Nella vista conflitti non usiamo stable-columns (minor fix). */}
+            <div className={currentView === 'all' ? 'stable-columns stable-columns--customers' : ''}>
             <IndexTable
               resourceName={t.customers.resource}
               itemCount={CUSTOMERS_PER_PAGE}
-              selectable={false}
+              selectable={currentView === 'conflicts'}
+              selectedItemsCount={
+                currentView === 'conflicts'
+                  ? allResourcesSelected
+                    ? 'All'
+                    : selectedResources.length
+                  : undefined
+              }
+              onSelectionChange={currentView === 'conflicts' ? handleSelectionChange : undefined}
+              promotedBulkActions={
+                currentView === 'conflicts'
+                  ? [
+                      {
+                        content: t.customers.conflicts.bulkKeepOurs,
+                        onAction: () => handleBulkResolve('kept_ours'),
+                        disabled: resolving,
+                      },
+                      {
+                        content: t.customers.conflicts.bulkUseTheirs,
+                        onAction: () => handleBulkResolve('used_theirs'),
+                        disabled: resolving,
+                      },
+                    ]
+                  : undefined
+              }
               loading={periodLoading}
-              headings={customerHeadings(t)}
+              headings={currentView === 'conflicts' ? conflictsHeadings(t) : customerHeadings(t)}
             >
-              {visibleRows.length === 0 ? (
-                <>
-                  {/* Messaggio quando non ci sono dati, centrato sotto le intestazioni */}
-                  <IndexTable.Row id="empty-state" position={0} disabled>
-                    <IndexTable.Cell colSpan={7}>
-                      <Box paddingBlock="400">
-                        <Text as="p" tone="subdued" alignment="center">
-                          {noSearchResults
-                            ? t.customers.searchNoResults(query.trim())
-                            : t.customers.empty}
-                        </Text>
-                      </Box>
-                    </IndexTable.Cell>
-                  </IndexTable.Row>
-                  {/* Righe di riempimento per mantenere l'altezza costante */}
-                  {Array.from({ length: CUSTOMERS_PER_PAGE - 1 }, (_, i) => (
-                    <IndexTable.Row
-                      key={`filler-${i}`}
-                      id={`filler-${i}`}
-                      position={i + 1}
-                      disabled
-                    >
-                      {Array.from({ length: 7 }, (_, colIdx) => (
-                        <IndexTable.Cell key={colIdx}>
-                          <span aria-hidden="true" style={{ visibility: 'hidden' }}>
-                            &nbsp;
-                          </span>
-                        </IndexTable.Cell>
-                      ))}
-                    </IndexTable.Row>
-                  ))}
-                </>
-              ) : (
-                <>
-                  {visibleRows.map((row, index) => (
-                    <IndexTable.Row id={String(row.customerId)} key={row.customerId} position={index}>
-                      <IndexTable.Cell>
-                        {/* Il nome porta alla scheda del cliente. _top e non
-                            _blank: dentro l'admin il target nuovo aprirebbe una
-                            finestra spoglia, senza il menu di Shopify intorno. */}
-                        <Link
-                          url={`${adminBase}/customers/${row.customerId}`}
-                          target="_top"
-                          removeUnderline
-                        >
-                          <Text as="span" fontWeight="semibold">
-                            {[row.firstName, row.lastName].filter(Boolean).join(' ') ||
-                              t.customers.noName}
+              {currentView === 'conflicts' ? (
+                /* Vista conflitti (I2: paginati) */
+                paginatedConflicts.length === 0 ? (
+                  <>
+                    <IndexTable.Row id="empty-state" position={0} disabled>
+                      <IndexTable.Cell colSpan={3}>
+                        <Box paddingBlock="400">
+                          <Text as="p" tone="subdued" alignment="center">
+                            {t.customers.conflicts.noConflicts}
                           </Text>
-                        </Link>
+                        </Box>
                       </IndexTable.Cell>
-                      <IndexTable.Cell>
-                        {/* Il profitto di questa riga e' completo, oppure e'
-                            calcolato su prodotti di cui non si conosce il costo.
-                            L'icona lo dice senza occupare una riga di testo sotto
-                            ogni nome: la spiegazione sta nel tooltip, per chi la
-                            cerca. */}
-                        <InlineStack align="center">
-                          <Tooltip
-                            content={
-                              row.coveredLines < row.totalLines
-                                ? t.customers.warning(row.totalLines - row.coveredLines)
-                                : t.customers.allGood
-                            }
-                          >
-                            <Icon
-                              source={
-                                row.coveredLines < row.totalLines ? AlertCircleIcon : CheckCircleIcon
-                              }
-                              tone={row.coveredLines < row.totalLines ? 'warning' : 'success'}
-                            />
-                          </Tooltip>
-                        </InlineStack>
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>{row.orders}</IndexTable.Cell>
-                      <IndexTable.Cell>
-                        {row.averageOrderProfit == null
-                          ? '—'
-                          : formatMoney(row.averageOrderProfit, currency, locale)}
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>
-                        <InlineStack gap="200" blockAlign="center" wrap={false}>
-                          <Text as="span">{formatMoney(row.lifetimeProfit, currency, locale)}</Text>
-                          {/* La variazione sul periodo precedente, in grigio quando
-                              non c'e' nulla da confrontare: verde e rosso dicono da
-                              soli in che direzione si sta andando. */}
-                          {row.profitChange != null && (
-                            <Text
-                              as="span"
-                              variant="bodySm"
-                              tone={row.profitChange >= 0 ? 'success' : 'critical'}
+                    </IndexTable.Row>
+                    <FillerRows count={CUSTOMERS_PER_PAGE - 1} cols={3} start={1} />
+                  </>
+                ) : (
+                  <>
+                    {paginatedConflicts.map((row, index) => (
+                      <IndexTable.Row
+                        id={String(row.customerId)}
+                        key={row.customerId}
+                        position={index}
+                        selected={selectedResources.includes(String(row.customerId))}
+                      >
+                        <IndexTable.Cell>
+                          {row.firstName || row.email ? (
+                            <Link
+                              url={`${adminBase}/customers/${row.customerId}`}
+                              target="_top"
+                              removeUnderline
                             >
-                              {row.profitChange >= 0 ? '+' : ''}
-                              {row.profitChange}%
+                              <Text as="span" fontWeight="semibold">
+                                {row.firstName || t.customers.noName}
+                              </Text>
+                              {row.email && (
+                                <Text as="p" variant="bodySm" tone="subdued">
+                                  {row.email}
+                                </Text>
+                              )}
+                            </Link>
+                          ) : (
+                            <Text as="span" tone="subdued">
+                              ID {row.customerId}
                             </Text>
                           )}
-                        </InlineStack>
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>
-                        <Badge tone={row.synced ? 'success' : 'warning'}>
-                          {row.synced ? t.customers.synced : t.customers.notSynced}
-                        </Badge>
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>
-                        {/* Solo dove c'e' qualcosa da risolvere. Un comando su ogni
-                            riga, anche su quelle a posto, si smette di leggere: e'
-                            la riga senza comando che deve saltare all'occhio. */}
-                        {/* Il cliente viaggia nell'indirizzo: di la' l'elenco si
-                            restringe ai soli prodotti che compaiono nei SUOI
-                            ordini. Chi preme "Risolvi problemi" da questa riga
-                            vuole sistemare il profitto di questo cliente, non fare
-                            le pulizie di primavera nel catalogo. */}
-                        {row.coveredLines < row.totalLines && (
-                          // Altezza esatta e lineHeight 0: lo Spinner di Polaris 13.9.5 rende
-                          // uno span inline con svg inline, che poggia sulla baseline lasciando
-                          // sotto lo spazio per i discendenti del line box (~4-5px). Il flex con
-                          // height fissa e lineHeight 0 elimina quel gap, mantenendo l'altezza
-                          // costante quando il Link diventa Spinner.
-                          <div style={{ display: 'flex', alignItems: 'center', height: '20px', lineHeight: 0 }}>
-                            {clienteInApertura === String(row.customerId) ? (
-                              <Spinner size="small" accessibilityLabel={t.customers.fixIssues} />
-                            ) : (
-                              <Link url={`/products/issues?customer=${row.customerId}`} removeUnderline>
-                                {t.customers.fixIssues}
-                              </Link>
-                            )}
-                          </div>
-                        )}
-                      </IndexTable.Cell>
-                    </IndexTable.Row>
-                  ))}
-                  {/* Righe di riempimento per mantenere l'altezza costante */}
-                  {Array.from({ length: Math.max(0, CUSTOMERS_PER_PAGE - visibleRows.length) }, (_, i) => (
-                    <IndexTable.Row
-                      key={`filler-${i}`}
-                      id={`filler-${i}`}
-                      position={visibleRows.length + i}
-                      disabled
-                    >
-                      {Array.from({ length: 7 }, (_, colIdx) => (
-                        <IndexTable.Cell key={colIdx}>
-                          <span aria-hidden="true" style={{ visibility: 'hidden' }}>
-                            &nbsp;
-                          </span>
                         </IndexTable.Cell>
-                      ))}
+                        <IndexTable.Cell>
+                          <BlockStack gap="100">
+                            <Text as="span" variant="bodySm">
+                              {row.ours === null
+                                ? t.customers.conflicts.ourValue(t.customers.conflicts.notSet)
+                                : t.customers.conflicts.ourValue(formatConflictDate(row.ours, locale))}
+                            </Text>
+                            <Text as="span" variant="bodySm">
+                              {t.customers.conflicts.theirValue(formatConflictDate(row.theirs, locale))}
+                            </Text>
+                          </BlockStack>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <InlineStack gap="200">
+                            <Button
+                              size="slim"
+                              onClick={() => handleResolveConflict(row.customerId, 'kept_ours')}
+                              disabled={resolving}
+                            >
+                              {t.customers.conflicts.keepOurs}
+                            </Button>
+                            <Button
+                              size="slim"
+                              onClick={() => handleResolveConflict(row.customerId, 'used_theirs')}
+                              disabled={resolving}
+                            >
+                              {t.customers.conflicts.useTheirs}
+                            </Button>
+                          </InlineStack>
+                        </IndexTable.Cell>
+                      </IndexTable.Row>
+                    ))}
+                    <FillerRows
+                      count={Math.max(0, CUSTOMERS_PER_PAGE - paginatedConflicts.length)}
+                      cols={3}
+                      start={paginatedConflicts.length}
+                    />
+                  </>
+                )
+              ) : (
+                /* Vista normale "Tutti" */
+                visibleRows.length === 0 ? (
+                  <>
+                    {/* Messaggio quando non ci sono dati, centrato sotto le intestazioni */}
+                    <IndexTable.Row id="empty-state" position={0} disabled>
+                      <IndexTable.Cell colSpan={7}>
+                        <Box paddingBlock="400">
+                          <Text as="p" tone="subdued" alignment="center">
+                            {noSearchResults
+                              ? t.customers.searchNoResults(query.trim())
+                              : t.customers.empty}
+                          </Text>
+                        </Box>
+                      </IndexTable.Cell>
                     </IndexTable.Row>
-                  ))}
-                </>
+                    <FillerRows count={CUSTOMERS_PER_PAGE - 1} cols={7} start={1} />
+                  </>
+                ) : (
+                  <>
+                    {visibleRows.map((row, index) => (
+                      <IndexTable.Row id={String(row.customerId)} key={row.customerId} position={index}>
+                        <IndexTable.Cell>
+                          {/* Il nome porta alla scheda del cliente. _top e non
+                              _blank: dentro l'admin il target nuovo aprirebbe una
+                              finestra spoglia, senza il menu di Shopify intorno. */}
+                          <Link
+                            url={`${adminBase}/customers/${row.customerId}`}
+                            target="_top"
+                            removeUnderline
+                          >
+                            <Text as="span" fontWeight="semibold">
+                              {[row.firstName, row.lastName].filter(Boolean).join(' ') ||
+                                t.customers.noName}
+                            </Text>
+                          </Link>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          {/* Il profitto di questa riga e' completo, oppure e'
+                              calcolato su prodotti di cui non si conosce il costo.
+                              L'icona lo dice senza occupare una riga di testo sotto
+                              ogni nome: la spiegazione sta nel tooltip, per chi la
+                              cerca. */}
+                          <InlineStack align="center">
+                            <Tooltip
+                              content={
+                                row.coveredLines < row.totalLines
+                                  ? t.customers.warning(row.totalLines - row.coveredLines)
+                                  : t.customers.allGood
+                              }
+                            >
+                              <Icon
+                                source={
+                                  row.coveredLines < row.totalLines ? AlertCircleIcon : CheckCircleIcon
+                                }
+                                tone={row.coveredLines < row.totalLines ? 'warning' : 'success'}
+                              />
+                            </Tooltip>
+                          </InlineStack>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>{row.orders}</IndexTable.Cell>
+                        <IndexTable.Cell>
+                          {row.averageOrderProfit == null
+                            ? '—'
+                            : formatMoney(row.averageOrderProfit, currency, locale)}
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <InlineStack gap="200" blockAlign="center" wrap={false}>
+                            <Text as="span">{formatMoney(row.lifetimeProfit, currency, locale)}</Text>
+                            {row.profitChange != null && (
+                              <Text
+                                as="span"
+                                variant="bodySm"
+                                tone={row.profitChange >= 0 ? 'success' : 'critical'}
+                              >
+                                {row.profitChange >= 0 ? '+' : ''}
+                                {row.profitChange}%
+                              </Text>
+                            )}
+                          </InlineStack>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <Badge tone={row.synced ? 'success' : 'warning'}>
+                            {row.synced ? t.customers.synced : t.customers.notSynced}
+                          </Badge>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          {row.coveredLines < row.totalLines && (
+                            <div style={{ display: 'flex', alignItems: 'center', height: '20px', lineHeight: 0 }}>
+                              {clienteInApertura === String(row.customerId) ? (
+                                <Spinner size="small" accessibilityLabel={t.customers.fixIssues} />
+                              ) : (
+                                <Link url={`/products/issues?customer=${row.customerId}`} removeUnderline>
+                                  {t.customers.fixIssues}
+                                </Link>
+                              )}
+                            </div>
+                          )}
+                        </IndexTable.Cell>
+                      </IndexTable.Row>
+                    ))}
+                    <FillerRows
+                      count={Math.max(0, CUSTOMERS_PER_PAGE - visibleRows.length)}
+                      cols={7}
+                      start={visibleRows.length}
+                    />
+                  </>
+                )
               )}
             </IndexTable>
             </div>
-            <TablePagination total={matching.length} page={page} onPage={setPage} perPage={CUSTOMERS_PER_PAGE} />
+            <TablePagination
+              total={currentView === 'conflicts' ? conflictRowsData.length : matching.length}
+              page={currentView === 'conflicts' ? conflictsPage : page}
+              onPage={currentView === 'conflicts' ? setConflictsPage : setPage}
+              perPage={CUSTOMERS_PER_PAGE}
+            />
           </Card>
 
-          {birthdate && notice.view === 'status' && (
-            <ExtraFieldsCard>
-              <BirthdateStatusRow active={birthdate.state === 'in_use'} onOpen={notice.open} />
-            </ExtraFieldsCard>
-          )}
+          <BlockStack gap="400">
+            {birthdate && notice.view === 'status' && (
+              <ExtraFieldsCard>
+                <BirthdateStatusRow active={birthdate.state === 'in_use'} onOpen={notice.open} />
+              </ExtraFieldsCard>
+            )}
+            <IntegrationsCard
+              integrations={integrations}
+              upgradePlan={upgradePlan}
+              onManage={handleManage}
+            />
+          </BlockStack>
           </InlineGrid>
         )}
+
+        {/* Senza tabella (report non letto, piano senza clienti, negozio non
+            collegato) la card resta: dice lo stato del collegamento o invita
+            all'upgrade, e quelle informazioni non dipendono dal report. */}
+        {unavailable !== null && (
+          <InlineGrid columns={{ xs: 1, md: 3 }} gap="400" alignItems="start">
+            <IntegrationsCard
+              integrations={integrations}
+              upgradePlan={upgradePlan}
+              onManage={handleManage}
+            />
+          </InlineGrid>
+        )}
+
+        <IntegrationsModal
+          open={integrationsModalOpen}
+          onClose={handleCloseModal}
+          preselected={preselectedProvider}
+        />
     </>
   );
 }

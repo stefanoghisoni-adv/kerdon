@@ -55,6 +55,7 @@ import { runWithShopLease } from '~/lib/queue/shop-lock.server';
 import type { GdprStep } from './steps';
 import { stepsFailed, failureMessage } from './steps';
 import {
+  collectIntegrationConflicts,
   emptyCustomerDataPackage,
   eraseCustomerFromAppDatabase,
   eraseCustomerFromMerchant,
@@ -396,18 +397,24 @@ async function dataRequest(
   // risposta piena — "di questa persona non teniamo nulla" e' esattamente cio'
   // che il diritto di accesso chiede quando e' vero.
   if (!shop?.supabaseConfig) {
-    return {
-      shopId: shop?.id ?? null,
-      steps: [
-        {
-          table: 'progetto Supabase del merchant',
-          outcome: 'skipped',
-          rows: 0,
-          detail: 'nessun progetto collegato: nessun dato conservato per questo negozio',
-        },
-      ],
-      export: emptyCustomerDataPackage(),
-    };
+    const steps: GdprStep[] = [
+      {
+        table: 'progetto Supabase del merchant',
+        outcome: 'skipped',
+        rows: 0,
+        detail: 'nessun progetto collegato: nessun dato conservato per questo negozio',
+      },
+    ];
+    const pack = emptyCustomerDataPackage();
+    // Il progetto puo' essere stato scollegato dopo un import da Klaviyo: le
+    // differenze registrate da noi restano, e restano della persona.
+    if (shop) {
+      const conflitti = await collectIntegrationConflicts(shop.id, customerId);
+      steps.push(conflitti.step);
+      if (stepsFailed(steps)) return { shopId: shop.id, steps };
+      pack.integration_conflicts = conflitti.rows;
+    }
+    return { shopId: shop?.id ?? null, steps, export: pack };
   }
 
   const supabase = createSupabaseClient(shop.supabaseConfig);
@@ -460,13 +467,18 @@ async function dataRequest(
 
   const { data, steps } = await collectSubjectData(supabase, customersTable, fotografia.snapshot);
 
+  // Le differenze con Klaviyo stanno nel nostro database, non in quello del
+  // merchant: fuori dal lucchetto, che protegge le sue tabelle dalle corse.
+  const conflitti = await collectIntegrationConflicts(shop.id, customerId);
+  steps.push(conflitti.step);
+
   // Una tabella che non ha risposto, o che non contiene piu' le righe
   // fotografate, vuol dire un'esportazione incompleta o incoerente. Messa a
   // disposizione come completa sarebbe peggio di una ritentata: chi la legge
   // crederebbe che il resto non esiste.
   if (stepsFailed(steps)) return { shopId: shop.id, steps };
 
-  return { shopId: shop.id, steps, export: data };
+  return { shopId: shop.id, steps, export: { ...data, integration_conflicts: conflitti.rows } };
 }
 
 function nessunaFotografia(): GdprStep {

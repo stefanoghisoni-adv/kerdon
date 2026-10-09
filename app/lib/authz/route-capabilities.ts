@@ -134,6 +134,39 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
   'api.tracking.setup': { guard: 'capability', capability: 'use_app' },
   'api.tracking.verify': { guard: 'capability', capability: 'use_app' },
 
+  // --- Integrazioni -----------------------------------------------------
+  // L'import scrive sui clienti: negozio operativo e piano con i clienti, come
+  // il collegamento (app/lib/integrations/route-guard.server.ts).
+  'api.integrations.$provider.import': {
+    guard: 'capability',
+    capability: 'use_app',
+    via: 'requireCustomersSyncShop',
+  },
+  'api.integrations.conflicts': {
+    guard: 'capability',
+    capability: 'use_app',
+    via: 'requireCustomersSyncShop',
+  },
+  'api.integrations.klaviyo.connect': {
+    guard: 'capability',
+    capability: 'use_app',
+    via: 'requireCustomersSyncShop',
+  },
+  'api.integrations.klaviyo.oauth-url': {
+    guard: 'capability',
+    capability: 'use_app',
+    via: 'requireCustomersSyncShop',
+  },
+  'api.integrations.$provider': {
+    guard: 'open',
+    reason:
+      "Via d'uscita a meta': lo stato della connessione e lo scollegamento " +
+      'restano aperti anche a un negozio sospeso o sceso di piano, perche’ ' +
+      'staccare Klaviyo non puo’ dipendere dall’abbonamento. Le parti che ' +
+      'lavorano sui dati (proprieta’ e associazione dei campi) chiamano ' +
+      '`requireCustomersSyncShop` nello stesso file.',
+  },
+
   // --- Collegamento Supabase: i gesti che creano o collegano -------------
   'api.supabase.create-project': { guard: 'capability', capability: 'use_app', via: 'can(' },
   'api.supabase.create-tables': { guard: 'capability', capability: 'use_app', via: 'can(' },
@@ -272,6 +305,13 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
     reason:
       "E' l'installazione: chiedere un permesso qui vorrebbe dire chiederlo " +
       'prima che esista qualcuno a cui darlo.',
+  },
+  'auth.klaviyo.callback': {
+    guard: 'open',
+    reason:
+      'Ritorno di OAuth da Klaviyo: non legge e non scrive niente, consegna ' +
+      'codice e stato alla finestra dell’app con postMessage. Lo scambio del ' +
+      'codice lo fa `api.integrations.klaviyo.connect`, che e’ protetta.',
   },
   'auth.supabase.callback': {
     guard: 'open',

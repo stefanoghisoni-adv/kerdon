@@ -15,6 +15,7 @@ vi.mock('~/db.server', () => ({
     },
     shop: { findUnique: vi.fn() },
     syncJob: { create: vi.fn() },
+    integrationConflict: { findMany: vi.fn() },
   },
 }));
 vi.mock('~/lib/supabase.server', () => ({ createSupabaseClient: vi.fn(() => ({})) }));
@@ -166,6 +167,7 @@ beforeEach(() => {
   // porterebbe dietro in tutti quelli dopo.
   (saveGdprOutcome as any).mockResolvedValue(undefined);
   (trySaveGdprOutcome as any).mockResolvedValue(undefined);
+  (prisma.integrationConflict.findMany as any).mockResolvedValue([]);
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -414,7 +416,61 @@ describe('customers/data_request', () => {
       orders: [],
       order_lines: [],
       browsers: [],
+      integration_conflicts: [],
     });
+  });
+
+  const conflittoDb = {
+    provider: 'klaviyo',
+    targetField: 'birthdate',
+    ourValue: '1975-06-01',
+    theirValue: '1980-02-03',
+    status: 'kept_ours',
+    decidedAt: new Date('2026-10-05T09:00:00Z'),
+  };
+  const conflittoEsportato = {
+    provider: 'klaviyo',
+    field: 'birthdate',
+    our_value: '1975-06-01',
+    provider_value: '1980-02-03',
+    status: 'kept_ours',
+    decided_at: '2026-10-05T09:00:00.000Z',
+  };
+
+  it('l esportazione porta i conflitti con Klaviyo della persona, letti per negozio e cliente', async () => {
+    // La data di Klaviyo di un conflitto tenuto con «Tieni il nostro» non sta
+    // da nessun'altra parte: se non esce qui, la persona non la vedrebbe mai.
+    asDataRequest();
+    (prisma.integrationConflict.findMany as any).mockResolvedValue([conflittoDb]);
+
+    const result = await processComplianceRequest('req-1');
+
+    expect(result).toBe('done');
+    expect((prisma.integrationConflict.findMany as any).mock.calls[0][0].where).toEqual({
+      shopId: 'shop-1',
+      customerId: { in: [4021n] },
+    });
+    expect(lastUpdate().export.integration_conflicts).toEqual([conflittoEsportato]);
+    expect(lastUpdate().export.customer).toEqual({ id: 4021 });
+  });
+
+  it('negozio senza progetto collegato: i conflitti rimasti da noi escono lo stesso', async () => {
+    asDataRequest();
+    (prisma.shop.findUnique as any).mockResolvedValue({ id: 'shop-1', supabaseConfig: null });
+    (prisma.integrationConflict.findMany as any).mockResolvedValue([conflittoDb]);
+
+    expect(await processComplianceRequest('req-1')).toBe('done');
+    expect(lastUpdate().export.integration_conflicts).toEqual([conflittoEsportato]);
+  });
+
+  it('conflitti non leggibili: nessuna esportazione incompleta, si ritenta', async () => {
+    asDataRequest();
+    (prisma.integrationConflict.findMany as any).mockRejectedValue(new Error('database irraggiungibile'));
+
+    const result = await processComplianceRequest('req-1');
+
+    expect(result).toBe('failed');
+    expect(lastUpdate()?.export).toBeUndefined();
   });
 
   it('raccolta incompleta: nessuna esportazione, e si ritenta', async () => {

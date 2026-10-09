@@ -36,6 +36,9 @@ export const SYNC_REQUEST_TYPES = [
   // Chiede a Shopify l'opzione di spedizione degli ordini salvati prima dello
   // schema 13, che non la conoscono (app/lib/shipping/shipping-method-backfill.server.ts).
   'shipping-method-backfill',
+  // Importa da Klaviyo le date di nascita mancanti e segna i conflitti
+  // (app/lib/integrations/import.server.ts).
+  'integration-import',
 ] as const;
 
 export type SyncRequestType = (typeof SYNC_REQUEST_TYPES)[number];
@@ -142,6 +145,8 @@ export const MAX_RUN_MS: Record<SyncRequestType, number> = {
   // Stesso passo a tappe del ricalcolo (budget interno di 200 s e
   // continuazione dal cursore), quindi lo stesso tetto.
   'shipping-method-backfill': 270_000,
+  // Budget interno di 200 s e continuazione dal cursore, come il ricalcolo.
+  'integration-import': 270_000,
 };
 
 /**

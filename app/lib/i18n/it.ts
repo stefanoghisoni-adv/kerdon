@@ -588,7 +588,7 @@ export const it = {
     // alla versione, a ogni modifica sostanziale.
     privacyNotice: {
       title: "Abbiamo aggiornato l'informativa sulla privacy",
-      body: "Ora elenca uno per uno i cookie che il riconoscimento dei visitatori usa sul tuo negozio, con durata e finalità: puoi riportarli così come sono nella tua cookie policy.",
+      body: "Ora descrive l'importazione da Klaviyo: se colleghi il tuo account, Kerdon ne legge i profili solo quando glielo chiedi, per completare le date di nascita mancanti. Le date diverse restano da decidere a te, l'accesso al tuo account Klaviyo è custodito in modo sicuro e su Klaviyo non viene scritto niente.",
       link: "Leggi l'informativa",
       acknowledge: "Ho capito",
       saveFailed: "Non siamo riusciti a registrare la conferma. Riprova tra poco.",
@@ -1257,6 +1257,113 @@ export const it = {
         "Chi visita il negozio senza comprare viene riconosciuto anche quando torna, cos\u00ec il giorno in cui acquista sai da dove era arrivato la prima volta \u2014 anche se sono passati mesi e anche se cambia dispositivo. Pi\u00f9 a lungo li conservi, pi\u00f9 indietro riesci a risalire; meno a lungo, meno spazio occupano nel tuo database.",
       label: "Conserva per",
       option: (days: number) => `${days} giorni`,
+    },
+    integrations: {
+      title: "Integrazioni",
+      manage: "Gestisci",
+      noIntegrations: "Collega integrazioni per importare dati dei clienti da altre piattaforme.",
+      lastImport: (date: string, filled: number) =>
+        `Ultimo import: ${date} \u00b7 ${filled} ${filled === 1 ? 'campo completato' : 'campi completati'}`,
+      conflicts: (n: number) =>
+        n === 1 ? '1 dato diverso da Klaviyo' : `${n} dati diversi da Klaviyo`,
+      importData: "Importa dati",
+      /** Accanto al pulsante mentre un import e' in corso. */
+      importRunning: "Import in corso. Riapri questa pagina tra qualche minuto per vedere i risultati.",
+      reconnect: "Riconnetti",
+      statusConnected: "Collegata",
+      statusNotConnected: "Da collegare",
+      statusNeedsReconnect: "Riconnetti",
+      /** Motivi per cui l'import non parte. */
+      importReasons: {
+        already_running: "Un import \u00e8 gi\u00e0 in corso.",
+        no_mapping: "Configura quale campo importare prima di avviare l'import.",
+        not_connected: "Collega l'integrazione per importare i dati.",
+        no_write_access: "L'app non ha i permessi per scrivere i dati dei clienti. Riapri l'app per concederli.",
+        plan: "Aggiorna il piano per importare i dati dei clienti.",
+      },
+    },
+    conflicts: {
+      /** Tab label con conteggio conflitti. */
+      tabAll: "Tutti",
+      tabConflicts: (n: number) => `Dati diversi da Klaviyo (${n})`,
+      /** Colonna nella vista conflitti. */
+      birthdateColumn: "Data di nascita",
+      /** Formato: "Nostra: <data> · Klaviyo: <data>". */
+      ourValue: (date: string) => `Nostra: ${date}`,
+      theirValue: (date: string) => `Klaviyo: ${date}`,
+      /** Data non indicata nel nostro sistema. */
+      notSet: "non indicata",
+      /** Azioni di riga. */
+      keepOurs: "Tieni il nostro",
+      useTheirs: "Usa Klaviyo",
+      /** Azioni bulk. */
+      bulkKeepOurs: "Tieni il nostro",
+      bulkUseTheirs: "Usa Klaviyo",
+      /** Toast di successo per kept_ours. */
+      resolvedKeptOurs: (n: number) =>
+        n === 0 ? 'Nessun conflitto da risolvere'
+        : n === 1 ? '1 conflitto risolto'
+        : `${n} conflitti risolti`,
+      /** Toast di successo per used_theirs. */
+      resolvedUsedTheirs: (n: number) =>
+        n === 0 ? 'Nessun conflitto da aggiornare'
+        : n === 1 ? '1 data aggiornata'
+        : `${n} date aggiornate`,
+      /** Banner per righe non scritte. */
+      notWrittenWarning: (n: number) =>
+        n === 1
+          ? 'Non è stato possibile aggiornare 1 cliente. Riprova.'
+          : `Non è stato possibile aggiornare ${n} clienti. Riprova.`,
+      /** Banner per errore generico. */
+      genericError: "Non è stato possibile completare l'operazione. Riprova.",
+      /** Tabella vuota nella vista conflitti. */
+      noConflicts: "Nessun dato diverso da risolvere.",
+    },
+    integrationsModal: {
+      backToAll: "Tutte le integrazioni",
+      searchLabel: "Cerca integrazioni",
+      searchPlaceholder: "Cerca un'integrazione\u2026",
+      categoryLabel: "Categoria",
+      allCategory: "Tutti",
+      categories: {
+        crm: "CRM",
+        database: "Database",
+        csv: "CSV",
+      },
+      comingSoon: "In arrivo",
+      noResults: "Nessuna integrazione trovata",
+    },
+    klaviyoDetail: {
+      benefitText: "Importa le date di nascita dei tuoi clienti da Klaviyo per completare i dati mancanti.",
+      connect: "Collega Klaviyo",
+      accountLabel: "Account",
+      disconnect: "Scollega",
+      disconnectConfirm: "Scollegare Klaviyo? I dati gi\u00e0 importati e i conflitti restano, ma non potrai pi\u00f9 importare nuovi dati.",
+      fieldMappingTitle: "Associazione campi",
+      klaviyoPropertyLabel: "Propriet\u00e0 Klaviyo",
+      selectProperty: "Seleziona una propriet\u00e0",
+      selectFormat: "Scegli il formato",
+      kerdonFieldLabel: "Campo Kerdon",
+      birthdate: "Data di nascita",
+      dateFormatLabel: "Formato data",
+      previewTitle: "Anteprima",
+      save: "Salva",
+      oauthErrors: {
+        denied: "Autorizzazione negata. Concedi i permessi per collegare Klaviyo.",
+        failed: "Collegamento non riuscito. Riprova.",
+        expired: "Sessione scaduta. Riprova.",
+        shop_mismatch: "Errore di sicurezza. Riprova dal tuo negozio.",
+        unavailable: "Klaviyo non \u00e8 raggiungibile. Riprova fra poco.",
+        unknown: "Errore sconosciuto. Riprova.",
+      },
+      errors: {
+        propertiesReconnect: "Riconnetti Klaviyo per caricare le propriet\u00e0.",
+        propertiesUnavailable: "Klaviyo non \u00e8 raggiungibile. Riprova fra poco.",
+        saveFailed: "Salvataggio non riuscito. Riprova.",
+        disconnectFailed: "Disconnessione non riuscita. Riprova.",
+      },
+      popupBlocked: "Il popup \u00e8 stato bloccato dal browser.",
+      retryPopup: "Riprova",
     },
   },
 

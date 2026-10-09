@@ -12,12 +12,17 @@ vi.mock('~/lib/gdpr/process-compliance.server', () => ({
 vi.mock('./shop-lock.server', () => ({ runWithShopLease: vi.fn() }));
 vi.mock('~/lib/shipping/recompute.server', () => ({ processLogisticsRecompute: vi.fn() }));
 vi.mock('~/lib/shipping/shipping-method-backfill.server', () => ({ processShippingMethodBackfill: vi.fn() }));
+vi.mock('~/lib/integrations/import.server', () => ({
+  processIntegrationImport: vi.fn(),
+  enqueueImportContinuation: vi.fn(),
+}));
 
 import { drainSyncRequests, type Handler } from './drain.server';
 import { runWithShopLease } from './shop-lock.server';
 import { processManualSync } from '~/lib/workers/processors.server';
 import { processLogisticsRecompute } from '~/lib/shipping/recompute.server';
 import { processShippingMethodBackfill } from '~/lib/shipping/shipping-method-backfill.server';
+import { enqueueImportContinuation, processIntegrationImport } from '~/lib/integrations/import.server';
 import type { QueueStore } from './queue-store.server';
 import {
   LEASE_TTL_MS,
@@ -412,6 +417,67 @@ describe('il recupero dell opzione sugli ordini storici', () => {
     const coda = codaInMemoria([riga({ type: 'shipping-method-backfill', shopId: 'shop-1' })]);
     await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
     expect((processShippingMethodBackfill as any).mock.calls[0][1].cursor).toBeNull();
+  });
+});
+
+describe('l import dalle integrazioni', () => {
+  it('gira sotto il lucchetto con giro, cursore, possesso e segnale', async () => {
+    const coda = codaInMemoria([
+      riga({
+        type: 'integration-import',
+        shopId: 'shop-1',
+        payload: { runId: 'run-1', cursor: 'https://a.klaviyo.com/api/profiles?p=2' },
+      }),
+    ]);
+
+    const esito = await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
+
+    expect(esito.completed).toBe(1);
+    expect(runWithShopLease).toHaveBeenCalledWith('shop-1', expect.any(Function), expect.anything());
+    const [shopId, ctx] = (processIntegrationImport as any).mock.calls[0];
+    expect(shopId).toBe('shop-1');
+    expect(ctx.runId).toBe('run-1');
+    expect(ctx.cursor).toBe('https://a.klaviyo.com/api/profiles?p=2');
+    expect(typeof ctx.lease.assertHeld).toBe('function');
+    expect(ctx.signal).toBeInstanceOf(AbortSignal);
+    expect(ctx.lastAttempt).toBe(false);
+  });
+
+  it('all ultimo tentativo glielo dice: Klaviyo indisponibile chiude il giro invece di finire in lettera morta', async () => {
+    const coda = codaInMemoria([
+      riga({
+        type: 'integration-import',
+        shopId: 'shop-1',
+        // La presa porta i tentativi a MAX_ATTEMPTS: e' l'ultimo.
+        attempts: MAX_ATTEMPTS - 1,
+        payload: { runId: 'run-1', cursor: null },
+      }),
+    ]);
+
+    await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
+
+    expect((processIntegrationImport as any).mock.calls[0][1].lastAttempt).toBe(true);
+  });
+
+  it('fermo per tempo: il seguito si accoda legato a questo item', async () => {
+    (processIntegrationImport as any).mockImplementation(
+      async (_shopId: string, ctx: { saveCursor: (c: string, r: string) => Promise<void> }) => {
+        await ctx.saveCursor('https://a.klaviyo.com/api/profiles?p=3', 'run-1');
+        return 'paused';
+      },
+    );
+    const coda = codaInMemoria([
+      riga({ type: 'integration-import', shopId: 'shop-1', payload: { runId: 'run-1', cursor: null } }),
+    ]);
+
+    await drainSyncRequests({ store: coda.store, clock: () => ADESSO });
+
+    expect(enqueueImportContinuation).toHaveBeenCalledWith(
+      'shop-1',
+      'item-1',
+      'run-1',
+      'https://a.klaviyo.com/api/profiles?p=3',
+    );
   });
 });
 

@@ -49,6 +49,10 @@ export async function finti(
     graphql?: { match: string; body: unknown; status?: number; once?: boolean }[];
     sessioni?: string[];
     eliminazione?: Record<string, unknown>;
+    /** Klaviyo finto: profili, nome dell'account, profili per pagina. */
+    klaviyo?: { profili?: unknown[]; nomeAccount?: string; dimensionePagina?: number };
+    /** Il database Supabase del merchant: tabella → righe. */
+    databaseMerchant?: Record<string, Array<Record<string, unknown>>>;
   },
 ): Promise<void> {
   const risposta = await request.post('/__test/fakes', { data: valori });
@@ -56,13 +60,27 @@ export async function finti(
 }
 
 /** Cosa hanno visto i finti: le query arrivate e quante eliminazioni sono state chieste. */
-export async function cosaHannoVisto(
+export interface VistoDaiFinti {
+  graphqlLog: string[];
+  eliminazioniChieste: number;
+  /** Le chiamate all'Admin GraphQL fatte via HTTP, con le variabili. */
+  adminLog: { query: string; variables: unknown }[];
+  /** Ogni richiesta arrivata a Klaviyo finto: `METODO host/percorso`. */
+  klaviyoRichieste: string[];
+}
+
+export async function cosaHannoVisto(request: APIRequestContext): Promise<VistoDaiFinti> {
+  return (await (await request.get('/__test/fakes')).json()) as VistoDaiFinti;
+}
+
+/** Drena la coda del negozio con il drenaggio vero, e restituisce l'esito. */
+export async function drenaCoda(
   request: APIRequestContext,
-): Promise<{ graphqlLog: string[]; eliminazioniChieste: number }> {
-  return (await (await request.get('/__test/fakes')).json()) as {
-    graphqlLog: string[];
-    eliminazioniChieste: number;
-  };
+  shopId: string,
+): Promise<{ claimed: number; completed: number; errors: unknown[] }> {
+  const risposta = await request.post('/__test/drain', { data: { shopId } });
+  expect(risposta.ok(), 'drenaggio della coda').toBeTruthy();
+  return ((await risposta.json()) as { esito: { claimed: number; completed: number; errors: unknown[] } }).esito;
 }
 
 /** Sposta in avanti l'orologio del server. */

@@ -281,3 +281,74 @@ async function ensureReportTables(token: string, ref: string, shopId: string): P
     );
   }
 }
+
+/**
+ * Carica nomi ed email per i customer ID specificati dal database del merchant.
+ *
+ * Usato per arricchire i conflitti con nome/email anche quando il cliente e'
+ * fuori dal periodo scelto (quindi non in `rows`).
+ *
+ * Valida gli IDs internamente: mantiene solo interi positivi, deduplica.
+ * Legge dalla tabella customers (non orders): un cliente senza ordini deve
+ * comunque avere nome ed email se presente nella tabella.
+ *
+ * @param shopId L'ID del negozio
+ * @param ref Il riferimento Supabase del merchant
+ * @param customerIds Array di customer ID (vengono validati internamente)
+ * @returns Map di customerId → {firstName, email}
+ */
+export async function fetchConflictCustomerNames(
+  shopId: string,
+  ref: string,
+  customerIds: number[],
+): Promise<Map<number, { firstName: string | null; email: string | null }>> {
+  // Valida IDs internamente: solo interi positivi safe, deduplica (I3a)
+  const validIds = Array.from(
+    new Set(
+      customerIds.filter((id) => Number.isSafeInteger(id) && id > 0),
+    ),
+  );
+
+  // Empty dopo filtering → return senza query
+  if (validIds.length === 0) return new Map();
+
+  try {
+    const token = await getValidAccessToken(shopId);
+
+    // IDs validati: safe per interpolazione diretta
+    const idsString = validIds.join(', ');
+
+    // Query dalla tabella customers direttamente (I3a: clienti senza ordini
+    // devono comunque avere nome/email se presenti in customers)
+    const sql = `
+      SELECT
+        shopify_customer_id AS customer_id,
+        first_name,
+        email_address AS email
+      FROM customers
+      WHERE shopify_customer_id = ANY(ARRAY[${idsString}])
+    `;
+
+    interface NameRow {
+      customer_id: number | string; // Management API può ritornare int8 come string
+      first_name: string | null;
+      email: string | null;
+    }
+
+    const rows = await runQueryRows<NameRow>(token, ref, sql);
+
+    // Key con Number(r.customer_id): Management API può ritornare int8 come string
+    return new Map(
+      rows.map((r) => [
+        Number(r.customer_id),
+        { firstName: r.first_name, email: r.email },
+      ]),
+    );
+  } catch (error) {
+    console.warn(
+      '[customers] nomi conflitti non leggibili dal database del merchant:',
+      error instanceof Error ? error.message : 'errore sconosciuto',
+    );
+    return new Map();
+  }
+}

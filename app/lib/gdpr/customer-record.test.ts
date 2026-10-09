@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const deleteManyEvents = vi.fn();
 const findManyJobs = vi.fn();
 const updateJob = vi.fn();
+const deleteManyConflicts = vi.fn();
 
 vi.mock('~/db.server', () => ({
   prisma: {
@@ -11,6 +12,7 @@ vi.mock('~/db.server', () => ({
       findMany: (...a: unknown[]) => findManyJobs(...a),
       update: (...a: unknown[]) => updateJob(...a),
     },
+    integrationConflict: { deleteMany: (...a: unknown[]) => deleteManyConflicts(...a) },
   },
 }));
 
@@ -322,6 +324,7 @@ describe('cancellazione nel nostro database', () => {
     deleteManyEvents.mockResolvedValue({ count: 2 });
     findManyJobs.mockResolvedValue([]);
     updateJob.mockResolvedValue({});
+    deleteManyConflicts.mockResolvedValue({ count: 0 });
   });
 
   it('toglie le righe di dettaglio che portano l id della persona', async () => {
@@ -345,6 +348,39 @@ describe('cancellazione nel nostro database', () => {
       data: { errors: { message: 'timeout', customer_ref: 'impronta' } },
     });
     expect(step(steps, 'sync_jobs')).toMatchObject({ outcome: 'anonymized', rows: 1 });
+  });
+
+  it('toglie i conflitti con Klaviyo della persona, e solo i suoi', async () => {
+    deleteManyConflicts.mockResolvedValue({ count: 1 });
+
+    const steps = await eraseCustomerFromAppDatabase('shop-1', '4021', 'impronta');
+
+    // Negozio e cliente insieme nella condizione: senza il negozio, la stessa
+    // persona su un altro negozio perderebbe i suoi; senza il cliente, se ne
+    // andrebbero quelli di tutti.
+    expect(deleteManyConflicts).toHaveBeenCalledWith({
+      where: { shopId: 'shop-1', customerId: { in: [4021n] } },
+    });
+    expect(step(steps, 'integration_conflicts')).toMatchObject({ outcome: 'deleted', rows: 1 });
+  });
+
+  it('id non numerico: nessun conflitto puo corrispondere, e non si cancella niente', async () => {
+    const steps = await eraseCustomerFromAppDatabase('shop-1', 'abc', 'impronta');
+
+    expect(deleteManyConflicts).not.toHaveBeenCalled();
+    expect(step(steps, 'integration_conflicts')).toMatchObject({ outcome: 'skipped', rows: 0 });
+  });
+
+  it('conflitti non cancellabili → passo fallito, e la richiesta non risulta riuscita', async () => {
+    deleteManyConflicts.mockRejectedValue(new Error('database irraggiungibile'));
+
+    const steps = await eraseCustomerFromAppDatabase('shop-1', '4021', 'impronta');
+
+    expect(step(steps, 'integration_conflicts')).toMatchObject({
+      outcome: 'failed',
+      detail: 'database irraggiungibile',
+    });
+    expect(stepsFailed(steps)).toBe(true);
   });
 
   it('il registro degli accessi non ha identificatori da togliere', async () => {

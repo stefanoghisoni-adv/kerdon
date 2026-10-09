@@ -45,6 +45,10 @@ import {
 import { processComplianceRequest } from '~/lib/gdpr/process-compliance.server';
 import { processLogisticsRecompute } from '~/lib/shipping/recompute.server';
 import { processShippingMethodBackfill } from '~/lib/shipping/shipping-method-backfill.server';
+import {
+  enqueueImportContinuation,
+  processIntegrationImport,
+} from '~/lib/integrations/import.server';
 import { randomUUID } from 'node:crypto';
 
 /** Quanto si aspetta prima di riprovare un negozio che era occupato. */
@@ -120,6 +124,22 @@ export const defaultHandlers: Record<SyncRequestType, Handler> = {
       cursor: typeof cursor === 'string' ? cursor : null,
     });
   },
+  'integration-import': async (row, ctx) => {
+    // Il giro porta il suo id; una continuazione anche il cursore. Il cursore
+    // buono resta comunque quello salvato sul giro dopo ogni pagina.
+    const payload = row.payload as { cursor?: unknown; runId?: unknown } | null;
+    const shopId = row.shopId!;
+    await processIntegrationImport(shopId, {
+      lease: ctx.lease,
+      signal: ctx.signal,
+      runId: typeof payload?.runId === 'string' ? payload.runId : null,
+      cursor: typeof payload?.cursor === 'string' ? payload.cursor : null,
+      saveCursor: (cursor, runId) => enqueueImportContinuation(shopId, row.id, runId, cursor),
+      // La presa ha gia' contato questo tentativo: se e' l'ultimo, un errore
+      // manderebbe l'item in lettera morta.
+      lastAttempt: isExhausted(row.attempts),
+    });
+  },
 };
 
 /**
@@ -141,6 +161,10 @@ const RICHIEDE_LUCCHETTO: ReadonlySet<string> = new Set([
   // Scrive sugli ordini come le sincronizzazioni: in fila con loro, e con il
   // ricalcolo che accoda alla fine.
   'shipping-method-backfill',
+  // Un giro di import per negozio alla volta: il lucchetto mette in fila la
+  // continuazione e un item ripreso dalla coda, che sullo stesso giro
+  // scriverebbero due volte.
+  'integration-import',
 ]);
 
 export interface DrainOptions {

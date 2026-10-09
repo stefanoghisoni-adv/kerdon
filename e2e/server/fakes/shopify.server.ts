@@ -45,26 +45,30 @@ function negozioDiRichiesta(request: Request): string | null {
  * ramo del rifiuto — e chi legge il verde crede di aver provato l'attivazione.
  * Meglio un errore che dice quale query non era prevista.
  */
+export function rispostaGraphQL(query: string): Response {
+  const s = stato();
+  s.graphqlLog.push(query);
+
+  const indice = s.graphql.findIndex((r) => query.includes(r.match));
+  if (indice < 0) {
+    throw new Error(
+      `nessuna risposta preparata per questa query GraphQL: ${query.slice(0, 120)}`,
+    );
+  }
+
+  const risposta = s.graphql[indice];
+  if (risposta.once) s.graphql.splice(indice, 1);
+
+  return new Response(JSON.stringify(risposta.body), {
+    status: risposta.status ?? 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 function clientGraphQL() {
   return {
     async graphql(query: string): Promise<Response> {
-      const s = stato();
-      s.graphqlLog.push(query);
-
-      const indice = s.graphql.findIndex((r) => query.includes(r.match));
-      if (indice < 0) {
-        throw new Error(
-          `nessuna risposta preparata per questa query GraphQL: ${query.slice(0, 120)}`,
-        );
-      }
-
-      const risposta = s.graphql[indice];
-      if (risposta.once) s.graphql.splice(indice, 1);
-
-      return new Response(JSON.stringify(risposta.body), {
-        status: risposta.status ?? 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return rispostaGraphQL(query);
     },
   };
 }

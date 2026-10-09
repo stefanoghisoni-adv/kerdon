@@ -38,6 +38,10 @@
 //                       scrivere, ma le vecchie sono li')
 //     sync_jobs.errors  il JSON di un fallimento poteva portarsi dentro il
 //                       customer_id in chiaro
+//     integration_conflicts  shopify_customer_id + la data di nascita nostra
+//                       e quella letta da Klaviyo. Al `shop/redact` se ne va
+//                       per cascata da `shops`, come le altre tabelle
+//                       integration_*, che non portano dati delle persone
 //     customer_data_access_logs  niente: per come e' fatto, quel registro
 //                       tiene esito e stato HTTP e nient'altro
 //
@@ -239,11 +243,73 @@ export interface CustomerDataPackage {
    * persona" e' esattamente cio' che di lei abbiamo dedotto.
    */
   browsers: Record<string, unknown>[];
+  /**
+   * Le differenze con Klaviyo registrate per la persona: l'unica parte che non
+   * sta nel database del merchant ma nel nostro. La data di Klaviyo di un
+   * conflitto ancora aperto, o chiuso con «Tieni il nostro», non esiste da
+   * nessun'altra parte: senza questa voce la persona non la vedrebbe mai.
+   */
+  integration_conflicts: Record<string, unknown>[];
 }
 
 /** Un'esportazione vuota, la risposta giusta quando non teniamo nulla. */
 export function emptyCustomerDataPackage(): CustomerDataPackage {
-  return { customer: null, orders: [], order_lines: [], browsers: [] };
+  return { customer: null, orders: [], order_lines: [], browsers: [], integration_conflicts: [] };
+}
+
+/**
+ * I conflitti con le integrazioni (Klaviyo) di una persona, per l'esportazione.
+ *
+ * Solo quelli di questo negozio: la stessa persona su un altro negozio e' un
+ * altro titolare. I nomi delle chiavi sono quelli che legge chi riceve il file,
+ * non le colonne: `provider_value` e' il valore letto dal fornitore indicato in
+ * `provider`. Una lettura fallita e' un passo fallito, e l'esportazione non
+ * parte: incompleta direbbe che il resto non esiste.
+ */
+export async function collectIntegrationConflicts(
+  shopId: string,
+  customerId: string,
+): Promise<{ rows: Record<string, unknown>[]; step: GdprStep }> {
+  const table = 'integration_conflicts';
+  if (!/^\d+$/.test(customerId)) {
+    return {
+      rows: [],
+      step: { table, outcome: 'skipped', rows: 0, detail: 'id cliente non numerico: nessuna riga puo corrispondere' },
+    };
+  }
+  try {
+    const found = await prisma.integrationConflict.findMany({
+      where: { shopId, customerId: { in: [BigInt(customerId)] } },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        provider: true,
+        targetField: true,
+        ourValue: true,
+        theirValue: true,
+        status: true,
+        decidedAt: true,
+      },
+    });
+    const rows = found.map((c) => ({
+      provider: c.provider,
+      field: c.targetField,
+      our_value: c.ourValue,
+      provider_value: c.theirValue,
+      status: c.status,
+      decided_at: c.decidedAt ? new Date(c.decidedAt).toISOString() : null,
+    }));
+    return { rows, step: { table, outcome: 'read', rows: rows.length } };
+  } catch (error) {
+    return {
+      rows: [],
+      step: {
+        table,
+        outcome: 'failed',
+        rows: 0,
+        detail: error instanceof Error ? error.message : 'errore sconosciuto',
+      },
+    };
+  }
 }
 
 // LA RACCOLTA PER UNA RICHIESTA DI ACCESSO STA IN `subject-snapshot.server`.
@@ -340,6 +406,35 @@ export async function eraseCustomerFromAppDatabase(
       rows: 0,
       detail: error instanceof Error ? error.message : 'errore sconosciuto',
     });
+  }
+
+  // I conflitti con Klaviyo: ognuno porta la data di nascita della persona due
+  // volte, la nostra e quella letta da Klaviyo. Si cancellano, decisi o no:
+  // una decisione presa su una persona che ha chiesto la cancellazione non
+  // serve piu' a niente. Solo quelli di questo negozio: la stessa persona su un
+  // altro negozio e' un altro titolare, con un'altra richiesta.
+  const conflictCustomerId = /^\d+$/.test(customerId) ? BigInt(customerId) : null;
+  if (conflictCustomerId === null) {
+    steps.push({
+      table: 'integration_conflicts',
+      outcome: 'skipped',
+      rows: 0,
+      detail: 'id cliente non numerico: nessuna riga puo corrispondere',
+    });
+  } else {
+    try {
+      const removed = await prisma.integrationConflict.deleteMany({
+        where: { shopId, customerId: { in: [conflictCustomerId] } },
+      });
+      steps.push({ table: 'integration_conflicts', outcome: 'deleted', rows: removed.count });
+    } catch (error) {
+      steps.push({
+        table: 'integration_conflicts',
+        outcome: 'failed',
+        rows: 0,
+        detail: error instanceof Error ? error.message : 'errore sconosciuto',
+      });
+    }
   }
 
   // Il registro degli accessi non ha niente da cancellare, ed e' un pregio del

@@ -443,14 +443,16 @@ describe('Shopify API Client (GraphQL)', () => {
     // numero e' la posizione nel lotto mandato. E' l'unico modo di attribuire
     // il rifiuto, e senza attribuzione si finisce per ritentare tutti o
     // nessuno.
-    (global.fetch as any).mockResolvedValueOnce(
-      ok({
-        metafieldsSet: {
-          metafields: [{ id: 'x' }],
-          userErrors: [{ field: ['metafields', '1', 'value'], message: 'Value is invalid' }],
-        },
-      }),
-    );
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok({
+          metafieldsSet: {
+            metafields: null,
+            userErrors: [{ field: ['metafields', '1', 'value'], message: 'Value is invalid' }],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(ok({ metafieldsSet: { metafields: [{ id: 'x' }], userErrors: [] } }));
 
     const result = await client().setCustomerBirthdates([
       { customerId: 7, date: '1985-04-23' },
@@ -458,6 +460,164 @@ describe('Shopify API Client (GraphQL)', () => {
     ]);
 
     expect(result.failed).toEqual([{ customerId: 8, reason: 'Value is invalid' }]);
+    expect(result.written).toBe(1);
+    // Il secondo lotto manda solo il cliente 7
+    expect(sentBody(1).variables.metafields.map((m: any) => m.ownerId)).toEqual(['gid://shopify/Customer/7']);
+  });
+
+  it('metafieldsSet e\' atomico: un rifiuto nel lotto blocca tutti, il lotto si rimanda senza il fallito', async () => {
+    // Bug fix: quando metafieldsSet torna userErrors, nessuno del lotto e'
+    // stato scritto (operazione atomica). Il cliente fallito va in `failed`, ma
+    // gli altri vanno ritentati — altrimenti risultano scritti mentre Shopify
+    // tiene ancora il valore vecchio.
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok({
+          metafieldsSet: {
+            metafields: null,
+            userErrors: [{ field: ['metafields', '1', 'value'], message: 'Value is invalid' }],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(ok({ metafieldsSet: { metafields: [{ id: 'x' }, { id: 'y' }], userErrors: [] } }));
+
+    const result = await client().setCustomerBirthdates([
+      { customerId: 7, date: '1985-04-23' },
+      { customerId: 8, date: 'non-una-data' },
+      { customerId: 9, date: '1990-01-01' },
+    ]);
+
+    expect(result).toEqual({
+      written: 2,
+      errors: ['Value is invalid'],
+      failed: [{ customerId: 8, reason: 'Value is invalid' }],
+    });
+    expect((global.fetch as any).mock.calls).toHaveLength(2);
+    // Il secondo lotto manda solo 7 e 9
+    expect(sentBody(1).variables.metafields.map((m: any) => m.ownerId)).toEqual([
+      'gid://shopify/Customer/7',
+      'gid://shopify/Customer/9',
+    ]);
+  });
+
+  it('un rifiuto senza indice in setCustomerBirthdates: tutto il lotto e\' fallito', async () => {
+    // Se l'errore non porta l'indice, non si sa quale cliente e' stato
+    // rifiutato, quindi meglio marcare tutti come falliti che lasciarne qualcuno
+    // in uno stato inconsistente.
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({
+        metafieldsSet: {
+          metafields: null,
+          userErrors: [{ field: null, message: 'Internal error', code: 'INTERNAL_ERROR' }],
+        },
+      }),
+    );
+
+    const result = await client().setCustomerBirthdates([
+      { customerId: 7, date: '1985-04-23' },
+      { customerId: 8, date: '1990-01-01' },
+    ]);
+
+    expect(result).toEqual({
+      written: 0,
+      errors: ['Internal error'],
+      failed: [
+        { customerId: 7, reason: 'Internal error' },
+        { customerId: 8, reason: 'Internal error' },
+      ],
+    });
+    // Non c'e' un secondo tentativo: non si sa chi togliere
+    expect((global.fetch as any).mock.calls).toHaveLength(1);
+  });
+
+  it('riempire solo dove manca: ogni metafield parte con compareDigest null', async () => {
+    // compareDigest null = "scrivi solo se il metafield non esiste". E' la
+    // garanzia che l'import non copre una data che Shopify ha gia'.
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ metafieldsSet: { metafields: [{ id: 'x' }], userErrors: [] } }),
+    );
+
+    const result = await client().fillCustomerBirthdatesIfAbsent([{ customerId: 7, date: '1985-04-23' }]);
+
+    expect(result).toEqual({ written: [7], present: [], failed: [] });
+    expect(sentBody().variables.metafields).toEqual([
+      {
+        ownerId: 'gid://shopify/Customer/7',
+        namespace: 'facts',
+        key: 'birth_date',
+        type: 'date',
+        value: '1985-04-23',
+        compareDigest: null,
+      },
+    ]);
+    expect(sentBody().query).toContain('code');
+  });
+
+  it('un metafield gia\' presente torna come present; il lotto (atomico) si rimanda senza di lui', async () => {
+    // metafieldsSet e' atomico: un solo rifiuto e nessuno del lotto e' stato
+    // scritto. Chi e' stato rifiutato esce, gli altri si rimandano.
+    (global.fetch as any)
+      .mockResolvedValueOnce(
+        ok({
+          metafieldsSet: {
+            metafields: null,
+            userErrors: [
+              { field: ['metafields', '1', 'compareDigest'], message: 'stale', code: 'STALE_OBJECT' },
+              { field: ['metafields', '2', 'value'], message: 'Value is invalid', code: 'INVALID_VALUE' },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(ok({ metafieldsSet: { metafields: [{ id: 'x' }], userErrors: [] } }));
+
+    const result = await client().fillCustomerBirthdatesIfAbsent([
+      { customerId: 7, date: '1985-04-23' },
+      { customerId: 8, date: '1990-01-01' },
+      { customerId: 9, date: 'boh' },
+    ]);
+
+    expect(result).toEqual({
+      written: [7],
+      present: [8],
+      failed: [{ customerId: 9, reason: 'Value is invalid' }],
+    });
+    expect((global.fetch as any).mock.calls).toHaveLength(2);
+    expect(sentBody(1).variables.metafields.map((m: any) => m.ownerId)).toEqual(['gid://shopify/Customer/7']);
+    expect(sentBody(1).variables.metafields[0].compareDigest).toBeNull();
+  });
+
+  it('un rifiuto senza indice vale per tutto il lotto rimasto', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({ metafieldsSet: { metafields: null, userErrors: [{ field: null, message: 'boom', code: 'INTERNAL_ERROR' }] } }),
+    );
+
+    const result = await client().fillCustomerBirthdatesIfAbsent([{ customerId: 7, date: '1985-04-23' }]);
+
+    expect(result).toEqual({ written: [], present: [], failed: [{ customerId: 7, reason: 'boom' }] });
+  });
+
+  it('legge la data di nascita attuale di alcuni clienti', async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      ok({
+        nodes: [
+          { id: 'gid://shopify/Customer/7', metafield: { value: '1980-02-03' } },
+          { id: 'gid://shopify/Customer/8', metafield: null },
+          null,
+        ],
+      }),
+    );
+
+    const values = await client().getCustomerBirthdateValues([7, 8, 9]);
+
+    expect(sentBody().variables).toEqual({
+      ids: ['gid://shopify/Customer/7', 'gid://shopify/Customer/8', 'gid://shopify/Customer/9'],
+      namespace: 'facts',
+      key: 'birth_date',
+    });
+    expect([...values]).toEqual([
+      [7, '1980-02-03'],
+      [8, null],
+    ]);
   });
 
   it('senza nessuno da riscrivere non si chiama Shopify', async () => {
