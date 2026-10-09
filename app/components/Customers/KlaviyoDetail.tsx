@@ -9,7 +9,6 @@ import {
   Text,
   Button,
   Banner,
-  Select,
   List,
   InlineStack,
   Spinner,
@@ -21,6 +20,7 @@ import {
   Tooltip,
   Icon,
 } from '@shopify/polaris';
+import { PolarisSelect } from '../shared/PolarisSelect';
 import { InfoIcon } from '@shopify/polaris-icons';
 import { useT, useLocale } from '~/lib/i18n/context';
 import type { DateFormat } from '~/lib/integrations/values';
@@ -735,7 +735,7 @@ export function KlaviyoDetail({ onClose, onActionsChange, initialStatus }: Klavi
                     </span>
                   </Tooltip>
                 </InlineStack>
-                <Select
+                <PolarisSelect
                   label={t.customers.klaviyoDetail.klaviyoPropertyLabel}
                   labelHidden
                   options={[
@@ -748,7 +748,7 @@ export function KlaviyoDetail({ onClose, onActionsChange, initialStatus }: Klavi
                 />
               </BlockStack>
 
-              <Select
+              <PolarisSelect
                 label={t.customers.klaviyoDetail.kerdonFieldLabel}
                 options={[{ label: t.customers.klaviyoDetail.birthdate, value: 'birthdate' }]}
                 value="birthdate"
@@ -757,7 +757,7 @@ export function KlaviyoDetail({ onClose, onActionsChange, initialStatus }: Klavi
             </FormLayout.Group>
 
             {selectedProp && selectedProp.ambiguous && (
-              <Select
+              <PolarisSelect
                 label={t.customers.klaviyoDetail.dateFormatLabel}
                 options={[
                   { label: t.customers.klaviyoDetail.selectFormat, value: '' },

@@ -9,8 +9,9 @@
 // seconda regola "tutto il resto", senza aspettare la risposta.
 
 import { useState } from 'react';
-import { BlockStack, Checkbox, Modal, Select, Text, TextField } from '@shopify/polaris';
+import { BlockStack, Checkbox, Modal, Text, TextField } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
+import { PolarisSelect } from '../shared/PolarisSelect';
 import type { FallbackRule, PackagingCategory } from '~/lib/shipping/types';
 import { testoDiErrore } from './feedback';
 import { saveCategory, saveRule } from './packaging-edit';
@@ -175,7 +176,7 @@ export function RuleModal({ current, index, onClose, onSave, isSaving, serverErr
               error={weightError ? localText ?? undefined : undefined}
             />
           )}
-          <Select
+          <PolarisSelect
             label={t.shipping.packaging.ruleCategoryLabel}
             options={current.categories.map((cat) => ({ label: cat.name, value: cat.name }))}
             value={category}

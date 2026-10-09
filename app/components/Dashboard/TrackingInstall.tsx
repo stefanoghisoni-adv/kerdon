@@ -8,10 +8,10 @@ import {
   Icon,
   InlineStack,
   List,
-  Select,
   Text,
   TextField,
 } from '@shopify/polaris';
+import { PolarisSelect } from '../shared/PolarisSelect';
 import { CheckCircleIcon, AlertCircleIcon } from '@shopify/polaris-icons';
 import { MetricRow } from './MetricRow';
 import { useLocale } from '~/lib/i18n/context';
@@ -158,7 +158,7 @@ export function TrackingInstall({ path, endpoint, verifiedAt }: TrackingInstallP
           }
         />
       ) : (
-        <Select
+        <PolarisSelect
           label={t.installLabel}
           options={options}
           value={chosen}
