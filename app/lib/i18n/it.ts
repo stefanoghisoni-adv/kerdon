@@ -267,6 +267,7 @@ export const it = {
       retry: "Ho creato il database",
       failed: "Collegamento a Supabase non riuscito. Riprova.",
       popupsBlocked: "Consenti i popup per collegare Supabase.",
+      openWindow: "Apri la finestra di Supabase",
       connectedWith: (email: string) => `Account connesso con ${email}.`,
       connectedRow: "Account connesso con",
       noEmail: "—",
@@ -278,7 +279,7 @@ export const it = {
       reopen: "Riapri la pagina di autorizzazione",
       almostTitle: "Manca solo un passaggio",
       almostBody:
-        "Se hai appena creato l’account o il database su Supabase, resta da accettare il collegamento: è un clic, nella finestra di Supabase.",
+        "Se hai appena creato l’account o il database su Supabase, resta da accettare il collegamento: clicca il pulsante qui sotto e conferma nella finestra che si apre.",
     },
     database: {
       label: "Database",

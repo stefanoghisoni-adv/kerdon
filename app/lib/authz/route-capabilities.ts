@@ -168,6 +168,7 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
   },
 
   // --- Collegamento Supabase: i gesti che creano o collegano -------------
+  'api.supabase.connect': { guard: 'capability', capability: 'use_app', via: 'can(' },
   'api.supabase.create-project': { guard: 'capability', capability: 'use_app', via: 'can(' },
   'api.supabase.create-tables': { guard: 'capability', capability: 'use_app', via: 'can(' },
   'api.supabase.delete-project': { guard: 'open', reason: USCITA_CANCELLAZIONE },
@@ -316,8 +317,10 @@ export const ROUTE_CAPABILITIES: Readonly<Record<string, RouteCapabilityRule>> =
   'auth.supabase.callback': {
     guard: 'open',
     reason:
-      'Ritorno di OAuth da Supabase: si identifica dallo stato firmato che ha ' +
-      'emesso l’app, non da una sessione.',
+      'Ritorno di OAuth da Supabase: non legge e non scrive niente, consegna ' +
+      'codice e stato alla finestra dell’app con postMessage. Lo scambio del ' +
+      'codice lo fa `api.supabase.connect`, che e’ protetta e controlla che ' +
+      'lo stato sia del negozio della sessione.',
   },
   'policies.privacy-policy': {
     guard: 'open',

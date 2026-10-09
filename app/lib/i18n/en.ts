@@ -220,6 +220,7 @@ export const en: typeof it = {
       retry: "I created the database",
       failed: "Could not connect to Supabase. Try again.",
       popupsBlocked: "Allow pop-ups to connect Supabase.",
+      openWindow: "Open the Supabase window",
       connectedWith: (email: string) => `Account connected with ${email}.`,
       connectedRow: "Account connected with",
       noEmail: "—",
@@ -231,7 +232,7 @@ export const en: typeof it = {
       reopen: "Reopen the authorisation page",
       almostTitle: "One step left",
       almostBody:
-        "If you have just created the account or the database on Supabase, the connection still needs accepting: it is one click, in the Supabase window.",
+        "If you have just created the account or the database on Supabase, the connection still needs accepting: click the button below and confirm in the window that opens.",
     },
     database: {
       label: "Database",

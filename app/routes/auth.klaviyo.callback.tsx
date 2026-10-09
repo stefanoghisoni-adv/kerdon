@@ -1,35 +1,8 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
-
-function jsonForScript(value: unknown): string {
-  return JSON.stringify(value).replace(
-    /[<>&\u2028\u2029]/g,
-    (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'),
-  );
-}
+import { oauthCallbackPage } from '~/lib/oauth-callback-page.server';
 
 function closePage(message: Record<string, unknown>, appOrigin: string): Response {
-  const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
-<script>
-(function () {
-  try {
-    if (window.opener) {
-      window.opener.postMessage(${jsonForScript(message)}, ${jsonForScript(appOrigin)});
-    }
-  } catch (e) {}
-  window.close();
-})();
-</script>
-<p>You can close this window. / Puoi chiudere questa finestra.</p>
-</body></html>`;
-  return new Response(html, {
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      // Il codice OAuth viaggia nell'URL di questa pagina: non va tenuto in
-      // nessuna cache ne' passato come Referer.
-      'Cache-Control': 'no-store',
-      'Referrer-Policy': 'no-referrer',
-    },
-  });
+  return oauthCallbackPage(message, appOrigin);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

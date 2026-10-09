@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFetcher, useRevalidator } from '@remix-run/react';
 import { BlockStack, Button, Banner, InlineStack, Spinner, Text } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
+import { isValidOAuthMessage } from '~/lib/oauth-popup-message';
+import { settleSubmission, type SubmissionPhase } from '~/lib/fetcher-settle';
 import { DisconnectSupabase, type DisconnectMode } from './DisconnectSupabase';
 
 export type SupabaseConnectStatus = 'idle' | 'in_progress' | 'failed';
@@ -51,10 +53,25 @@ export function SupabaseAccountConnect({
   const urlFetcher = useFetcher<{ url?: string; error?: string }>();
   const accountFetcher = useFetcher<{ email: string | null }>();
   const statusFetcher = useFetcher<{ linked: boolean }>();
+  const connectFetcher = useFetcher<{ ok: boolean; error?: string }>();
 
   const [connecting, setConnecting] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
-  const [popupRef, setPopupRef] = useState<Window | null>(null);
+  const [popupRef, setPopupState] = useState<Window | null>(null);
+  // La finestra aperta dall'ultimo clic, letta dall'ascoltatore dei messaggi:
+  // e' registrato una volta sola, e dallo stato vedrebbe sempre il valore del
+  // primo render. Non si azzera quando la finestra risulta chiusa: la pagina
+  // di ritorno manda il messaggio e si chiude subito, e il controllo sulla
+  // chiusura puo' arrivare prima del messaggio. Si azzera quando il messaggio
+  // e' arrivato — uno per clic — o al clic dopo, che la sostituisce.
+  const popupWindowRef = useRef<Window | null>(null);
+  const setPopupRef = useCallback((popup: Window | null) => {
+    if (popup) popupWindowRef.current = popup;
+    setPopupState(popup);
+  }, []);
+  // Il browser ha bloccato la finestra: si offre di riaprirla con un clic,
+  // che e' l'unico gesto da cui il browser la lascia aprire.
+  const [popupBlocked, setPopupBlocked] = useState(false);
   // True se l'ultimo tentativo e' fallito (finestra chiusa senza confermare
   // l'integrazione, o errore): guida il badge "Fallito".
   const [connectFailed, setConnectFailed] = useState(false);
@@ -64,25 +81,39 @@ export function SupabaseAccountConnect({
   // lampo che dice il contrario di quel che e' appena successo.
   const [confirmed, setConfirmed] = useState(false);
 
-  // Ricezione esito dalla finestra di accesso (origine validata).
+  // Ricezione esito dalla finestra di accesso. Vale solo il messaggio della
+  // finestra aperta da questo clic, dalla nostra origine e del tipo atteso:
+  // tutto il resto si ignora. La finestra non collega niente da se': consegna
+  // codice e stato, e il collegamento lo completa il server per questo negozio.
   useEffect(() => {
     const appOrigin = window.location.origin;
     function onMessage(event: MessageEvent) {
-      if (event.origin !== appOrigin) return;
-      const data = event.data as { type?: string; ok?: boolean; error?: string };
-      if (!data || data.type !== 'supabase-oauth') return;
-      setConnecting(false);
-      setPopupRef(null);
-      if (data.ok) {
+      const result = isValidOAuthMessage(
+        event,
+        popupWindowRef.current,
+        appOrigin,
+        'supabase-oauth',
+      );
+      if (result.ok || 'error' in result) popupWindowRef.current = null;
+      if (result.ok) {
+        setConnecting(false);
+        setPopupRef(null);
         setOauthError(null);
         setConnectFailed(false);
         // Il passo resta "In corso" finche' il server non conferma: e' vero, e
         // non fa lampeggiare "Non collegato" a collegamento appena riuscito.
         setConfirmed(true);
-        // Lo stato del passo lo dice il server: ricaricandolo il primo passo
-        // risulta concluso e il secondo si sblocca da se'.
-        revalidator.revalidate();
-      } else {
+        // Da qui si segue l'invio fino all'esito, anche se la richiesta
+        // solleva e non porta nessuna risposta (vedi `settleSubmission`).
+        connectPhaseRef.current = 'sent';
+        connectPrevDataRef.current = connectDataRef.current;
+        connectFetcher.submit(
+          { code: result.data.code, state: result.data.state },
+          { method: 'post', action: '/api/supabase/connect', encType: 'application/json' },
+        );
+      } else if ('error' in result) {
+        setConnecting(false);
+        setPopupRef(null);
         setConnectFailed(true);
         setOauthError(t.connect.account.failed);
       }
@@ -91,6 +122,34 @@ export function SupabaseAccountConnect({
     return () => window.removeEventListener('message', onMessage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Esito del completamento sul server. Una decisione per invio: risposta ok
+  // → si ricarica il passo; risposta negativa, oppure nessuna risposta
+  // (richiesta sollevata, rete giu') → il pulsante non resta a girare, si
+  // dice che non e' riuscito.
+  const connectPhaseRef = useRef<SubmissionPhase>('none');
+  const connectPrevDataRef = useRef<typeof connectFetcher.data>(undefined);
+  const connectDataRef = useRef<typeof connectFetcher.data>(undefined);
+  connectDataRef.current = connectFetcher.data;
+  useEffect(() => {
+    const { phase, outcome } = settleSubmission(
+      connectPhaseRef.current,
+      connectFetcher.state,
+      connectFetcher.data,
+      connectPrevDataRef.current,
+    );
+    connectPhaseRef.current = phase;
+    if (outcome === 'ok') {
+      // Lo stato del passo lo dice il server: ricaricandolo il primo passo
+      // risulta concluso e il secondo si sblocca da se'.
+      revalidator.revalidate();
+    } else if (outcome === 'failed') {
+      setConfirmed(false);
+      setConnectFailed(true);
+      setOauthError(t.connect.account.failed);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectFetcher.state, connectFetcher.data]);
 
   // Porta la finestra sull'indirizzo di accesso appena e' pronto.
   useEffect(() => {
@@ -210,19 +269,20 @@ export function SupabaseAccountConnect({
     setOauthError(null);
     setConnectFailed(false);
     setConfirmed(false);
+    setPopupBlocked(false);
     // Finestra con un nome: se e' gia' aperta la si riusa invece di aprirne una
     // seconda. E' quello che serve a "Riapri la pagina di autorizzazione", che
     // riporta li' chi nel frattempo e' finito a creare account o organizzazione.
     const popup = window.open('', 'supabase-oauth', 'width=600,height=760');
     if (!popup) {
-      setOauthError(t.connect.account.popupsBlocked);
+      setPopupBlocked(true);
       return;
     }
     popup.focus();
     setPopupRef(popup);
     setConnecting(true);
     urlFetcher.submit(null, { method: 'post', action: '/api/supabase/oauth-url' });
-  }, [urlFetcher]);
+  }, [urlFetcher, setPopupRef]);
 
   // Con quale account si e' entrati: si chiede solo a collegamento fatto, e
   // dopo che la pagina e' gia' comparsa. Nell'attesa si dice che si sta
@@ -315,7 +375,16 @@ export function SupabaseAccountConnect({
         {t.connect.account.intro}
       </Text>
 
-      {oauthError && <Banner tone="critical">{oauthError}</Banner>}
+      {oauthError && <Banner tone="warning">{oauthError}</Banner>}
+
+      {popupBlocked && (
+        <Banner
+          tone="warning"
+          action={{ content: t.connect.account.openWindow, onAction: startConnect }}
+        >
+          {t.connect.account.popupsBlocked}
+        </Banner>
+      )}
 
       {/* Il caso che lascia tutti fermi: chi arriva senza account, o senza
           un'organizzazione, viene portato da Supabase a crearla e la richiesta
@@ -337,7 +406,9 @@ export function SupabaseAccountConnect({
           che restava un ultimo consenso da dare. Dirgli che e' "fallito"
           sarebbe falso e scoraggiante: gli manca un clic, e il pulsante qui
           sotto cambia nome per andarlo a prendere da dove si trova ora. */}
-      {connectFailed && (
+      {/* Un messaggio solo: se c'e' un errore vale quello (sopra, in warning),
+          altrimenti la guida sull'ultimo passaggio. */}
+      {connectFailed && !oauthError && (
         <Banner tone="info" title={t.connect.account.almostTitle}>
           <Text as="p">{t.connect.account.almostBody}</Text>
         </Banner>
