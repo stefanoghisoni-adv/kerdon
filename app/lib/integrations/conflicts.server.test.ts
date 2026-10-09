@@ -297,6 +297,34 @@ describe('conflicts.server', () => {
       expect(conflict123?.decidedAt).toBeUndefined();
     });
 
+    it('with batch rejection, only actually-written rows close (atomicity bug fix)', async () => {
+      // Prima del fix: metafieldsSet rifiuta atomicamente tutto il lotto se c'e'
+      // un errore, ma setCustomerBirthdates metteva in `failed` solo la riga
+      // indicizzata, lasciando le altre come "scritte" anche se Shopify non le
+      // aveva salvate. Il conflitto si chiudeva per 24 righe che tenevano ancora
+      // il valore vecchio.
+      // Con il fix: si ritenta il lotto senza i falliti, e `written` conta solo
+      // chi e' stato davvero salvato.
+      h.mockSetBirthdates.mockResolvedValue({
+        written: 1, // Solo 1 scritto (il retry)
+        errors: ['Value is invalid'],
+        failed: [{ customerId: 123, reason: 'Value is invalid' }],
+      });
+
+      const result = await resolveConflicts(shopId, [123, 456], 'used_theirs');
+
+      expect(result.resolved).toBe(1); // Solo il cliente 456
+      expect(result.notWritten).toEqual([123]);
+
+      // 456 si chiude: e' stato scritto
+      const conflict456 = h.conflicts.find((c) => c.customerId === 456n);
+      expect(conflict456?.status).toBe('used_theirs');
+
+      // 123 resta aperto: fallito
+      const conflict123 = h.conflicts.find((c) => c.customerId === 123n);
+      expect(conflict123?.status).toBe('open');
+    });
+
     it('ignores customer IDs from other shops', async () => {
       h.mockSetBirthdates.mockResolvedValue({
         written: 2,
