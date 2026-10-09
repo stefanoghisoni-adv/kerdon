@@ -3,6 +3,7 @@ import { useFetcher, useRevalidator } from '@remix-run/react';
 import { BlockStack, Button, Banner, InlineStack, Spinner, Text } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
 import { isValidOAuthMessage } from '~/lib/oauth-popup-message';
+import { settleSubmission, type SubmissionPhase } from '~/lib/fetcher-settle';
 import { DisconnectSupabase, type DisconnectMode } from './DisconnectSupabase';
 
 export type SupabaseConnectStatus = 'idle' | 'in_progress' | 'failed';
@@ -93,7 +94,7 @@ export function SupabaseAccountConnect({
         appOrigin,
         'supabase-oauth',
       );
-      if (result.ok || result.error) popupWindowRef.current = null;
+      if (result.ok || 'error' in result) popupWindowRef.current = null;
       if (result.ok) {
         setConnecting(false);
         setPopupRef(null);
@@ -102,11 +103,15 @@ export function SupabaseAccountConnect({
         // Il passo resta "In corso" finche' il server non conferma: e' vero, e
         // non fa lampeggiare "Non collegato" a collegamento appena riuscito.
         setConfirmed(true);
+        // Da qui si segue l'invio fino all'esito, anche se la richiesta
+        // solleva e non porta nessuna risposta (vedi `settleSubmission`).
+        connectPhaseRef.current = 'sent';
+        connectPrevDataRef.current = connectDataRef.current;
         connectFetcher.submit(
           { code: result.data.code, state: result.data.state },
           { method: 'post', action: '/api/supabase/connect', encType: 'application/json' },
         );
-      } else if (result.error) {
+      } else if ('error' in result) {
         setConnecting(false);
         setPopupRef(null);
         setConnectFailed(true);
@@ -118,17 +123,27 @@ export function SupabaseAccountConnect({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Esito del completamento sul server.
-  const handledConnectRef = useRef<typeof connectFetcher.data>(undefined);
+  // Esito del completamento sul server. Una decisione per invio: risposta ok
+  // → si ricarica il passo; risposta negativa, oppure nessuna risposta
+  // (richiesta sollevata, rete giu') → il pulsante non resta a girare, si
+  // dice che non e' riuscito.
+  const connectPhaseRef = useRef<SubmissionPhase>('none');
+  const connectPrevDataRef = useRef<typeof connectFetcher.data>(undefined);
+  const connectDataRef = useRef<typeof connectFetcher.data>(undefined);
+  connectDataRef.current = connectFetcher.data;
   useEffect(() => {
-    if (connectFetcher.state !== 'idle' || !connectFetcher.data) return;
-    if (connectFetcher.data === handledConnectRef.current) return;
-    handledConnectRef.current = connectFetcher.data;
-    if (connectFetcher.data.ok) {
+    const { phase, outcome } = settleSubmission(
+      connectPhaseRef.current,
+      connectFetcher.state,
+      connectFetcher.data,
+      connectPrevDataRef.current,
+    );
+    connectPhaseRef.current = phase;
+    if (outcome === 'ok') {
       // Lo stato del passo lo dice il server: ricaricandolo il primo passo
       // risulta concluso e il secondo si sblocca da se'.
       revalidator.revalidate();
-    } else {
+    } else if (outcome === 'failed') {
       setConfirmed(false);
       setConnectFailed(true);
       setOauthError(t.connect.account.failed);
@@ -391,7 +406,9 @@ export function SupabaseAccountConnect({
           che restava un ultimo consenso da dare. Dirgli che e' "fallito"
           sarebbe falso e scoraggiante: gli manca un clic, e il pulsante qui
           sotto cambia nome per andarlo a prendere da dove si trova ora. */}
-      {connectFailed && (
+      {/* Un messaggio solo: se c'e' un errore vale quello (sopra, in warning),
+          altrimenti la guida sull'ultimo passaggio. */}
+      {connectFailed && !oauthError && (
         <Banner tone="info" title={t.connect.account.almostTitle}>
           <Text as="p">{t.connect.account.almostBody}</Text>
         </Banner>

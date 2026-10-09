@@ -279,7 +279,7 @@ export const it = {
       reopen: "Riapri la pagina di autorizzazione",
       almostTitle: "Manca solo un passaggio",
       almostBody:
-        "Se hai appena creato l’account o il database su Supabase, resta da accettare il collegamento: è un clic, nella finestra di Supabase.",
+        "Se hai appena creato l’account o il database su Supabase, resta da accettare il collegamento: clicca il pulsante qui sotto e conferma nella finestra che si apre.",
     },
     database: {
       label: "Database",

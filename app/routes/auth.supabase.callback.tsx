@@ -1,4 +1,5 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
+import { oauthCallbackPage } from '~/lib/oauth-callback-page.server';
 
 /**
  * Il ritorno da Supabase: consegna, non decide.
@@ -15,41 +16,10 @@ import type { LoaderFunctionArgs } from '@remix-run/node';
  * del negozio della sessione. E' lo stesso disegno del ritorno da Klaviyo.
  */
 
-// Serializza un valore per l'inserimento sicuro dentro un tag <script>.
-// JSON.stringify NON neutralizza `</script>` né i separatori di riga
-// U+2028/U+2029: `code` e `state` arrivano dall'URL, e chi li scrive potrebbe
-// spezzare il tag ed eseguire codice (XSS). Escapiamo `<`, `>`, `&` e i due
-// separatori di riga come escape unicode.
-function jsonForScript(value: unknown): string {
-  return JSON.stringify(value).replace(
-    /[<>&\u2028\u2029]/g,
-    (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'),
-  );
-}
+const COPY = { connectLabel: { it: 'Collega Supabase', en: 'Connect Supabase' } };
 
 function closePage(message: Record<string, unknown>, appOrigin: string): Response {
-  const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
-<script>
-(function () {
-  try {
-    if (window.opener) {
-      window.opener.postMessage(${jsonForScript(message)}, ${jsonForScript(appOrigin)});
-    }
-  } catch (e) {}
-  window.close();
-})();
-</script>
-<p>Puoi chiudere questa finestra. / You can close this window.</p>
-</body></html>`;
-  return new Response(html, {
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      // Il codice OAuth viaggia nell'URL di questa pagina: non va tenuto in
-      // nessuna cache ne' passato come Referer.
-      'Cache-Control': 'no-store',
-      'Referrer-Policy': 'no-referrer',
-    },
-  });
+  return oauthCallbackPage(message, appOrigin, COPY);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

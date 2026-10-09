@@ -232,7 +232,7 @@ export const en: typeof it = {
       reopen: "Reopen the authorisation page",
       almostTitle: "One step left",
       almostBody:
-        "If you have just created the account or the database on Supabase, the connection still needs accepting: it is one click, in the Supabase window.",
+        "If you have just created the account or the database on Supabase, the connection still needs accepting: click the button below and confirm in the window that opens.",
     },
     database: {
       label: "Database",

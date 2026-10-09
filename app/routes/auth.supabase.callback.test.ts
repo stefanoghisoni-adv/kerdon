@@ -104,4 +104,19 @@ describe('GET /auth/supabase/callback', () => {
     expect(html).toContain('\\u003c/script\\u003e');
     expect(postedMessage(html)).toEqual({ type: 'supabase-oauth', code: evil, state: 's' });
   });
+
+  it('senza la finestra dell\'app non si chiude: spiega come completare', async () => {
+    // Una pagina di Supabase puo' tagliare il legame con la finestra che l'ha
+    // aperta (dopo aver creato account o organizzazione). Li' il codice non
+    // arriva a nessuno: chiudere dicendo "fatto" lascerebbe il merchant
+    // convinto di aver finito.
+    const html = await (await call('?code=c&state=s')).text();
+    expect(html).toContain('Torna su Kerdon e clicca di nuovo «Collega Supabase» per completare.');
+    expect(html).toContain('Go back to Kerdon and click "Connect Supabase" again to finish.');
+    // window.close() solo dentro il ramo con la finestra dell'app.
+    const script = html.slice(html.indexOf('<script>'), html.indexOf('</script>'));
+    expect(script).toMatch(/if \(window\.opener\) \{[^}]*postMessage[\s\S]*window\.close\(\);[\s\S]*\} else \{/);
+    expect(script.split('window.close()').length - 1).toBe(1);
+    expect(script.slice(script.indexOf('} else {'))).not.toContain('window.close');
+  });
 });
