@@ -3,7 +3,7 @@
 // Menu a tendina costruito con i componenti Polaris (Button + Popover + OptionList)
 // al posto di <Select> nativo del browser.
 
-import { useState, useCallback, useRef, useId, type ReactNode } from 'react';
+import { useState, useCallback, useRef, useId, useEffect, type ReactNode } from 'react';
 import { Button, Popover, OptionList, Labelled } from '@shopify/polaris';
 
 export interface PolarisSelectOption {
@@ -60,13 +60,21 @@ export function mapOptionsForList(options: PolarisSelectOption[]) {
 }
 
 /**
+ * Decide se l'evento deve essere bloccato per non chiudere la Modal genitore.
+ * Restituisce true se è un Escape da bloccare.
+ */
+export function shouldBlockEscapeEvent(event: KeyboardEvent | React.KeyboardEvent): boolean {
+  return event.key === 'Escape';
+}
+
+/**
  * PolarisSelect: menu a tendina costruito con Polaris, senza <select> nativo.
  *
  * Accessibilità:
  * - Apertura con Enter/Space o click
- * - Chiusura con Escape (fermato al popover per non chiudere Modal genitore)
- * - Focus torna al trigger dopo la selezione
- * - Label collegata al trigger tramite Labelled
+ * - Chiusura con Escape (bloccato via native listener capture-phase per non chiudere Modal)
+ * - Focus torna al trigger dopo la selezione o Escape
+ * - Label e valore collegati al trigger tramite Labelled + ariaDescribedBy
  */
 export function PolarisSelect({
   label,
@@ -81,7 +89,9 @@ export function PolarisSelect({
 }: PolarisSelectProps) {
   const [popoverActive, setPopoverActive] = useState(false);
   const triggerId = useId();
+  const valueId = useId();
   const triggerRef = useRef<HTMLDivElement>(null);
+  const escapeKeydownFiredRef = useRef(false);
 
   const togglePopover = useCallback(() => {
     if (!disabled) {
@@ -89,9 +99,7 @@ export function PolarisSelect({
     }
   }, [disabled]);
 
-  const closePopover = useCallback(() => {
-    setPopoverActive(false);
-    // Focus torna al trigger (il Button dentro il div wrapper)
+  const refocusTrigger = useCallback(() => {
     if (triggerRef.current) {
       const button = triggerRef.current.querySelector('button');
       if (button) {
@@ -100,33 +108,71 @@ export function PolarisSelect({
     }
   }, []);
 
+  const closePopover = useCallback(() => {
+    setPopoverActive(false);
+  }, []);
+
+  const closePopoverAndRefocus = useCallback(() => {
+    closePopover();
+    refocusTrigger();
+  }, [closePopover, refocusTrigger]);
+
   const handleSelection = useCallback(
     (selected: string[]) => {
       // Skip se si riseleziona lo stesso valore
       if (selected.length > 0 && selected[0] !== value && onChange) {
         onChange(selected[0]);
       }
-      closePopover();
+      closePopoverAndRefocus();
     },
-    [onChange, closePopover, value]
+    [onChange, closePopoverAndRefocus, value]
   );
 
-  // Intercetta Escape nel popover per non chiudere la Modal genitore
-  const handlePopoverKeyDown = useCallback((event: React.KeyboardEvent) => {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      closePopover();
-    }
-  }, [closePopover]);
+  // Native listener in capture phase su window per bloccare Escape prima che raggiunga Dialog
+  useEffect(() => {
+    if (!popoverActive) return;
 
-  const handlePopoverKeyUp = useCallback((event: React.KeyboardEvent) => {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-    }
-  }, []);
+    const handleNativeKeyDown = (event: KeyboardEvent) => {
+      if (shouldBlockEscapeEvent(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        escapeKeydownFiredRef.current = true;
+        closePopoverAndRefocus();
+      }
+    };
+
+    const handleNativeKeyUp = (event: KeyboardEvent) => {
+      if (shouldBlockEscapeEvent(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        // Se abbiamo già chiuso su keydown, questo keyup è solo da ingoiare
+        escapeKeydownFiredRef.current = false;
+      }
+    };
+
+    window.addEventListener('keydown', handleNativeKeyDown, true);
+    window.addEventListener('keyup', handleNativeKeyUp, true);
+
+    return () => {
+      window.removeEventListener('keydown', handleNativeKeyDown, true);
+      window.removeEventListener('keyup', handleNativeKeyUp, true);
+      escapeKeydownFiredRef.current = false;
+    };
+  }, [popoverActive, closePopoverAndRefocus]);
 
   const selectedLabel = getSelectedLabel(options, value, placeholder);
   const listOptions = mapOptionsForList(options);
+
+  // ariaDescribedBy: collega valore + helpText/error (ids da Labelled)
+  const describedByIds = [valueId];
+  if (error) {
+    describedByIds.push(`${triggerId}Error`);
+  } else if (helpText) {
+    describedByIds.push(`${triggerId}HelpText`);
+  }
+  const ariaDescribedBy = describedByIds.join(' ');
 
   const activator = (
     <div ref={triggerRef}>
@@ -137,9 +183,14 @@ export function PolarisSelect({
         fullWidth
         textAlign="start"
         disabled={disabled}
+        ariaDescribedBy={ariaDescribedBy}
       >
         {selectedLabel}
       </Button>
+      {/* Valore visivamente nascosto ma annunciato via ariaDescribedBy */}
+      <span id={valueId} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>
+        {selectedLabel}
+      </span>
     </div>
   );
 
@@ -159,13 +210,11 @@ export function PolarisSelect({
         preferredAlignment="left"
         fullWidth
       >
-        <div onKeyDown={handlePopoverKeyDown} onKeyUp={handlePopoverKeyUp}>
-          <OptionList
-            options={listOptions}
-            selected={[value]}
-            onChange={handleSelection}
-          />
-        </div>
+        <OptionList
+          options={listOptions}
+          selected={[value]}
+          onChange={handleSelection}
+        />
       </Popover>
     </Labelled>
   );

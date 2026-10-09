@@ -1,7 +1,7 @@
 // app/components/shared/PolarisSelect.test.ts
 
 import { describe, it, expect } from 'vitest';
-import { getSelectedLabel, mapOptionsForList, type PolarisSelectOption } from './PolarisSelect';
+import { getSelectedLabel, mapOptionsForList, shouldBlockEscapeEvent, type PolarisSelectOption } from './PolarisSelect';
 
 describe('getSelectedLabel', () => {
   const options: PolarisSelectOption[] = [
@@ -57,5 +57,24 @@ describe('mapOptionsForList', () => {
     const options: PolarisSelectOption[] = [{ label: 'Test', value: 't' }];
     const result = mapOptionsForList(options);
     expect(result[0].disabled).toBeUndefined();
+  });
+});
+
+describe('shouldBlockEscapeEvent', () => {
+  it('restituisce true per evento Escape', () => {
+    const event = { key: 'Escape' } as KeyboardEvent;
+    expect(shouldBlockEscapeEvent(event)).toBe(true);
+  });
+
+  it('restituisce false per altri tasti', () => {
+    expect(shouldBlockEscapeEvent({ key: 'Enter' } as KeyboardEvent)).toBe(false);
+    expect(shouldBlockEscapeEvent({ key: 'Space' } as KeyboardEvent)).toBe(false);
+    expect(shouldBlockEscapeEvent({ key: 'Tab' } as KeyboardEvent)).toBe(false);
+    expect(shouldBlockEscapeEvent({ key: 'a' } as KeyboardEvent)).toBe(false);
+  });
+
+  it('funziona sia per keydown che keyup', () => {
+    expect(shouldBlockEscapeEvent({ key: 'Escape' } as KeyboardEvent)).toBe(true);
+    expect(shouldBlockEscapeEvent({ key: 'Escape' } as KeyboardEvent)).toBe(true);
   });
 });
