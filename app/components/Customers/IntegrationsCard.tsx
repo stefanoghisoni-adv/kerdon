@@ -2,18 +2,19 @@
 //
 // La card «Integrazioni» nella tab Clienti: mostra le integrazioni disponibili
 // come riquadri cliccabili, con logo e stato visivo (installata, da collegare,
-// richiede attenzione, non disponibile).
+// richiede attenzione, non disponibile). Al clic il riquadro mostra lo spinner
+// finche' i dati della modal non sono pronti, e gli altri restano fermi.
 
-import type { ReactNode } from 'react';
 import {
   Banner,
   BlockStack,
   Box,
   Card,
+  Icon,
+  Image,
   InlineStack,
-  Scrollable,
+  Spinner,
   Text,
-  Thumbnail,
   UnstyledButton,
 } from '@shopify/polaris';
 import { AppsIcon } from '@shopify/polaris-icons';
@@ -21,12 +22,8 @@ import { useT } from '~/lib/i18n/context';
 import { PlanUpgradeAction } from '~/components/Dashboard/PlanUpgradeAction';
 import { INTEGRATIONS, type IntegrationEntry, type IntegrationId } from '~/lib/integrations/registry';
 
-/**
- * Altezza massima dello Scrollable per evitare che la card cresca oltre lo
- * schermo con molte integrazioni. Alzata rispetto a prima (200px) per far
- * stare 2 riquadri interi senza scroll.
- */
-const SCROLLABLE_MAX_HEIGHT = '400px';
+/** Lato del logo nel riquadro, in pixel. */
+const LOGO_SIZE = 40;
 
 export interface IntegrationStatus {
   provider: 'klaviyo';
@@ -50,6 +47,8 @@ export interface IntegrationsCardProps {
   upgradePlan: string | null;
   /** Callback per aprire il modal di gestione (Task 11). */
   onManage?: (provider: IntegrationId) => void;
+  /** Il riquadro di cui si stanno caricando i dati (null = nessuno). */
+  pendingProvider?: IntegrationId | null;
 }
 
 /**
@@ -112,10 +111,45 @@ export function tileState(
   return { label: 'tileInstalled', tone: 'success', clickable: true };
 }
 
+export interface TileVisualState {
+  /** Il riquadro risponde al clic adesso. */
+  clickable: boolean;
+  /** Il riquadro sta caricando i dati della sua modal (spinner). */
+  loading: boolean;
+  /** Fermo solo finche' un altro riquadro carica. */
+  disabledTemporarily: boolean;
+}
+
+/**
+ * Funzione pura: lo stato visivo di un riquadro durante il caricamento al clic.
+ *
+ * - Non disponibile: mai cliccabile, aspetto suo (grigio), non «temporaneo».
+ * - Il riquadro che carica: spinner, non cliccabile.
+ * - Gli altri riquadri attivi mentre uno carica: fermi per il momento.
+ * - Nessun caricamento: cliccabile.
+ */
+export function tileVisualState(
+  state: Pick<TileState, 'clickable'>,
+  pendingProvider: IntegrationId | null | undefined,
+  provider: IntegrationId,
+): TileVisualState {
+  if (!state.clickable) {
+    return { clickable: false, loading: false, disabledTemporarily: false };
+  }
+  if (pendingProvider === provider) {
+    return { clickable: false, loading: true, disabledTemporarily: false };
+  }
+  if (pendingProvider) {
+    return { clickable: false, loading: false, disabledTemporarily: true };
+  }
+  return { clickable: true, loading: false, disabledTemporarily: false };
+}
+
 export function IntegrationsCard({
   integrations,
   upgradePlan,
   onManage,
+  pendingProvider = null,
 }: IntegrationsCardProps) {
   const t = useT();
 
@@ -146,29 +180,31 @@ export function IntegrationsCard({
     }
   }
 
+  // Niente Scrollable: con pochi riquadri non serve, e tagliava il bordo
+  // dell'ultimo in fondo.
   return (
     <Card>
       <BlockStack gap="300">
         <Text as="h2" variant="headingMd">
           {t.customers.integrations.title}
         </Text>
-        <Scrollable style={{ maxHeight: SCROLLABLE_MAX_HEIGHT }} focusable>
-          <BlockStack gap="300">
-            {INTEGRATIONS.map((entry) => {
-              const integration = integrationsByProvider.get(entry.id);
-              const state = tileState(entry, integration);
+        <BlockStack gap="300">
+          {INTEGRATIONS.map((entry) => {
+            const integration = integrationsByProvider.get(entry.id);
+            const state = tileState(entry, integration);
+            const visual = tileVisualState(state, pendingProvider, entry.id);
 
-              return (
-                <IntegrationTile
-                  key={entry.id}
-                  entry={entry}
-                  state={state}
-                  onManage={onManage}
-                />
-              );
-            })}
-          </BlockStack>
-        </Scrollable>
+            return (
+              <IntegrationTile
+                key={entry.id}
+                entry={entry}
+                state={state}
+                visual={visual}
+                onManage={onManage}
+              />
+            );
+          })}
+        </BlockStack>
       </BlockStack>
     </Card>
   );
@@ -177,72 +213,76 @@ export function IntegrationsCard({
 interface IntegrationTileProps {
   entry: IntegrationEntry;
   state: TileState;
+  visual: TileVisualState;
   onManage?: (provider: IntegrationId) => void;
 }
 
-function IntegrationTile({ entry, state, onManage }: IntegrationTileProps) {
+function IntegrationTile({ entry, state, visual, onManage }: IntegrationTileProps) {
   const t = useT();
+  const notAvailable = !state.clickable;
 
-  // Logo: per le voci non disponibili, avvolto in un elemento con classe CSS
+  // Logo senza cornice; segnaposto per le voci senza logo
   const logo = entry.logo ? (
-    <Thumbnail
+    <Image
       source={entry.logo}
-      alt={entry.name}
-      size="medium"
-      transparent
+      alt=""
+      width={LOGO_SIZE}
+      height={LOGO_SIZE}
+      style={{ display: 'block', objectFit: 'contain' }}
     />
   ) : (
-    // Segnaposto per le voci senza logo (es. Omnisend)
-    <Thumbnail
-      source={AppsIcon}
-      alt={entry.name}
-      size="medium"
-      transparent
-    />
+    <Box minWidth={`${LOGO_SIZE}px`}>
+      <Icon source={AppsIcon} tone="subdued" />
+    </Box>
   );
 
-  const logoElement = state.clickable ? (
-    logo
-  ) : (
-    <span className="integration-logo-disabled">{logo}</span>
-  );
-
+  // Il riquadro: bordo sottile, angoli arrotondati, niente ombra. Lo sfondo
+  // lo da' il pulsante (per hover e pressione) o, se non cliccabile, il Box.
   const tileContent = (
     <Box
-      background="bg-surface"
+      background={notAvailable ? 'bg-surface' : undefined}
+      borderColor="border"
+      borderWidth="025"
       borderRadius="300"
-      shadow="200"
       padding="400"
     >
-      <InlineStack gap="300" blockAlign="center" wrap={false}>
-        {logoElement}
-        <BlockStack gap="100">
-          <Text
-            as="span"
-            variant="headingMd"
-            fontWeight="bold"
-            tone={state.tone === 'disabled' ? 'disabled' : undefined}
-          >
-            {entry.name}
-          </Text>
-          <Text as="span" tone={state.tone}>
-            {t.customers.integrations[state.label]}
-          </Text>
-        </BlockStack>
+      <InlineStack align="space-between" blockAlign="center" gap="300" wrap={false}>
+        <InlineStack gap="400" blockAlign="center" wrap={false}>
+          {notAvailable ? <span className="integration-logo-disabled">{logo}</span> : logo}
+          <BlockStack gap="100">
+            <Text
+              as="span"
+              variant="headingMd"
+              fontWeight="bold"
+              tone={notAvailable ? 'disabled' : undefined}
+            >
+              {entry.name}
+            </Text>
+            <Text as="span" tone={state.tone}>
+              {t.customers.integrations[state.label]}
+            </Text>
+          </BlockStack>
+        </InlineStack>
+        {visual.loading && <Spinner size="small" />}
       </InlineStack>
     </Box>
   );
 
-  // Voce non disponibile: Box senza UnstyledButton
-  if (!state.clickable) {
+  // Voce non disponibile: solo il riquadro, nessun pulsante
+  if (notAvailable) {
     return tileContent;
   }
 
-  // Voce cliccabile: UnstyledButton con aria-label accessibile
+  // Voce cliccabile: pulsante senza stile Polaris, l'aspetto lo da' la
+  // classe `integration-tile`. `disabled` di UnstyledButton mette
+  // aria-disabled, toglie il focus e blocca il clic; `loading` mette aria-busy.
   return (
     <UnstyledButton
+      className="integration-tile"
       onClick={() => onManage?.(entry.id)}
-      ariaLabel={`${entry.name} - ${t.customers.integrations[state.label]}`}
+      disabled={!visual.clickable}
+      loading={visual.loading}
+      accessibilityLabel={`${entry.name} - ${t.customers.integrations[state.label]}`}
     >
       {tileContent}
     </UnstyledButton>

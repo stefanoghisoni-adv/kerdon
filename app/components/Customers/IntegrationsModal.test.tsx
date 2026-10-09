@@ -1,178 +1,263 @@
 import { describe, it, expect, vi } from 'vitest';
-import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions } from './IntegrationsModal';
+import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions, isMappingDirty } from './IntegrationsModal';
 
 describe('buildFooterActions', () => {
   const mockCallbacks = {
+    onCancel: vi.fn(),
     onSave: vi.fn(),
     onImport: vi.fn(),
-    onConnect: vi.fn(),
   };
 
   const baseInput = {
     statusLoading: false,
+    hasSavedMapping: true,
+    isDirty: false,
     canSave: true,
-    hasMapping: true,
     running: false,
     saving: false,
     importing: false,
-    connectLoading: false,
-    connectLabel: 'Connect',
-    reconnectLabel: 'Reconnect',
-    saveLabel: 'Save',
+    cancelLabel: 'Cancel',
+    updateSelectionLabel: 'Update selection',
     importLabel: 'Import',
     ...mockCallbacks,
   };
 
-  it('statusLoading: no actions', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        statusLoading: true,
-        status: 'not_connected',
-      });
+  it('statusLoading: 3 buttons, only Annulla enabled', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      statusLoading: true,
+      status: 'not_connected',
+    });
 
-      expect(result.primary).toBeUndefined();
-      expect(result.secondary).toEqual([]);
+    expect(result.primary).toBeDefined();
+    expect(result.primary?.disabled).toBe(true);
+    expect(result.secondary).toHaveLength(2);
+    expect(result.secondary[0].content).toBe('Cancel');
+    expect(result.secondary[0].disabled).toBeUndefined(); // Annulla sempre abilitato
+    expect(result.secondary[1].content).toBe('Update selection');
+    expect(result.secondary[1].disabled).toBe(true);
   });
 
-  it('not_connected: primary Collega, no secondary', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'not_connected',
-      });
+  it('not_connected: 3 buttons, Aggiorna e Importa disabilitati', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'not_connected',
+    });
 
-      expect(result.primary).toEqual({
-        content: 'Connect',
-        loading: false,
-        onAction: mockCallbacks.onConnect,
-      });
-      expect(result.secondary).toEqual([]);
+    expect(result.primary).toBeDefined();
+    expect(result.primary?.content).toBe('Import');
+    expect(result.primary?.disabled).toBe(true);
+    expect(result.secondary).toHaveLength(2);
+    expect(result.secondary[0].content).toBe('Cancel');
+    expect(result.secondary[1].content).toBe('Update selection');
+    expect(result.secondary[1].disabled).toBe(true);
   });
 
-  it('needs_reconnect: primary Riconnetti, no secondary', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'needs_reconnect',
-      });
+  it('needs_reconnect: 3 buttons, Aggiorna e Importa disabilitati', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'needs_reconnect',
+    });
 
-      expect(result.primary).toEqual({
-        content: 'Reconnect',
-        loading: false,
-        onAction: mockCallbacks.onConnect,
-      });
-      expect(result.secondary).toEqual([]);
+    expect(result.primary?.disabled).toBe(true);
+    expect(result.secondary[1].disabled).toBe(true);
   });
 
-  it('not_connected: Collega loading when connectLoading is true', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'not_connected',
-        connectLoading: true,
-      });
+  it('connected: Aggiorna selezione disabled when !isDirty', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      isDirty: false,
+    });
 
-      expect(result.primary?.loading).toBe(true);
+    expect(result.secondary[1].disabled).toBe(true);
   });
 
-  it('needs_reconnect: Riconnetti loading when connectLoading is true', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'needs_reconnect',
-        connectLoading: true,
-      });
+  it('connected: Aggiorna selezione enabled when isDirty and canSave', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      isDirty: true,
+      canSave: true,
+    });
 
-      expect(result.primary?.loading).toBe(true);
+    expect(result.secondary[1].disabled).toBe(false);
   });
 
-  it('connected: primary Salva (disabled when !canSave), secondary Importa dati', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'connected',
-        canSave: true,
-      });
+  it('connected: Aggiorna selezione disabled when !canSave', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      isDirty: true,
+      canSave: false,
+    });
 
-      expect(result.primary).toEqual({
-        content: 'Save',
-        loading: false,
-        disabled: false,
-        onAction: mockCallbacks.onSave,
-      });
-      expect(result.secondary).toHaveLength(1);
-      expect(result.secondary[0]).toEqual({
-        content: 'Import',
-        loading: false,
-        disabled: false,
-        onAction: mockCallbacks.onImport,
-      });
+    expect(result.secondary[1].disabled).toBe(true);
   });
 
-  it('connected: Salva disabled when canSave is false', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'connected',
-        canSave: false,
-      });
+  it('connected: Aggiorna selezione loading when saving', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      isDirty: true,
+      saving: true,
+    });
 
-      expect(result.primary?.disabled).toBe(true);
+    expect(result.secondary[1].loading).toBe(true);
   });
 
-  it('connected: Salva loading when saving is true', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'connected',
-        saving: true,
-      });
+  it('connected: Importa disabled when no saved mapping', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      hasSavedMapping: false,
+    });
 
-      expect(result.primary?.loading).toBe(true);
+    expect(result.primary?.disabled).toBe(true);
   });
 
-  it('connected: Importa disabled when no mapping', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'connected',
-        hasMapping: false,
-      });
+  it('connected: Importa disabled when isDirty', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      isDirty: true,
+    });
 
-      expect(result.secondary[0].disabled).toBe(true);
+    expect(result.primary?.disabled).toBe(true);
   });
 
   it('connected: Importa disabled when running', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'connected',
-        running: true,
-      });
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      running: true,
+    });
 
-      expect(result.secondary[0].disabled).toBe(true);
+    expect(result.primary?.disabled).toBe(true);
   });
 
   it('connected: Importa loading when importing', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'connected',
-        importing: true,
-      });
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      importing: true,
+    });
 
-      expect(result.secondary[0].loading).toBe(true);
+    expect(result.primary?.loading).toBe(true);
   });
 
   it('connected: Importa loading when running', () => {
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'connected',
-        running: true,
-      });
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      running: true,
+    });
 
-      expect(result.secondary[0].loading).toBe(true);
+    expect(result.primary?.loading).toBe(true);
   });
 
-  it('callbacks reflect the latest values passed', () => {
-      const newSave = vi.fn();
-      const result = buildFooterActions({
-        ...baseInput,
-        status: 'connected',
-        onSave: newSave,
-      });
+  it('connected: Importa enabled when has mapping, not dirty, not running', () => {
+    const result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      hasSavedMapping: true,
+      isDirty: false,
+      running: false,
+    });
 
-      expect(result.primary?.onAction).toBe(newSave);
+    expect(result.primary?.disabled).toBe(false);
+  });
+
+  it('onCancel is wired to secondary[0] in all states', () => {
+    const onCancel = vi.fn();
+
+    // statusLoading
+    let result = buildFooterActions({
+      ...baseInput,
+      statusLoading: true,
+      status: 'not_connected',
+      onCancel,
+    });
+    expect(result.secondary[0].onAction).toBe(onCancel);
+
+    // not_connected
+    result = buildFooterActions({
+      ...baseInput,
+      status: 'not_connected',
+      onCancel,
+    });
+    expect(result.secondary[0].onAction).toBe(onCancel);
+
+    // needs_reconnect
+    result = buildFooterActions({
+      ...baseInput,
+      status: 'needs_reconnect',
+      onCancel,
+    });
+    expect(result.secondary[0].onAction).toBe(onCancel);
+
+    // connected
+    result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      onCancel,
+    });
+    expect(result.secondary[0].onAction).toBe(onCancel);
+  });
+});
+
+describe('isMappingDirty', () => {
+  it('returns false when no saved mapping and current is empty', () => {
+    expect(isMappingDirty(null, { sourceKey: '', dateFormat: '' })).toBe(false);
+  });
+
+  it('returns true when no saved mapping and current has sourceKey', () => {
+    expect(isMappingDirty(null, { sourceKey: 'birthdate', dateFormat: 'DMY' })).toBe(true);
+  });
+
+  it('returns false when saved matches current exactly', () => {
+    expect(
+      isMappingDirty(
+        { sourceKey: 'birthdate', dateFormat: 'DMY' },
+        { sourceKey: 'birthdate', dateFormat: 'DMY' }
+      )
+    ).toBe(false);
+  });
+
+  it('returns true when sourceKey differs', () => {
+    expect(
+      isMappingDirty(
+        { sourceKey: 'birthdate', dateFormat: 'DMY' },
+        { sourceKey: 'custom_birthdate', dateFormat: 'DMY' }
+      )
+    ).toBe(true);
+  });
+
+  it('returns true when dateFormat differs', () => {
+    expect(
+      isMappingDirty(
+        { sourceKey: 'birthdate', dateFormat: 'DMY' },
+        { sourceKey: 'birthdate', dateFormat: 'MDY' }
+      )
+    ).toBe(true);
+  });
+
+  it('returns true when both sourceKey and dateFormat differ', () => {
+    expect(
+      isMappingDirty(
+        { sourceKey: 'birthdate', dateFormat: 'DMY' },
+        { sourceKey: 'custom_birthdate', dateFormat: 'MDY' }
+      )
+    ).toBe(true);
+  });
+
+  it('handles empty string dateFormat in current', () => {
+    expect(
+      isMappingDirty(
+        { sourceKey: 'birthdate', dateFormat: 'DMY' },
+        { sourceKey: 'birthdate', dateFormat: '' }
+      )
+    ).toBe(true);
   });
 });
 

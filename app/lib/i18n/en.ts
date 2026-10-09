@@ -989,11 +989,14 @@ export const en: typeof it = {
       importData: "Import data",
       importRunning: "Import in progress. Reopen this page in a few minutes to see the results.",
       reconnect: "Reconnect",
+      updateSelection: "Update selection",
       /** Integration tile states. */
       tileInstalled: "Installed",
       tileNotConnected: "Not connected",
       tileNeedsAttention: "Needs attention",
       tileNotAvailable: "Not available",
+      /** When an integration's detail can't be opened. */
+      loadFailed: "We couldn't open this integration right now. Please try again shortly.",
       /** Reasons why import doesn't start. */
       importReasons: {
         already_running: "An import is already running.",
@@ -1047,13 +1050,13 @@ export const en: typeof it = {
       disconnectConfirm: "Disconnect Klaviyo? Already imported data and conflicts remain, but you won't be able to import new data.",
       fieldMappingTitle: "Field mapping",
       klaviyoPropertyLabel: "Klaviyo property",
+      klaviyoPropertyHelp: "The Klaviyo profile field we read your customers' birthdate from.",
       selectProperty: "Select a property",
       selectFormat: "Choose format",
       kerdonFieldLabel: "Kerdon field",
       birthdate: "Birthdate",
       dateFormatLabel: "Date format",
       previewTitle: "Preview",
-      save: "Save",
       oauthErrors: {
         denied: "Authorization denied. Grant permissions to connect Klaviyo.",
         failed: "Connection failed. Please try again.",

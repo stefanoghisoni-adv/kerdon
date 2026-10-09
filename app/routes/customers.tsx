@@ -31,7 +31,6 @@ import { prisma } from '~/db.server';
 import { findPlanByName } from '~/lib/billing/find-plan.server';
 import { firstPlanWithCustomersSync } from '~/components/Dashboard/account-format';
 import { BASE_CURRENCY } from '~/lib/billing/money';
-import type { IntegrationId } from '~/lib/integrations/registry';
 import { requireSetupComplete } from '~/lib/setup/require-setup.server';
 import type { CustomersReport } from '~/lib/customers/customers.server';
 import { fetchConflictCustomerNames } from '~/lib/customers/customers.server';
@@ -64,6 +63,7 @@ import { BirthdateStatusRow } from '~/components/Customers/BirthdateStatusRow';
 import { ExtraFieldsCard } from '~/components/Customers/ExtraFieldsCard';
 import { IntegrationsCard } from '~/components/Customers/IntegrationsCard';
 import { IntegrationsModal } from '~/components/Customers/IntegrationsModal';
+import { useIntegrationPreload } from '~/components/Customers/useIntegrationPreload';
 import { ShopifyAPIClient } from '~/lib/shopify-api.server';
 import {
   BIRTHDATE_METAFIELD_KEY,
@@ -483,19 +483,17 @@ function CustomersContent({
   const [onlyIssues, setOnlyIssues] = useState(false);
   const [query, setQuery] = useState('');
 
-  // Modal «Gestisci» integrazioni
-  const [integrationsModalOpen, setIntegrationsModalOpen] = useState(false);
-  const [preselectedProvider, setPreselectedProvider] = useState<IntegrationId | null>(null);
-
-  const handleManage = (provider: IntegrationId) => {
-    setPreselectedProvider(provider);
-    setIntegrationsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIntegrationsModalOpen(false);
-    setPreselectedProvider(null);
-  };
+  // Modal «Gestisci» integrazioni: al clic il riquadro carica lo stato e la
+  // modal si apre solo a dati pronti. Se il caricamento fallisce, i riquadri
+  // tornano normali e un avviso lo dice.
+  const handlePreloadError = useCallback(() => {
+    if (typeof window !== 'undefined' && window.shopify?.toast) {
+      window.shopify.toast.show(t.customers.integrations.loadFailed, { isError: true });
+    }
+  }, [t]);
+  const integrationsPreload = useIntegrationPreload(handlePreloadError);
+  // Entrambi gia' stabili (useCallback nel hook)
+  const { start: handleManage, close: handleCloseModal } = integrationsPreload;
 
   // Il periodo invece sta nell'indirizzo: cambiarlo vuol dire chiedere al
   // database altri ordini, e il caricamento lo legge da li'. Si toccano solo
@@ -1127,6 +1125,7 @@ function CustomersContent({
               integrations={integrations}
               upgradePlan={upgradePlan}
               onManage={handleManage}
+              pendingProvider={integrationsPreload.pendingProvider}
             />
           </BlockStack>
           </InlineGrid>
@@ -1141,14 +1140,16 @@ function CustomersContent({
               integrations={integrations}
               upgradePlan={upgradePlan}
               onManage={handleManage}
+              pendingProvider={integrationsPreload.pendingProvider}
             />
           </InlineGrid>
         )}
 
         <IntegrationsModal
-          open={integrationsModalOpen}
+          open={integrationsPreload.openProvider !== null}
           onClose={handleCloseModal}
-          preselected={preselectedProvider}
+          preselected={integrationsPreload.openProvider}
+          initialStatus={integrationsPreload.initialStatus}
         />
     </>
   );

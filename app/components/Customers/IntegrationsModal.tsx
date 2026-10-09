@@ -10,7 +10,7 @@ import {
 } from '~/lib/integrations/registry';
 import type { DateFormat } from '~/lib/integrations/values';
 import { parseDate } from '~/lib/integrations/values';
-import { KlaviyoDetail } from './KlaviyoDetail';
+import { KlaviyoDetail, type StatusData } from './KlaviyoDetail';
 import {
   isValidOAuthMessage as isValidPopupMessage,
   type OAuthMessageValidation,
@@ -21,6 +21,8 @@ export interface IntegrationsModalProps {
   onClose: () => void;
   /** Provider dell'integrazione da configurare. */
   preselected?: IntegrationId | null;
+  /** Lo stato gia' letto prima di aprire: il dettaglio si mostra subito pronto. */
+  initialStatus?: StatusData | null;
 }
 
 export interface Sample {
@@ -98,6 +100,26 @@ export function canSaveMapping({
 }
 
 /**
+ * Determina se la selezione corrente differisce da quella salvata.
+ *
+ * Regole:
+ * - Se non c'è mapping salvato, la selezione è sempre dirty (a meno che non sia vuota)
+ * - Se c'è un mapping salvato, confronta sourceKey e dateFormat
+ */
+export function isMappingDirty(
+  saved: { sourceKey: string; dateFormat: string } | null,
+  current: { sourceKey: string; dateFormat: DateFormat | '' }
+): boolean {
+  if (!saved) {
+    // Nessun mapping salvato: dirty se c'è qualcosa selezionato
+    return current.sourceKey !== '';
+  }
+
+  // Confronta con il mapping salvato
+  return saved.sourceKey !== current.sourceKey || saved.dateFormat !== current.dateFormat;
+}
+
+/**
  * Il messaggio di ritorno dalla finestra di Klaviyo: le regole stanno nella
  * funzione condivisa con Supabase (`~/lib/oauth-popup-message`), qui si fissa
  * solo il tipo atteso.
@@ -120,24 +142,28 @@ export type FooterAction = {
 export interface FooterActionsInput {
   statusLoading: boolean;
   status: 'connected' | 'not_connected' | 'needs_reconnect';
+  hasSavedMapping: boolean;
+  isDirty: boolean;
   canSave: boolean;
-  hasMapping: boolean;
   running: boolean;
   saving: boolean;
   importing: boolean;
-  connectLoading: boolean;
+  onCancel: () => void;
   onSave: () => void;
   onImport: () => void;
-  onConnect: () => void;
-  connectLabel: string;
-  reconnectLabel: string;
-  saveLabel: string;
+  cancelLabel: string;
+  updateSelectionLabel: string;
   importLabel: string;
 }
 
 /**
  * Costruisce le azioni del footer della modal in base allo stato.
  * Funzione pura per testing.
+ *
+ * Footer sempre a 3 pulsanti:
+ * - «Annulla» (secondaryActions[0]): chiude la modal
+ * - «Aggiorna selezione» (secondaryActions[1]): salva e resta aperta
+ * - «Importa dati» (primaryAction): avvia l'import
  */
 export function buildFooterActions(input: FooterActionsInput): {
   primary: FooterAction | undefined;
@@ -146,67 +172,51 @@ export function buildFooterActions(input: FooterActionsInput): {
   const {
     statusLoading,
     status,
+    hasSavedMapping,
+    isDirty,
     canSave,
-    hasMapping,
     running,
     saving,
     importing,
-    connectLoading,
+    onCancel,
     onSave,
     onImport,
-    onConnect,
-    connectLabel,
-    reconnectLabel,
-    saveLabel,
+    cancelLabel,
+    updateSelectionLabel,
     importLabel,
   } = input;
 
-  // Mentre lo status carica: nessuna azione (evita «Collega» per un merchant gia collegato)
-  if (statusLoading) {
-    return {
-      primary: undefined,
-      secondary: [],
-    };
-  }
+  // Determina lo stato di «Aggiorna selezione» e «Importa dati» in base allo stato
+  const isConnected = status === 'connected';
 
-  if (status === 'not_connected') {
-    return {
-      primary: {
-        content: connectLabel,
-        loading: connectLoading,
-        onAction: onConnect,
-      },
-      secondary: [],
-    };
-  }
+  // «Aggiorna selezione»: disabilitato se not_connected/needs_reconnect o se !isDirty o !canSave quando connected
+  const updateSelectionDisabled = !isConnected || !isDirty || !canSave;
 
-  if (status === 'needs_reconnect') {
-    return {
-      primary: {
-        content: reconnectLabel,
-        loading: connectLoading,
-        onAction: onConnect,
-      },
-      secondary: [],
-    };
-  }
+  // «Importa dati»: disabilitato se not_connected/needs_reconnect o se !hasSavedMapping o isDirty o running quando connected
+  const importDisabled = !isConnected || !hasSavedMapping || isDirty || running;
 
-  // connected
-  return {
-    primary: {
-      content: saveLabel,
+  // Costruisci il secondary array una sola volta
+  const secondary: FooterAction[] = [
+    {
+      content: cancelLabel,
+      onAction: onCancel,
+    },
+    {
+      content: updateSelectionLabel,
       loading: saving,
-      disabled: !canSave,
+      disabled: updateSelectionDisabled || statusLoading,
       onAction: onSave,
     },
-    secondary: [
-      {
-        content: importLabel,
-        loading: importing || running,
-        disabled: !hasMapping || running,
-        onAction: onImport,
-      },
-    ],
+  ];
+
+  return {
+    primary: {
+      content: importLabel,
+      loading: importing || running,
+      disabled: importDisabled || statusLoading,
+      onAction: onImport,
+    },
+    secondary,
   };
 }
 
@@ -214,6 +224,7 @@ export function IntegrationsModal({
   open,
   onClose,
   preselected,
+  initialStatus,
 }: IntegrationsModalProps) {
   // Trova l'integrazione dal provider preselezionato
   const integration = preselected ? INTEGRATIONS.find((i) => i.id === preselected) : null;
@@ -252,6 +263,7 @@ export function IntegrationsModal({
         <KlaviyoDetail
           onClose={onClose}
           onActionsChange={handleActionsChange}
+          initialStatus={initialStatus}
         />
       )}
     </Modal>

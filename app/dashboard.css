@@ -625,6 +625,50 @@
   filter: grayscale(100%);
 }
 
+/* Il riquadro integrazione cliccabile si comporta come un pulsante: Polaris
+   non ha una prop per hover, pressione e caricamento di un UnstyledButton, e
+   senza classe il browser gli metterebbe il suo sfondo grigio e il suo bordo.
+   Bordo, angoli e spaziatura li da' il Box dentro; qui solo sfondo e stati. */
+.integration-tile {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--p-border-radius-300);
+  background: var(--p-color-bg-surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.integration-tile:hover:not([aria-disabled="true"]) {
+  background: var(--p-color-bg-surface-hover);
+}
+
+.integration-tile:active:not([aria-disabled="true"]) {
+  background: var(--p-color-bg-surface-active);
+}
+
+.integration-tile:focus-visible {
+  outline: var(--p-border-width-050) solid var(--p-color-border-focus);
+  outline-offset: var(--p-space-050);
+}
+
+/* Il riquadro che carica: fondo grigio chiaro e spinner a destra. */
+.integration-tile[aria-busy="true"] {
+  background: var(--p-color-bg-surface-disabled);
+  cursor: progress;
+}
+
+/* Gli altri riquadri mentre uno carica: fermi, appena attenuati. */
+.integration-tile[aria-disabled="true"]:not([aria-busy="true"]) {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Il pulsante che aspetta qualche secondo prima di potersi premere.
    Il testo vero resta nel pulsante anche mentre il conto scorre — e' lui a
    dargli la larghezza — ma si fa trasparente, e il numero gli sta sopra

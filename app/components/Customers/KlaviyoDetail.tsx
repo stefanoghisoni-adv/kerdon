@@ -18,10 +18,13 @@ import {
   FormLayout,
   Divider,
   Link,
+  Tooltip,
+  Icon,
 } from '@shopify/polaris';
+import { InfoIcon } from '@shopify/polaris-icons';
 import { useT, useLocale } from '~/lib/i18n/context';
 import type { DateFormat } from '~/lib/integrations/values';
-import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions, type FooterAction } from './IntegrationsModal';
+import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions, isMappingDirty, type FooterAction } from './IntegrationsModal';
 import type { Sample } from './IntegrationsModal';
 import { useIntegrationImport } from './useIntegrationImport';
 import { buildConflictsUrl, tileState, type IntegrationStatus } from './IntegrationsCard';
@@ -37,6 +40,12 @@ export interface KlaviyoDetailProps {
     primary: FooterAction | undefined,
     secondary: FooterAction[]
   ) => void;
+  /**
+   * Lo stato gia' letto dal genitore prima di aprire la modal: il dettaglio
+   * si mostra subito pronto, senza spinner. Dopo salvataggio, collegamento e
+   * scollegamento il dettaglio rilegge lo stato da se'.
+   */
+  initialStatus?: StatusData | null;
 }
 
 interface Property {
@@ -46,8 +55,9 @@ interface Property {
   ambiguous: boolean;
 }
 
-interface StatusData {
-  status: 'connected' | 'not_connected' | 'needs_reconnect';
+export interface StatusData {
+  /** Valori reali dal server: 'connected' | 'needs_reconnect' | 'disconnected' | 'none' */
+  status: string;
   accountName?: string | null;
   mapping: { sourceKey: string; dateFormat: string } | null;
   /** Un import e' in corso adesso. */
@@ -58,6 +68,24 @@ interface StatusData {
     finishedAt: string | null;
     counters: { filled?: number; conflicts?: number; [key: string]: unknown };
   } | null;
+}
+
+/**
+ * Normalizza lo stato di connessione dal server ai valori usati dal client.
+ *
+ * Server: 'connected' | 'needs_reconnect' | 'disconnected' | 'none'
+ * Client: 'connected' | 'not_connected' | 'needs_reconnect'
+ *
+ * Regole:
+ * - 'connected' → 'connected'
+ * - 'needs_reconnect' → 'needs_reconnect'
+ * - 'disconnected', 'none', valori sconosciuti, undefined → 'not_connected'
+ */
+export function normalizeConnectionStatus(raw: string | undefined): 'connected' | 'not_connected' | 'needs_reconnect' {
+  if (raw === 'connected') return 'connected';
+  if (raw === 'needs_reconnect') return 'needs_reconnect';
+  // 'disconnected', 'none', valori sconosciuti, undefined → 'not_connected'
+  return 'not_connected';
 }
 
 /**
@@ -116,7 +144,7 @@ export function decideDateFormat({
   return '';
 }
 
-export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) {
+export function KlaviyoDetail({ onClose, onActionsChange, initialStatus }: KlaviyoDetailProps) {
   const t = useT();
   const locale = useLocale();
   const revalidator = useRevalidator();
@@ -145,16 +173,21 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const popupRef = useRef<Window | null>(null);
 
-  // Load status on mount
+  // Lo stato del fetcher (dopo una rilettura) vince su quello iniziale
+  const statusData: StatusData | undefined = statusFetcher.data ?? initialStatus ?? undefined;
+
+  // Carica lo stato al montaggio solo se il genitore non l'ha gia' letto.
+  // `hasInitialStatus` e' un booleano: la dipendenza resta stabile.
+  const hasInitialStatus = !!initialStatus;
   useEffect(() => {
-    if (statusFetcher.state === 'idle' && !statusFetcher.data) {
+    if (!hasInitialStatus && statusFetcher.state === 'idle' && !statusFetcher.data) {
       statusFetcher.load('/api/integrations/klaviyo');
     }
-  }, [statusFetcher]);
+  }, [statusFetcher, hasInitialStatus]);
 
-  const status = statusFetcher.data?.status ?? 'not_connected';
-  const accountName = statusFetcher.data?.accountName;
-  const mapping = statusFetcher.data?.mapping;
+  const status = normalizeConnectionStatus(statusData?.status);
+  const accountName = statusData?.accountName;
+  const mapping = statusData?.mapping;
   const properties = propertiesFetcher.data?.properties ?? EMPTY_PROPERTIES;
 
   // Load properties when connected
@@ -347,19 +380,35 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   // Track handled save-mapping responses
   const handledSaveMappingRef = useRef<typeof saveMappingFetcher.data>(null);
 
-  // Reload after saving mapping
+  // Reload after saving mapping (modal resta aperta)
   useEffect(() => {
     if (saveMappingFetcher.data && saveMappingFetcher.data !== handledSaveMappingRef.current) {
       handledSaveMappingRef.current = saveMappingFetcher.data;
 
       if (saveMappingFetcher.data.ok) {
+        // Ricarica lo stato per aggiornare il mapping salvato
         statusFetcher.load('/api/integrations/klaviyo');
-        onClose();
+        // La modal resta aperta, non chiamiamo onClose()
       } else {
         setSaveMappingError(saveMappingFetcher.data.error ?? 'unknown');
       }
     }
-  }, [saveMappingFetcher.data, statusFetcher, onClose]);
+  }, [saveMappingFetcher.data, statusFetcher]);
+
+  // Dopo l'avvio di un import serve rileggere lo stato per vedere `running`.
+  // Se il fetcher ha gia' dei dati ci pensa la rivalidazione di Remix dopo il
+  // POST; se lo stato era quello iniziale del genitore, il fetcher non ha mai
+  // caricato e va letto a mano.
+  const handledImportRef = useRef<typeof importFetcher.data>(undefined);
+
+  useEffect(() => {
+    if (importFetcher.data && importFetcher.data !== handledImportRef.current) {
+      handledImportRef.current = importFetcher.data;
+      if (!statusFetcher.data && statusFetcher.state === 'idle') {
+        statusFetcher.load('/api/integrations/klaviyo');
+      }
+    }
+  }, [importFetcher.data, statusFetcher]);
 
   const handleDisconnectClick = useCallback(() => {
     setShowDisconnectConfirm(true);
@@ -433,68 +482,73 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   });
 
   // Refs per i latest handlers (aggiornati ad ogni render)
-  const handleConnectRef = useRef(handleConnect);
   const handleSaveMappingRef = useRef(handleSaveMapping);
   const handleImportRef = useRef(handleImport);
 
   useEffect(() => {
-    handleConnectRef.current = handleConnect;
     handleSaveMappingRef.current = handleSaveMapping;
     handleImportRef.current = handleImport;
   });
 
   // Wrapper callbacks stabili che chiamano ref.current (sincronamente)
-  const onConnect = useCallback(() => handleConnectRef.current(), []);
   const onSave = useCallback(() => handleSaveMappingRef.current(), []);
   const onImport = useCallback(() => handleImportRef.current(), []);
 
   // Esponi le azioni del footer usando buildFooterActions (PRIMA di ogni early return)
   useEffect(() => {
-    const statusLoading = !statusFetcher.data;
-    const connectLoading = oauthFetcher.state === 'loading' || connectFetcher.state === 'submitting';
-    const saving = saveMappingFetcher.state === 'submitting';
+    const statusLoading = !statusData;
+    // Il salvataggio resta «in corso» anche mentre si rilegge lo stato dopo un
+    // salvataggio riuscito: cosi' il pulsante non torna attivo per un attimo
+    // con il mapping vecchio.
+    const saving =
+      saveMappingFetcher.state !== 'idle' ||
+      (!!saveMappingFetcher.data?.ok && statusFetcher.state === 'loading');
     const importing = importFetcher.state !== 'idle';
-    const running = statusFetcher.data?.running ?? false;
-    const hasMapping = !!mapping;
+    const running = statusData?.running ?? false;
+    const hasSavedMapping = !!mapping;
+    const isDirty = isMappingDirty(mapping ?? null, {
+      sourceKey: selectedProperty,
+      dateFormat: dateFormat,
+    });
 
     const actions = buildFooterActions({
       statusLoading,
       status,
+      hasSavedMapping,
+      isDirty,
       canSave,
-      hasMapping,
       running,
       saving,
       importing,
-      connectLoading,
+      onCancel: onClose,
       onSave,
       onImport,
-      onConnect,
-      connectLabel: t.customers.klaviyoDetail.connect,
-      reconnectLabel: t.customers.integrations.reconnect,
-      saveLabel: t.customers.klaviyoDetail.save,
+      cancelLabel: t.common.cancel,
+      updateSelectionLabel: t.customers.integrations.updateSelection,
       importLabel: t.customers.integrations.importData,
     });
 
     onActionsChange(actions.primary, actions.secondary);
   }, [
-    statusFetcher.data,
+    statusData,
+    statusFetcher.state,
     status,
-    canSave,
     mapping,
-    oauthFetcher.state,
-    connectFetcher.state,
+    selectedProperty,
+    dateFormat,
+    canSave,
     saveMappingFetcher.state,
+    saveMappingFetcher.data,
     importFetcher.state,
-    statusFetcher.data?.running,
-    onConnect,
+    onClose,
     onSave,
     onImport,
     t,
     onActionsChange,
   ]);
 
-  // I13 FIX: Show spinner whenever !statusFetcher.data (covers first frame)
-  const isLoadingStatus = !statusFetcher.data;
+  // I13 FIX: spinner finche' non c'e' alcuno stato (ne' iniziale ne' letto)
+  const isLoadingStatus = !statusData;
 
   // Entrata Klaviyo dal registro per logo e nome
   const klaviyoEntry = INTEGRATIONS.find((i) => i.id === 'klaviyo');
@@ -511,6 +565,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
 
   // Not connected / needs_reconnect
   if (status === 'not_connected' || status === 'needs_reconnect') {
+    const connectLoading = oauthFetcher.state === 'loading' || connectFetcher.state !== 'idle';
 
     return (
       <Modal.Section>
@@ -534,6 +589,16 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
               {t.customers.klaviyoDetail.popupBlocked}
             </Banner>
           )}
+
+          <Button
+            variant="primary"
+            onClick={handleConnect}
+            loading={connectLoading}
+          >
+            {status === 'needs_reconnect'
+              ? t.customers.integrations.reconnect
+              : t.customers.klaviyoDetail.connect}
+          </Button>
         </BlockStack>
       </Modal.Section>
     );
@@ -543,15 +608,15 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   const previews = selectedProp ? previewLines(selectedProp.samples, dateFormat as DateFormat) : [];
 
   // Determina lo stato del tile (per il colore e il testo dello stato)
-  const integrationStatus: IntegrationStatus | undefined = statusFetcher.data
+  const integrationStatus: IntegrationStatus | undefined = statusData
     ? {
         provider: 'klaviyo' as const,
-        status: statusFetcher.data.status,
-        accountName: statusFetcher.data.accountName,
-        mapping: statusFetcher.data.mapping,
-        lastRun: statusFetcher.data.lastRun ?? null,
-        running: statusFetcher.data.running ?? false,
-        openConflicts: statusFetcher.data.openConflicts ?? 0,
+        status: status,
+        accountName: statusData.accountName,
+        mapping: statusData.mapping,
+        lastRun: statusData.lastRun ?? null,
+        running: statusData.running ?? false,
+        openConflicts: statusData.openConflicts ?? 0,
       }
     : undefined;
 
@@ -559,8 +624,8 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   const state = tileState(klaviyoEntry!, integrationStatus!);
 
   // Formatta la data dell'ultimo import con il locale del merchant
-  const lastRunDate = statusFetcher.data?.lastRun?.finishedAt
-    ? new Date(statusFetcher.data.lastRun.finishedAt).toLocaleString(locale, {
+  const lastRunDate = statusData?.lastRun?.finishedAt
+    ? new Date(statusData.lastRun.finishedAt).toLocaleString(locale, {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -569,7 +634,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
       })
     : null;
 
-  const lastRunCounters = statusFetcher.data?.lastRun?.counters;
+  const lastRunCounters = statusData?.lastRun?.counters;
   const filledCount = lastRunCounters?.filled ?? 0;
 
   return (
@@ -659,16 +724,29 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
 
           <FormLayout>
             <FormLayout.Group>
-              <Select
-                label={t.customers.klaviyoDetail.klaviyoPropertyLabel}
-                options={[
-                  { label: t.customers.klaviyoDetail.selectProperty, value: '' },
-                  ...properties.map((p) => ({ label: p.key, value: p.key })),
-                ]}
-                value={selectedProperty}
-                onChange={setSelectedProperty}
-                disabled={propertiesFetcher.state === 'loading'}
-              />
+              <BlockStack gap="100">
+                <InlineStack gap="100" blockAlign="center" wrap={false}>
+                  <Text as="p" variant="bodyMd">
+                    {t.customers.klaviyoDetail.klaviyoPropertyLabel}
+                  </Text>
+                  <Tooltip content={t.customers.klaviyoDetail.klaviyoPropertyHelp}>
+                    <span className="info-icon">
+                      <Icon source={InfoIcon} tone="subdued" />
+                    </span>
+                  </Tooltip>
+                </InlineStack>
+                <Select
+                  label={t.customers.klaviyoDetail.klaviyoPropertyLabel}
+                  labelHidden
+                  options={[
+                    { label: t.customers.klaviyoDetail.selectProperty, value: '' },
+                    ...properties.map((p) => ({ label: p.key, value: p.key })),
+                  ]}
+                  value={selectedProperty}
+                  onChange={setSelectedProperty}
+                  disabled={propertiesFetcher.state === 'loading'}
+                />
+              </BlockStack>
 
               <Select
                 label={t.customers.klaviyoDetail.kerdonFieldLabel}
@@ -720,15 +798,15 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
             </Text>
           )}
 
-          {statusFetcher.data && (statusFetcher.data.openConflicts ?? 0) > 0 && (
+          {statusData && (statusData.openConflicts ?? 0) > 0 && (
             <Text as="p" tone="subdued">
               <Link onClick={handleConflictsClick}>
-                {t.customers.integrations.conflicts(statusFetcher.data.openConflicts ?? 0)}
+                {t.customers.integrations.conflicts(statusData.openConflicts ?? 0)}
               </Link>
             </Text>
           )}
 
-          {statusFetcher.data?.running && (
+          {statusData?.running && (
             <Text as="p" tone="subdued">
               {t.customers.integrations.importRunning}
             </Text>

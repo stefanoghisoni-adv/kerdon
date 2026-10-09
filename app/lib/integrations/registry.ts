@@ -21,7 +21,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     id: 'omnisend',
     name: 'Omnisend',
     category: 'crm',
-    logo: '',
+    logo: '/integrations/omnisend.png',
     status: 'coming_soon',
   },
 ];

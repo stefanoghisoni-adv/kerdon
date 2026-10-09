@@ -1269,11 +1269,14 @@ export const it = {
       /** Accanto al pulsante mentre un import e' in corso. */
       importRunning: "Import in corso. Riapri questa pagina tra qualche minuto per vedere i risultati.",
       reconnect: "Riconnetti",
+      updateSelection: "Aggiorna selezione",
       /** Stati dei riquadri integrazione. */
       tileInstalled: "Installata",
       tileNotConnected: "Da collegare",
       tileNeedsAttention: "Richiede attenzione",
       tileNotAvailable: "Non disponibile",
+      /** Quando il dettaglio di un'integrazione non si apre. */
+      loadFailed: "Non riusciamo ad aprire l'integrazione in questo momento. Riprova tra poco.",
       /** Motivi per cui l'import non parte. */
       importReasons: {
         already_running: "Un import \u00e8 gi\u00e0 in corso.",
@@ -1327,13 +1330,13 @@ export const it = {
       disconnectConfirm: "Scollegare Klaviyo? I dati gi\u00e0 importati e i conflitti restano, ma non potrai pi\u00f9 importare nuovi dati.",
       fieldMappingTitle: "Associazione campi",
       klaviyoPropertyLabel: "Propriet\u00e0 Klaviyo",
+      klaviyoPropertyHelp: "Il dato dei profili Klaviyo da cui leggiamo la data di nascita dei tuoi clienti.",
       selectProperty: "Seleziona una propriet\u00e0",
       selectFormat: "Scegli il formato",
       kerdonFieldLabel: "Campo Kerdon",
       birthdate: "Data di nascita",
       dateFormatLabel: "Formato data",
       previewTitle: "Anteprima",
-      save: "Salva",
       oauthErrors: {
         denied: "Autorizzazione negata. Concedi i permessi per collegare Klaviyo.",
         failed: "Collegamento non riuscito. Riprova.",
