@@ -663,6 +663,19 @@
   cursor: progress;
 }
 
+/* Lo spinner del riquadro che carica. L'SVG di Polaris e' inline e si
+   appoggia alla linea del testo, quindi sta piu' in alto del centro: in un
+   contenitore flex con l'SVG a blocco torna al centro. */
+.integration-tile-spinner {
+  display: flex;
+  align-items: center;
+  padding-inline-end: var(--p-space-400);
+}
+
+.integration-tile-spinner svg {
+  display: block;
+}
+
 /* Gli altri riquadri mentre uno carica: fermi, appena attenuati. */
 .integration-tile[aria-disabled="true"]:not([aria-busy="true"]) {
   opacity: 0.6;
