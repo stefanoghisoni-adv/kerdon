@@ -3,7 +3,7 @@
 // Dettaglio Klaviyo: OAuth, mapping, preview, import.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useFetcher, useRevalidator } from '@remix-run/react';
+import { useFetcher, useRevalidator, useSearchParams, useNavigate } from '@remix-run/react';
 import {
   BlockStack,
   Text,
@@ -13,15 +13,27 @@ import {
   List,
   InlineStack,
   Spinner,
+  Modal,
+  Thumbnail,
+  FormLayout,
+  Divider,
+  Link,
 } from '@shopify/polaris';
 import { useT } from '~/lib/i18n/context';
 import type { DateFormat } from '~/lib/integrations/values';
 import { previewLines, canSaveMapping, isValidOAuthMessage } from './IntegrationsModal';
 import type { Sample } from './IntegrationsModal';
 import { useIntegrationImport } from './useIntegrationImport';
+import { buildConflictsUrl, tileState, type IntegrationStatus } from './IntegrationsCard';
+import { INTEGRATIONS } from '~/lib/integrations/registry';
 
 export interface KlaviyoDetailProps {
   onClose: () => void;
+  /** Callback per esporre le azioni al footer della modal. */
+  onActionsChange: (
+    primary: { content: string; loading?: boolean; disabled?: boolean; onAction: () => void } | undefined,
+    secondary: Array<{ content: string; loading?: boolean; disabled?: boolean; onAction: () => void }>
+  ) => void;
 }
 
 interface Property {
@@ -37,6 +49,20 @@ interface StatusData {
   mapping: { sourceKey: string; dateFormat: string } | null;
   /** Un import e' in corso adesso. */
   running?: boolean;
+  openConflicts?: number;
+  lastRun?: {
+    status: 'completed' | 'interrupted';
+    finishedAt: string | null;
+    counters: { filled?: number; conflicts?: number; [key: string]: unknown };
+  } | null;
+}
+
+/**
+ * Decides whether to show the account name in the account row.
+ * Returns true if accountName is not empty/null/whitespace.
+ */
+export function shouldShowAccountName(accountName?: string | null): boolean {
+  return !!(accountName && accountName.trim().length > 0);
 }
 
 interface PropertiesData {
@@ -87,9 +113,11 @@ export function decideDateFormat({
   return '';
 }
 
-export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
+export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) {
   const t = useT();
   const revalidator = useRevalidator();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // Fetchers
   const statusFetcher = useFetcher<StatusData>();
@@ -389,6 +417,15 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
   // I13 FIX: Show spinner whenever !statusFetcher.data (covers first frame)
   const isLoadingStatus = !statusFetcher.data;
 
+  // Entrata Klaviyo dal registro per logo e nome
+  const klaviyoEntry = INTEGRATIONS.find((i) => i.id === 'klaviyo');
+
+  // Handler per il link ai conflitti: chiude la modal e naviga
+  const handleConflictsClick = useCallback(() => {
+    onClose();
+    navigate(buildConflictsUrl(searchParams.toString()));
+  }, [onClose, navigate, searchParams]);
+
   if (isLoadingStatus) {
     return (
       <BlockStack gap="400" inlineAlign="center">
@@ -397,44 +434,50 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     );
   }
 
-  // Not connected
+  // Not connected / needs_reconnect
   if (status === 'not_connected' || status === 'needs_reconnect') {
-    return (
-      <BlockStack gap="400">
-        <Text as="p">{t.customers.klaviyoDetail.benefitText}</Text>
-
-        {oauthError && (
-          <Banner tone="warning" onDismiss={() => setOauthError(null)}>
-            {t.customers.klaviyoDetail.oauthErrors[oauthError as keyof typeof t.customers.klaviyoDetail.oauthErrors] ?? t.customers.klaviyoDetail.oauthErrors.unknown}
-          </Banner>
-        )}
-
-        {popupBlocked && (
-          <Banner
-            tone="warning"
-            action={{
-              content: t.customers.klaviyoDetail.retryPopup,
-              onAction: handleRetryPopup,
-            }}
-          >
-            {t.customers.klaviyoDetail.popupBlocked}
-          </Banner>
-        )}
-
-        <Button
-          variant="primary"
-          onClick={handleConnect}
-          loading={oauthFetcher.state === 'loading' || connectFetcher.state === 'submitting'}
-        >
-          {status === 'needs_reconnect'
+    // Esponi il pulsante di collegamento come primaryAction del footer
+    useEffect(() => {
+      onActionsChange(
+        {
+          content: status === 'needs_reconnect'
             ? t.customers.integrations.reconnect
-            : t.customers.klaviyoDetail.connect}
-        </Button>
-      </BlockStack>
+            : t.customers.klaviyoDetail.connect,
+          loading: oauthFetcher.state === 'loading' || connectFetcher.state === 'submitting',
+          onAction: handleConnect,
+        },
+        []
+      );
+    }, [status, oauthFetcher.state, connectFetcher.state]);
+
+    return (
+      <Modal.Section>
+        <BlockStack gap="400">
+          <Text as="p">{t.customers.klaviyoDetail.benefitText}</Text>
+
+          {oauthError && (
+            <Banner tone="warning" onDismiss={() => setOauthError(null)}>
+              {t.customers.klaviyoDetail.oauthErrors[oauthError as keyof typeof t.customers.klaviyoDetail.oauthErrors] ?? t.customers.klaviyoDetail.oauthErrors.unknown}
+            </Banner>
+          )}
+
+          {popupBlocked && (
+            <Banner
+              tone="warning"
+              action={{
+                content: t.customers.klaviyoDetail.retryPopup,
+                onAction: handleRetryPopup,
+              }}
+            >
+              {t.customers.klaviyoDetail.popupBlocked}
+            </Banner>
+          )}
+        </BlockStack>
+      </Modal.Section>
     );
   }
 
-  // Connected
+  // Connected: struttura a 3 sezioni
   const selectedProp = properties.find((p) => p.key === selectedProperty);
   const previews = selectedProp ? previewLines(selectedProp.samples, dateFormat as DateFormat) : [];
   const canSave = canSaveMapping({
@@ -443,139 +486,228 @@ export function KlaviyoDetail({ onClose }: KlaviyoDetailProps) {
     dateFormat: dateFormat as DateFormat,
   });
 
+  // Determina lo stato del tile (per il colore e il testo dello stato)
+  const integrationStatus: IntegrationStatus | undefined = statusFetcher.data
+    ? {
+        provider: 'klaviyo' as const,
+        status: statusFetcher.data.status,
+        accountName: statusFetcher.data.accountName,
+        mapping: statusFetcher.data.mapping,
+        lastRun: statusFetcher.data.lastRun ?? null,
+        running: statusFetcher.data.running ?? false,
+        openConflicts: statusFetcher.data.openConflicts ?? 0,
+      }
+    : undefined;
+
+  const state = klaviyoEntry && integrationStatus
+    ? tileState(klaviyoEntry, integrationStatus)
+    : { label: 'tileInstalled' as const, tone: 'success' as const, clickable: true };
+
+  // Esponi le azioni «Salva» e «Importa dati» al footer
+  useEffect(() => {
+    onActionsChange(
+      {
+        content: t.customers.klaviyoDetail.save,
+        loading: saveMappingFetcher.state === 'submitting',
+        disabled: !canSave,
+        onAction: handleSaveMapping,
+      },
+      [
+        {
+          content: t.customers.integrations.importData,
+          loading: importFetcher.state !== 'idle' || statusFetcher.data?.running === true,
+          disabled: !mapping || statusFetcher.data?.running === true,
+          onAction: () => handleImport(),
+        },
+      ]
+    );
+  }, [canSave, saveMappingFetcher.state, importFetcher.state, mapping, statusFetcher.data?.running]);
+
+  // Formatta la data dell'ultimo import
+  const lastRunDate = statusFetcher.data?.lastRun?.finishedAt
+    ? new Date(statusFetcher.data.lastRun.finishedAt).toLocaleString('it-IT', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
+
+  const lastRunCounters = statusFetcher.data?.lastRun?.counters;
+  const filledCount = lastRunCounters?.filled ?? 0;
+
   return (
-    <BlockStack gap="400">
-      <Text as="p" tone="subdued">
-        {t.customers.klaviyoDetail.accountLabel}: {accountName}
-      </Text>
+    <>
+      {/* Sezione 1: Account */}
+      <Modal.Section>
+        <BlockStack gap="400">
+          <InlineStack align="space-between" blockAlign="center" wrap={false}>
+            <InlineStack gap="300" blockAlign="center" wrap={false}>
+              {klaviyoEntry?.logo && (
+                <Thumbnail
+                  source={klaviyoEntry.logo}
+                  alt={klaviyoEntry.name}
+                  size="small"
+                  transparent
+                />
+              )}
+              <BlockStack gap="100">
+                {shouldShowAccountName(accountName) && (
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">
+                    {accountName}
+                  </Text>
+                )}
+                <Text as="p" tone={state.tone}>
+                  {t.customers.integrations[state.label]}
+                </Text>
+              </BlockStack>
+            </InlineStack>
+            {!showDisconnectConfirm && (
+              <Button
+                variant="plain"
+                tone="critical"
+                onClick={handleDisconnectClick}
+                loading={disconnectFetcher.state === 'submitting'}
+              >
+                {t.customers.klaviyoDetail.disconnect}
+              </Button>
+            )}
+          </InlineStack>
 
-      {propertiesError && (
-        <Banner tone="warning">
-          {propertiesError === 'reconnect'
-            ? t.customers.klaviyoDetail.errors.propertiesReconnect
-            : t.customers.klaviyoDetail.errors.propertiesUnavailable}
-        </Banner>
-      )}
+          {showDisconnectConfirm && (
+            <Banner
+              tone="warning"
+              action={{
+                content: t.common.confirm,
+                onAction: handleDisconnectConfirm,
+              }}
+              secondaryAction={{
+                content: t.common.cancel,
+                onAction: handleDisconnectCancel,
+              }}
+            >
+              {t.customers.klaviyoDetail.disconnectConfirm}
+            </Banner>
+          )}
 
-      {saveMappingError && (
-        <Banner tone="warning" onDismiss={() => setSaveMappingError(null)}>
-          {t.customers.klaviyoDetail.errors.saveFailed}
-        </Banner>
-      )}
+          {propertiesError && (
+            <Banner tone="warning">
+              {propertiesError === 'reconnect'
+                ? t.customers.klaviyoDetail.errors.propertiesReconnect
+                : t.customers.klaviyoDetail.errors.propertiesUnavailable}
+            </Banner>
+          )}
 
-      {disconnectError && (
-        <Banner tone="warning" onDismiss={() => setDisconnectError(null)}>
-          {t.customers.klaviyoDetail.errors.disconnectFailed}
-        </Banner>
-      )}
+          {saveMappingError && (
+            <Banner tone="warning" onDismiss={() => setSaveMappingError(null)}>
+              {t.customers.klaviyoDetail.errors.saveFailed}
+            </Banner>
+          )}
 
-      {showDisconnectConfirm && (
-        <Banner
-          tone="warning"
-          action={{
-            content: t.common.confirm,
-            onAction: handleDisconnectConfirm,
-          }}
-          secondaryAction={{
-            content: t.common.cancel,
-            onAction: handleDisconnectCancel,
-          }}
-        >
-          {t.customers.klaviyoDetail.disconnectConfirm}
-        </Banner>
-      )}
+          {disconnectError && (
+            <Banner tone="warning" onDismiss={() => setDisconnectError(null)}>
+              {t.customers.klaviyoDetail.errors.disconnectFailed}
+            </Banner>
+          )}
+        </BlockStack>
+      </Modal.Section>
 
-      {!showDisconnectConfirm && (
-        <InlineStack align="end">
-          <Button
-            variant="plain"
-            tone="critical"
-            onClick={handleDisconnectClick}
-            loading={disconnectFetcher.state === 'submitting'}
-          >
-            {t.customers.klaviyoDetail.disconnect}
-          </Button>
-        </InlineStack>
-      )}
+      <Divider />
 
-      <BlockStack gap="300">
-        <Text as="h3" variant="headingSm">
-          {t.customers.klaviyoDetail.fieldMappingTitle}
-        </Text>
+      {/* Sezione 2: Associazione campi */}
+      <Modal.Section>
+        <BlockStack gap="400">
+          <Text as="h3" variant="headingSm">
+            {t.customers.klaviyoDetail.fieldMappingTitle}
+          </Text>
 
-        <Select
-          label={t.customers.klaviyoDetail.klaviyoPropertyLabel}
-          options={[
-            { label: t.customers.klaviyoDetail.selectProperty, value: '' },
-            ...properties.map((p) => ({ label: p.key, value: p.key })),
-          ]}
-          value={selectedProperty}
-          onChange={setSelectedProperty}
-          disabled={propertiesFetcher.state === 'loading'}
-        />
+          <FormLayout>
+            <FormLayout.Group>
+              <Select
+                label={t.customers.klaviyoDetail.klaviyoPropertyLabel}
+                options={[
+                  { label: t.customers.klaviyoDetail.selectProperty, value: '' },
+                  ...properties.map((p) => ({ label: p.key, value: p.key })),
+                ]}
+                value={selectedProperty}
+                onChange={setSelectedProperty}
+                disabled={propertiesFetcher.state === 'loading'}
+              />
 
-        <Select
-          label={t.customers.klaviyoDetail.kerdonFieldLabel}
-          options={[{ label: t.customers.klaviyoDetail.birthdate, value: 'birthdate' }]}
-          value="birthdate"
-          disabled
-        />
+              <Select
+                label={t.customers.klaviyoDetail.kerdonFieldLabel}
+                options={[{ label: t.customers.klaviyoDetail.birthdate, value: 'birthdate' }]}
+                value="birthdate"
+                disabled
+              />
+            </FormLayout.Group>
 
-        {selectedProp && selectedProp.ambiguous && (
-          <Select
-            label={t.customers.klaviyoDetail.dateFormatLabel}
-            options={[
-              { label: t.customers.klaviyoDetail.selectFormat, value: '' },
-              { label: 'DD/MM/YYYY', value: 'DMY' },
-              { label: 'MM/DD/YYYY', value: 'MDY' },
-            ]}
-            value={dateFormat}
-            onChange={(value) => setDateFormat(value as DateFormat)}
-          />
-        )}
+            {selectedProp && selectedProp.ambiguous && (
+              <Select
+                label={t.customers.klaviyoDetail.dateFormatLabel}
+                options={[
+                  { label: t.customers.klaviyoDetail.selectFormat, value: '' },
+                  { label: 'DD/MM/YYYY', value: 'DMY' },
+                  { label: 'MM/DD/YYYY', value: 'MDY' },
+                ]}
+                value={dateFormat}
+                onChange={(value) => setDateFormat(value as DateFormat)}
+              />
+            )}
+          </FormLayout>
 
-        {previews.length > 0 && (
-          <BlockStack gap="200">
-            <Text as="p" variant="bodyMd" fontWeight="semibold">
-              {t.customers.klaviyoDetail.previewTitle}
+          {previews.length > 0 && (
+            <BlockStack gap="200">
+              <Text as="p" variant="bodyMd" fontWeight="semibold">
+                {t.customers.klaviyoDetail.previewTitle}
+              </Text>
+              <List type="bullet">
+                {previews.map((preview, i) => (
+                  <List.Item key={i}>
+                    {preview.raw} → {preview.display}
+                  </List.Item>
+                ))}
+              </List>
+            </BlockStack>
+          )}
+        </BlockStack>
+      </Modal.Section>
+
+      <Divider />
+
+      {/* Sezione 3: Import */}
+      <Modal.Section>
+        <BlockStack gap="400">
+          {lastRunDate && (
+            <Text as="p" tone="subdued">
+              {t.customers.integrations.lastImport(lastRunDate, filledCount)}
             </Text>
-            <List type="bullet">
-              {previews.map((preview, i) => (
-                <List.Item key={i}>
-                  {preview.raw} → {preview.display}
-                </List.Item>
-              ))}
-            </List>
-          </BlockStack>
-        )}
+          )}
 
-        <InlineStack gap="200">
-          <Button
-            variant="primary"
-            onClick={handleSaveMapping}
-            loading={saveMappingFetcher.state === 'submitting'}
-            disabled={!canSave}
-          >
-            {t.customers.klaviyoDetail.save}
-          </Button>
+          {statusFetcher.data && (statusFetcher.data.openConflicts ?? 0) > 0 && (
+            <Text as="p" tone="subdued">
+              <Link onClick={handleConflictsClick}>
+                {t.customers.integrations.conflicts(statusFetcher.data.openConflicts ?? 0)}
+              </Link>
+            </Text>
+          )}
 
-          <Button
-            onClick={() => handleImport()}
-            loading={importFetcher.state !== 'idle' || statusFetcher.data?.running === true}
-            disabled={!mapping || statusFetcher.data?.running === true}
-          >
-            {t.customers.integrations.importData}
-          </Button>
-        </InlineStack>
+          {statusFetcher.data?.running && (
+            <Text as="p" tone="subdued">
+              {t.customers.integrations.importRunning}
+            </Text>
+          )}
 
-        {importReason && (
-          <Banner tone="warning">
-            {t.customers.integrations.importReasons[
-              importReason as keyof typeof t.customers.integrations.importReasons
-            ] ?? importReason}
-          </Banner>
-        )}
-      </BlockStack>
-    </BlockStack>
+          {importReason && (
+            <Banner tone="warning">
+              {t.customers.integrations.importReasons[
+                importReason as keyof typeof t.customers.integrations.importReasons
+              ] ?? importReason}
+            </Banner>
+          )}
+        </BlockStack>
+      </Modal.Section>
+    </>
   );
 }

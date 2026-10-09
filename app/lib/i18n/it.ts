@@ -1321,20 +1321,6 @@ export const it = {
       /** Tabella vuota nella vista conflitti. */
       noConflicts: "Nessun dato diverso da risolvere.",
     },
-    integrationsModal: {
-      backToAll: "Tutte le integrazioni",
-      searchLabel: "Cerca integrazioni",
-      searchPlaceholder: "Cerca un'integrazione\u2026",
-      categoryLabel: "Categoria",
-      allCategory: "Tutti",
-      categories: {
-        crm: "CRM",
-        database: "Database",
-        csv: "CSV",
-      },
-      comingSoon: "In arrivo",
-      noResults: "Nessuna integrazione trovata",
-    },
     klaviyoDetail: {
       benefitText: "Importa le date di nascita dei tuoi clienti da Klaviyo per completare i dati mancanti.",
       connect: "Collega Klaviyo",

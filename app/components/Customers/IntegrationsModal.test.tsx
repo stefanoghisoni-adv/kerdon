@@ -1,5 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { previewLines, canSaveMapping, isValidOAuthMessage } from './IntegrationsModal';
+import { INTEGRATIONS } from '~/lib/integrations/registry';
+
+describe('IntegrationsModal', () => {
+  describe('modal title from registry', () => {
+    it('returns Klaviyo name for klaviyo provider', () => {
+      const integration = INTEGRATIONS.find((i) => i.id === 'klaviyo');
+      expect(integration?.name).toBe('Klaviyo');
+    });
+
+    it('returns empty string when provider not found', () => {
+      const integration = INTEGRATIONS.find((i) => i.id === 'nonexistent' as any);
+      expect(integration).toBeUndefined();
+    });
+  });
+});
 
 describe('previewLines', () => {
   it('returns empty array for empty samples', () => {

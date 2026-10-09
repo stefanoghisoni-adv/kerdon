@@ -1041,20 +1041,6 @@ export const en: typeof it = {
       /** Empty table in conflicts view. */
       noConflicts: "No different values to resolve.",
     },
-    integrationsModal: {
-      backToAll: "All integrations",
-      searchLabel: "Search integrations",
-      searchPlaceholder: "Search for an integration…",
-      categoryLabel: "Category",
-      allCategory: "All",
-      categories: {
-        crm: "CRM",
-        database: "Database",
-        csv: "CSV",
-      },
-      comingSoon: "Coming soon",
-      noResults: "No integrations found",
-    },
     klaviyoDetail: {
       benefitText: "Import customer birthdates from Klaviyo to fill in missing data.",
       connect: "Connect Klaviyo",
