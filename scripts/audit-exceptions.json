@@ -15,9 +15,11 @@
     "scriverli, la vulnerabilita' non va accettata. La correzione di tutte le",
     "voci e' la migrazione a React Router 7: docs/migrazione-react-router-7.md.",
     "",
-    "Prova verificata il 2026-10-02 su main 6abcef9 (dettagli in SECURITY.md):",
+    "Prova verificata il 2026-10-09 su feat/integrazioni-klaviyo e83e804 (dettagli in SECURITY.md):",
     "`npm run build`, poi `grep -o 'v3_singleFetch[^,}]*' build/server/assets/server-build-*.js`",
-    "restituisce `v3_singleFetch\": false`."
+    "restituisce `v3_singleFetch\": false`. Nello stesso build nessun file di",
+    "build/server importa express, compression, proxy-addr, chokidar, braces,",
+    "@remix-run/serve, @remix-run/express o vitest."
   ],
 
   "eccezioni": [
@@ -59,10 +61,10 @@
     },
     {
       "pacchetto": "@remix-run/serve",
-      "advisory": ["GHSA-rxv8-25v2-qmq8"],
-      "avviso": "high per via di @remix-run/express e @remix-run/node",
-      "motivo": "Stessa catena Remix 2. Resta perche' `npm start` lo usa in locale.",
-      "mitigazione": "Su Vercel non serve la produzione: l'handler lo costruisce il preset del framework 'remix' (vercel.json), quindi il server express che porta con se' non e' in esecuzione da nessuna parte. Anche in locale il single fetch e' spento.",
+      "advisory": ["GHSA-rxv8-25v2-qmq8", "GHSA-vfj7-8cjw-p6xm"],
+      "avviso": "high per via di @remix-run/express e @remix-run/node; in piu' braces 3.0.3 (high: DoS da pattern annidati) via chokidar",
+      "motivo": "Stessa catena Remix 2. Resta perche' `npm start` lo usa in locale. Per braces non esiste una versione corretta (3.0.3 e' l'ultima): la toglie solo l'uscita da @remix-run/serve con la migrazione a React Router 7.",
+      "mitigazione": "Su Vercel non serve la produzione: l'handler lo costruisce il preset del framework 'remix' (vercel.json), quindi il server express che porta con se' non e' in esecuzione da nessuna parte (nessun file di build/server lo importa). Anche in locale il single fetch e' spento. braces: vedi la voce braces.",
       "owner": "Stefano Ghisoni",
       "scadenza": "2026-12-31"
     },
@@ -81,6 +83,60 @@
       "avviso": "high per via di @remix-run/server-runtime",
       "motivo": "La stessa catena Remix 2, ereditata. Anche l'ultima versione (6.0.1) dipende da @remix-run/server-runtime ^2.17.5, quindi aggiornarla non toglie l'avviso: non e' una correzione travestita da aggiornamento. La sostituta e' @shopify/shopify-app-react-router, parte della migrazione.",
       "mitigazione": "Il pacchetto non usa turbo-stream ne' il single fetch (nessuna occorrenza di 'turbo-stream' o 'singleFetch' in dist/): eredita solo la dipendenza, il cui percorso vulnerabile e' spento.",
+      "owner": "Stefano Ghisoni",
+      "scadenza": "2026-12-31"
+    },
+    {
+      "pacchetto": "proxy-addr",
+      "advisory": ["GHSA-jqcg-44mw-7w3h"],
+      "avviso": "proxy-addr 2.0.7 (critical) — IP spoofing quando la subnet di fiducia e' scritta come IPv4-mapped IPv6 con prefisso corto",
+      "motivo": "Arriva con express@4.22.2, portato da @remix-run/serve (dipendenza di produzione, usata solo da `npm start`) e da @remix-run/dev. La correzione (2.0.8) e' compatibile con il range di express: va presa con un aggiornamento del lockfile in una PR a parte.",
+      "mitigazione": "Il difetto scatta solo se l'app imposta 'trust proxy' con una subnet come ::ffff:10.0.0.0/8 e poi si fida di req.ip. Nessuno la imposta: il codice dell'app non usa express, e remix-serve (@remix-run/serve/dist/cli.js) crea express() senza 'trust proxy', quindi vale il default false e nessun indirizzo e' trattato come proxy. In produzione express comunque non gira: su Vercel l'handler e' quello del preset 'remix' e nessun file di build/server importa express o proxy-addr.",
+      "owner": "Stefano Ghisoni",
+      "scadenza": "2026-11-30"
+    },
+    {
+      "pacchetto": "compression",
+      "advisory": ["GHSA-vc2v-76pw-4v95"],
+      "avviso": "compression 1.8.1 (high) — DoS per memoria zlib non liberata quando il client chiude la connessione a meta' risposta",
+      "motivo": "Arriva solo da @remix-run/serve. La correzione (1.8.2) e' compatibile con il range dichiarato: va presa con un aggiornamento del lockfile in una PR a parte.",
+      "mitigazione": "compression e' usato solo dal server di remix-serve (app.use(compression()) in @remix-run/serve/dist/cli.js), cioe' da `npm start` in locale. Su Vercel l'handler e' quello del preset 'remix' e nessun file di build/server importa compression; il worker (dist/worker.js, impacchettato da build-worker.mjs a partire da worker.ts) non lo usa. Il codice vulnerabile non riceve traffico in produzione.",
+      "owner": "Stefano Ghisoni",
+      "scadenza": "2026-11-30"
+    },
+    {
+      "pacchetto": "braces",
+      "advisory": ["GHSA-vfj7-8cjw-p6xm"],
+      "avviso": "braces 3.0.3 (high) — stack overflow da pattern di graffe profondamente annidati",
+      "motivo": "3.0.3 e' l'ultima versione: non c'e' una correzione da prendere. Arriva solo tramite chokidar@3.6.0 (@remix-run/serve, @remix-run/dev); il chokidar 4 di Prisma non dipende da braces. Si chiude con la migrazione a React Router 7, che toglie @remix-run/serve.",
+      "mitigazione": "Il DoS richiede che l'attaccante scelga il pattern da espandere. Qui i pattern sono solo quelli scritti negli strumenti (i watcher di chokidar in sviluppo), nessuno arriva da una richiesta: l'app non importa braces, micromatch ne' chokidar, e nessun file di build/server li importa.",
+      "owner": "Stefano Ghisoni",
+      "scadenza": "2026-11-30"
+    },
+    {
+      "pacchetto": "chokidar",
+      "advisory": ["GHSA-vfj7-8cjw-p6xm"],
+      "avviso": "high per via di braces 3.0.3",
+      "motivo": "chokidar@3.6.0 arriva da @remix-run/serve e da @remix-run/dev, e la catena si chiude solo togliendo braces, che non ha una versione corretta. Si chiude con la migrazione a React Router 7.",
+      "mitigazione": "Vedi la voce braces: chokidar riceve solo percorsi scritti nel codice (remix-serve osserva il file della versione del build, e solo in sviluppo), mai input esterno. In produzione non gira: nessun file di build/server lo importa.",
+      "owner": "Stefano Ghisoni",
+      "scadenza": "2026-11-30"
+    },
+    {
+      "pacchetto": "tinypool",
+      "advisory": ["GHSA-5gmw-xhrv-c9v3", "GHSA-85c8-ppgw-ccpr"],
+      "avviso": "tinypool 1.1.1 (critical) — prototype pollution nelle opzioni del worker e di run() porta a esecuzione di codice",
+      "motivo": "Arriva solo da vitest@3.2.7; la correzione sta in vitest 4.1.11, un salto di versione maggiore da fare in una PR a parte. Solo sviluppo: assente dal grafo `npm audit --omit=dev`.",
+      "mitigazione": "Non arriva nella funzione di Vercel ne' nell'immagine del worker (npm ci --omit=dev). Gira dove gira vitest: in locale, in CI e nel build di Vercel (`build:verified` esegue `vitest run`). Lo sfruttamento richiede che qualcosa nel processo di test inquini Object.prototype prima che il pool parta: le opzioni le compone vitest da vitest.config.ts, e le prove eseguono solo codice del repository su dati finti, senza input dalla rete. Chi riuscisse a inquinare il prototipo li' starebbe gia' eseguendo codice nel runner.",
+      "owner": "Stefano Ghisoni",
+      "scadenza": "2026-12-31"
+    },
+    {
+      "pacchetto": "vitest",
+      "advisory": ["GHSA-5gmw-xhrv-c9v3", "GHSA-82fw-gwwq-j7x9", "GHSA-85c8-ppgw-ccpr"],
+      "avviso": "critical per via di tinypool; in piu' @vitest/mocker (moderate: lettura di file tramite redirect mock)",
+      "motivo": "vitest@3.2.7 (con @vitest/ui@3.2.7): la correzione e' vitest 4.1.11, versione maggiore, da fare in una PR a parte insieme alla suite. Solo sviluppo: assente dal grafo `npm audit --omit=dev`.",
+      "mitigazione": "tinypool: vedi la voce tinypool. GHSA-82fw-gwwq-j7x9 e' sfruttabile senza autenticazione solo tramite gli export mockerPlugin/interceptorPlugin montati su un dev server di terzi; la browser mode di vitest passa da un RPC con token. Il progetto usa vitest solo in modalita' node (vitest.config.ts, nessuna browser mode) e non importa @vitest/mocker; `vitest --ui` si lancia solo a mano in locale. Mai nella funzione di Vercel.",
       "owner": "Stefano Ghisoni",
       "scadenza": "2026-12-31"
     }
