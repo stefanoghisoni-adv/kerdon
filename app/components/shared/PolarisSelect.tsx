@@ -4,7 +4,7 @@
 // al posto di <Select> nativo del browser.
 
 import { useState, useCallback, useRef, useId, useEffect, type ReactNode } from 'react';
-import { Button, Popover, OptionList, Labelled } from '@shopify/polaris';
+import { Button, Popover, OptionList, Labelled, Text } from '@shopify/polaris';
 
 export interface PolarisSelectOption {
   label: string;
@@ -68,6 +68,66 @@ export function shouldBlockEscapeEvent(event: KeyboardEvent | React.KeyboardEven
 }
 
 /**
+ * Gestisce keydown/keyup Escape su window per bloccare la chiusura della Modal.
+ * Logica estratta per test senza React.
+ */
+export function setupEscapeHandling(
+  window: Window | EventTarget,
+  onEscape: () => void
+): () => void {
+  let keyupHandlerRef: ((e: Event) => void) | null = null;
+  let cleanupTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const cleanupKeyupHandler = () => {
+    if (keyupHandlerRef) {
+      window.removeEventListener('keyup', keyupHandlerRef, true);
+      keyupHandlerRef = null;
+    }
+    if (cleanupTimeoutId !== null) {
+      clearTimeout(cleanupTimeoutId);
+      cleanupTimeoutId = null;
+    }
+  };
+
+  const handleKeyDown = (event: Event) => {
+    const kbEvent = event as KeyboardEvent;
+    if (shouldBlockEscapeEvent(kbEvent)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      // Cleanup any previous one-shot handler
+      cleanupKeyupHandler();
+
+      // Aggiungi one-shot listener per keyup che sopravvive alla chiusura del popover
+      keyupHandlerRef = (e: Event) => {
+        if (shouldBlockEscapeEvent(e as KeyboardEvent)) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        }
+        cleanupKeyupHandler();
+      };
+
+      window.addEventListener('keyup', keyupHandlerRef, { capture: true, once: true });
+
+      // Fallback: rimuovi dopo 500ms se keyup non arriva (es. focus perso)
+      cleanupTimeoutId = setTimeout(cleanupKeyupHandler, 500);
+
+      onEscape();
+    }
+  };
+
+  window.addEventListener('keydown', handleKeyDown, true);
+
+  // Cleanup: rimuovi listener keydown e qualsiasi keyup pending
+  return () => {
+    window.removeEventListener('keydown', handleKeyDown, true);
+    cleanupKeyupHandler();
+  };
+}
+
+/**
  * PolarisSelect: menu a tendina costruito con Polaris, senza <select> nativo.
  *
  * Accessibilità:
@@ -91,7 +151,6 @@ export function PolarisSelect({
   const triggerId = useId();
   const valueId = useId();
   const triggerRef = useRef<HTMLDivElement>(null);
-  const escapeKeydownFiredRef = useRef(false);
 
   const togglePopover = useCallback(() => {
     if (!disabled) {
@@ -128,38 +187,10 @@ export function PolarisSelect({
     [onChange, closePopoverAndRefocus, value]
   );
 
-  // Native listener in capture phase su window per bloccare Escape prima che raggiunga Dialog
+  // Setup Escape handling: one-shot keyup listener sopravvive alla chiusura del popover
   useEffect(() => {
     if (!popoverActive) return;
-
-    const handleNativeKeyDown = (event: KeyboardEvent) => {
-      if (shouldBlockEscapeEvent(event)) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        escapeKeydownFiredRef.current = true;
-        closePopoverAndRefocus();
-      }
-    };
-
-    const handleNativeKeyUp = (event: KeyboardEvent) => {
-      if (shouldBlockEscapeEvent(event)) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        // Se abbiamo già chiuso su keydown, questo keyup è solo da ingoiare
-        escapeKeydownFiredRef.current = false;
-      }
-    };
-
-    window.addEventListener('keydown', handleNativeKeyDown, true);
-    window.addEventListener('keyup', handleNativeKeyUp, true);
-
-    return () => {
-      window.removeEventListener('keydown', handleNativeKeyDown, true);
-      window.removeEventListener('keyup', handleNativeKeyUp, true);
-      escapeKeydownFiredRef.current = false;
-    };
+    return setupEscapeHandling(window, closePopoverAndRefocus);
   }, [popoverActive, closePopoverAndRefocus]);
 
   const selectedLabel = getSelectedLabel(options, value, placeholder);
@@ -187,10 +218,10 @@ export function PolarisSelect({
       >
         {selectedLabel}
       </Button>
-      {/* Valore visivamente nascosto ma annunciato via ariaDescribedBy */}
-      <span id={valueId} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>
+      {/* Valore visualmente nascosto ma annunciato via ariaDescribedBy */}
+      <Text as="span" id={valueId} visuallyHidden>
         {selectedLabel}
-      </span>
+      </Text>
     </div>
   );
 
