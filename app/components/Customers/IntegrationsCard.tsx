@@ -243,8 +243,12 @@ function IntegrationTile({ entry, state, visual, onManage }: IntegrationTileProp
       background={notAvailable ? 'bg-surface' : undefined}
       borderColor="border"
       borderWidth="025"
+      borderStyle="solid"
       borderRadius="300"
-      padding="400"
+      paddingBlockStart="200"
+      paddingBlockEnd="200"
+      paddingInlineStart="200"
+      paddingInlineEnd="100"
     >
       <InlineStack align="space-between" blockAlign="center" gap="300" wrap={false}>
         <InlineStack gap="400" blockAlign="center" wrap={false}>
