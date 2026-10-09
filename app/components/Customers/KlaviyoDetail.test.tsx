@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideDateFormat, shouldShowAccountName } from './KlaviyoDetail';
+import { decideDateFormat, shouldShowAccountName, normalizeConnectionStatus } from './KlaviyoDetail';
 
 describe('decideDateFormat', () => {
   const ambiguousProperty = {
@@ -131,5 +131,33 @@ describe('shouldShowAccountName', () => {
 
   it('returns true for account name with surrounding spaces', () => {
     expect(shouldShowAccountName('  My Account  ')).toBe(true);
+  });
+});
+
+describe('normalizeConnectionStatus', () => {
+  it('returns connected for connected', () => {
+    expect(normalizeConnectionStatus('connected')).toBe('connected');
+  });
+
+  it('returns needs_reconnect for needs_reconnect', () => {
+    expect(normalizeConnectionStatus('needs_reconnect')).toBe('needs_reconnect');
+  });
+
+  it('returns not_connected for disconnected', () => {
+    expect(normalizeConnectionStatus('disconnected')).toBe('not_connected');
+  });
+
+  it('returns not_connected for none', () => {
+    expect(normalizeConnectionStatus('none')).toBe('not_connected');
+  });
+
+  it('returns not_connected for undefined', () => {
+    expect(normalizeConnectionStatus(undefined)).toBe('not_connected');
+  });
+
+  it('returns not_connected for unknown values', () => {
+    expect(normalizeConnectionStatus('unknown')).toBe('not_connected');
+    expect(normalizeConnectionStatus('invalid')).toBe('not_connected');
+    expect(normalizeConnectionStatus('')).toBe('not_connected');
   });
 });

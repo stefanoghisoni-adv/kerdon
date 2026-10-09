@@ -1269,6 +1269,7 @@ export const it = {
       /** Accanto al pulsante mentre un import e' in corso. */
       importRunning: "Import in corso. Riapri questa pagina tra qualche minuto per vedere i risultati.",
       reconnect: "Riconnetti",
+      updateSelection: "Aggiorna selezione",
       /** Stati dei riquadri integrazione. */
       tileInstalled: "Installata",
       tileNotConnected: "Da collegare",
@@ -1327,6 +1328,7 @@ export const it = {
       disconnectConfirm: "Scollegare Klaviyo? I dati gi\u00e0 importati e i conflitti restano, ma non potrai pi\u00f9 importare nuovi dati.",
       fieldMappingTitle: "Associazione campi",
       klaviyoPropertyLabel: "Propriet\u00e0 Klaviyo",
+      klaviyoPropertyHelp: "Il dato dei profili Klaviyo da cui leggiamo la data di nascita dei tuoi clienti.",
       selectProperty: "Seleziona una propriet\u00e0",
       selectFormat: "Scegli il formato",
       kerdonFieldLabel: "Campo Kerdon",

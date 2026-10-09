@@ -98,6 +98,26 @@ export function canSaveMapping({
 }
 
 /**
+ * Determina se la selezione corrente differisce da quella salvata.
+ *
+ * Regole:
+ * - Se non c'è mapping salvato, la selezione è sempre dirty (a meno che non sia vuota)
+ * - Se c'è un mapping salvato, confronta sourceKey e dateFormat
+ */
+export function isMappingDirty(
+  saved: { sourceKey: string; dateFormat: string } | null,
+  current: { sourceKey: string; dateFormat: DateFormat | '' }
+): boolean {
+  if (!saved) {
+    // Nessun mapping salvato: dirty se c'è qualcosa selezionato
+    return current.sourceKey !== '';
+  }
+
+  // Confronta con il mapping salvato
+  return saved.sourceKey !== current.sourceKey || saved.dateFormat !== current.dateFormat;
+}
+
+/**
  * Il messaggio di ritorno dalla finestra di Klaviyo: le regole stanno nella
  * funzione condivisa con Supabase (`~/lib/oauth-popup-message`), qui si fissa
  * solo il tipo atteso.
@@ -120,24 +140,27 @@ export type FooterAction = {
 export interface FooterActionsInput {
   statusLoading: boolean;
   status: 'connected' | 'not_connected' | 'needs_reconnect';
+  hasSavedMapping: boolean;
+  isDirty: boolean;
   canSave: boolean;
-  hasMapping: boolean;
   running: boolean;
   saving: boolean;
   importing: boolean;
-  connectLoading: boolean;
   onSave: () => void;
   onImport: () => void;
-  onConnect: () => void;
-  connectLabel: string;
-  reconnectLabel: string;
-  saveLabel: string;
+  cancelLabel: string;
+  updateSelectionLabel: string;
   importLabel: string;
 }
 
 /**
  * Costruisce le azioni del footer della modal in base allo stato.
  * Funzione pura per testing.
+ *
+ * Footer sempre a 3 pulsanti:
+ * - «Annulla» (secondaryActions[0]): chiude la modal
+ * - «Aggiorna selezione» (secondaryActions[1]): salva e resta aperta
+ * - «Importa dati» (primaryAction): avvia l'import
  */
 export function buildFooterActions(input: FooterActionsInput): {
   primary: FooterAction | undefined;
@@ -146,65 +169,81 @@ export function buildFooterActions(input: FooterActionsInput): {
   const {
     statusLoading,
     status,
+    hasSavedMapping,
+    isDirty,
     canSave,
-    hasMapping,
     running,
     saving,
     importing,
-    connectLoading,
     onSave,
     onImport,
-    onConnect,
-    connectLabel,
-    reconnectLabel,
-    saveLabel,
+    cancelLabel,
+    updateSelectionLabel,
     importLabel,
   } = input;
 
-  // Mentre lo status carica: nessuna azione (evita «Collega» per un merchant gia collegato)
+  // Mentre lo status carica: solo «Annulla» abilitato
   if (statusLoading) {
     return {
-      primary: undefined,
-      secondary: [],
+      primary: {
+        content: importLabel,
+        disabled: true,
+        onAction: onImport,
+      },
+      secondary: [
+        {
+          content: cancelLabel,
+          onAction: () => {}, // Placeholder: sarà gestito dal genitore (onClose)
+        },
+        {
+          content: updateSelectionLabel,
+          disabled: true,
+          onAction: onSave,
+        },
+      ],
     };
   }
 
-  if (status === 'not_connected') {
+  // not_connected o needs_reconnect: «Aggiorna selezione» e «Importa dati» disabilitati
+  if (status === 'not_connected' || status === 'needs_reconnect') {
     return {
       primary: {
-        content: connectLabel,
-        loading: connectLoading,
-        onAction: onConnect,
+        content: importLabel,
+        disabled: true,
+        onAction: onImport,
       },
-      secondary: [],
+      secondary: [
+        {
+          content: cancelLabel,
+          onAction: () => {}, // Placeholder: sarà gestito dal genitore (onClose)
+        },
+        {
+          content: updateSelectionLabel,
+          disabled: true,
+          onAction: onSave,
+        },
+      ],
     };
   }
 
-  if (status === 'needs_reconnect') {
-    return {
-      primary: {
-        content: reconnectLabel,
-        loading: connectLoading,
-        onAction: onConnect,
-      },
-      secondary: [],
-    };
-  }
-
-  // connected
+  // connected: logica completa
   return {
     primary: {
-      content: saveLabel,
-      loading: saving,
-      disabled: !canSave,
-      onAction: onSave,
+      content: importLabel,
+      loading: importing || running,
+      disabled: !hasSavedMapping || isDirty || running,
+      onAction: onImport,
     },
     secondary: [
       {
-        content: importLabel,
-        loading: importing || running,
-        disabled: !hasMapping || running,
-        onAction: onImport,
+        content: cancelLabel,
+        onAction: () => {}, // Placeholder: sarà gestito dal genitore (onClose)
+      },
+      {
+        content: updateSelectionLabel,
+        loading: saving,
+        disabled: !isDirty || !canSave,
+        onAction: onSave,
       },
     ],
   };

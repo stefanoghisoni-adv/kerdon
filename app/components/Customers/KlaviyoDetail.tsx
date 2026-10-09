@@ -18,10 +18,13 @@ import {
   FormLayout,
   Divider,
   Link,
+  Tooltip,
+  Icon,
 } from '@shopify/polaris';
+import { InfoIcon } from '@shopify/polaris-icons';
 import { useT, useLocale } from '~/lib/i18n/context';
 import type { DateFormat } from '~/lib/integrations/values';
-import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions, type FooterAction } from './IntegrationsModal';
+import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions, isMappingDirty, type FooterAction } from './IntegrationsModal';
 import type { Sample } from './IntegrationsModal';
 import { useIntegrationImport } from './useIntegrationImport';
 import { buildConflictsUrl, tileState, type IntegrationStatus } from './IntegrationsCard';
@@ -47,7 +50,8 @@ interface Property {
 }
 
 interface StatusData {
-  status: 'connected' | 'not_connected' | 'needs_reconnect';
+  /** Valori reali dal server: 'connected' | 'needs_reconnect' | 'disconnected' | 'none' */
+  status: string;
   accountName?: string | null;
   mapping: { sourceKey: string; dateFormat: string } | null;
   /** Un import e' in corso adesso. */
@@ -58,6 +62,24 @@ interface StatusData {
     finishedAt: string | null;
     counters: { filled?: number; conflicts?: number; [key: string]: unknown };
   } | null;
+}
+
+/**
+ * Normalizza lo stato di connessione dal server ai valori usati dal client.
+ *
+ * Server: 'connected' | 'needs_reconnect' | 'disconnected' | 'none'
+ * Client: 'connected' | 'not_connected' | 'needs_reconnect'
+ *
+ * Regole:
+ * - 'connected' → 'connected'
+ * - 'needs_reconnect' → 'needs_reconnect'
+ * - 'disconnected', 'none', valori sconosciuti, undefined → 'not_connected'
+ */
+export function normalizeConnectionStatus(raw: string | undefined): 'connected' | 'not_connected' | 'needs_reconnect' {
+  if (raw === 'connected') return 'connected';
+  if (raw === 'needs_reconnect') return 'needs_reconnect';
+  // 'disconnected', 'none', valori sconosciuti, undefined → 'not_connected'
+  return 'not_connected';
 }
 
 /**
@@ -152,7 +174,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
     }
   }, [statusFetcher]);
 
-  const status = statusFetcher.data?.status ?? 'not_connected';
+  const status = normalizeConnectionStatus(statusFetcher.data?.status);
   const accountName = statusFetcher.data?.accountName;
   const mapping = statusFetcher.data?.mapping;
   const properties = propertiesFetcher.data?.properties ?? EMPTY_PROPERTIES;
@@ -347,19 +369,20 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   // Track handled save-mapping responses
   const handledSaveMappingRef = useRef<typeof saveMappingFetcher.data>(null);
 
-  // Reload after saving mapping
+  // Reload after saving mapping (modal resta aperta)
   useEffect(() => {
     if (saveMappingFetcher.data && saveMappingFetcher.data !== handledSaveMappingRef.current) {
       handledSaveMappingRef.current = saveMappingFetcher.data;
 
       if (saveMappingFetcher.data.ok) {
+        // Ricarica lo stato per aggiornare il mapping salvato
         statusFetcher.load('/api/integrations/klaviyo');
-        onClose();
+        // La modal resta aperta, non chiamiamo onClose()
       } else {
         setSaveMappingError(saveMappingFetcher.data.error ?? 'unknown');
       }
     }
-  }, [saveMappingFetcher.data, statusFetcher, onClose]);
+  }, [saveMappingFetcher.data, statusFetcher]);
 
   const handleDisconnectClick = useCallback(() => {
     setShowDisconnectConfirm(true);
@@ -451,27 +474,28 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   // Esponi le azioni del footer usando buildFooterActions (PRIMA di ogni early return)
   useEffect(() => {
     const statusLoading = !statusFetcher.data;
-    const connectLoading = oauthFetcher.state === 'loading' || connectFetcher.state === 'submitting';
     const saving = saveMappingFetcher.state === 'submitting';
     const importing = importFetcher.state !== 'idle';
     const running = statusFetcher.data?.running ?? false;
-    const hasMapping = !!mapping;
+    const hasSavedMapping = !!mapping;
+    const isDirty = isMappingDirty(mapping ?? null, {
+      sourceKey: selectedProperty,
+      dateFormat: dateFormat,
+    });
 
     const actions = buildFooterActions({
       statusLoading,
       status,
+      hasSavedMapping,
+      isDirty,
       canSave,
-      hasMapping,
       running,
       saving,
       importing,
-      connectLoading,
       onSave,
       onImport,
-      onConnect,
-      connectLabel: t.customers.klaviyoDetail.connect,
-      reconnectLabel: t.customers.integrations.reconnect,
-      saveLabel: t.customers.klaviyoDetail.save,
+      cancelLabel: t.common.cancel,
+      updateSelectionLabel: t.customers.integrations.updateSelection,
       importLabel: t.customers.integrations.importData,
     });
 
@@ -479,14 +503,13 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   }, [
     statusFetcher.data,
     status,
-    canSave,
     mapping,
-    oauthFetcher.state,
-    connectFetcher.state,
+    selectedProperty,
+    dateFormat,
+    canSave,
     saveMappingFetcher.state,
     importFetcher.state,
     statusFetcher.data?.running,
-    onConnect,
     onSave,
     onImport,
     t,
@@ -546,7 +569,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   const integrationStatus: IntegrationStatus | undefined = statusFetcher.data
     ? {
         provider: 'klaviyo' as const,
-        status: statusFetcher.data.status,
+        status: status,
         accountName: statusFetcher.data.accountName,
         mapping: statusFetcher.data.mapping,
         lastRun: statusFetcher.data.lastRun ?? null,
@@ -659,16 +682,29 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
 
           <FormLayout>
             <FormLayout.Group>
-              <Select
-                label={t.customers.klaviyoDetail.klaviyoPropertyLabel}
-                options={[
-                  { label: t.customers.klaviyoDetail.selectProperty, value: '' },
-                  ...properties.map((p) => ({ label: p.key, value: p.key })),
-                ]}
-                value={selectedProperty}
-                onChange={setSelectedProperty}
-                disabled={propertiesFetcher.state === 'loading'}
-              />
+              <div>
+                <InlineStack gap="100" blockAlign="center" wrap={false}>
+                  <Text as="p" variant="bodyMd">
+                    {t.customers.klaviyoDetail.klaviyoPropertyLabel}
+                  </Text>
+                  <Tooltip content={t.customers.klaviyoDetail.klaviyoPropertyHelp}>
+                    <span className="info-icon">
+                      <Icon source={InfoIcon} tone="subdued" />
+                    </span>
+                  </Tooltip>
+                </InlineStack>
+                <Select
+                  label={t.customers.klaviyoDetail.klaviyoPropertyLabel}
+                  labelHidden
+                  options={[
+                    { label: t.customers.klaviyoDetail.selectProperty, value: '' },
+                    ...properties.map((p) => ({ label: p.key, value: p.key })),
+                  ]}
+                  value={selectedProperty}
+                  onChange={setSelectedProperty}
+                  disabled={propertiesFetcher.state === 'loading'}
+                />
+              </div>
 
               <Select
                 label={t.customers.klaviyoDetail.kerdonFieldLabel}

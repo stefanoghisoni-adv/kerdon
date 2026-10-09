@@ -989,6 +989,7 @@ export const en: typeof it = {
       importData: "Import data",
       importRunning: "Import in progress. Reopen this page in a few minutes to see the results.",
       reconnect: "Reconnect",
+      updateSelection: "Update selection",
       /** Integration tile states. */
       tileInstalled: "Installed",
       tileNotConnected: "Not connected",
@@ -1047,6 +1048,7 @@ export const en: typeof it = {
       disconnectConfirm: "Disconnect Klaviyo? Already imported data and conflicts remain, but you won't be able to import new data.",
       fieldMappingTitle: "Field mapping",
       klaviyoPropertyLabel: "Klaviyo property",
+      klaviyoPropertyHelp: "The Klaviyo profile field we read your customers' birthdate from.",
       selectProperty: "Select a property",
       selectFormat: "Choose format",
       kerdonFieldLabel: "Kerdon field",
