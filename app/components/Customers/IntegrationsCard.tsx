@@ -267,7 +267,13 @@ function IntegrationTile({ entry, state, visual, onManage }: IntegrationTileProp
             </Text>
           </BlockStack>
         </InlineStack>
-        {visual.loading && <Spinner size="small" />}
+        {/* Lo spinner va centrato in altezza e a 20px dal bordo destro: il
+            riquadro ne da' 4 di padding, gli altri 16 li aggiunge la classe. */}
+        {visual.loading && (
+          <span className="integration-tile-spinner">
+            <Spinner size="small" />
+          </span>
+        )}
       </InlineStack>
     </Box>
   );
