@@ -124,7 +124,7 @@ export interface FooterActionsInput {
   running: boolean;
   saving: boolean;
   importing: boolean;
-  connectLoading?: boolean;
+  connectLoading: boolean;
   onSave: () => void;
   onImport: () => void;
   onConnect: () => void;
@@ -149,7 +149,7 @@ export function buildFooterActions(input: FooterActionsInput): {
     running,
     saving,
     importing,
-    connectLoading = false,
+    connectLoading,
     onSave,
     onImport,
     onConnect,

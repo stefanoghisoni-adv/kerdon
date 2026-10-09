@@ -14,6 +14,7 @@ describe('buildFooterActions', () => {
     running: false,
     saving: false,
     importing: false,
+    connectLoading: false,
     connectLabel: 'Connect',
     reconnectLabel: 'Reconnect',
     saveLabel: 'Save',

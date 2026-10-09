@@ -463,6 +463,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
       running,
       saving,
       importing,
+      connectLoading,
       onSave,
       onImport,
       onConnect,
