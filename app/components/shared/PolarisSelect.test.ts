@@ -1,7 +1,7 @@
 // app/components/shared/PolarisSelect.test.ts
 
 import { describe, it, expect, vi } from 'vitest';
-import { getSelectedLabel, mapOptionsForList, shouldBlockEscapeEvent, setupEscapeHandling, type PolarisSelectOption } from './PolarisSelect';
+import { getSelectedLabel, mapOptionsForList, reduceEscapeGuard, type EscapeGuardState, type PolarisSelectOption } from './PolarisSelect';
 
 describe('getSelectedLabel', () => {
   const options: PolarisSelectOption[] = [
@@ -60,173 +60,80 @@ describe('mapOptionsForList', () => {
   });
 });
 
-describe('shouldBlockEscapeEvent', () => {
-  it('restituisce true per evento Escape', () => {
-    const event = { key: 'Escape' } as KeyboardEvent;
-    expect(shouldBlockEscapeEvent(event)).toBe(true);
+describe('reduceEscapeGuard', () => {
+  const closed: EscapeGuardState = { open: false, swallowEscapeKeyup: false };
+  const open: EscapeGuardState = { open: true, swallowEscapeKeyup: false };
+
+  it('menu aperto + keydown Escape: blocca, chiude e attende il keyup', () => {
+    const r = reduceEscapeGuard(open, { type: 'keydown', key: 'Escape' });
+    expect(r.block).toBe(true);
+    expect(r.close).toBe(true);
+    expect(r.nextState).toEqual({ open: false, swallowEscapeKeyup: true });
   });
 
-  it('restituisce false per altri tasti', () => {
-    expect(shouldBlockEscapeEvent({ key: 'Enter' } as KeyboardEvent)).toBe(false);
-    expect(shouldBlockEscapeEvent({ key: 'Space' } as KeyboardEvent)).toBe(false);
-    expect(shouldBlockEscapeEvent({ key: 'Tab' } as KeyboardEvent)).toBe(false);
-    expect(shouldBlockEscapeEvent({ key: 'a' } as KeyboardEvent)).toBe(false);
+  it('sequenza completa: il keyup dello stesso Escape è bloccato, il successivo arriva alla Modal', () => {
+    let state = open;
+    const down = reduceEscapeGuard(state, { type: 'keydown', key: 'Escape' });
+    expect(down.block && down.close).toBe(true);
+    state = down.nextState;
+
+    // Tra keydown e keyup React ri-renderizza: i listener restano (stato in ref),
+    // la guardia vede solo lo stato aggiornato.
+    const up = reduceEscapeGuard(state, { type: 'keyup', key: 'Escape' });
+    expect(up.block).toBe(true);
+    expect(up.close).toBe(false);
+    state = up.nextState;
+    expect(state).toEqual(closed);
+
+    // Secondo Escape a menu chiuso: passa, la Modal può chiudersi.
+    const down2 = reduceEscapeGuard(state, { type: 'keydown', key: 'Escape' });
+    expect(down2.block).toBe(false);
+    const up2 = reduceEscapeGuard(down2.nextState, { type: 'keyup', key: 'Escape' });
+    expect(up2.block).toBe(false);
+    expect(up2.close).toBe(false);
   });
 
-  it('funziona sia per keydown che keyup', () => {
-    expect(shouldBlockEscapeEvent({ key: 'Escape' } as KeyboardEvent)).toBe(true);
-    expect(shouldBlockEscapeEvent({ key: 'Escape' } as KeyboardEvent)).toBe(true);
+  it('un keyup di un altro tasto in mezzo non consuma il flag', () => {
+    let state = reduceEscapeGuard(open, { type: 'keydown', key: 'Escape' }).nextState;
+    const shift = reduceEscapeGuard(state, { type: 'keyup', key: 'Shift' });
+    expect(shift.block).toBe(false);
+    expect(shift.nextState.swallowEscapeKeyup).toBe(true);
+    state = shift.nextState;
+    expect(reduceEscapeGuard(state, { type: 'keyup', key: 'Escape' }).block).toBe(true);
   });
-});
 
-describe('setupEscapeHandling', () => {
-  // Stub minimale di EventTarget che traccia listener e permette dispatch
-  class EventTargetStub {
-    private listeners = new Map<string, Array<{ fn: (e: Event) => void; options?: any }>>();
+  it('blur della finestra azzera il flag', () => {
+    const state = reduceEscapeGuard(open, { type: 'keydown', key: 'Escape' }).nextState;
+    const blurred = reduceEscapeGuard(state, { type: 'blur' });
+    expect(blurred.block).toBe(false);
+    expect(blurred.nextState.swallowEscapeKeyup).toBe(false);
+    expect(reduceEscapeGuard(blurred.nextState, { type: 'keyup', key: 'Escape' }).block).toBe(false);
+  });
 
-    addEventListener(event: string, fn: (e: Event) => void, options?: boolean | any) {
-      if (!this.listeners.has(event)) {
-        this.listeners.set(event, []);
+  it('autorepeat del keydown dopo la chiusura resta bloccato senza richiudere', () => {
+    const state = reduceEscapeGuard(open, { type: 'keydown', key: 'Escape' }).nextState;
+    const repeat = reduceEscapeGuard(state, { type: 'keydown', key: 'Escape' });
+    expect(repeat.block).toBe(true);
+    expect(repeat.close).toBe(false);
+    expect(repeat.nextState.swallowEscapeKeyup).toBe(true);
+  });
+
+  it('menu chiuso: non blocca mai', () => {
+    for (const type of ['keydown', 'keyup'] as const) {
+      for (const key of ['Escape', 'Enter', 'Tab']) {
+        const r = reduceEscapeGuard(closed, { type, key });
+        expect(r.block).toBe(false);
+        expect(r.close).toBe(false);
+        expect(r.nextState).toEqual(closed);
       }
-      // Normalizza options: se è boolean, è il valore di capture
-      const normalizedOptions = typeof options === 'boolean' ? { capture: options } : options;
-      this.listeners.get(event)!.push({ fn, options: normalizedOptions });
     }
-
-    removeEventListener(event: string, fn: (e: Event) => void) {
-      const list = this.listeners.get(event);
-      if (list) {
-        const index = list.findIndex((l) => l.fn === fn);
-        if (index !== -1) {
-          list.splice(index, 1);
-        }
-      }
-    }
-
-    dispatchEvent(event: Event, phase: 'capture' | 'bubble' = 'bubble') {
-      const list = this.listeners.get(event.type);
-      if (!list) return;
-
-      for (const { fn, options } of list) {
-        // Esegui solo listener in capture phase se richiesto
-        if (phase === 'capture' && options?.capture !== true) continue;
-        if (phase === 'bubble' && options?.capture === true) continue;
-
-        fn(event);
-
-        // Se once: true, rimuovi dopo la prima esecuzione
-        if (options?.once) {
-          this.removeEventListener(event.type, fn);
-        }
-      }
-    }
-
-    getListenerCount(event: string, capture?: boolean): number {
-      const list = this.listeners.get(event);
-      if (!list) return 0;
-      if (capture === undefined) return list.length;
-      return list.filter((l) => l.options?.capture === capture).length;
-    }
-  }
-
-  function createKeyboardEvent(key: string, type: 'keydown' | 'keyup'): Event {
-    const event = {
-      type,
-      key,
-      preventDefault: vi.fn(),
-      stopPropagation: vi.fn(),
-      stopImmediatePropagation: vi.fn(),
-    } as unknown as Event;
-    return event;
-  }
-
-  it('blocca keydown Escape e aggiunge one-shot listener per keyup', () => {
-    const stub = new EventTargetStub();
-    const onEscape = vi.fn();
-    const cleanup = setupEscapeHandling(stub as any, onEscape);
-
-    expect(stub.getListenerCount('keydown', true)).toBe(1);
-    expect(stub.getListenerCount('keyup', true)).toBe(0);
-
-    const keydownEvent = createKeyboardEvent('Escape', 'keydown');
-    stub.dispatchEvent(keydownEvent, 'capture');
-
-    expect(keydownEvent.preventDefault).toHaveBeenCalled();
-    expect(keydownEvent.stopPropagation).toHaveBeenCalled();
-    expect(keydownEvent.stopImmediatePropagation).toHaveBeenCalled();
-    expect(onEscape).toHaveBeenCalledTimes(1);
-    expect(stub.getListenerCount('keyup', true)).toBe(1);
-
-    cleanup();
+    expect(reduceEscapeGuard(closed, { type: 'blur' }).block).toBe(false);
   });
 
-  it('il one-shot listener keyup blocca Escape e si rimuove', () => {
-    const stub = new EventTargetStub();
-    const onEscape = vi.fn();
-    const cleanup = setupEscapeHandling(stub as any, onEscape);
-
-    const keydownEvent = createKeyboardEvent('Escape', 'keydown');
-    stub.dispatchEvent(keydownEvent, 'capture');
-
-    expect(stub.getListenerCount('keyup', true)).toBe(1);
-
-    const keyupEvent = createKeyboardEvent('Escape', 'keyup');
-    stub.dispatchEvent(keyupEvent, 'capture');
-
-    expect(keyupEvent.preventDefault).toHaveBeenCalled();
-    expect(keyupEvent.stopImmediatePropagation).toHaveBeenCalled();
-    expect(stub.getListenerCount('keyup', true)).toBe(0);
-
-    cleanup();
-  });
-
-  it('non blocca altri tasti', () => {
-    const stub = new EventTargetStub();
-    const onEscape = vi.fn();
-    const cleanup = setupEscapeHandling(stub as any, onEscape);
-
-    const enterEvent = createKeyboardEvent('Enter', 'keydown');
-    stub.dispatchEvent(enterEvent, 'capture');
-
-    expect(enterEvent.preventDefault).not.toHaveBeenCalled();
-    expect(onEscape).not.toHaveBeenCalled();
-    expect(stub.getListenerCount('keyup', true)).toBe(0);
-
-    cleanup();
-  });
-
-  it('cleanup rimuove tutti i listener', () => {
-    const stub = new EventTargetStub();
-    const onEscape = vi.fn();
-    const cleanup = setupEscapeHandling(stub as any, onEscape);
-
-    const keydownEvent = createKeyboardEvent('Escape', 'keydown');
-    stub.dispatchEvent(keydownEvent, 'capture');
-
-    expect(stub.getListenerCount('keydown', true)).toBe(1);
-    expect(stub.getListenerCount('keyup', true)).toBe(1);
-
-    cleanup();
-
-    expect(stub.getListenerCount('keydown', true)).toBe(0);
-    expect(stub.getListenerCount('keyup', true)).toBe(0);
-  });
-
-  it('keydown Escape successivi puliscono il one-shot precedente', () => {
-    const stub = new EventTargetStub();
-    const onEscape = vi.fn();
-    const cleanup = setupEscapeHandling(stub as any, onEscape);
-
-    // Primo keydown
-    stub.dispatchEvent(createKeyboardEvent('Escape', 'keydown'), 'capture');
-    expect(stub.getListenerCount('keyup', true)).toBe(1);
-    expect(onEscape).toHaveBeenCalledTimes(1);
-
-    // Secondo keydown (prima che arrivi il primo keyup)
-    stub.dispatchEvent(createKeyboardEvent('Escape', 'keydown'), 'capture');
-    expect(stub.getListenerCount('keyup', true)).toBe(1); // Ancora solo uno
-    expect(onEscape).toHaveBeenCalledTimes(2);
-
-    cleanup();
+  it('menu aperto: gli altri tasti non vengono toccati', () => {
+    const r = reduceEscapeGuard(open, { type: 'keydown', key: 'ArrowDown' });
+    expect(r.block).toBe(false);
+    expect(r.close).toBe(false);
+    expect(r.nextState).toEqual(open);
   });
 });

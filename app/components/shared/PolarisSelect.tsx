@@ -60,71 +60,64 @@ export function mapOptionsForList(options: PolarisSelectOption[]) {
 }
 
 /**
- * Decide se l'evento deve essere bloccato per non chiudere la Modal genitore.
- * Restituisce true se è un Escape da bloccare.
+ * Stato della guardia sull'Escape. Vive in ref nel componente, non in state React,
+ * così i listener registrati una sola volta leggono sempre il valore aggiornato.
+ * - open: il menu è aperto (rispecchia popoverActive).
+ * - swallowEscapeKeyup: abbiamo chiuso il menu su un keydown Escape e il keyup
+ *   dello stesso tasto non deve arrivare alla Modal (Polaris Dialog chiude su keyup).
  */
-export function shouldBlockEscapeEvent(event: KeyboardEvent | React.KeyboardEvent): boolean {
-  return event.key === 'Escape';
+export interface EscapeGuardState {
+  open: boolean;
+  swallowEscapeKeyup: boolean;
+}
+
+export type EscapeGuardEvent =
+  | { type: 'keydown' | 'keyup'; key: string }
+  | { type: 'blur' };
+
+export interface EscapeGuardResult {
+  /** Fermare l'evento (preventDefault + stopPropagation) prima che arrivi alla Modal. */
+  block: boolean;
+  /** Chiudere il menu e riportare il focus sul pulsante. */
+  close: boolean;
+  nextState: EscapeGuardState;
 }
 
 /**
- * Gestisce keydown/keyup Escape su window per bloccare la chiusura della Modal.
- * Logica estratta per test senza React.
+ * Logica pura della guardia sull'Escape: dato lo stato e l'evento, decide se
+ * bloccare, se chiudere il menu e quale sarà lo stato successivo.
  */
-export function setupEscapeHandling(
-  window: Window | EventTarget,
-  onEscape: () => void
-): () => void {
-  let keyupHandlerRef: ((e: Event) => void) | null = null;
-  let cleanupTimeoutId: ReturnType<typeof setTimeout> | null = null;
+export function reduceEscapeGuard(
+  state: EscapeGuardState,
+  event: EscapeGuardEvent
+): EscapeGuardResult {
+  // Il keyup potrebbe non arrivare mai (finestra che perde il focus): azzera il flag.
+  if (event.type === 'blur') {
+    return { block: false, close: false, nextState: { ...state, swallowEscapeKeyup: false } };
+  }
 
-  const cleanupKeyupHandler = () => {
-    if (keyupHandlerRef) {
-      window.removeEventListener('keyup', keyupHandlerRef, true);
-      keyupHandlerRef = null;
+  // Gli altri tasti non toccano lo stato: un modificatore rilasciato prima
+  // dell'Escape non deve consumare il flag.
+  if (event.key !== 'Escape') {
+    return { block: false, close: false, nextState: state };
+  }
+
+  if (event.type === 'keydown') {
+    if (state.open) {
+      return { block: true, close: true, nextState: { open: false, swallowEscapeKeyup: true } };
     }
-    if (cleanupTimeoutId !== null) {
-      clearTimeout(cleanupTimeoutId);
-      cleanupTimeoutId = null;
+    // Autorepeat dello stesso tasto tenuto premuto dopo la chiusura: resta nostro.
+    if (state.swallowEscapeKeyup) {
+      return { block: true, close: false, nextState: state };
     }
-  };
+    return { block: false, close: false, nextState: state };
+  }
 
-  const handleKeyDown = (event: Event) => {
-    const kbEvent = event as KeyboardEvent;
-    if (shouldBlockEscapeEvent(kbEvent)) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-
-      // Cleanup any previous one-shot handler
-      cleanupKeyupHandler();
-
-      // Aggiungi one-shot listener per keyup che sopravvive alla chiusura del popover
-      keyupHandlerRef = (e: Event) => {
-        if (shouldBlockEscapeEvent(e as KeyboardEvent)) {
-          e.preventDefault();
-          e.stopPropagation();
-          e.stopImmediatePropagation();
-        }
-        cleanupKeyupHandler();
-      };
-
-      window.addEventListener('keyup', keyupHandlerRef, { capture: true, once: true });
-
-      // Fallback: rimuovi dopo 500ms se keyup non arriva (es. focus perso)
-      cleanupTimeoutId = setTimeout(cleanupKeyupHandler, 500);
-
-      onEscape();
-    }
-  };
-
-  window.addEventListener('keydown', handleKeyDown, true);
-
-  // Cleanup: rimuovi listener keydown e qualsiasi keyup pending
-  return () => {
-    window.removeEventListener('keydown', handleKeyDown, true);
-    cleanupKeyupHandler();
-  };
+  // keyup Escape
+  if (state.swallowEscapeKeyup) {
+    return { block: true, close: false, nextState: { ...state, swallowEscapeKeyup: false } };
+  }
+  return { block: false, close: false, nextState: state };
 }
 
 /**
@@ -132,7 +125,7 @@ export function setupEscapeHandling(
  *
  * Accessibilità:
  * - Apertura con Enter/Space o click
- * - Chiusura con Escape (bloccato via native listener capture-phase per non chiudere Modal)
+ * - Chiusura con Escape: keydown e keyup fermati in capture su window, così la Modal resta aperta
  * - Focus torna al trigger dopo la selezione o Escape
  * - Label e valore collegati al trigger tramite Labelled + ariaDescribedBy
  */
@@ -187,11 +180,50 @@ export function PolarisSelect({
     [onChange, closePopoverAndRefocus, value]
   );
 
-  // Setup Escape handling: one-shot keyup listener sopravvive alla chiusura del popover
+  // Stato della guardia Escape in ref: i listener sotto sono registrati una sola volta.
+  const isOpenRef = useRef(false);
+  const swallowEscapeKeyupRef = useRef(false);
+  const closePopoverAndRefocusRef = useRef(closePopoverAndRefocus);
+  closePopoverAndRefocusRef.current = closePopoverAndRefocus;
+
   useEffect(() => {
-    if (!popoverActive) return;
-    return setupEscapeHandling(window, closePopoverAndRefocus);
-  }, [popoverActive, closePopoverAndRefocus]);
+    isOpenRef.current = popoverActive;
+  }, [popoverActive]);
+
+  // Listener in capture su window, registrati al mount e rimossi solo all'unmount.
+  // Così il keyup dell'Escape viene fermato anche dopo che il menu si è chiuso
+  // sul keydown, prima che arrivi al listener keyup della Modal su document.
+  useEffect(() => {
+    const handle = (event: Event) => {
+      const guardEvent: EscapeGuardEvent =
+        event.type === 'blur'
+          ? { type: 'blur' }
+          : { type: event.type as 'keydown' | 'keyup', key: (event as KeyboardEvent).key };
+      const result = reduceEscapeGuard(
+        { open: isOpenRef.current, swallowEscapeKeyup: swallowEscapeKeyupRef.current },
+        guardEvent
+      );
+      isOpenRef.current = result.nextState.open;
+      swallowEscapeKeyupRef.current = result.nextState.swallowEscapeKeyup;
+      if (result.block) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        event.stopPropagation();
+      }
+      if (result.close) {
+        closePopoverAndRefocusRef.current();
+      }
+    };
+
+    window.addEventListener('keydown', handle, true);
+    window.addEventListener('keyup', handle, true);
+    window.addEventListener('blur', handle);
+    return () => {
+      window.removeEventListener('keydown', handle, true);
+      window.removeEventListener('keyup', handle, true);
+      window.removeEventListener('blur', handle);
+    };
+  }, []);
 
   const selectedLabel = getSelectedLabel(options, value, placeholder);
   const listOptions = mapOptionsForList(options);
