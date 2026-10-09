@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { previewLines, canSaveMapping, isValidOAuthMessage } from './IntegrationsModal';
+import { describe, it, expect, vi } from 'vitest';
+import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions } from './IntegrationsModal';
 import { INTEGRATIONS } from '~/lib/integrations/registry';
 
 describe('IntegrationsModal', () => {
@@ -12,6 +12,148 @@ describe('IntegrationsModal', () => {
     it('returns empty string when provider not found', () => {
       const integration = INTEGRATIONS.find((i) => i.id === 'nonexistent' as any);
       expect(integration).toBeUndefined();
+    });
+  });
+
+  describe('buildFooterActions', () => {
+    const mockCallbacks = {
+      onSave: vi.fn(),
+      onImport: vi.fn(),
+      onConnect: vi.fn(),
+    };
+
+    const baseInput = {
+      canSave: true,
+      hasMapping: true,
+      running: false,
+      saving: false,
+      importing: false,
+      connectLabel: 'Connect',
+      reconnectLabel: 'Reconnect',
+      saveLabel: 'Save',
+      importLabel: 'Import',
+      ...mockCallbacks,
+    };
+
+    it('not_connected: primary Collega, no secondary', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'not_connected',
+      });
+
+      expect(result.primary).toEqual({
+        content: 'Connect',
+        loading: false,
+        onAction: mockCallbacks.onConnect,
+      });
+      expect(result.secondary).toEqual([]);
+    });
+
+    it('needs_reconnect: primary Riconnetti, no secondary', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'needs_reconnect',
+      });
+
+      expect(result.primary).toEqual({
+        content: 'Reconnect',
+        loading: false,
+        onAction: mockCallbacks.onConnect,
+      });
+      expect(result.secondary).toEqual([]);
+    });
+
+    it('connected: primary Salva (disabled when !canSave), secondary Importa dati', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'connected',
+        canSave: true,
+      });
+
+      expect(result.primary).toEqual({
+        content: 'Save',
+        loading: false,
+        disabled: false,
+        onAction: mockCallbacks.onSave,
+      });
+      expect(result.secondary).toHaveLength(1);
+      expect(result.secondary[0]).toEqual({
+        content: 'Import',
+        loading: false,
+        disabled: false,
+        onAction: mockCallbacks.onImport,
+      });
+    });
+
+    it('connected: Salva disabled when canSave is false', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'connected',
+        canSave: false,
+      });
+
+      expect(result.primary?.disabled).toBe(true);
+    });
+
+    it('connected: Salva loading when saving is true', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'connected',
+        saving: true,
+      });
+
+      expect(result.primary?.loading).toBe(true);
+    });
+
+    it('connected: Importa disabled when no mapping', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'connected',
+        hasMapping: false,
+      });
+
+      expect(result.secondary[0].disabled).toBe(true);
+    });
+
+    it('connected: Importa disabled when running', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'connected',
+        running: true,
+      });
+
+      expect(result.secondary[0].disabled).toBe(true);
+    });
+
+    it('connected: Importa loading when importing', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'connected',
+        importing: true,
+      });
+
+      expect(result.secondary[0].loading).toBe(true);
+    });
+
+    it('connected: Importa loading when running', () => {
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'connected',
+        running: true,
+      });
+
+      expect(result.secondary[0].loading).toBe(true);
+    });
+
+    it('callbacks reflect the latest values passed', () => {
+      const newSave = vi.fn();
+      const result = buildFooterActions({
+        ...baseInput,
+        status: 'connected',
+        onSave: newSave,
+      });
+
+      expect(result.primary?.onAction).toBe(newSave);
     });
   });
 });

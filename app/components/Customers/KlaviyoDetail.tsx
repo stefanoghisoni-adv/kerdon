@@ -19,7 +19,7 @@ import {
   Divider,
   Link,
 } from '@shopify/polaris';
-import { useT } from '~/lib/i18n/context';
+import { useT, useLocale } from '~/lib/i18n/context';
 import type { DateFormat } from '~/lib/integrations/values';
 import { previewLines, canSaveMapping, isValidOAuthMessage } from './IntegrationsModal';
 import type { Sample } from './IntegrationsModal';
@@ -115,6 +115,7 @@ export function decideDateFormat({
 
 export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) {
   const t = useT();
+  const locale = useLocale();
   const revalidator = useRevalidator();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -414,30 +415,24 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
     oauthFetcher.load('/api/integrations/klaviyo/oauth-url');
   }, [oauthFetcher]);
 
-  // I13 FIX: Show spinner whenever !statusFetcher.data (covers first frame)
-  const isLoadingStatus = !statusFetcher.data;
-
-  // Entrata Klaviyo dal registro per logo e nome
-  const klaviyoEntry = INTEGRATIONS.find((i) => i.id === 'klaviyo');
-
   // Handler per il link ai conflitti: chiude la modal e naviga
   const handleConflictsClick = useCallback(() => {
     onClose();
     navigate(buildConflictsUrl(searchParams.toString()));
   }, [onClose, navigate, searchParams]);
 
-  if (isLoadingStatus) {
-    return (
-      <BlockStack gap="400" inlineAlign="center">
-        <Spinner size="small" />
-      </BlockStack>
-    );
-  }
+  // Computed values needed for footer actions (before early return)
+  const selectedProp = properties.find((p) => p.key === selectedProperty);
+  const canSave = canSaveMapping({
+    sourceKey: selectedProperty,
+    ambiguous: selectedProp?.ambiguous ?? false,
+    dateFormat: dateFormat as DateFormat,
+  });
 
-  // Not connected / needs_reconnect
-  if (status === 'not_connected' || status === 'needs_reconnect') {
-    // Esponi il pulsante di collegamento come primaryAction del footer
-    useEffect(() => {
+  // Esponi le azioni del footer (PRIMA di ogni early return per evitare hook violation)
+  useEffect(() => {
+    if (status === 'not_connected' || status === 'needs_reconnect') {
+      // Not connected: pulsante collegamento come primaryAction
       onActionsChange(
         {
           content: status === 'needs_reconnect'
@@ -448,7 +443,59 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
         },
         []
       );
-    }, [status, oauthFetcher.state, connectFetcher.state]);
+    } else if (status === 'connected') {
+      // Connected: Salva + Importa dati
+      onActionsChange(
+        {
+          content: t.customers.klaviyoDetail.save,
+          loading: saveMappingFetcher.state === 'submitting',
+          disabled: !canSave,
+          onAction: handleSaveMapping,
+        },
+        [
+          {
+            content: t.customers.integrations.importData,
+            loading: importFetcher.state !== 'idle' || statusFetcher.data?.running === true,
+            disabled: !mapping || statusFetcher.data?.running === true,
+            onAction: () => handleImport(),
+          },
+        ]
+      );
+    }
+  }, [
+    status,
+    oauthFetcher.state,
+    connectFetcher.state,
+    canSave,
+    saveMappingFetcher.state,
+    importFetcher.state,
+    mapping,
+    statusFetcher.data?.running,
+    handleConnect,
+    handleSaveMapping,
+    handleImport,
+    t,
+    onActionsChange,
+  ]);
+
+  // I13 FIX: Show spinner whenever !statusFetcher.data (covers first frame)
+  const isLoadingStatus = !statusFetcher.data;
+
+  // Entrata Klaviyo dal registro per logo e nome
+  const klaviyoEntry = INTEGRATIONS.find((i) => i.id === 'klaviyo');
+
+  if (isLoadingStatus) {
+    return (
+      <Modal.Section>
+        <BlockStack gap="400" inlineAlign="center">
+          <Spinner size="small" />
+        </BlockStack>
+      </Modal.Section>
+    );
+  }
+
+  // Not connected / needs_reconnect
+  if (status === 'not_connected' || status === 'needs_reconnect') {
 
     return (
       <Modal.Section>
@@ -478,13 +525,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   }
 
   // Connected: struttura a 3 sezioni
-  const selectedProp = properties.find((p) => p.key === selectedProperty);
   const previews = selectedProp ? previewLines(selectedProp.samples, dateFormat as DateFormat) : [];
-  const canSave = canSaveMapping({
-    sourceKey: selectedProperty,
-    ambiguous: selectedProp?.ambiguous ?? false,
-    dateFormat: dateFormat as DateFormat,
-  });
 
   // Determina lo stato del tile (per il colore e il testo dello stato)
   const integrationStatus: IntegrationStatus | undefined = statusFetcher.data
@@ -503,29 +544,9 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
     ? tileState(klaviyoEntry, integrationStatus)
     : { label: 'tileInstalled' as const, tone: 'success' as const, clickable: true };
 
-  // Esponi le azioni «Salva» e «Importa dati» al footer
-  useEffect(() => {
-    onActionsChange(
-      {
-        content: t.customers.klaviyoDetail.save,
-        loading: saveMappingFetcher.state === 'submitting',
-        disabled: !canSave,
-        onAction: handleSaveMapping,
-      },
-      [
-        {
-          content: t.customers.integrations.importData,
-          loading: importFetcher.state !== 'idle' || statusFetcher.data?.running === true,
-          disabled: !mapping || statusFetcher.data?.running === true,
-          onAction: () => handleImport(),
-        },
-      ]
-    );
-  }, [canSave, saveMappingFetcher.state, importFetcher.state, mapping, statusFetcher.data?.running]);
-
-  // Formatta la data dell'ultimo import
+  // Formatta la data dell'ultimo import con il locale del merchant
   const lastRunDate = statusFetcher.data?.lastRun?.finishedAt
-    ? new Date(statusFetcher.data.lastRun.finishedAt).toLocaleString('it-IT', {
+    ? new Date(statusFetcher.data.lastRun.finishedAt).toLocaleString(locale, {
         year: 'numeric',
         month: 'short',
         day: 'numeric',

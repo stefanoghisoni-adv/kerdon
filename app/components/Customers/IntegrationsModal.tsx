@@ -2,7 +2,7 @@
 //
 // Modal di configurazione per la singola integrazione.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Modal } from '@shopify/polaris';
 import {
   INTEGRATIONS,
@@ -110,6 +110,94 @@ export function isValidOAuthMessage(
   return isValidPopupMessage(event, popupWindow, appOrigin, 'klaviyo-oauth');
 }
 
+export type FooterAction = {
+  content: string;
+  loading?: boolean;
+  disabled?: boolean;
+  onAction: () => void;
+};
+
+export interface FooterActionsInput {
+  status: 'connected' | 'not_connected' | 'needs_reconnect';
+  canSave: boolean;
+  hasMapping: boolean;
+  running: boolean;
+  saving: boolean;
+  importing: boolean;
+  onSave: () => void;
+  onImport: () => void;
+  onConnect: () => void;
+  connectLabel: string;
+  reconnectLabel: string;
+  saveLabel: string;
+  importLabel: string;
+}
+
+/**
+ * Costruisce le azioni del footer della modal in base allo stato.
+ * Funzione pura per testing.
+ */
+export function buildFooterActions(input: FooterActionsInput): {
+  primary: FooterAction | undefined;
+  secondary: FooterAction[];
+} {
+  const {
+    status,
+    canSave,
+    hasMapping,
+    running,
+    saving,
+    importing,
+    onSave,
+    onImport,
+    onConnect,
+    connectLabel,
+    reconnectLabel,
+    saveLabel,
+    importLabel,
+  } = input;
+
+  if (status === 'not_connected') {
+    return {
+      primary: {
+        content: connectLabel,
+        loading: false,
+        onAction: onConnect,
+      },
+      secondary: [],
+    };
+  }
+
+  if (status === 'needs_reconnect') {
+    return {
+      primary: {
+        content: reconnectLabel,
+        loading: false,
+        onAction: onConnect,
+      },
+      secondary: [],
+    };
+  }
+
+  // connected
+  return {
+    primary: {
+      content: saveLabel,
+      loading: saving,
+      disabled: !canSave,
+      onAction: onSave,
+    },
+    secondary: [
+      {
+        content: importLabel,
+        loading: importing || running,
+        disabled: !hasMapping || running,
+        onAction: onImport,
+      },
+    ],
+  };
+}
+
 export function IntegrationsModal({
   open,
   onClose,
@@ -122,6 +210,15 @@ export function IntegrationsModal({
   // Azioni per il footer della modal (esposte da KlaviyoDetail)
   const [primaryAction, setPrimaryAction] = useState<{ content: string; loading?: boolean; disabled?: boolean; onAction: () => void } | undefined>(undefined);
   const [secondaryActions, setSecondaryActions] = useState<Array<{ content: string; loading?: boolean; disabled?: boolean; onAction: () => void }>>([]);
+
+  // Callback stabile per esporre azioni (evita loop infinito nelle dipendenze)
+  const handleActionsChange = useCallback((
+    primary: { content: string; loading?: boolean; disabled?: boolean; onAction: () => void } | undefined,
+    secondary: Array<{ content: string; loading?: boolean; disabled?: boolean; onAction: () => void }>
+  ) => {
+    setPrimaryAction(primary);
+    setSecondaryActions(secondary);
+  }, []);
 
   // Reset actions when modal closes
   useEffect(() => {
@@ -142,10 +239,7 @@ export function IntegrationsModal({
       {integration?.id === 'klaviyo' && (
         <KlaviyoDetail
           onClose={onClose}
-          onActionsChange={(primary, secondary) => {
-            setPrimaryAction(primary);
-            setSecondaryActions(secondary);
-          }}
+          onActionsChange={handleActionsChange}
         />
       )}
     </Modal>
