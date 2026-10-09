@@ -1275,6 +1275,8 @@ export const it = {
       tileNotConnected: "Da collegare",
       tileNeedsAttention: "Richiede attenzione",
       tileNotAvailable: "Non disponibile",
+      /** Quando il dettaglio di un'integrazione non si apre. */
+      loadFailed: "Non riusciamo ad aprire l'integrazione in questo momento. Riprova tra poco.",
       /** Motivi per cui l'import non parte. */
       importReasons: {
         already_running: "Un import \u00e8 gi\u00e0 in corso.",

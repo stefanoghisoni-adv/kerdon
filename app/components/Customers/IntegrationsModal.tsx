@@ -10,7 +10,7 @@ import {
 } from '~/lib/integrations/registry';
 import type { DateFormat } from '~/lib/integrations/values';
 import { parseDate } from '~/lib/integrations/values';
-import { KlaviyoDetail } from './KlaviyoDetail';
+import { KlaviyoDetail, type StatusData } from './KlaviyoDetail';
 import {
   isValidOAuthMessage as isValidPopupMessage,
   type OAuthMessageValidation,
@@ -21,6 +21,8 @@ export interface IntegrationsModalProps {
   onClose: () => void;
   /** Provider dell'integrazione da configurare. */
   preselected?: IntegrationId | null;
+  /** Lo stato gia' letto prima di aprire: il dettaglio si mostra subito pronto. */
+  initialStatus?: StatusData | null;
 }
 
 export interface Sample {
@@ -222,6 +224,7 @@ export function IntegrationsModal({
   open,
   onClose,
   preselected,
+  initialStatus,
 }: IntegrationsModalProps) {
   // Trova l'integrazione dal provider preselezionato
   const integration = preselected ? INTEGRATIONS.find((i) => i.id === preselected) : null;
@@ -260,6 +263,7 @@ export function IntegrationsModal({
         <KlaviyoDetail
           onClose={onClose}
           onActionsChange={handleActionsChange}
+          initialStatus={initialStatus}
         />
       )}
     </Modal>

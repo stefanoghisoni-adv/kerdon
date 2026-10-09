@@ -21,7 +21,7 @@ describe('integrations registry', () => {
       expect(omnisend?.status).toBe('coming_soon');
       expect(omnisend?.name).toBe('Omnisend');
       expect(omnisend?.category).toBe('crm');
-      expect(omnisend?.logo).toBe('');
+      expect(omnisend?.logo).toBe('/integrations/omnisend.png');
     });
   });
 

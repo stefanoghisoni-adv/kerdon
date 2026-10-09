@@ -5,7 +5,7 @@
 // preservando i parametri esistenti.
 
 import { describe, it, expect } from 'vitest';
-import { tileState, buildConflictsUrl } from './IntegrationsCard';
+import { tileState, buildConflictsUrl, tileVisualState } from './IntegrationsCard';
 import type { IntegrationStatus } from './IntegrationsCard';
 import type { IntegrationEntry } from '~/lib/integrations/registry';
 import { INTEGRATIONS } from '~/lib/integrations/registry';
@@ -210,5 +210,49 @@ describe('buildConflictsUrl', () => {
     expect(url).toContain('from=2026-01-01');
     expect(url).toContain('to=2026-01-31');
     expect(url).toContain('view=conflicts');
+  });
+});
+
+describe('tileVisualState', () => {
+  const CLICKABLE = { clickable: true };
+  const NOT_AVAILABLE = { clickable: false };
+
+  it('nessun caricamento → cliccabile', () => {
+    expect(tileVisualState(CLICKABLE, null, 'klaviyo')).toEqual({
+      clickable: true,
+      loading: false,
+      disabledTemporarily: false,
+    });
+    expect(tileVisualState(CLICKABLE, undefined, 'klaviyo')).toEqual({
+      clickable: true,
+      loading: false,
+      disabledTemporarily: false,
+    });
+  });
+
+  it('il riquadro cliccato carica → spinner, non cliccabile', () => {
+    expect(tileVisualState(CLICKABLE, 'klaviyo', 'klaviyo')).toEqual({
+      clickable: false,
+      loading: true,
+      disabledTemporarily: false,
+    });
+  });
+
+  it('un altro riquadro carica → fermo per il momento', () => {
+    expect(tileVisualState(CLICKABLE, 'omnisend', 'klaviyo')).toEqual({
+      clickable: false,
+      loading: false,
+      disabledTemporarily: true,
+    });
+  });
+
+  it('non disponibile → mai cliccabile, mai in caricamento ne\' temporaneo', () => {
+    for (const pending of [null, 'klaviyo', 'omnisend'] as const) {
+      expect(tileVisualState(NOT_AVAILABLE, pending, 'omnisend')).toEqual({
+        clickable: false,
+        loading: false,
+        disabledTemporarily: false,
+      });
+    }
   });
 });

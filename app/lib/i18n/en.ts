@@ -995,6 +995,8 @@ export const en: typeof it = {
       tileNotConnected: "Not connected",
       tileNeedsAttention: "Needs attention",
       tileNotAvailable: "Not available",
+      /** When an integration's detail can't be opened. */
+      loadFailed: "We couldn't open this integration right now. Please try again shortly.",
       /** Reasons why import doesn't start. */
       importReasons: {
         already_running: "An import is already running.",
