@@ -220,6 +220,7 @@ export const en: typeof it = {
       retry: "I created the database",
       failed: "Could not connect to Supabase. Try again.",
       popupsBlocked: "Allow pop-ups to connect Supabase.",
+      openWindow: "Open the Supabase window",
       connectedWith: (email: string) => `Account connected with ${email}.`,
       connectedRow: "Account connected with",
       noEmail: "—",

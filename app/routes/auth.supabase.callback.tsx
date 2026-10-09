@@ -1,12 +1,25 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
-import { verifyState, saveTokens } from '~/lib/supabase-oauth.server';
-import { exchangeCode } from '~/lib/supabase-management.server';
+
+/**
+ * Il ritorno da Supabase: consegna, non decide.
+ *
+ * Questa pagina vive fuori dall'admin di Shopify e non ha una sessione: sa solo
+ * cosa c'e' nell'URL. Se scambiasse il codice e salvasse i token da se', il
+ * collegamento finirebbe sul negozio scritto nello `state` — e chi riceve da
+ * un altro negozio un link di autorizzazione gia' pronto, approvandolo,
+ * collegherebbe il PROPRIO account Supabase a quel negozio.
+ *
+ * Per questo qui non si scambia e non si salva niente: codice e stato vanno
+ * alla finestra dell'app che ha aperto questa (solo alla sua origine), e lo
+ * scambio lo fa `api.supabase.connect`, autenticata, solo se lo `state` e'
+ * del negozio della sessione. E' lo stesso disegno del ritorno da Klaviyo.
+ */
 
 // Serializza un valore per l'inserimento sicuro dentro un tag <script>.
 // JSON.stringify NON neutralizza `</script>` né i separatori di riga
-// U+2028/U+2029, quindi un `error` riflesso (dai query param di Supabase)
-// potrebbe spezzare il tag ed eseguire codice arbitrario (XSS). Escapiamo
-// `<`, `>`, `&` e i due separatori di riga come escape unicode.
+// U+2028/U+2029: `code` e `state` arrivano dall'URL, e chi li scrive potrebbe
+// spezzare il tag ed eseguire codice (XSS). Escapiamo `<`, `>`, `&` e i due
+// separatori di riga come escape unicode.
 function jsonForScript(value: unknown): string {
   return JSON.stringify(value).replace(
     /[<>&\u2028\u2029]/g,
@@ -26,10 +39,16 @@ function closePage(message: Record<string, unknown>, appOrigin: string): Respons
   window.close();
 })();
 </script>
-<p>Puoi chiudere questa finestra.</p>
+<p>Puoi chiudere questa finestra. / You can close this window.</p>
 </body></html>`;
   return new Response(html, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      // Il codice OAuth viaggia nell'URL di questa pagina: non va tenuto in
+      // nessuna cache ne' passato come Referer.
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+    },
   });
 }
 
@@ -42,7 +61,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const state = url.searchParams.get('state');
 
   if (error) {
-    return closePage({ type: 'supabase-oauth', ok: false, error }, appOrigin);
+    // Codici fissi: il valore grezzo di Supabase non passa alla finestra.
+    const mapped = error === 'access_denied' ? 'denied' : 'failed';
+    return closePage({ type: 'supabase-oauth', ok: false, error: mapped }, appOrigin);
   }
   if (!code || !state) {
     return closePage(
@@ -51,32 +72,5 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   }
 
-  const verified = verifyState(state);
-  if (!verified) {
-    return closePage({ type: 'supabase-oauth', ok: false, error: 'invalid_state' }, appOrigin);
-  }
-
-  const clientId = process.env.SUPABASE_OAUTH_CLIENT_ID;
-  const clientSecret = process.env.SUPABASE_OAUTH_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    console.error('[supabase callback] integrazione non configurata');
-    return closePage({ type: 'supabase-oauth', ok: false, error: 'not_configured' }, appOrigin);
-  }
-
-  try {
-    const tokens = await exchangeCode({
-      code,
-      clientId,
-      clientSecret,
-      redirectUri: `${appOrigin}/auth/supabase/callback`,
-    });
-    await saveTokens(verified.shopId, tokens);
-    return closePage({ type: 'supabase-oauth', ok: true }, appOrigin);
-  } catch (e) {
-    console.error(
-      '[supabase callback] exchange fallito:',
-      e instanceof Error ? e.message : 'errore sconosciuto',
-    );
-    return closePage({ type: 'supabase-oauth', ok: false, error: 'exchange_failed' }, appOrigin);
-  }
+  return closePage({ type: 'supabase-oauth', code, state }, appOrigin);
 }

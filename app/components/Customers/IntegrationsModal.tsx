@@ -28,6 +28,10 @@ import {
 import type { DateFormat } from '~/lib/integrations/values';
 import { parseDate } from '~/lib/integrations/values';
 import { KlaviyoDetail } from './KlaviyoDetail';
+import {
+  isValidOAuthMessage as isValidPopupMessage,
+  type OAuthMessageValidation,
+} from '~/lib/oauth-popup-message';
 
 export interface IntegrationsModalProps {
   open: boolean;
@@ -46,15 +50,7 @@ export interface PreviewLine {
   display: string;
 }
 
-export type OAuthMessageValidation =
-  | {
-      ok: true;
-      data: { code: string; state: string };
-    }
-  | {
-      ok: false;
-      error?: string;
-    };
+export type { OAuthMessageValidation } from '~/lib/oauth-popup-message';
 
 /**
  * Converts sample date values to human-readable preview lines using the given format.
@@ -119,56 +115,16 @@ export function canSaveMapping({
 }
 
 /**
- * Validates an OAuth callback message.
- *
- * Security rules (controller-mandated):
- * - popupWindow must not be null
- * - event.origin must match appOrigin
- * - event.source must match the popup window
- * - data must be a non-null object
- * - data.type must be 'klaviyo-oauth'
- * - For success: data.code and data.state must be present
- * - For error: data.ok === false and data.error present
- *
- * Returns { ok: true, data } for success or { ok: false, error } for known errors.
- * Returns { ok: false } (no error) when security checks fail (ignore silently).
- *
- * I5 FIX: Accepts error-shaped messages under the same origin+source checks.
- * I14 FIX: Rejects when popupRef is null, and when data is not a non-null object.
+ * Il messaggio di ritorno dalla finestra di Klaviyo: le regole stanno nella
+ * funzione condivisa con Supabase (`~/lib/oauth-popup-message`), qui si fissa
+ * solo il tipo atteso.
  */
 export function isValidOAuthMessage(
   event: MessageEvent,
   popupWindow: Window | null,
   appOrigin: string,
 ): OAuthMessageValidation {
-  // I14: Reject when popupRef is null
-  if (popupWindow === null) return { ok: false };
-
-  // Check origin
-  if (event.origin !== appOrigin) return { ok: false };
-
-  // Check source
-  if (event.source !== popupWindow) return { ok: false };
-
-  // I14: Harden data check (reject non-object or null)
-  const data = event.data;
-  if (typeof data !== 'object' || data === null) return { ok: false };
-
-  // Check type
-  if (data.type !== 'klaviyo-oauth') return { ok: false };
-
-  // I5: Accept error messages
-  if (data.ok === false && typeof data.error === 'string') {
-    return { ok: false, error: data.error };
-  }
-
-  // Success message: must have code and state
-  if (typeof data.code === 'string' && typeof data.state === 'string') {
-    return { ok: true, data: { code: data.code, state: data.state } };
-  }
-
-  // Unknown shape
-  return { ok: false };
+  return isValidPopupMessage(event, popupWindow, appOrigin, 'klaviyo-oauth');
 }
 
 export function IntegrationsModal({

@@ -267,6 +267,7 @@ export const it = {
       retry: "Ho creato il database",
       failed: "Collegamento a Supabase non riuscito. Riprova.",
       popupsBlocked: "Consenti i popup per collegare Supabase.",
+      openWindow: "Apri la finestra di Supabase",
       connectedWith: (email: string) => `Account connesso con ${email}.`,
       connectedRow: "Account connesso con",
       noEmail: "—",
