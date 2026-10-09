@@ -21,11 +21,14 @@ import {
 } from '@shopify/polaris';
 import { useT, useLocale } from '~/lib/i18n/context';
 import type { DateFormat } from '~/lib/integrations/values';
-import { previewLines, canSaveMapping, isValidOAuthMessage } from './IntegrationsModal';
+import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions } from './IntegrationsModal';
 import type { Sample } from './IntegrationsModal';
 import { useIntegrationImport } from './useIntegrationImport';
 import { buildConflictsUrl, tileState, type IntegrationStatus } from './IntegrationsCard';
 import { INTEGRATIONS } from '~/lib/integrations/registry';
+
+// Fallback stabile per evitare nuovi array identity ad ogni render
+const EMPTY_PROPERTIES: Property[] = [];
 
 export interface KlaviyoDetailProps {
   onClose: () => void;
@@ -152,7 +155,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   const status = statusFetcher.data?.status ?? 'not_connected';
   const accountName = statusFetcher.data?.accountName;
   const mapping = statusFetcher.data?.mapping;
-  const properties = propertiesFetcher.data?.properties ?? [];
+  const properties = propertiesFetcher.data?.properties ?? EMPTY_PROPERTIES;
 
   // Load properties when connected
   useEffect(() => {
@@ -429,51 +432,59 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
     dateFormat: dateFormat as DateFormat,
   });
 
-  // Esponi le azioni del footer (PRIMA di ogni early return per evitare hook violation)
+  // Refs per i latest handlers (aggiornati ad ogni render)
+  const handleConnectRef = useRef(handleConnect);
+  const handleSaveMappingRef = useRef(handleSaveMapping);
+  const handleImportRef = useRef(handleImport);
+
   useEffect(() => {
-    if (status === 'not_connected' || status === 'needs_reconnect') {
-      // Not connected: pulsante collegamento come primaryAction
-      onActionsChange(
-        {
-          content: status === 'needs_reconnect'
-            ? t.customers.integrations.reconnect
-            : t.customers.klaviyoDetail.connect,
-          loading: oauthFetcher.state === 'loading' || connectFetcher.state === 'submitting',
-          onAction: handleConnect,
-        },
-        []
-      );
-    } else if (status === 'connected') {
-      // Connected: Salva + Importa dati
-      onActionsChange(
-        {
-          content: t.customers.klaviyoDetail.save,
-          loading: saveMappingFetcher.state === 'submitting',
-          disabled: !canSave,
-          onAction: handleSaveMapping,
-        },
-        [
-          {
-            content: t.customers.integrations.importData,
-            loading: importFetcher.state !== 'idle' || statusFetcher.data?.running === true,
-            disabled: !mapping || statusFetcher.data?.running === true,
-            onAction: () => handleImport(),
-          },
-        ]
-      );
-    }
+    handleConnectRef.current = handleConnect;
+    handleSaveMappingRef.current = handleSaveMapping;
+    handleImportRef.current = handleImport;
+  });
+
+  // Wrapper callbacks stabili che chiamano ref.current (sincronamente)
+  const onConnect = useCallback(() => handleConnectRef.current(), []);
+  const onSave = useCallback(() => handleSaveMappingRef.current(), []);
+  const onImport = useCallback(() => handleImportRef.current(), []);
+
+  // Esponi le azioni del footer usando buildFooterActions (PRIMA di ogni early return)
+  useEffect(() => {
+    const connectLoading = oauthFetcher.state === 'loading' || connectFetcher.state === 'submitting';
+    const saving = saveMappingFetcher.state === 'submitting';
+    const importing = importFetcher.state !== 'idle';
+    const running = statusFetcher.data?.running ?? false;
+    const hasMapping = !!mapping;
+
+    const actions = buildFooterActions({
+      status,
+      canSave,
+      hasMapping,
+      running,
+      saving,
+      importing,
+      onSave,
+      onImport,
+      onConnect,
+      connectLabel: t.customers.klaviyoDetail.connect,
+      reconnectLabel: t.customers.integrations.reconnect,
+      saveLabel: t.customers.klaviyoDetail.save,
+      importLabel: t.customers.integrations.importData,
+    });
+
+    onActionsChange(actions.primary, actions.secondary);
   }, [
     status,
+    canSave,
+    mapping,
     oauthFetcher.state,
     connectFetcher.state,
-    canSave,
     saveMappingFetcher.state,
     importFetcher.state,
-    mapping,
     statusFetcher.data?.running,
-    handleConnect,
-    handleSaveMapping,
-    handleImport,
+    onConnect,
+    onSave,
+    onImport,
     t,
     onActionsChange,
   ]);

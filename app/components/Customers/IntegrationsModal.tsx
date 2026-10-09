@@ -124,6 +124,7 @@ export interface FooterActionsInput {
   running: boolean;
   saving: boolean;
   importing: boolean;
+  connectLoading?: boolean;
   onSave: () => void;
   onImport: () => void;
   onConnect: () => void;
@@ -148,6 +149,7 @@ export function buildFooterActions(input: FooterActionsInput): {
     running,
     saving,
     importing,
+    connectLoading = false,
     onSave,
     onImport,
     onConnect,
@@ -161,7 +163,7 @@ export function buildFooterActions(input: FooterActionsInput): {
     return {
       primary: {
         content: connectLabel,
-        loading: false,
+        loading: connectLoading,
         onAction: onConnect,
       },
       secondary: [],
@@ -172,7 +174,7 @@ export function buildFooterActions(input: FooterActionsInput): {
     return {
       primary: {
         content: reconnectLabel,
-        loading: false,
+        loading: connectLoading,
         onAction: onConnect,
       },
       secondary: [],
