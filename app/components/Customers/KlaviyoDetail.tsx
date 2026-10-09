@@ -474,7 +474,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
   // Esponi le azioni del footer usando buildFooterActions (PRIMA di ogni early return)
   useEffect(() => {
     const statusLoading = !statusFetcher.data;
-    const saving = saveMappingFetcher.state === 'submitting';
+    const saving = saveMappingFetcher.state === 'submitting' || saveMappingFetcher.state === 'loading';
     const importing = importFetcher.state !== 'idle';
     const running = statusFetcher.data?.running ?? false;
     const hasSavedMapping = !!mapping;
@@ -492,6 +492,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
       running,
       saving,
       importing,
+      onCancel: onClose,
       onSave,
       onImport,
       cancelLabel: t.common.cancel,
@@ -510,6 +511,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
     saveMappingFetcher.state,
     importFetcher.state,
     statusFetcher.data?.running,
+    onClose,
     onSave,
     onImport,
     t,
@@ -534,6 +536,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
 
   // Not connected / needs_reconnect
   if (status === 'not_connected' || status === 'needs_reconnect') {
+    const connectLoading = oauthFetcher.state === 'loading' || connectFetcher.state === 'submitting';
 
     return (
       <Modal.Section>
@@ -557,6 +560,16 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
               {t.customers.klaviyoDetail.popupBlocked}
             </Banner>
           )}
+
+          <Button
+            variant="primary"
+            onClick={handleConnect}
+            loading={connectLoading}
+          >
+            {status === 'needs_reconnect'
+              ? t.customers.integrations.reconnect
+              : t.customers.klaviyoDetail.connect}
+          </Button>
         </BlockStack>
       </Modal.Section>
     );
@@ -682,7 +695,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
 
           <FormLayout>
             <FormLayout.Group>
-              <div>
+              <BlockStack gap="100">
                 <InlineStack gap="100" blockAlign="center" wrap={false}>
                   <Text as="p" variant="bodyMd">
                     {t.customers.klaviyoDetail.klaviyoPropertyLabel}
@@ -704,7 +717,7 @@ export function KlaviyoDetail({ onClose, onActionsChange }: KlaviyoDetailProps) 
                   onChange={setSelectedProperty}
                   disabled={propertiesFetcher.state === 'loading'}
                 />
-              </div>
+              </BlockStack>
 
               <Select
                 label={t.customers.klaviyoDetail.kerdonFieldLabel}

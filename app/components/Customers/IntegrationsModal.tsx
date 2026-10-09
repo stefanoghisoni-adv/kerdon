@@ -146,6 +146,7 @@ export interface FooterActionsInput {
   running: boolean;
   saving: boolean;
   importing: boolean;
+  onCancel: () => void;
   onSave: () => void;
   onImport: () => void;
   cancelLabel: string;
@@ -175,6 +176,7 @@ export function buildFooterActions(input: FooterActionsInput): {
     running,
     saving,
     importing,
+    onCancel,
     onSave,
     onImport,
     cancelLabel,
@@ -182,70 +184,37 @@ export function buildFooterActions(input: FooterActionsInput): {
     importLabel,
   } = input;
 
-  // Mentre lo status carica: solo «Annulla» abilitato
-  if (statusLoading) {
-    return {
-      primary: {
-        content: importLabel,
-        disabled: true,
-        onAction: onImport,
-      },
-      secondary: [
-        {
-          content: cancelLabel,
-          onAction: () => {}, // Placeholder: sarà gestito dal genitore (onClose)
-        },
-        {
-          content: updateSelectionLabel,
-          disabled: true,
-          onAction: onSave,
-        },
-      ],
-    };
-  }
+  // Determina lo stato di «Aggiorna selezione» e «Importa dati» in base allo stato
+  const isConnected = status === 'connected';
 
-  // not_connected o needs_reconnect: «Aggiorna selezione» e «Importa dati» disabilitati
-  if (status === 'not_connected' || status === 'needs_reconnect') {
-    return {
-      primary: {
-        content: importLabel,
-        disabled: true,
-        onAction: onImport,
-      },
-      secondary: [
-        {
-          content: cancelLabel,
-          onAction: () => {}, // Placeholder: sarà gestito dal genitore (onClose)
-        },
-        {
-          content: updateSelectionLabel,
-          disabled: true,
-          onAction: onSave,
-        },
-      ],
-    };
-  }
+  // «Aggiorna selezione»: disabilitato se not_connected/needs_reconnect o se !isDirty o !canSave quando connected
+  const updateSelectionDisabled = !isConnected || !isDirty || !canSave;
 
-  // connected: logica completa
+  // «Importa dati»: disabilitato se not_connected/needs_reconnect o se !hasSavedMapping o isDirty o running quando connected
+  const importDisabled = !isConnected || !hasSavedMapping || isDirty || running;
+
+  // Costruisci il secondary array una sola volta
+  const secondary: FooterAction[] = [
+    {
+      content: cancelLabel,
+      onAction: onCancel,
+    },
+    {
+      content: updateSelectionLabel,
+      loading: saving,
+      disabled: updateSelectionDisabled || statusLoading,
+      onAction: onSave,
+    },
+  ];
+
   return {
     primary: {
       content: importLabel,
       loading: importing || running,
-      disabled: !hasSavedMapping || isDirty || running,
+      disabled: importDisabled || statusLoading,
       onAction: onImport,
     },
-    secondary: [
-      {
-        content: cancelLabel,
-        onAction: () => {}, // Placeholder: sarà gestito dal genitore (onClose)
-      },
-      {
-        content: updateSelectionLabel,
-        loading: saving,
-        disabled: !isDirty || !canSave,
-        onAction: onSave,
-      },
-    ],
+    secondary,
   };
 }
 

@@ -1055,7 +1055,6 @@ export const en: typeof it = {
       birthdate: "Birthdate",
       dateFormatLabel: "Date format",
       previewTitle: "Preview",
-      save: "Save",
       oauthErrors: {
         denied: "Authorization denied. Grant permissions to connect Klaviyo.",
         failed: "Connection failed. Please try again.",

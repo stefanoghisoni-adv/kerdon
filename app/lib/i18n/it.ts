@@ -1335,7 +1335,6 @@ export const it = {
       birthdate: "Data di nascita",
       dateFormatLabel: "Formato data",
       previewTitle: "Anteprima",
-      save: "Salva",
       oauthErrors: {
         denied: "Autorizzazione negata. Concedi i permessi per collegare Klaviyo.",
         failed: "Collegamento non riuscito. Riprova.",

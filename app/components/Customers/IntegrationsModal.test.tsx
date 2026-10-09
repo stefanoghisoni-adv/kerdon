@@ -3,6 +3,7 @@ import { previewLines, canSaveMapping, isValidOAuthMessage, buildFooterActions, 
 
 describe('buildFooterActions', () => {
   const mockCallbacks = {
+    onCancel: vi.fn(),
     onSave: vi.fn(),
     onImport: vi.fn(),
   };
@@ -165,6 +166,43 @@ describe('buildFooterActions', () => {
     });
 
     expect(result.primary?.disabled).toBe(false);
+  });
+
+  it('onCancel is wired to secondary[0] in all states', () => {
+    const onCancel = vi.fn();
+
+    // statusLoading
+    let result = buildFooterActions({
+      ...baseInput,
+      statusLoading: true,
+      status: 'not_connected',
+      onCancel,
+    });
+    expect(result.secondary[0].onAction).toBe(onCancel);
+
+    // not_connected
+    result = buildFooterActions({
+      ...baseInput,
+      status: 'not_connected',
+      onCancel,
+    });
+    expect(result.secondary[0].onAction).toBe(onCancel);
+
+    // needs_reconnect
+    result = buildFooterActions({
+      ...baseInput,
+      status: 'needs_reconnect',
+      onCancel,
+    });
+    expect(result.secondary[0].onAction).toBe(onCancel);
+
+    // connected
+    result = buildFooterActions({
+      ...baseInput,
+      status: 'connected',
+      onCancel,
+    });
+    expect(result.secondary[0].onAction).toBe(onCancel);
   });
 });
 
