@@ -183,6 +183,30 @@ interface IntegrationTileProps {
 function IntegrationTile({ entry, state, onManage }: IntegrationTileProps) {
   const t = useT();
 
+  // Logo: per le voci non disponibili, avvolto in un elemento con classe CSS
+  const logo = entry.logo ? (
+    <Thumbnail
+      source={entry.logo}
+      alt={entry.name}
+      size="medium"
+      transparent
+    />
+  ) : (
+    // Segnaposto per le voci senza logo (es. Omnisend)
+    <Thumbnail
+      source={AppsIcon}
+      alt={entry.name}
+      size="medium"
+      transparent
+    />
+  );
+
+  const logoElement = state.clickable ? (
+    logo
+  ) : (
+    <span className="integration-logo-disabled">{logo}</span>
+  );
+
   const tileContent = (
     <Box
       background="bg-surface"
@@ -191,22 +215,7 @@ function IntegrationTile({ entry, state, onManage }: IntegrationTileProps) {
       padding="400"
     >
       <InlineStack gap="300" blockAlign="center" wrap={false}>
-        {entry.logo ? (
-          <Thumbnail
-            source={entry.logo}
-            alt={entry.name}
-            size="medium"
-            transparent
-          />
-        ) : (
-          // Segnaposto per le voci senza logo (es. Omnisend)
-          <Thumbnail
-            source={AppsIcon}
-            alt={entry.name}
-            size="medium"
-            transparent
-          />
-        )}
+        {logoElement}
         <BlockStack gap="100">
           <Text
             as="span"
@@ -224,9 +233,9 @@ function IntegrationTile({ entry, state, onManage }: IntegrationTileProps) {
     </Box>
   );
 
-  // Voce non disponibile: niente UnstyledButton, logo con classe CSS per opacita'
+  // Voce non disponibile: Box senza UnstyledButton
   if (!state.clickable) {
-    return <div className="integration-tile-disabled">{tileContent}</div>;
+    return tileContent;
   }
 
   // Voce cliccabile: UnstyledButton con aria-label accessibile

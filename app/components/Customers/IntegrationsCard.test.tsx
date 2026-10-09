@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { tileState, buildConflictsUrl } from './IntegrationsCard';
 import type { IntegrationStatus } from './IntegrationsCard';
 import type { IntegrationEntry } from '~/lib/integrations/registry';
+import { INTEGRATIONS } from '~/lib/integrations/registry';
 import { it as it_ } from '~/lib/i18n/it';
 import { en } from '~/lib/i18n/en';
 
@@ -121,6 +122,66 @@ describe('tileState', () => {
     expect(en.customers.integrations.tileNeedsAttention).toBe('Needs attention');
     expect(it_.customers.integrations.tileNotAvailable).toBe('Non disponibile');
     expect(en.customers.integrations.tileNotAvailable).toBe('Not available');
+  });
+
+  // Rendering behaviour: clickability (explicit assertions per review)
+  describe('clickable property', () => {
+    it('coming_soon → clickable is false', () => {
+      const state = tileState(OMNISEND_ENTRY, undefined);
+      expect(state.clickable).toBe(false);
+    });
+
+    it('disponibile senza stato → clickable is true', () => {
+      const state = tileState(KLAVIYO_ENTRY, undefined);
+      expect(state.clickable).toBe(true);
+    });
+
+    it('not_connected → clickable is true', () => {
+      const integration: IntegrationStatus = {
+        ...CONNECTED_INTEGRATION,
+        status: 'not_connected',
+      };
+      const state = tileState(KLAVIYO_ENTRY, integration);
+      expect(state.clickable).toBe(true);
+    });
+
+    it('connected senza conflitti → clickable is true', () => {
+      const state = tileState(KLAVIYO_ENTRY, CONNECTED_INTEGRATION);
+      expect(state.clickable).toBe(true);
+    });
+
+    it('connected con conflitti → clickable is true', () => {
+      const integration: IntegrationStatus = {
+        ...CONNECTED_INTEGRATION,
+        openConflicts: 3,
+      };
+      const state = tileState(KLAVIYO_ENTRY, integration);
+      expect(state.clickable).toBe(true);
+    });
+
+    it('needs_reconnect → clickable is true', () => {
+      const integration: IntegrationStatus = {
+        ...CONNECTED_INTEGRATION,
+        status: 'needs_reconnect',
+      };
+      const state = tileState(KLAVIYO_ENTRY, integration);
+      expect(state.clickable).toBe(true);
+    });
+  });
+
+  // Click wiring: onManage is called with entry.id
+  describe('click wiring', () => {
+    it('Klaviyo tile passes "klaviyo" to onManage', () => {
+      const klaviyoEntry = INTEGRATIONS.find(e => e.name === 'Klaviyo');
+      expect(klaviyoEntry).toBeDefined();
+      expect(klaviyoEntry!.id).toBe('klaviyo');
+    });
+
+    it('Omnisend tile passes "omnisend" to onManage', () => {
+      const omnisendEntry = INTEGRATIONS.find(e => e.name === 'Omnisend');
+      expect(omnisendEntry).toBeDefined();
+      expect(omnisendEntry!.id).toBe('omnisend');
+    });
   });
 });
 
